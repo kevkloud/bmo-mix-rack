@@ -43,6 +43,16 @@ Both must pass. If a panel changed, look at the snapshot. If DSP changed,
 `build/tools/measure_<module>` prints the curves; the DSP tests say what
 the numbers are supposed to be.
 
+## Documenting new work
+
+When you add a new module, or any directory that carries its own context
+future contributors will need (e.g. a `presets/` folder, a new `core/`
+subsystem), create an `AGENTS.md` there explaining what lives in it, why,
+and anything a future AI contributor would otherwise have to re-derive.
+Add a `README.md` alongside it for human-facing context. Link the new
+`AGENTS.md` from its parent so the reading chain in the first paragraph
+above stays unbroken.
+
 ## Conventions
 
 - Root is the include root: `#include "core/state/ParamSet.h"`.

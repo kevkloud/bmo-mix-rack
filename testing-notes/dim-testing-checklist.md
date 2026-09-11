@@ -84,13 +84,23 @@ up there and whose width is non-monotonic.
 
 ## 3. Does it work at all
 
-> **⚠️ Flagged for ear review — the DETUNE fades, as of 2026-09-10.** The
-> 8 ms fade-out (`a5e91be`) and the instant-on that replaced the fade-in
-> (`cfdeeff`) have **not been heard in a host**. The 2026-09-10 host passes on
-> ICE QUEEN were most likely on the pre-review build, which was still the one
-> installed there (see `dim-bench-state-2026-09-09.md` §8). Both measure clean
-> offline. Clear this flag, with the build's SHA-256 and the machine, once
-> Frosty has heard the items below on a build that contains both.
+> **✅ Ear review of the DETUNE fades — cleared 2026-09-11, on ICE QUEEN.**
+> This flag was raised 2026-09-10 because the 8 ms fade-out (`a5e91be`) and
+> the instant-on (`cfdeeff`) had only been measured, never heard. Frosty ran
+> every item below in Ableton: *"Dimension all pass."* That covers the fade-out,
+> instant-on, double-tap, silence re-engage, DETUNE automation, a Mix Rack
+> slot, and the feel of 8 ms and of instant-on. Which builds, checked by
+> SHA-256 on ICE QUEEN before and after the test:
+>
+> - **BMO Dimension** — main `710dd46`,
+>   `6774E4CC757F169D23DD57B84A3AC06E00A2864E3CAC56F8C98015A079B3AFA2`
+> - **BMO Mix Rack**, for the slot items — fork `add-bmo-deq` `900efdd`,
+>   `E08B0A5B5780D79C1D48F0F9F55453700AD189EC01767E5C50B71D5F8DD4D8D1`.
+>   The rack compiles its modules in, so its Dimension is the DEQ build's copy:
+>   the same DSP as `710dd46`, a different binary.
+>
+> Re-open this if the DETUNE switch path changes. The steps it guards are also
+> held offline by `dim_dsp`, and printed by `measure_dim pass`.
 
 - Loads in a track, and in BMO Mix Rack as a slot module. No crashes.
 - **Toggle DETUNE over sustained, loud mono material** — a held vocal note or

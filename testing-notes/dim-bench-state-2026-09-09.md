@@ -418,9 +418,18 @@ Also deferred, and lower stakes:
 > on"* was then said of a build that was already instant-on. Frosty to confirm.
 >
 > `frosty-dim-detune-instant-on` keeps the fade-out and makes switch-on
-> instant with no tick: 1.00×, against 9.87× on main. Neither of its switch
-> paths has been heard in a host. (All the ×-figures above were measured
-> offline with `measure_dim pass` on ICE QUEEN, 2026-09-10.)
+> instant with no tick: 1.00×, against 9.87× on main. (All the ×-figures
+> above were measured offline with `measure_dim pass` on ICE QUEEN,
+> 2026-09-10.)
+>
+> **2026-09-11 — the fades, heard: all pass.** Frosty, on ICE QUEEN, in
+> Ableton, ran the whole of `dim-testing-checklist.md` §3's switch list on
+> **BMO Dimension `710dd46`** (`6774E4CC…`, which contains both the fade-out and
+> the instant-on). The Mix Rack slot items used rack `E08B0A5B…`, from the fork's
+> `900efdd` DEQ build. The hashes were checked on ICE QUEEN before and after the
+> test. *"Dimension all pass."* This settles the ear-review flag. It also
+> settles Frosty's instant-on preference, now on the build that has it rather
+> than the pre-review one.
 
 - **§4 panel questions**, which are now stale: they described a nine-knob
   layout and it is seven knobs and a switch since RATE and DEPTH went. Re-ask

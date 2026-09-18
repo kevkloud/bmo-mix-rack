@@ -7,13 +7,16 @@
 namespace bmo::products
 {
 
-/** BMO EQ, formerly FrostyEQ. The plugin code and bundle ID are the old
-    ones, so sessions saved with FrostyEQ open with this; the preset folder is
-    the new name, with the old one migrated on first run. */
+/** BMO CEQ -- the console EQ. It was FrostyEQ, then BMO EQ, and the plugin
+    code and bundle ID are still FrostyEQ's, so a session saved under either
+    old name opens with this. Only the display name and the preset folder
+    moved; both old folders are copied across on first run, newest first so a
+    name that exists in both arrives from BMO EQ rather than from FrostyEQ. */
 inline ProductInfo eqInfo()
 {
-    return { "BMO EQ",
-             { "BMO EQ", ".bmoeq", "FrostyEQ", ".frostyeq" },
+    return { "BMO CEQ",
+             { "BMO CEQ", ".bmoceq",
+               { { "BMO EQ", ".bmoeq" }, { "FrostyEQ", ".frostyeq" } } },
              eq::kVersionHint, eq::kStateVersion };
 }
 

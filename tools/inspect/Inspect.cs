@@ -7,6 +7,7 @@
 //   Inspect sheet <out.png> <png> <label> [<png> <label> ...]
 //   Inspect hash  <png> [<png> ...]         SHA-256 of the pixels
 //   Inspect ratio <a> <b> [...]             contrast and L* between colours
+//   Inspect gaps  <png> [min] [header] [scale]  bands of bare plate down a panel
 //
 // These are the tools that settled the visual questions on the ui-editor
 // branch. They existed as throwaway PowerShell in a scratchpad and died with
@@ -316,6 +317,103 @@ static class Program
             }
     }
 
+    //== gaps ==================================================================
+
+    /// Runs of rows that are nothing but plate: the empty bands down a panel.
+    ///
+    /// This exists because `ui_layout_tests --dump` cannot answer the
+    /// question. The dump prints control *boxes*, and a panel's boxes are
+    /// very nearly contiguous -- on BMO Util the rule under VOLUME and the
+    /// PAN box are one pixel apart -- while the *ink* inside them is not,
+    /// because a knob box carries padding above its face and below its
+    /// caption. Read from the dump alone, Util has no empty band worth the
+    /// name. Rendered, its worst is 46 px against BMO EQ's 21.5, which is
+    /// the comparison the UI pass actually trades in.
+    ///
+    /// So: boxes are what a layout test asserts, ink is what a reader sees,
+    /// and only the render knows the difference.
+    ///
+    /// Two things to know before reading the output. The plate is detected
+    /// as the commonest colour below the header rather than passed in, and
+    /// is printed on the first line so a wrong guess is visible instead of
+    /// silent. And a hairline rule *does* break a band, because it is a row
+    /// with ink in it: Util's empty foot prints as 46 and 31 either side of
+    /// the rule centred on 566, not as one run of 78.
+    static void Gaps(string[] a)
+    {
+        var px = Read(a[0]);
+        int min    = a.Length > 1 ? int.Parse(a[1], CultureInfo.InvariantCulture) : 10;
+        int header = a.Length > 2 ? int.Parse(a[2], CultureInfo.InvariantCulture) : 52;
+        int scale  = a.Length > 3 ? int.Parse(a[3], CultureInfo.InvariantCulture) : 2;
+
+        if (scale < 1) throw new Exception("scale is 1 or more, got " + a[3]);
+
+        // header and scale are properties of the renderer, not of the PNG, so
+        // both are printed rather than assumed silently. The defaults are
+        // tools/snapshot's: it renders at 2x (createComponentSnapshot 2.0f)
+        // and a product editor puts ProductHeader::kHeight 28 plus a 24 px
+        // preset strip above the panel. Pass them if either ever moves.
+        int top = header * scale;
+
+        if (top >= px.Height)
+            throw new Exception("header " + header + " at scale " + scale
+                                + " is the whole of a " + px.Height + " px render");
+
+        var counts = new Dictionary<int, int>();
+
+        for (int y = top; y < px.Height; y++)
+            for (int x = 0; x < px.Width; x++)
+            {
+                int c = px.Argb(x, y);
+                int n; counts.TryGetValue(c, out n); counts[c] = n + 1;
+            }
+
+        int plate = counts.OrderByDescending(kv => kv.Value).First().Key;
+        int pr = (plate >> 16) & 0xff, pg = (plate >> 8) & 0xff, pb = plate & 0xff;
+
+        Console.WriteLine("{0}  ({1}x{2})  plate #{3:x2}{4:x2}{5:x2}  scale {6}, header {7}",
+                          Path.GetFileName(a[0]), px.Width, px.Height, pr, pg, pb, scale, header);
+        Console.WriteLine("  panel is render rows {0}..{1}; bands under {2} px not listed",
+                          top, px.Height - 1, min);
+        Console.WriteLine("  {0,10}  {1,5}   panel-local design px", "design-y", "px");
+
+        int widest = 0;
+        string widestAt = "none";
+        int y2 = top;
+
+        while (y2 < px.Height)
+        {
+            if (! BareRow(px, y2, plate)) { y2++; continue; }
+
+            int start = y2;
+            while (y2 < px.Height && BareRow(px, y2, plate)) y2++;
+
+            int run = (y2 - start) / scale;
+
+            if (run >= min)
+            {
+                Console.WriteLine("  {0,4}..{1,-4}  {2,5}",
+                                  start / scale - header, (y2 - 1) / scale - header, run);
+
+                if (run > widest)
+                {
+                    widest = run;
+                    widestAt = (start / scale - header) + ".." + ((y2 - 1) / scale - header);
+                }
+            }
+        }
+
+        Console.WriteLine("  largest {0} px at {1}", widest, widestAt);
+    }
+
+    static bool BareRow(Pixels px, int y, int plate)
+    {
+        for (int x = 0; x < px.Width; x++)
+            if (px.Argb(x, y) != plate) return false;
+
+        return true;
+    }
+
     //== ratio =================================================================
 
     static double Channel(int c)
@@ -425,6 +523,7 @@ static class Program
                 case "sheet": Need(rest, 3, "sheet <out.png> <png> <label> ..."); Sheet(rest); break;
                 case "hash":  Need(rest, 1, "hash <png> [<png> ...]"); Hash(rest); break;
                 case "ratio": Need(rest, 2, "ratio <a> <b> [...]"); Ratio(rest); break;
+                case "gaps":  Need(rest, 1, "gaps <png> [min] [header] [scale]"); Gaps(rest); break;
                 default:
                     // Refuse what is not understood rather than doing something
                     // plausible with it, the way tools/snapshot's realValueFor
@@ -458,6 +557,7 @@ static class Program
             "Inspect crop  <png> <x> <y> <w> <h> <scale> <out.png>\n" +
             "Inspect sheet <out.png> <png> <label> [<png> <label> ...]\n" +
             "Inspect hash  <png> [<png> ...]         SHA-256 of the pixels\n" +
-            "Inspect ratio <a> <b> [...]             contrast and L*; a is #rrggbb or file.png:x,y");
+            "Inspect ratio <a> <b> [...]             contrast and L*; a is #rrggbb or file.png:x,y\n" +
+            "Inspect gaps  <png> [min] [header] [scale]  bands of bare plate down a panel");
     }
 }

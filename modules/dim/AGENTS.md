@@ -7,6 +7,28 @@ cannot be read off the code.
 The long-form record is `testing-notes/dim-1.0-handoff.md` — every number, how
 it was measured, and what was tried and rejected. It is not repeated here.
 
+## The panel's words are not the code's
+
+Renamed in the UI pass, 2026-09-17 (Frosty). The panel caption and the host
+name agree; the parameter ID, the `Index` enum and the DSP still use the
+original words, and must — the IDs are permanent. This file and the DSP
+comments use the code's words.
+
+| panel / host | ID | code and older notes say |
+|---|---|---|
+| GENERATE / Generate | `detune_on` | DETUNE switch, detune stage |
+| DETUNE / Detune | `detune` | CENTS |
+| DRIFT / Drift | `diffuse` | DIFFUSE, the diffuse stage |
+| — / Drift Rate, Drift Depth | `rate`, `depth` | RATE, DEPTH (no controls) |
+| DIMENSION / Dimension | `width` | WIDTH |
+| BLOOM / Bloom | `shuffle` | SHUFFLE, the shuffler |
+| BELOW / Below | `shuffle_freq` | FREQ, Shuffle Freq |
+| TURN / Turn | `rotation` | ROTATE |
+| TILT / Tilt | `asymmetry` | ASYM, the shear |
+
+The panel's two legends are SOURCE (generate and diffuse) and WIDTH (the
+image stage).
+
 ## The invariant everything else rests on
 
 Three stages run in series — generate, diffuse, image — and **all three work on
@@ -102,6 +124,14 @@ It is **not** the quadratic: that one's width climbs to 126 % and falls back to
 The coefficient is capped at half scale. Both laws degenerate above that — the
 shear turns the far side into pure anti-phase content, and the balance silenced
 a channel outright, which is what this shipped doing at ASYM 100 %.
+
+**The coefficient is the knob negated**, so + favours the right, as ROTATE
+does. With `a` positive the shear lifts the left (whose side is positive), so
+the knob leaned the image left until 2026-09-16, when the panel was about to
+print an R at that end. Frosty flipped the DSP rather than the letters. The
+sign is a free choice, not derivable from the manual, so `dim_dsp` pins it
+with absolutes: a hard-panned 0.4 tone at +50 % comes out 0.45 on the right
+and 0.35 on the left.
 
 ## Latency is zero, and stays zero
 

@@ -14,6 +14,8 @@
 */
 
 #include "TestUtil.h"
+#include "core/product/SingleModuleProcessor.h"
+#include "core/rack/RackEditor.h"
 #include "products/rack/Product.h"
 #include "products/rack/Registry.h"
 #include "products/eq/Product.h"
@@ -45,8 +47,22 @@ namespace
         { "sat",  { "input_gain", "drive", "mix", "output_level",
                     "sat_in", "phase", "auto_gain", "oversampling", "tone" } },
         { "opto", { "crush", "level", "mode", "link", "color" } },
+        // BMO DEQ has 159; these are the 32 that get a lane, allocated by
+        // Frosty on 2026-09-11 -- output, bands 1-6 by frequency, gain, Q,
+        // threshold and range, then the module's in/out. The rest are held off
+        // the grid (SlotOverflow) and pinned by DeqTests' schema table.
+        { "deq",  { "out",
+                    "b1_freq", "b1_gain", "b1_q", "b1_thr", "b1_range",
+                    "b2_freq", "b2_gain", "b2_q", "b2_thr", "b2_range",
+                    "b3_freq", "b3_gain", "b3_q", "b3_thr", "b3_range",
+                    "b4_freq", "b4_gain", "b4_q", "b4_thr", "b4_range",
+                    "b5_freq", "b5_gain", "b5_q", "b5_thr", "b5_range",
+                    "b6_freq", "b6_gain", "b6_q", "b6_thr", "b6_range",
+                    "active" } },
         { "dim",  { "width", "shuffle", "shuffle_freq", "detune", "detune_on",
                     "diffuse", "rate", "depth", "rotation", "asymmetry" } },
+        { "ltvcomp", { "amount", "gate", "output", "complex", "attack", "release",
+                     "arc", "sidechain", "low_thru", "high_thru" } },
     };
 
     std::vector<juce::String> chainIds (RackProcessor& rack)
@@ -106,6 +122,60 @@ namespace
 
         return def;
     }
+
+    //== A module with two widths ==============================================
+    // BMO DEQ is the only one, and its panel is not written yet. Compact at
+    // 160, expanded at 400. The switch is on the host's bar, not the panel.
+    struct PlainPanel final : bmo::ui::ModulePanel
+    {
+        explicit PlainPanel (bmo::ui::ModuleContext c) : ModulePanel (std::move (c)) {}
+    };
+
+    /** Every expand switch under `root`, the way a user would find them. */
+    std::vector<juce::Button*> expandSwitches (juce::Component& root)
+    {
+        std::vector<juce::Button*> out;
+        std::function<void (juce::Component&)> walk = [&] (juce::Component& c)
+        {
+            if (c.getComponentID() == "expand")
+                if (auto* b = dynamic_cast<juce::Button*> (&c))
+                    out.push_back (b);
+            for (auto* child : c.getChildren())
+                walk (*child);
+        };
+        walk (root);
+        return out;
+    }
+
+    const bmo::ModuleDef& expandableModule()
+    {
+        static const bmo::ParamSpecs specs { bmo::ParamSpec::floatParam ("gain", "Gain", 0.0f, 1.0f, 0.0f, 1.0f) };
+        static const std::vector<bmo::FactoryPreset> presets { { "Init", {} } };
+
+        static const bmo::ModuleDef def {
+            "twoway", "Two Way", 1, 160, juce::Colours::grey, specs, presets,
+            [] { return std::make_unique<WideDsp>(); },
+            [] (bmo::ui::ModuleContext c) -> std::unique_ptr<bmo::ui::ModulePanel> { return std::make_unique<PlainPanel> (std::move (c)); },
+            400 };
+
+        return def;
+    }
+
+    juce::String viewInSession (juce::AudioProcessor& p, bool rack)
+    {
+        juce::MemoryBlock block;
+        p.getStateInformation (block);
+        auto xml = juce::AudioProcessor::getXmlFromBinary (block.getData(), (int) block.getSize());
+
+        if (xml == nullptr)
+            return "<none>";
+
+        const auto* params = rack ? (xml->getChildByName (RackProcessor::kSlotTag) != nullptr
+                                        ? xml->getChildByName (RackProcessor::kSlotTag)->getChildByName (bmo::ParamSet::kRootTag)
+                                        : nullptr)
+                                  : xml.get();
+        return params != nullptr ? params->getStringAttribute (bmo::kViewAttribute, "<none>") : "<none>";
+    }
 }
 
 int main()
@@ -132,7 +202,7 @@ int main()
         auto rack = createRack();
         const auto& registry = rack->getRegistry();
 
-        check (registry.size() == 5, "the registry holds util, eq, sat, opto and dim");
+        check (registry.size() == 7, "the registry holds util, eq, sat, opto, dim, deq and vcomp");
 
         // A bank is a module's host lanes, so it stops at 32 even if the
         // module does not. Past that, its golden schema test pins the order.
@@ -195,7 +265,11 @@ int main()
         {
             for (const auto& spec : def->specs)
             {
-                const juce::NormalisableRange<float> range (spec.min, spec.max, spec.step);
+                // Linear specs are checked against JUCE's own arithmetic, built
+                // independently here. A logarithmic spec's JUCE range delegates
+                // to the spec (rangeFor), so it is checked separately below.
+                const auto range = spec.logarithmic ? bmo::rangeFor (spec)
+                                                    : juce::NormalisableRange<float> (spec.min, spec.max, spec.step);
 
                 for (int k = 0; k <= 10; ++k)
                 {
@@ -486,6 +560,134 @@ int main()
         presets.loadUser ("Mine");
         check (chainIds (*rack) == std::vector<juce::String> { "sat", "util" }, "a user rack preset restores the order");
         checkClose (rack->getEngineAt (1)->params().getReal (bmo::util::kPan), -25.0, 0.01, "and the settings");
+
+        sandbox.deleteRecursively();
+        bmo::PresetManager::setDirectoryForTesting ({});
+    }
+
+    //== Logarithmic ranges and the new units ==================================
+    // BMO DEQ's frequency, Q and time controls. The log law lives in ParamSpec
+    // alone; what is worth pinning is that it *is* a log law, that a JUCE
+    // parameter built from it round-trips, and that "2.1k" means 2100 Hz.
+    {
+        const auto freq = bmo::ParamSpec::logParam ("f", "Freq", 20.0f, 20000.0f, 0.0f, 1000.0f, bmo::ParamFormat::Hertz);
+        checkClose (freq.fromNormalised (0.5f), std::sqrt (20.0f * 20000.0f), 0.05, "halfway is the geometric mean");
+        checkClose (freq.toNormalised (200.0f), 1.0f / 3.0f, 1.0e-5, "each decade takes an equal turn");
+
+        const auto range = bmo::rangeFor (freq);
+        for (float hz : { 20.0f, 63.0f, 1000.0f, 7777.0f, 20000.0f })
+            checkClose (range.convertFrom0to1 (range.convertTo0to1 (hz)), hz, hz * 1.0e-5, "a JUCE log range round-trips " + juce::String (hz));
+
+        check (freq.text (2100.0f) == "2.10 kHz" && freq.text (850.0f) == "850 Hz" && freq.text (12500.0f) == "12.5 kHz",
+               "frequency prints in Hz and kHz");
+        checkClose (freq.valueFromText ("2.1k"), 2100.0, 1.0e-3, "\"2.1k\" is 2100 Hz");
+        checkClose (freq.valueFromText ("2.1 kHz"), 2100.0, 1.0e-3, "\"2.1 kHz\" is 2100 Hz");
+        checkClose (freq.valueFromText ("850"), 850.0, 1.0e-3, "a bare number is Hz");
+
+        const auto ms = bmo::ParamSpec::logParam ("a", "Attack", 0.1f, 200.0f, 0.0f, 5.0f, bmo::ParamFormat::Milliseconds);
+        check (ms.text (5.0f) == "5.0 ms" && ms.text (120.0f) == "120 ms", "time prints in ms");
+        const auto ratio = bmo::ParamSpec::logParam ("r", "Ratio", 1.0f, 20.0f, 0.0f, 3.0f, bmo::ParamFormat::Ratio);
+        check (ratio.text (3.0f) == "3.0:1", "a ratio prints as one");
+
+        const auto linear = bmo::ParamSpec::floatParam ("g", "Gain", -24.0f, 24.0f, 0.1f, 0.0f, bmo::ParamFormat::Decibels);
+        check (! linear.logarithmic && bmo::rangeFor (linear).skew == 1.0f, "a linear spec's JUCE range is untouched");
+    }
+
+    //== Two widths: compact in a rack, expanded standalone ====================
+    // Either is switchable per instance through the panel's context; the view
+    // follows the module through chain edits, is kept with the session, and
+    // stays out of presets, which describe sound. Nothing about it reaches a
+    // module with one width.
+    {
+        const auto sandbox = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                                 .getChildFile ("bmo-rack-view-tests");
+        sandbox.deleteRecursively();
+        bmo::PresetManager::setDirectoryForTesting (sandbox);
+
+        auto& twoway = expandableModule();
+        auto& util = bmo::util::module();
+        check (twoway.isExpandable() && ! util.isExpandable(), "only a module that declares a second width has one");
+
+        const auto makeRack = [&]
+        {
+            return std::make_unique<RackProcessor> (std::vector<const bmo::ModuleDef*> { &util, &twoway },
+                                                    bmo::products::rackInfo(),
+                                                    std::vector<bmo::RackPreset> { { "Both", { { "util", {} }, { "twoway", {} } } } });
+        };
+
+        auto rack = makeRack();
+        rack->addModule (util);
+        rack->addModule (twoway);
+        check (! rack->isSlotExpanded (1), "an expandable module arrives in a rack compact");
+
+        std::unique_ptr<juce::AudioProcessorEditor> editor (rack->createEditor());
+        const auto compactWidth = editor->getWidth();
+        check (compactWidth == util.designWidth + 160 + bmo::RackEditor::kAddStrip, "the rack lays it out at its compact width");
+
+        auto switches = expandSwitches (*editor);
+        check (switches.size() == 1, "only the expandable module's slot bar has an expand switch, found " + juce::String ((int) switches.size()));
+
+        if (switches.size() == 1)
+            switches[0]->onClick();
+
+        check (rack->isSlotExpanded (1), "the switch expands the slot");
+        check (editor->getWidth() == compactWidth + (400 - 160), "the rack widens by the difference, got " + juce::String (editor->getWidth()));
+        check (viewInSession (*rack, true) == "<none>", "the first slot is util, which writes no view");
+
+        rack->moveModule (1, 0);
+        check (rack->isSlotExpanded (0) && ! rack->isSlotExpanded (1), "the view follows the module when the chain is reordered");
+        check (viewInSession (*rack, true) == bmo::kViewExpanded, "and is kept with the session");
+        check (rack->captureState()->toString().indexOf (bmo::kViewAttribute) < 0, "but not with a preset");
+
+        juce::MemoryBlock session;
+        rack->getStateInformation (session);
+        editor.reset();
+
+        auto restored = makeRack();
+        restored->setStateInformation (session.getData(), (int) session.getSize());
+        check (restored->isSlotExpanded (0), "a restored session opens the module expanded");
+
+        restored->getPresets().loadFactory (0);
+        check (! restored->isSlotExpanded (1), "a preset's chain arrives compact");
+
+        // Standalone: the window is the module's own, so it opens expanded.
+        {
+            bmo::SingleModuleProcessor standalone (twoway, bmo::products::rackInfo());
+            check (standalone.isExpanded(), "standalone, an expandable module opens expanded");
+
+            std::unique_ptr<juce::AudioProcessorEditor> window (standalone.createEditor());
+            check (window->getWidth() == 400, "at its wide width, got " + juce::String (window->getWidth()));
+
+            auto headerSwitches = expandSwitches (*window);
+            check (headerSwitches.size() == 1, "with an expand switch in its header");
+
+            if (headerSwitches.size() == 1)
+                headerSwitches[0]->onClick();
+
+            check (! standalone.isExpanded() && window->getWidth() == 160, "which collapses it to compact, got " + juce::String (window->getWidth()));
+            check (viewInSession (standalone, false) == bmo::kViewCompact, "the session keeps that");
+            check (standalone.captureState()->toString().indexOf (bmo::kViewAttribute) < 0, "a preset does not");
+
+            juce::MemoryBlock block;
+            standalone.getStateInformation (block);
+            window.reset();
+
+            bmo::SingleModuleProcessor again (twoway, bmo::products::rackInfo());
+            again.setStateInformation (block.getData(), (int) block.getSize());
+            check (! again.isExpanded(), "a restored session opens compact again");
+
+            bmo::SingleModuleProcessor fresh (twoway, bmo::products::rackInfo());
+            auto old = fresh.captureState();   // a session from before the view existed
+            juce::MemoryBlock oldBlock;
+            juce::AudioProcessor::copyXmlToBinary (*old, oldBlock);
+            again.setExpanded (true);
+            again.setStateInformation (oldBlock.getData(), (int) oldBlock.getSize());
+            check (again.isExpanded(), "an old session leaves the view alone");
+
+            bmo::SingleModuleProcessor plain (util, bmo::products::rackInfo());
+            plain.setExpanded (true);
+            check (! plain.isExpanded() && viewInSession (plain, false) == "<none>", "a one-width module has no view, and writes none");
+        }
 
         sandbox.deleteRecursively();
         bmo::PresetManager::setDirectoryForTesting ({});

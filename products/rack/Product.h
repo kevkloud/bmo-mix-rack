@@ -15,7 +15,7 @@ inline constexpr int kRackStateVersion = 1;
 inline ProductInfo rackInfo()
 {
     return { "BMO Mix Rack",
-             { "BMO Mix Rack", ".bmorack", {}, {} },
+             { "BMO Mix Rack", ".bmorack" },
              kRackVersionHint, kRackStateVersion };
 }
 

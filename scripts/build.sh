@@ -59,9 +59,9 @@ if [[ ${1:-} == --snapshots ]]; then
 
     mkdir -p snapshots
 
-    for module in eq sat util opto; do
+    for module in eq sat util opto dim deq vcomp; do
         "$snapshot" "$module" "snapshots/$module.png"
     done
 
-    "$snapshot" rack snapshots/rack.png chain=util,eq,sat,opto
+    "$snapshot" rack snapshots/rack.png chain=util,eq,sat,opto,dim,deq,vcomp
 fi

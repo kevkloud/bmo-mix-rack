@@ -14,6 +14,14 @@ assets/fonts/*.ttf
 plans/
 packages/
 
+# Field audio, blind listening sets and their answers and keys. The source
+# material is not necessarily ours to publish and this fork is public.
+# AGENTS.md has carried "field audio, blind sets and the licensed fonts are
+# never committed" since Tune arrived on 2026-09-11, but nothing enforced it
+# here until 2026-09-12 -- the standalone tune repository ignored this same
+# path, and that rule did not come across with the code.
+field-audio/
+
 # Rendered panels (regenerate with tools/snapshot)
 snapshots/
 
@@ -28,3 +36,11 @@ snapshots/
 # deliberately outside CMake; see each one's README.
 tools/measure/renders/*.exe
 tools/inspect/*.exe
+
+# The corpus scorer's working folders (scripts/score-corpus.sh): the generator is
+# the source of truth and regenerates the same bytes, and renders/ holds
+# renders of the field takes, which are never committed. Nothing enforced
+# this until a commit on 2026-09-14 swept all three in.
+corpus/
+renders/
+reports/

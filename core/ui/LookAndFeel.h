@@ -32,6 +32,18 @@ public:
     void setAccent (juce::Colour c) noexcept { accent = c; }
     juce::Colour getAccent() const noexcept  { return accent; }
 
+    /** What a *utility* knob draws in, when it should not be the suite azure.
+
+        Transparent by default, meaning `tokens().track` -- which is what a
+        trim knob has always used and what every INPUT and OUTPUT still uses.
+
+        It exists for a drawer: LTV Comp reveals five trim knobs behind its
+        COMPLEX switch, and they take the colour of the switch that revealed
+        them, so the drawer reads as one thing rather than as five controls
+        that happen to have turned up. Set it and the caption follows. */
+    void setUtilityTint (juce::Colour c) noexcept { utilityTint = c; }
+    juce::Colour getUtilityTint() const noexcept  { return utilityTint; }
+
     void setDetents (int count) noexcept { detents = count; }
     int  getDetents() const noexcept     { return detents; }
 
@@ -43,6 +55,35 @@ public:
         around it, and the face inside knows nothing about the ring's size. */
     void setTrackRadius (float r) noexcept { trackRadius = r; }
     float getTrackRadius() const noexcept  { return trackRadius; }
+
+    /** Whether the heavy dot marking the rest position is drawn at all.
+
+        On everywhere by default, and the drawing already drops it where it
+        would fuse with the plus or the minus at an end of the sweep. But that
+        test is a *pixel* clearance converted to an angle, so it depends on the
+        track radius: a control resting at an end loses its dot on a small knob
+        and keeps it on a large one, where the same gap subtends less arc. BMO
+        Tune RT's RETUNE is the case -- at face 96 the dot was suppressed, and
+        growing the face to 112 brought it back as what reads as a doubled
+        minus.
+
+        Off means no rest mark at any size. For a control whose default *is* an
+        end of its range, the pointer already says so when the panel opens.
+        Frosty, 2026-09-16. */
+    void setRestMark (bool b) noexcept { restMark = b; }
+    bool hasRestMark() const noexcept  { return restMark; }
+
+    /** What the two ends of the dotted track say.
+
+        `lessMore` is the suite's minus and plus, and it is right for every
+        control that runs from less of something to more of it. `leftRight` is
+        for a control whose ends are two *directions* rather than two amounts --
+        BMO Dimension's ROTATE and ASYM, which move the image left or right,
+        where neither end is more than the other. */
+    enum class EndMarks { lessMore, leftRight };
+
+    void setEndMarks (EndMarks m) noexcept { endMarks = m; }
+    EndMarks getEndMarks() const noexcept  { return endMarks; }
 
     /** The inner control of a concentric pair claims only its own circle, so
         the ring around it stays grabbable right up to the corners. */
@@ -62,7 +103,10 @@ public:
 private:
     Style style = Style::utility;
     juce::Colour accent { tokens().accent };
+    juce::Colour utilityTint;
     bool  circularHit = false;
+    bool  restMark = true;
+    EndMarks endMarks = EndMarks::lessMore;
     int   detents = 0;
     float faceScale = 1.0f;
     float trackRadius = 0.0f;
@@ -99,6 +143,11 @@ public:
         way could agree with the very bug it exists to catch. */
     static juce::Rectangle<float> toggleLabelBox (const juce::ToggleButton&);
     static juce::Font toggleLabelFont (const juce::ToggleButton&);
+
+    /** A property a switch may set on itself to pin its label's point size
+        instead of having it derived from its height. See `toggleLabelFont`,
+        and `SwitchButton::setLabelSize`, which is how a panel asks for it. */
+    static constexpr const char* kSwitchLabelSize = "bmoSwitchLabelSize";
 
     /** How much wider a toggle's label is than its box, in pixels; zero or
         less fits.

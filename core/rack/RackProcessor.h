@@ -98,6 +98,13 @@ public:
 
     ui::ModuleContext makeContext (int slot);
 
+    /** Wide or compact, for an expandable module in `slot`; false otherwise.
+        A module arrives in a rack compact (ModuleDef::expandedWidth). The view
+        travels with the module through chain edits and is kept with the
+        session, not with rack presets. Message thread. */
+    bool isSlotExpanded (int slot) const noexcept;
+    void setSlotExpanded (int slot, bool shouldBe) noexcept;
+
     const ProductInfo& getInfo() const noexcept   { return info; }
     PresetManager& getPresets() noexcept          { return presets; }
 
@@ -134,6 +141,8 @@ private:
         // into it.
         std::unique_ptr<SlotOverflow> overflow;
         std::unique_ptr<ModuleEngine> engine;
+
+        bool expanded = false;
     };
 
     void parameterValueChanged (int, float) override;

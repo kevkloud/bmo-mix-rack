@@ -10,7 +10,7 @@ namespace bmo::products
 inline ProductInfo optoInfo()
 {
     return { "BMO Opto",
-             { "BMO Opto", ".bmoopto", {}, {} },
+             { "BMO Opto", ".bmoopto" },
              opto::kVersionHint, opto::kStateVersion };
 }
 

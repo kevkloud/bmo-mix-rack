@@ -107,7 +107,10 @@ ui::ModuleContext SingleModuleProcessor::makeContext()
              [this] { return engine.meter().maxRms(); },
              [this] { return engine.inputMeter().maxPeak(); },
              [this] { return engine.inputMeter().maxRms(); },
-             [this] { return engine.gainReduction().get(); } };
+             [this] { return engine.gainReduction().get(); },
+             [this] { return engine.sampleRate(); },
+             [this] (int band) { engine.setSolo (band); },
+             engine.analyser() };
 }
 
 //==============================================================================
@@ -134,13 +137,28 @@ void SingleModuleProcessor::resetToDefaults()
 void SingleModuleProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     if (auto xml = captureState())
+    {
+        // The view goes in the session and nowhere else: captureState is also
+        // what a preset file is written from, and a preset is sound, not a
+        // window size. Modules with one width write nothing new at all.
+        if (def.isExpandable())
+            xml->setAttribute (kViewAttribute, isExpanded() ? kViewExpanded : kViewCompact);
+
         copyXmlToBinary (*xml, destData);
+    }
 }
 
 void SingleModuleProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
     if (auto xml = getXmlFromBinary (data, sizeInBytes))
+    {
         restoreState (*xml);
+
+        // A session saved before the module could expand has no view, and
+        // opens the way a new instance does.
+        if (def.isExpandable() && xml->hasAttribute (kViewAttribute))
+            setExpanded (xml->getStringAttribute (kViewAttribute) == kViewExpanded);
+    }
 }
 
 } // namespace bmo

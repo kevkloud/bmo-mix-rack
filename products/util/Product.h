@@ -10,7 +10,7 @@ namespace bmo::products
 inline ProductInfo utilInfo()
 {
     return { "BMO Util",
-             { "BMO Util", ".bmoutil", {}, {} },
+             { "BMO Util", ".bmoutil" },
              util::kVersionHint, util::kStateVersion };
 }
 

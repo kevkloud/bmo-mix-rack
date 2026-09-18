@@ -70,17 +70,17 @@ inline const ParamSpecs& specs()
         // range as BMO Util's width, deliberately -- a user who knows one
         // knows the other, and the two modules disagreeing about what 150 %
         // means would be worse than the duplication.
-        S::floatParam (kWidth, "Width", 0.0f, 200.0f, 1.0f, 100.0f, F::Percent),
+        S::floatParam (kWidth, "Dimension", 0.0f, 200.0f, 1.0f, 100.0f, F::Percent),
 
         // SHUFFLE: Gerzon's bass shuffler, which widens the low end alone to
         // correct for the ears hearing stereo as narrower in the bass than in
         // the treble. 1.0 is no shuffling and is the default; the S1's manual
         // puts the useful range at 1.6-2.5 and its maximum at 3.
-        S::floatParam (kShuffle, "Shuffle", 1.0f, 3.0f, 0.01f, 1.0f),
+        S::floatParam (kShuffle, "Bloom", 1.0f, 3.0f, 0.01f, 1.0f),
 
         // The corner the shuffler works below. The S1 allows 350-1400 Hz and
         // recommends 600-700 for normal monitoring; 700 is the default here.
-        S::floatParam (kShuffleFreq, "Shuffle Freq", 350.0f, 1400.0f, 1.0f, 700.0f),
+        S::floatParam (kShuffleFreq, "Below", 350.0f, 1400.0f, 1.0f, 700.0f, F::Hertz),
 
         // DETUNE: two voices, one shifted up and one down by this many cents,
         // opposed so the pair sums back toward the centre. The classic
@@ -93,24 +93,24 @@ inline const ParamSpecs& specs()
         // Off by default, so a freshly inserted instance is transparent and
         // adds no latency until it is asked for. See latencyForParams for why
         // the reported latency does not follow this switch.
-        S::boolParam (kDetuneOn, "Detune On", false),
+        S::boolParam (kDetuneOn, "Generate", false),
 
         // DIFFUSE: how much of the side signal goes through the all-pass
         // network. 0 % is the dry side signal and is the default.
-        S::floatParam (kDiffuse, "Diffuse", 0.0f, 100.0f, 1.0f, 0.0f, F::Percent),
+        S::floatParam (kDiffuse, "Drift", 0.0f, 100.0f, 1.0f, 0.0f, F::Percent),
 
         // The all-pass coefficients are swept by an LFO -- this is what makes
         // the stage a phaser rather than a fixed decorrelator. Slow by
         // default: this is a widener, and an audible sweep is a different job.
-        S::floatParam (kRate,  "Rate",  0.05f, 5.0f, 0.01f, 0.40f),
-        S::floatParam (kDepth, "Depth", 0.0f, 100.0f, 1.0f, 50.0f, F::Percent),
+        S::floatParam (kRate,  "Drift Rate",  0.05f, 5.0f, 0.01f, 0.40f),
+        S::floatParam (kDepth, "Drift Depth", 0.0f, 100.0f, 1.0f, 50.0f, F::Percent),
 
         // ROTATION: the whole stereo stage turned, without changing the
         // relative levels of anything standing on it. Degrees, and the S1's
         // own control is unbounded in principle -- this stops at a quarter
         // turn either way, past which the image is inverted rather than
         // rotated.
-        S::floatParam (kRotation, "Rotation", -45.0f, 45.0f, 0.5f, 0.0f),
+        S::floatParam (kRotation, "Turn", -45.0f, 45.0f, 0.5f, 0.0f),
 
         // ASYMMETRY: left against right, with centre material left where it
         // is. Gerzon's control, and the one the S1 was the first product to
@@ -119,7 +119,7 @@ inline const ParamSpecs& specs()
         // for the law and is quoted at the point of use; see the shear in
         // modules/dim/dsp/DspCore.h, and the test that asserts a dead-centre
         // source comes through it unmoved.
-        S::floatParam (kAsymmetry, "Asymmetry", -100.0f, 100.0f, 1.0f, 0.0f, F::Percent),
+        S::floatParam (kAsymmetry, "Tilt", -100.0f, 100.0f, 1.0f, 0.0f, F::Percent),
     };
 
     return s;

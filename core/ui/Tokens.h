@@ -126,12 +126,38 @@ struct Tokens
         `utility` style. That said it *was* one of them, and it is not: INPUT
         and OUTPUT are the pair every module begins and ends with, trims either
         side of whatever the module does. Util's gain is the thing Util does.
-        Same behaviour, different job, so it gets its own rules.
+        Same behaviour, different job, so it keeps rules of its own -- which is
+        why this is still a token rather than a second use of `track`, even
+        though the two now hold the same hex. `track`, `switchAlt` and `meterGr`
+        already share it on the same terms: one name per job, so a colour can
+        move for one of them without silently moving for the others.
 
-        BMO Opto's old lavender, unused since that module went greyscale in
-        0.2.2. A placeholder that differentiates rather than a colour chosen
-        for this knob -- when one is chosen, change it here. */
-    juce::Colour utilGain   { 0xff9c71c3 };
+        **The value came back to the azure on Frosty's call, 2026-09-14, from
+        rendered candidates rather than from the table of ratios.** 0.2.3 had
+        parked it on BMO Opto's old lavender as a placeholder that
+        differentiated rather than a colour chosen for this knob, and that
+        placeholder was the fault: at hue 271.5 degrees against BMO Dimension's
+        271.6, VOLUME read as a Dimension control whenever the two sat in one
+        rack.
+
+        Three candidates were rendered, panel and rack, both appearances:
+
+        | | hue | on the dark plate | on the pale one |
+        |---|---|---|---|
+        | Util's own green `#7fc98a` | 128.9 | 6.84:1 | 1.72:1 |
+        | **the utility azure** | **198.8** | **6.02:1** | **1.95:1** |
+        | gold `#e8c95a` | 46.9 | 8.33:1 | 1.41:1 |
+
+        Green needed no new colour and cleared the rack, but rendered it took
+        VOLUME to the same green as PAN and WIDTH and the panel went monochrome
+        -- the headline knob stopped being the headline. Numbers could not show
+        that; only the render did. Gold read best of the three in the rack and
+        is the one that was recommended, and it was not taken: it puts a section
+        legend at 1.41:1 on the pale plate, below the 1.72-2.00 band the raw
+        legend rule already spends, and it buys a permanent new hue to get
+        there. The azure is second in the rack, clear of every accent by hue,
+        and the only candidate that stays inside the band already signed off. */
+    juce::Colour utilGain   { 0xff4fb8e8 };
 
     juce::Colour accent     { 0xfff08cb4 };   ///< the module's own colour; see ModuleDef
 
@@ -149,10 +175,180 @@ struct Tokens
         occupy. */
     juce::Colour neutral    { 0xffababab };
 
+    /** A meter fill that is not a warning yet, on a panel that does not use
+        the green. BMO Opto and the suite meters run meterLow; the LTV line is
+        greyscale and a green bar on it is the same loose end periwinkle was.
+
+        Mid, because it has to read in a well at either end of the range: it
+        clears the LTV pale well #b0b0b0 by 24.5 L* and the dark one #27272b by
+        31.6, which is the best either end gets from a single value. */
+    juce::Colour meterQuiet { 0xff6f7076 };
+
     juce::Colour meterLow   { 0xff6bbf7a };
     juce::Colour meterHigh  { 0xffe0b040 };
     juce::Colour meterClip  { 0xffe0685a };
     juce::Colour meterGr    { 0xff4fb8e8 };   ///< gain reduction, for the modules that show it
+
+    /** Gain reduction on a panel that carries no suite colour.
+
+        BMO LTV Comp's, which is greyscale. A second GR colour rather than a new
+        value for `meterGr`, because BMO DEQ draws with that one in three places
+        and this was not a change to how BMO looks.
+
+        It stayed LTV Comp's alone: BMO DEQ's bidirectional bar was offered the
+        bronze on 2026-09-15 and took `meterCut` instead, so the LTV line keeps
+        a GR colour of its own.
+
+        Bronze -- Frosty, 2026-09-15, from four warm candidates rendered in
+        both appearances. **The warm gap is narrower than it looks**: the LTV
+        level bars already run a gradient from amber at 42 degrees to red at 6,
+        so anything warm *between* those reads as a level rather than as a
+        different quantity. Deep gold came back looking like the gradient's
+        amber zone and copper like its red. This is muted and dark enough to
+        read as neither -- 24.5 L* clear of the silver well, 31.6 of the
+        graphite -- which is what a bar measuring a different thing from the
+        two bars either side of it needs to do. */
+    juce::Colour meterGrWarm { 0xffb98a5e };
+
+    /** Gain a module is **taking away**, on a meter that shows both directions.
+        The other half of the pair is `meterBoost`; they exist together or not
+        at all, and nothing should use one without meaning the other.
+
+        **Azure's complement.** BMO DEQ's bar reads gain added in the azure, so
+        gain taken away is the colour directly opposite it: azure is hue 198.8
+        degrees and this is 18.8, at azure's own saturation. The hue is the
+        complement's and the lightness is chosen for legibility -- the same
+        method `analyserPink` records for the teal, and for the same reason,
+        which is that a true complement at the original's lightness is usually
+        the faintest thing on the panel.
+
+        Frosty picked it from a rendered ladder of that hue, 2026-09-15. At
+        4.51:1 on the dark well and 2.62:1 on the pale one it is the most
+        saturated of the four and the strongest of them where the suite is
+        weakest, which is the pale plate.
+
+        **Not the amber** `meterHigh`, which was asked for and rendered first.
+        That is hue 42, and it is what BMO LTV Comp's level bars turn from -9 dB
+        up -- in a rack, a DEQ metering gain reduction and an LTV Comp
+        approaching its ceiling would have been the same colour. This sits 23
+        degrees clear of it. */
+    /** A band's **placement**, as a colour it carries everywhere.
+
+        BMO DEQ, 2026-09-15: Stereo keeps the module accent, and Mid and Side
+        each take one of these -- on the band's tab, on its node, and on the
+        knobs when it is the band being edited. So which of the three a band is
+        reads at a glance whether or not it is selected, which a lit switch in
+        the strip below could only say about the selected one.
+
+        Placement is the right thing to spend a colour on because it barely
+        moves. The compress/expand mode was tinted this way for one round and
+        taken back off: it flips whenever RANGE crosses zero, and a panel that
+        recolours itself that often is louder than what it is reporting.
+
+        **The hue space is crowded and these are what is left.** Sixteen hues in
+        the suite are already spoken for -- five module accents, the utility
+        azure, four meter states, four analyser options and BMO Tune's lime --
+        so the choice was made from the gaps, and both were picked from rendered
+        candidates rather than from the table (Frosty, 2026-09-15).
+
+        **Mid is the indigo on its pale-plate figure.** Magenta at 320 and green
+        at 104 were both rendered against it. Magenta measures 1.62:1 on the
+        pale well and green 1.39; the indigo is **1.90**, the only one of the
+        three inside the 1.72-2.00 band the suite's raw legends already spend --
+        and the pale plate is where this whole scheme is weakest, because Side
+        is down at 1.09 there whatever its hue. Green lost for a second reason
+        the numbers do not show: at 104 it is green-family with the teal at 172,
+        so a Stereo tab and a Mid tab read alike at a glance, which is the thing
+        this is for.
+
+        Its risk is off-panel and is accepted: BMO Dimension's lavender is at
+        271.6, eighteen degrees away, so a DEQ and a Dimension in one rack are
+        neighbours. */
+    juce::Colour placeMid  { 0xffa390df };   ///< hue 254
+    juce::Colour placeSide { 0xffdcd060 };   ///< hue 54
+
+    /** The dynamics half of a panel: its switches, its knobs and their names.
+
+        BMO DEQ, 2026-09-15. The panel divides into an EQ half and a dynamics
+        half, and they were the same colour with only a rule between them.
+
+        **The azure** (Frosty, 2026-09-15), so everything dynamic on the panel
+        agrees: these knobs, COMP and EXP, DYN, the dot on a band's tab that
+        says it has dynamics, and the whisker on its node that shows their
+        range. Before this they were four colours doing one job.
+
+        Six candidates were rendered whole before it landed here -- CEQ's pink,
+        a grey of its own, indigo, green, magenta and no section colour at all.
+        The pink crossed the accent table; the grey read well but took DYN's
+        "way in" quality off it, which was the thing that sent DYN up to sit
+        with MID and SIDE in the first place.
+
+        The same hex as `switchAlt`, and a token of its own on the terms this
+        file sets throughout: one name per job, so a colour can move for one of
+        them without silently moving for the others. Five candidates moved
+        through this line and only this line. */
+    juce::Colour dynamicsAccent { 0xff4fb8e8 };   ///< the azure, same hex as switchAlt
+
+    juce::Colour meterCut { 0xffe46830 };
+
+    /** Gain a module is **adding** -- upward expansion -- for a meter that
+        shows both directions.
+
+        BMO DEQ is the only one: its dynamic bands expand upward as well as
+        compress downward, and since 2026-09-15 its bar reads gain taken away
+        down from the top and gain added up from the bottom. Two quantities in
+        one track, and drawn in one colour the picture said how much while only
+        the readout's sign said which way.
+
+        **The azure, and `meterCut` is its opposite** (Frosty, 2026-09-15) --
+        chosen in that order, so the cut colour is the one that had to move.
+        Gain going up keeps the colour BMO DEQ has always metered dynamics in,
+        and gain coming down takes the hue directly across the wheel from it.
+
+        A separate token from `meterGr` even though the two hold the same hex,
+        on the terms this file already sets for `track`, `switchAlt` and
+        `meterGr`: one name per job, so a colour can move for one of them
+        without silently moving for the others. `meterGr` still draws BMO DEQ's
+        band-tab dynamics dot and the curve's range whisker, neither of which
+        is a direction; this one is half of a pair that means one. */
+    juce::Colour meterBoost { 0xff4fb8e8 };
+
+    /** The spectrum analyser's four alternatives, and its default.
+
+        **None of these is an accent**, and that is the whole point of writing
+        them down here rather than picking one in a panel. A colour in this set
+        means something *inside* one panel: it never touches a knob cap, a
+        caption or a header bar, and it claims no hue for the module drawing it.
+        The same is true of BMO Opto's red and amber, and the table beside these
+        lives in `products/AGENTS.md` for the same reason -- without it, a later
+        module reads BMO DEQ as owning 23.6 degrees.
+
+        A preference with five options, Frosty 2026-09-12, measured against the
+        well `#1b1b1f`. The fifth is the module's own accent and needs no token,
+        which is why there are four here:
+
+        | option | hue | on well | nearest claimed hue |
+        |---|---|---|---|
+        | Accent (the module's own) | -- | -- | it *is* the accent; no separation from the curve |
+        | orange | 23.6 | 6.92:1 | 8 degrees from BMO Saturator |
+        | gold | 46.9 | 10.57:1 | 5 degrees from BMO Opto's amber state |
+        | pink | 352.0 | 7.44:1 | 16 degrees from BMO EQ |
+        | **neutral, the default** | 220.0 | 8.25:1 | claims nothing |
+
+        **Neutral is the default**: it collides with nothing, it never competes
+        with the curve in front of it, and a panel that ships in someone else's
+        colour has made a claim on their behalf. The other four are there for
+        people who want one.
+
+        The pink is the true complement of BMO DEQ's teal -- 352.0 against
+        172.0 -- but lifted. The complement at the teal's own saturation and
+        lightness is `#cf5e6d`, which measures 4.48:1 and is the faintest thing
+        on the panel. The hue is the complement's; the lightness is the suite's
+        legibility. */
+    juce::Colour analyserOrange  { 0xffef8b4a };
+    juce::Colour analyserGold    { 0xffe8c95a };
+    juce::Colour analyserPink    { 0xffe6949f };
+    juce::Colour analyserNeutral { 0xffaeb4c0 };
 
     //== Fixed, not themable ===================================================
 
@@ -263,6 +459,12 @@ juce::Colour onAccentOf (juce::Colour fill, float minRatio = 4.5f) noexcept;
     they went in, which is why this is a swap and not a compromise. */
 juce::Colour accentInk (juce::Colour accent) noexcept;
 
+/** The same, derived against a stated ground rather than against the suite&apos;s
+    plate. For a panel on a ui::Line that carries a plate of its own: a legend
+    stepped for #efefef and then printed on silver is legible for a plate the
+    reader is not looking at. */
+juce::Colour accentInk (juce::Colour accent, juce::Colour ground) noexcept;
+
 /** The current tokens: the built-in set for whichever appearance is chosen,
     with whatever the user's theme file overrides on top. */
 const Tokens& tokens() noexcept;
@@ -342,12 +544,37 @@ juce::File themeDirectory();
 /** The file an editor watches. */
 juce::File themeFile();
 
+/** Points `themeFile()` somewhere else for the rest of the process.
+
+    For tools that render a *candidate* palette. Without it the only way to see
+    one is to write the machine-wide `Themes/Default.json`, which is a file the
+    user owns and which every open plugin is watching on a 1 Hz poll -- so
+    rendering a colour you were only considering would recolour the session
+    going on in the next window. Pass an empty File to go back to the default.
+
+    Tools only. Nothing in a plugin should call this. */
+void overrideThemeFile (const juce::File& file);
+
 /** Re-reads the theme if the file has changed since the last look. True when
     the tokens changed, in which case the caller repaints. */
 bool pollTheme();
 
 /** Every token name the theme file may set, for writing a template. */
 juce::StringArray tokenNames();
+
+/** Whether the theme file currently in force sets this token by name.
+
+    The difference between "the plate is #efefef because that is the built-in"
+    and "the plate is #efefef because a theme says so", which nothing could ask
+    before: `tokens()` hands back a colour and not its provenance.
+
+    It exists for `ui::Line`. A line carries its own ground -- the LTV plugins
+    are silver rather than the suite's pale grey -- and that has to give way
+    the moment someone applies a theme, because a theme is a statement about
+    the whole window and a line is only a statement about one product in it.
+    Without this, a theme that set `plate` would recolour seven panels and
+    leave the eighth silver, which is the one outcome nobody wants. */
+bool themeSets (juce::StringRef tokenName);
 
 /** Applies a parsed theme object over `base`, which defaults to the light
     built-in set. A theme is an overlay, not a whole palette, so choosing dark

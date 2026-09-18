@@ -9,11 +9,14 @@
 #   <out>/VST3/*.vst3          both platforms
 #   <out>/AU/*.component       macOS
 #   <out>/Standalone/*         .app on macOS, .exe on Windows
+#   <out>/install.command    macOS installer
+#   <out>/install.ps1        Windows installer
+#   <out>/superseded.txt     old bundle names both installers remove
 #   <out>/LICENSE.txt
 #   <out>/README.txt           where to put things
 #
-# Distribution proper (installers, signing, notarisation) is out of scope
-# for now; this is the "unzip and copy" package.
+# Signing and notarisation are still out of scope, so macOS quarantines
+# what it unzips and the installer clears the flag. See README.md.
 
 set -euo pipefail
 
@@ -65,6 +68,13 @@ fi
 
 cp "$root/LICENSE" "$out/LICENSE.txt"
 
+# The installers and the one list they share. Both platforms read
+# superseded.txt, so a rename is recorded once rather than twice.
+cp "$(dirname "$0")/install.command" "$out/"
+cp "$(dirname "$0")/install.ps1"    "$out/"
+cp "$(dirname "$0")/superseded.txt" "$out/"
+chmod +x "$out/install.command"
+
 # Names the products that actually got staged, for the same reason the array
 # above is discovered: a second hand-maintained list is a second thing to
 # forget.
@@ -87,21 +97,56 @@ TXT
 cat >> "$out/README.txt" <<'TXT'
 
 Install
-  macOS
-    VST3  ->  ~/Library/Audio/Plug-Ins/VST3/
-    AU    ->  ~/Library/Audio/Plug-Ins/Components/
-    These are not signed or notarised yet. If macOS refuses to open
-    them, remove the quarantine flag once:
-      xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/VST3/BMO*.vst3
-      xattr -dr com.apple.quarantine ~/Library/Audio/Plug-Ins/Components/BMO*.component
-    Then rescan plugins in your DAW.
-  Windows
-    VST3  ->  C:\Program Files\Common Files\VST3\
+  Easiest: run the installer beside this file. It removes bundles an
+  earlier build left under a name this one no longer uses, copies
+  everything into place, and on macOS clears the quarantine flag.
 
-FrostyEQ users
-  BMO EQ is FrostyEQ renamed; sessions that used FrostyEQ open with
-  BMO EQ. Remove the old FrostyEQ.vst3 / FrostyEQ.component so the DAW
-  does not show both.
+    macOS     double-click install.command
+    Windows   right-click install.ps1 -> Run with PowerShell (as
+              Administrator; the shared VST3 folder is under Program Files)
+
+  By hand, if you would rather:
+    macOS
+      VST3  ->  ~/Library/Audio/Plug-Ins/VST3/
+      AU    ->  ~/Library/Audio/Plug-Ins/Components/
+      These are not signed or notarised yet, so macOS will say a plugin
+      is "damaged and can't be opened". It is almost never damaged.
+      Three things wear those words:
+        1. the quarantine flag, on anything unzipped from a download;
+        2. the flag cleared in ~/Library while the plugins are in
+           /Library, which matches nothing and looks like a no-op;
+        3. an arm64-only build on an Intel Mac, which no xattr fixes.
+      Covering 1 and 2 by hand:
+        for d in ~/Library/Audio/Plug-Ins /Library/Audio/Plug-Ins; do
+          sudo xattr -dr com.apple.quarantine "$d"/VST3/BMO*.vst3 "$d"/VST3/LTV*.vst3 2>/dev/null
+          sudo xattr -dr com.apple.quarantine "$d"/Components/BMO*.component "$d"/Components/LTV*.component 2>/dev/null
+        done
+      Both globs matter: LTV Comp is the one bundle whose name does
+      not begin with BMO. For 3, run  uname -m  -- if it says x86_64
+      you need a package from a tag run, which is universal.
+    Windows
+      VST3  ->  C:\Program Files\Common Files\VST3\
+    Then rescan plugins in your DAW.
+
+Renamed products
+  Each of these shipped under an older name. The installer removes the
+  old bundle for you; by hand, delete it yourself or the DAW lists both.
+
+  BMO Vcomp  ->  LTV Comp
+    The first product on the LTV line rather than a BMO one. Your presets
+    are copied into the LTV Comp folder the first time it runs. Sessions
+    are NOT carried over: the plugin's identifier changed with the name,
+    so a session that loaded BMO Vcomp will not find LTV Comp in its
+    place. Re-insert it on those tracks.
+
+  BMO EQ  ->  BMO CEQ
+    The console EQ, so the name says what it is next to BMO DEQ. Same
+    plugin, same sessions, same sound. Your presets are copied into the
+    BMO CEQ folder the first time it runs.
+
+  FrostyEQ  ->  BMO CEQ
+    The same product, one rename earlier. Sessions that used FrostyEQ
+    open with BMO CEQ, and presets come across from either old name.
 
 Presets
   ~/Library/Audio/Presets/LT3 Audio/<product>/   (macOS)

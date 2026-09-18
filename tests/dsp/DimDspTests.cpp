@@ -303,6 +303,73 @@ int main()
         check (worst > 1.0e-3f, "asymmetry does change off-centre material");
     }
 
+    //== Asymmetry favours the side its knob turns toward ======================
+    // Same trap as rotation: the tests above ask whether asymmetry moves
+    // off-centre material, which is true whichever way it moves it. It reached
+    // the UI pass with + favouring the LEFT, and was found only because the
+    // panel was about to print an R at that end (2026-09-16). Frosty's call was
+    // to flip the DSP so ASYM agrees with ROTATE: + is right.
+    //
+    // Absolutes, not a comparison. A hard-panned 0.4 tone, second half only so
+    // the smoother has arrived. At +50 the shear coefficient is -0.25, so the
+    // favoured side comes out at 0.45 and the other at 0.35 -- and at +100 it is
+    // 0.50 and 0.30, the disfavoured side 6 dB down in the mono sum, which is
+    // what asymCoeff's comment says the end of the knob means.
+    {
+        const auto peaksAt = [] (float asym, float ampL, float ampR, float& peakL, float& peakR)
+        {
+            constexpr int n = 8192;
+            DimDsp dsp;
+
+            const float v[Index::count] {
+                100.0f, 1.0f, 700.0f, 10.0f, 0.0f,
+                0.0f, 0.40f, 50.0f, 0.0f, asym
+            };
+
+            dsp.setParams (v, Index::count);
+            dsp.prepare (48000.0, 512, 2);
+            dsp.setParams (v, Index::count);
+
+            std::vector<float> l ((size_t) n), r ((size_t) n);
+            for (int i = 0; i < n; ++i)
+            {
+                const auto tone = std::sin (2.0f * 3.14159265f * 220.0f * (float) i / 48000.0f);
+                l[(size_t) i] = ampL * tone;
+                r[(size_t) i] = ampR * tone;
+            }
+
+            float* ch[2] { l.data(), r.data() };
+            dsp.process (ch, 2, n);
+
+            peakL = peakR = 0.0f;
+            for (int i = n / 2; i < n; ++i)
+            {
+                peakL = std::max (peakL, std::abs (l[(size_t) i]));
+                peakR = std::max (peakR, std::abs (r[(size_t) i]));
+            }
+        };
+
+        float l = 0.0f, r = 0.0f;
+
+        peaksAt (+50.0f, 0.0f, 0.4f, l, r);
+        check (near (r, 0.45f, 1.0e-3f), "positive asymmetry lifts a hard-RIGHT source to 0.45");
+
+        peaksAt (+50.0f, 0.4f, 0.0f, l, r);
+        check (near (l, 0.35f, 1.0e-3f), "positive asymmetry lowers a hard-LEFT source to 0.35");
+
+        peaksAt (-50.0f, 0.4f, 0.0f, l, r);
+        check (near (l, 0.45f, 1.0e-3f), "negative asymmetry lifts a hard-LEFT source to 0.45");
+
+        peaksAt (-50.0f, 0.0f, 0.4f, l, r);
+        check (near (r, 0.35f, 1.0e-3f), "negative asymmetry lowers a hard-RIGHT source to 0.35");
+
+        peaksAt (+100.0f, 0.0f, 0.4f, l, r);
+        check (near (r, 0.50f, 1.0e-3f), "full positive asymmetry takes a hard-RIGHT source to 0.50");
+
+        peaksAt (+100.0f, 0.4f, 0.0f, l, r);
+        check (near (l, 0.30f, 1.0e-3f), "full positive asymmetry takes a hard-LEFT source to 0.30");
+    }
+
     //== A mono instance is a wire ============================================
     // SingleModuleProcessor::isBusesLayoutSupported accepts a mono layout, so
     // this path is reachable from a host. There is no stereo image on one
@@ -333,6 +400,46 @@ int main()
             worst = std::max (worst, std::abs (m[(size_t) i] - ref[(size_t) i]));
 
         check (worst == 0.0f, "a mono instance passes through untouched, every stage on");
+    }
+
+    //== CENTS at 0 is off, however the knob got there ========================
+    // A voice at 0 cents stops sweeping and freezes wherever it was, so with
+    // DETUNE on the pair used to become two fixed taps of the mid, differenced:
+    // a static comb whose level depended on where the sweep had got to when
+    // the knob arrived -- after CENTS 10 -> 0 it measured louder than at 10
+    // (0.2.4 review, 2026-09-14). The injected difference is scaled by the
+    // first cent of the knob now, so the bottom of the range is silence.
+    {
+        DimDsp dsp;
+        float v[Index::count] { 100.0f, 1.0f, 700.0f, 10.0f, 1.0f,
+                                0.0f, 0.4f, 50.0f, 0.0f, 0.0f };
+
+        dsp.setParams (v, Index::count);
+        dsp.prepare (48000.0, 512, 2);
+        dsp.setParams (v, Index::count);
+
+        int at = 0;   // one continuous tone across the three feeds, no phase jump
+
+        const auto feed = [&] (int n)
+        {
+            std::vector<float> l ((size_t) n), r ((size_t) n);
+            for (int i = 0; i < n; ++i, ++at)
+                l[(size_t) i] = r[(size_t) i] = 0.5f * std::sin (2.0f * 3.14159265f * 220.0f * (float) at / 48000.0f);
+
+            float* ch[2] { l.data(), r.data() };
+            dsp.process (ch, 2, n);
+            return peakSide ({ l, r });
+        };
+
+        const auto atTen = feed (96000);          // two seconds at CENTS 10
+        check (atTen > 0.01f, "CENTS 10 with DETUNE on manufactures side content");
+
+        v[Index::detune] = 0.0f;                  // the knob goes to 0 mid-sweep
+        dsp.setParams (v, Index::count);
+        feed (24000);                             // half a second to fade
+
+        const auto atZero = feed (9600);
+        check (atZero < 1.0e-5f, "CENTS at 0 with DETUNE on leaves no side content, wherever the sweep had got to");
     }
 
     //== The detune stage does not replay what it last held ===================

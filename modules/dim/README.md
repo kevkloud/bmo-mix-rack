@@ -21,30 +21,50 @@ a mono track has no side signal, and an all-pass of zero is zero.
 
 ## Controls
 
-**WIDTH** — the side signal scaled, 100 % being unity. Same law and range as
-BMO Util's width, deliberately.
+The panel is in two sections, and the host names match the captions — an
+automation lane is called what the knob is called. The parameter IDs underneath
+(`width`, `shuffle`, `detune_on`, ...) are the permanent part and never
+followed the words; the old names are in brackets.
 
-**SHUFFLE** / **FREQ** — Gerzon's bass shuffler, widening the low end alone to
-correct for the ears hearing stereo as narrower in the bass. 1.0 is off; the S1
-manual puts the useful range at 1.6–2.5 below about 650–700 Hz.
+### SOURCE — making width from nothing
 
-**DETUNE** switch and **CENTS** — the spreader. Around 10 cents is the classic
-setting. The range stops at 25 rather than MicroPitch's 50, because past about
-25 it stops widening and starts sounding out of tune.
+**GENERATE** (Detune On) — switches in the generate stage. A mono source has
+no side signal, so without this nothing below it has anything to work on.
 
-**DIFFUSE** — how much side signal goes through the all-pass network. Its LFO
-rate and depth are fixed at 0.40 Hz and 50 %: neither was audible enough to
-earn a control, so neither has one. Slow on purpose — this is a widener, and an
-audible sweep is a different job.
+**DETUNE** (the CENTS knob) — how far apart the two voices are pitched, in
+cents. Around 10 is the classic setting. The range stops at 25 rather than
+MicroPitch's 50, because past about 25 it stops widening and starts sounding
+out of tune.
 
-**ROTATE** — the whole soundfield turned, without changing the relative levels
-of anything standing on it. Positive degrees move the image **right**, like a
-pan knob.
+**DRIFT** (Diffuse) — how much side signal goes through the swept all-pass
+network. It works on any side content, not only what GENERATE makes. Its speed
+and depth are **Drift Rate** and **Drift Depth** (Rate, Depth), fixed at
+0.40 Hz and 50 % with no knobs: neither was audible enough to earn one. Slow on
+purpose — this is a widener, and an audible sweep is a different job.
 
-**ASYM** — left against right, with centre material left exactly where it is.
-This is not a balance control and not a pan; a dead-centre vocal does not move
-at any setting. It is the reason this module is not just a width knob with a
-crossover.
+### WIDTH — shaping the width that is there
+
+**DIMENSION** (Width) — the side signal scaled, 100 % being unity. The hero
+knob. Same law and range as BMO Util's WIDTH, deliberately. It comes after
+GENERATE, DRIFT and BLOOM, so at 0 it silences all three.
+
+**BLOOM** / **BELOW** (Shuffle / Shuffle Freq) — Gerzon's bass shuffler,
+widening the low end alone to correct for the ears hearing stereo as narrower
+in the bass. BLOOM at 1.0 is off; the S1 manual puts the useful range at
+1.6–2.5. BELOW is the frequency it works under, printed on the panel, and the
+S1 recommends 600–700 Hz.
+
+**TURN** (Rotation) — the whole soundfield turned, without changing the
+relative levels of anything standing on it. Positive degrees move the image
+**right**, like a pan knob. Its ends are marked L and R.
+
+**TILT** (Asymmetry) — left against right, with centre material left exactly
+where it is. This is not a balance control and not a pan; a dead-centre vocal
+does not move at any setting. It is the reason this module is not just a width
+knob with a crossover. Positive settings favour the **right**, the same way
+TURN turns: material on the right comes up and material on the left goes down.
+(It leaned left until 2026-09-16, when the sign was flipped to agree.) Its ends
+are marked L and R.
 
 ## Presets
 
@@ -53,18 +73,18 @@ be making a decision you have not made yet.
 
 The rest split on one line: whether your source already has side content.
 
-- **Wide Vocal**, **Mono to Stereo**, **Thicken** turn DETUNE on, so they work
+- **Wide Vocal**, **Mono to Stereo**, **Thicken** turn GENERATE on, so they work
   on a mono track.
 - **Bass Shuffle**, **Diffuse Pad**, **Narrow** only scale and steer what is
   already there, so they need a stereo source to do anything.
 
 ## Things worth knowing before you use it
 
-- **WIDTH at 0 turns the whole module off**, DETUNE included — width sits
+- **DIMENSION at 0 turns the whole module off**, GENERATE included — it sits
   downstream of everything else.
-- **CENTS is inactive until DETUNE is switched on.** It is the only control on
-  the panel that does nothing where it stands, and the switch above it says so.
-- **There is no output trim yet**, and extreme SHUFFLE and WIDTH together can
+- **DETUNE is inactive until GENERATE is switched on.** It is the only control on
+  the panel that does nothing where it stands, and the switch above its row says so.
+- **There is no output trim yet**, and extreme BLOOM and DIMENSION together can
   add real level. Watch what leaves it.
 - **On a mono track it is a wire**, by design. There is no image to work on.
 - **The detune stage throbs.** The two voices beat against each other, so the

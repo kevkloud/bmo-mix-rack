@@ -2,44 +2,58 @@
 
 #include "core/product/ModuleDef.h"
 
+#include <array>
+
 namespace bmo::dim
 {
 
-/** DETUNE over CENTS and DIFFUSE, then WIDTH on its own, then SHUFFLE with its
-    FREQ, and ROTATE and ASYM at the foot.
+/** Two sections, laid out and named in the UI pass of 2026-09-16/17 (Frosty):
 
-    **RATE and DEPTH have no controls.** They are the diffuse stage's LFO, and
-    the listening pass on 2026-09-09 found neither audible enough to earn the
-    space -- so they are fixed at their defaults, 0.40 Hz and 50 %. The
-    parameters stay in `params.h`: the IDs are permanent and append-only, and a
-    host session that automated them must still load. This is the stronger
-    answer to the "three dead knobs on a fresh insert" problem than dimming
-    them would have been, since with DIFFUSE at its 0 % default these two did
-    nothing until it was raised.
+        SOURCE   GENERATE, over DETUNE and DRIFT
+        WIDTH    DIMENSION, then BLOOM and BELOW, then TURN and TILT
+
+    **The panel's words are not the code's.** Captions and host names agree,
+    so an automation lane is called what the knob is called, but the IDs, the
+    `Index` enum and the members below keep the original words, because the
+    IDs are permanent. The map is in modules/dim/AGENTS.md: DETUNE is `cents`,
+    DRIFT is `diffuse`, DIMENSION is `width`, BLOOM and BELOW are `shuffle` and
+    `shuffleFreq`, TURN and TILT are `rotation` and `asymmetry`, and the
+    GENERATE switch is `detuneOn`.
+
+    **Drift Rate and Drift Depth have no controls.** They are the diffuse
+    stage's LFO, and the listening pass on 2026-09-09 found neither audible
+    enough to earn the space -- so they are fixed at their defaults, 0.40 Hz
+    and 50 %. The parameters stay in `params.h`: the IDs are permanent and
+    append-only, and a host session that automated them must still load.
 
     Built on BMO Opto's panel rather than on BMO EQ's: blocks placed from the
-    top on one derived gap, no input or output section reserved, and no section
-    rules. The rule about rules is the reason -- a rule is a divider, and a
-    panel that is one idea has nothing to divide. This module is one idea, a
-    stereo image, taken in three passes; drawing a line between the passes would
-    mark a boundary that is not there any more than it is on Opto.
+    top on one derived gap, and no input or output section reserved. It had no
+    rules either, on the argument that it was one idea. Frosty's legends settled
+    that it is two -- make width, then shape it -- and the legends sit in gaps
+    the rhythm already left, so adding them moved no control.
+
+    **Pairs are bracketed.** Each pair of knobs has a line under its captions
+    with the ends turned up, in the knobs' own track colour. It joins rather
+    than divides, which is why it is painted here and is not a rule.
 
     The order down the panel is signal order -- generate, diffuse, image --
     which is *not* the order in params.h. That one is reach-for-first, because
     it is permanent and because it is what a host's automation list shows. The
     two are independent and each is right for the list it is in.
 
-    WIDTH sits in the middle at full size, where Opto puts its meter. It is the
-    control this panel is opened for, it is the only one anybody reaches for
-    without thinking, and it is the only knob here that earns 92 px. Everything
-    else is paired at 64, which is between BMO EQ's 56 and Opto's 92. That was
-    sized for ten controls; there are eight now, and it stays at 64 to match
-    the rest of the suite rather than growing into the space.
+    DIMENSION is the hero, at 148 px where Opto puts its meter; everything else
+    is paired at 64, the size the rest of the suite's paired knobs use. BELOW
+    is the one knob here that prints its value -- it is a crossover, and "below
+    what" is the question its caption raises -- and BLOOM keeps a blank line to
+    stay level with it. TURN and TILT mark their ends L and R, since both move
+    the image one way or the other rather than giving more or less of it.
 
-    DETUNE is a switch rather than a zero position on the CENTS knob. The stage
-    it gates is the only part of the module that manufactures signal rather than
-    shaping it, so it is worth being able to take out and put back without
-    losing the amount you had set -- and worth reading as off at a glance.
+    GENERATE is a switch rather than a zero position on the DETUNE knob. The
+    stage it gates is the only part of the module that manufactures signal
+    rather than shaping it, so it is worth being able to take out and put back
+    without losing the amount you had set -- and worth reading as off at a
+    glance. It is centred over its row but gates only DETUNE; DRIFT works on any
+    side content.
 
     **A goniometer is the meter this panel wants, and it is deliberately not
     here yet.** Deferred 2026-09-08, on functionality first.
@@ -71,6 +85,11 @@ public:
     void resized() override;
 
 private:
+    void paintPanel (juce::Graphics&) override;
+
+    // The three knob pairs, as laid out, so paintPanel can group them.
+    std::array<juce::Rectangle<int>, 3> pairBoxes;
+
     ui::PlainKnob width, shuffle, shuffleFreq, cents, diffuse,
                   rotation, asymmetry;
 

@@ -27,9 +27,20 @@ public:
 
 private:
 
+
+    /** Lights the one switch of the three that `choice` names, or none of them
+        when it is Off. Radio behaviour over one choice parameter, the same
+        arrangement the Saturator's oversampling row uses -- a click sets the
+        parameter and the parameter lights the switches, so a click and host
+        automation cannot disagree. */
+    void showOversampling (int choice);
+
     ui::PlainKnob inputGain, outputLevel;
     ui::ConcentricBand high, mid, low, highPass;
-    ui::SwitchButton eqIn, phase, midHiQ;
+    ui::SwitchButton eqIn, phase, midHiQ, autoGain;
+
+    juce::ToggleButton os2x, os4x, osHq;
+    std::unique_ptr<juce::ParameterAttachment> osAttachment;
 
 };
 

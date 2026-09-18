@@ -1,0 +1,9 @@
+# Shell scripts run under bash on every platform, including Git Bash on
+# Windows, where a CRLF checkout turns `set -euo pipefail` into an error.
+*.sh text eol=lf
+
+# The macOS installer is a shell script that does not end in .sh, so the rule
+# above misses it: a CRLF checkout makes it "bad interpreter" on the one
+# platform it runs on. superseded.txt is parsed by it, field by field.
+*.command       text eol=lf
+superseded.txt  text eol=lf

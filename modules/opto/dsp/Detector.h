@@ -1,81 +1,29 @@
 #pragma once
 
+#include "core/dsp/GainComputer.h"
+
 #include <algorithm>
 #include <cmath>
 
 namespace bmo::opto
 {
 
-/** Threshold/ratio/knee for one sample. Ratio and knee are fixed per mode --
-    see curveForLa2a() / curveForDistressor() -- only threshold moves with
-    CRUSH, because neither real unit has a ratio control; CRUSH is a stand-in
-    for the Peak Reduction knob, which pushes more signal over a fixed
-    circuit's threshold rather than reshaping the circuit itself. */
-struct Curve
-{
-    float thresholdDb;
-    /** dB of reduction per dB over threshold, *not* a ratio -- see
-        feedforwardSlope()/feedbackSlope() for why a feedback cell can't
-        express what it needs as one. */
-    float slope;
-    float kneeDb;
-};
-
-/** The reduction slope a **feedforward** cell needs to deliver `ratio`.
-    Output is input minus the reduction, so a slope of `1 - 1/R` leaves a
-    residual slope of `1/R` -- the ratio, straightforwardly. */
-constexpr float feedforwardSlope (float ratio) noexcept
-{
-    return 1.0f - 1.0f / ratio;
-}
-
-/** The reduction slope a **feedback** cell needs to deliver `ratio`, which
-    is a different number, because the detector reads the already-reduced
-    output rather than the input. In steady state, with slope `a`:
-
-        y = x - a(y - T)  ->  y = (x + aT)/(1 + a)  ->  dy/dx = 1/(1 + a)
-
-    so the delivered ratio is `1 + a`, and `a = ratio - 1`.
-
-    This is why `Curve` carries a slope and not a ratio. Feeding a feedback
-    cell `1 - 1/R` (the feedforward figure, which is what this module did
-    until 0.2.0) delivers `1/(2 - 1/R)` instead: 3:1 came out as 1.67:1, and
-    since `1 - 1/R < 1` for every finite R, **no ratio value could ever ask
-    a feedback cell for more than 2:1**. Expressed as a slope there is no
-    such ceiling -- 3:1 is simply a = 2.
-
-    Loop stability is not a concern at these attack times even though a > 1:
-    the envelope follower's own coefficient `c` sets the per-sample loop
-    gain, and the recursion multiplier is `1 - c(1 + a)`, stable while
-    `c(1 + a) < 2`. A 10 ms attack gives c ~= 0.0023 at 44.1 kHz, three
-    orders of magnitude inside that. */
-constexpr float feedbackSlope (float ratio) noexcept
-{
-    return ratio - 1.0f;
-}
-
-/** The soft-knee gain computer from Reiss & McPherson's compressor tutorial,
-    restated to return the reduction directly: for a ratio R and knee width W
-    either side of threshold T, the input-output gain difference is a smooth
-    parabola inside the knee and a straight line beyond it. Shared by both
-    modes -- it's generic knee math, not part of what makes either unit
-    sound like itself. */
-inline float kneeReductionDb (float levelDb, const Curve& curve) noexcept
-{
-    const auto diff = levelDb - curve.thresholdDb;
-    const auto half = curve.kneeDb * 0.5f;
-
-    if (diff <= -half)
-        return 0.0f;
-
-    if (diff < half)
-    {
-        const auto t = diff + half;
-        return curve.slope * (t * t) / (2.0f * curve.kneeDb);
-    }
-
-    return curve.slope * diff;
-}
+// Threshold/ratio/knee for one sample, the slope-not-ratio conversions and
+// the soft-knee gain computer all live in core/dsp/GainComputer.h now: they
+// are generic compressor arithmetic, and BMO Vcomp needs the same four. They
+// were written here first, and the derivation of why a feedback cell cannot
+// state what it needs as a ratio -- this module's finding, and the bug that
+// was quietly delivering 1.67:1 for 3:1 -- went with them.
+//
+// Pulled in under these names so the rest of this file reads as it always
+// did. Ratio and knee are still fixed per mode; only threshold moves with
+// CRUSH, because neither real unit has a ratio control -- CRUSH is a stand-in
+// for the Peak Reduction knob, which pushes more signal over a fixed
+// circuit's threshold rather than reshaping the circuit itself.
+using dsp::Curve;
+using dsp::feedforwardSlope;
+using dsp::feedbackSlope;
+using dsp::kneeReductionDb;
 
 inline float coeffFor (float tauSec, double rate) noexcept
 {

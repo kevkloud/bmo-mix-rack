@@ -17,7 +17,7 @@ namespace bmo::eq
 //==============================================================================
 
 inline constexpr auto kModuleId   = "eq";
-inline constexpr auto kModuleName = "BMO EQ";
+inline constexpr auto kModuleName = "BMO CEQ";
 
 inline constexpr auto kHfFreq       = "hf_freq";
 inline constexpr auto kHfGain       = "hf_gain";
@@ -85,7 +85,7 @@ inline const ParamSpecs& specs()
 
         // The one module in the suite whose default is not zero-latency: the
         // 1073 model's 16 kHz shelf needs the headroom. See the plan.
-        S::choiceParam (kOversampling, "Oversampling", { "Off", "2x", "4x", "HQ (8x)" }, 1),
+        S::choiceParam (kOversampling, "Oversampling", { "Off", "2x", "4x", "8x" }, 1),
     };
 
     return s;

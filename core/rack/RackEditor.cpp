@@ -13,7 +13,23 @@ RackEditor::SlotBar::SlotBar (RackEditor& o, int s) : owner (o), slot (s)
     }
 
     if (auto* def = owner.proc.getModuleAt (slot))
+    {
         name.setButtonText (def->name);
+
+        // Only a module with two widths gets the switch. Unlike the buttons
+        // below it does not destroy this bar -- the bar is resized with its
+        // panel -- so it acts inside the click.
+        if (def->isExpandable())
+        {
+            expand = std::make_unique<ui::ExpandButton> ([this] { return owner.proc.isSlotExpanded (slot); });
+            expand->onClick = [this]
+            {
+                owner.toggleSlotView (slot);
+                expand->refresh();
+            };
+            addAndMakeVisible (*expand);
+        }
+    }
 
     // Every one of these destroys this bar, so the work is deferred to the
     // next message rather than done inside the click.
@@ -65,6 +81,10 @@ void RackEditor::SlotBar::resized()
     left  .setBounds (area.removeFromLeft (button));
     remove.setBounds (area.removeFromRight (button));
     right .setBounds (area.removeFromRight (button));
+
+    if (expand != nullptr)
+        expand->setBounds (area.removeFromRight (button));
+
     name  .setBounds (area.reduced (2, 0));
 }
 
@@ -98,7 +118,7 @@ void RackEditor::AddStrip::resized()
 //==============================================================================
 RackEditor::RackEditor (RackProcessor& p)
     : juce::AudioProcessorEditor (&p), proc (p),
-      header (p.getInfo().name, ui::tokens().accent),
+      header (p.getInfo().name, ui::tokens().accent, ui::bmoLine()),
       presetBar (p.getPresets()),
       addStrip (*this)
 {
@@ -140,11 +160,32 @@ void RackEditor::rackChainChanged()
     const auto scale = (float) getWidth() / (float) plate.getWidth();
 
     rebuildViews();
+    refit (scale);
+}
 
+void RackEditor::refit (float scale)
+{
     const auto w = designWidth();
     getConstrainer()->setFixedAspectRatio ((double) w / (double) kDesignHeight);
     setResizeLimits (w * 2 / 3, kDesignHeight * 2 / 3, w * 2, kDesignHeight * 2);
     setSize (juce::roundToInt ((float) w * scale), juce::roundToInt ((float) kDesignHeight * scale));
+    resized();
+}
+
+int RackEditor::slotWidth (int slot) const
+{
+    return proc.getModuleAt (slot)->widthFor (proc.isSlotExpanded (slot));
+}
+
+void RackEditor::toggleSlotView (int slot)
+{
+    // Nothing is torn down: the panel is resized in place and lays itself out
+    // again, the modules to its right move over, and the window keeps the
+    // scale the user had.
+    const auto scale = (float) getWidth() / (float) plate.getWidth();
+    proc.setSlotExpanded (slot, ! proc.isSlotExpanded (slot));
+    layoutPlate();
+    refit (scale);
 }
 
 void RackEditor::rebuildViews()
@@ -184,7 +225,7 @@ int RackEditor::designWidth() const
     int w = 0;
 
     for (int s = 0; s < proc.getNumModules(); ++s)
-        w += proc.getModuleAt (s)->designWidth;
+        w += slotWidth (s);
 
     return juce::jmax (kMinWidth, w + kAddStrip);
 }
@@ -204,7 +245,7 @@ void RackEditor::layoutPlate()
 
     for (int s = 0; s < (int) views.size(); ++s)
     {
-        const auto width = proc.getModuleAt (s)->designWidth;
+        const auto width = slotWidth (s);
 
         views[(size_t) s].bar  ->setBounds (x, kHeader, width, kSlotBar);
         views[(size_t) s].panel->setBounds (x, kHeader + kSlotBar, width, ui::ModulePanel::kContentHeight);

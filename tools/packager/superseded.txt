@@ -1,0 +1,16 @@
+# Bundles a previous tester build installed under a name this build no longer
+# uses. The installers remove these by exact name, because a rename changes the
+# bundle's filename and the DAW otherwise lists the old one alongside the new.
+#
+#   <old bundle base name> | <what replaced it> | <when>
+#
+# One list, read by install.command and install.ps1 both, for the same reason
+# package.sh discovers its product list instead of hardcoding one: a second
+# hand-maintained list is a second thing to forget.
+#
+# Only ever add a name this project actually shipped. The installers refuse to
+# remove anything that is also a product in the current build.
+
+BMO Vcomp | LTV Comp | renamed 2026-09-14
+BMO EQ    | BMO CEQ  | renamed 2026-09-17
+FrostyEQ  | BMO CEQ  | renamed before BMO EQ

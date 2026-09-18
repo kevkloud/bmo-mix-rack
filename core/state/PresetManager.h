@@ -29,16 +29,33 @@ struct FactoryEntry
     std::function<void()> apply;    ///< runs after resetToDefaults()
 };
 
-/** Where a product keeps its presets. */
-struct PresetInfo
+/** Left in a preset folder once the copy from an older name has run. Not a
+    preset: it does not carry the product's extension, so nothing lists it. */
+inline constexpr auto kMigrationMarker = ".migrated";
+
+/** A folder and extension a product used to write, before it was renamed. */
+struct LegacyPreset
 {
     juce::String folderName;        ///< "BMO EQ": under LT3 Audio/
     juce::String extension;         ///< ".bmoeq"
+};
+
+/** Where a product keeps its presets. */
+struct PresetInfo
+{
+    juce::String folderName;        ///< "BMO CEQ": under LT3 Audio/
+    juce::String extension;         ///< ".bmoceq"
 
     /** A product that was renamed keeps reading what it used to write. On
-        first run with an empty folder, the old folder's files are copied
-        across under the new extension. */
-    juce::String legacyFolderName, legacyExtension;
+        first run the old folders' files are copied across under the new
+        extension, and a marker left in the new folder stops the copy ever
+        running again -- so a preset the user deletes afterwards stays deleted.
+
+        **Newest first.** A product renamed twice can have the same preset name
+        sitting in two old folders, and the copy never overwrites, so whichever
+        folder is listed first wins. That has to be the most recent one: the
+        older file is the same preset from before the user's later edits. */
+    std::vector<LegacyPreset> legacy {};
 };
 
 /** Presets, both the ones that ship and the user's own.
@@ -99,6 +116,11 @@ public:
 
 private:
     void migrateLegacy();
+
+    /** A product folder by name, through the test redirection if one is set.
+        `directory()` is this for `info.folderName`; migration needs it for the
+        old names too, which is what used to make the copy untestable. */
+    juce::File folderFor (const juce::String& name) const;
 
     PresetTarget& target;
     PresetInfo info;

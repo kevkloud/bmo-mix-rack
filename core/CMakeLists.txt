@@ -11,6 +11,7 @@ if(NOT BMO_DSP_ONLY)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/Fonts.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/LookAndFeel.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/Controls.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/Line.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/ModulePanel.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/PresetBar.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/product/SingleModuleProcessor.cpp

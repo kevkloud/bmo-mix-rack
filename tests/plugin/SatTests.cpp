@@ -52,8 +52,8 @@ int main()
                "Output should read '-3.0 dB', got '" + param (*proc, P::kOutputLevel).getCurrentValueAsText() + "'");
 
         setValue (*proc, P::kOversampling, 3.0f);
-        check (param (*proc, P::kOversampling).getCurrentValueAsText() == "HQ (8x)",
-               "Oversampling 3 should read 'HQ (8x)', got '" + param (*proc, P::kOversampling).getCurrentValueAsText() + "'");
+        check (param (*proc, P::kOversampling).getCurrentValueAsText() == "8x",
+               "Oversampling 3 should read '8x', got '" + param (*proc, P::kOversampling).getCurrentValueAsText() + "'");
     }
 
     //== Latency ==============================================================

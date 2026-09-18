@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -26,7 +27,10 @@ enum class ParamFormat
     Plain,       ///< the number
     Decibels,    ///< "+3.0 dB"
     Percent,     ///< "40 %"
-    Pan          ///< "L 50", "C", "R 50"
+    Pan,         ///< "L 50", "C", "R 50"
+    Hertz,       ///< "850 Hz", "2.10 kHz"
+    Milliseconds,///< "5.0 ms", "120 ms"
+    Ratio        ///< "3.0:1"
 };
 
 struct ParamSpec
@@ -38,12 +42,27 @@ struct ParamSpec
     ParamFormat  format = ParamFormat::Plain;
     std::vector<const char*> choices;
 
+    /** Knob travel proportional to log(value) rather than to value: equal
+        turns for equal ratios, which is how frequency, Q and time are heard.
+        `min` must be above zero. The mapping lives here and nowhere else --
+        the JUCE range for a standalone parameter is built from these functions
+        (rangeFor, core/state/Parameters.h), so the two cannot disagree. */
+    bool         logarithmic = false;
+
     static ParamSpec floatParam (const char* id, const char* name, float min, float max,
                                  float step, float def, ParamFormat format = ParamFormat::Plain)
     {
         ParamSpec s;
         s.id = id; s.name = name; s.kind = ParamKind::Float;
         s.min = min; s.max = max; s.step = step; s.def = def; s.format = format;
+        return s;
+    }
+
+    static ParamSpec logParam (const char* id, const char* name, float min, float max,
+                               float step, float def, ParamFormat format = ParamFormat::Plain)
+    {
+        auto s = floatParam (id, name, min, max, step, def, format);
+        s.logarithmic = min > 0.0f;
         return s;
     }
 
@@ -72,10 +91,13 @@ struct ParamSpec
     {
         switch (format)
         {
-            case ParamFormat::Decibels: return "dB";
-            case ParamFormat::Percent:  return "%";
-            case ParamFormat::Pan:      return "";
-            case ParamFormat::Plain:    return "";
+            case ParamFormat::Decibels:     return "dB";
+            case ParamFormat::Percent:      return "%";
+            case ParamFormat::Hertz:        return "Hz";
+            case ParamFormat::Milliseconds: return "ms";
+            case ParamFormat::Pan:          return "";
+            case ParamFormat::Ratio:        return "";
+            case ParamFormat::Plain:        return "";
         }
 
         return "";
@@ -101,14 +123,17 @@ struct ParamSpec
         if (max <= min)
             return 0.0f;
 
-        const auto n = (clampReal (real) - min) / (max - min);
+        const auto v = clampReal (real);
+        const auto n = logarithmic ? std::log (v / min) / std::log (max / min)
+                                   : (v - min) / (max - min);
         return n < 0.0f ? 0.0f : (n > 1.0f ? 1.0f : n);
     }
 
     float fromNormalised (float n) const noexcept
     {
         n = n < 0.0f ? 0.0f : (n > 1.0f ? 1.0f : n);
-        return clampReal (min + n * (max - min));
+        return clampReal (logarithmic ? min * std::pow (max / min, n)
+                                      : min + n * (max - min));
     }
 
     /** The value as the panel and the host print it. */
@@ -149,12 +174,52 @@ struct ParamSpec
                 return buf;
             }
 
+            case ParamFormat::Hertz:
+                if (real >= 10000.0f)     std::snprintf (buf, sizeof (buf), "%.1f kHz", (double) real / 1000.0);
+                else if (real >= 1000.0f) std::snprintf (buf, sizeof (buf), "%.2f kHz", (double) real / 1000.0);
+                else if (real >= 100.0f)  std::snprintf (buf, sizeof (buf), "%.0f Hz", (double) real);
+                else                      std::snprintf (buf, sizeof (buf), "%.1f Hz", (double) real);
+                return buf;
+
+            case ParamFormat::Milliseconds:
+                std::snprintf (buf, sizeof (buf), real < 10.0f ? "%.1f ms" : "%.0f ms", (double) real);
+                return buf;
+
+            case ParamFormat::Ratio:
+                std::snprintf (buf, sizeof (buf), "%.1f:1", (double) real);
+                return buf;
+
             case ParamFormat::Plain:
                 break;
         }
 
         std::snprintf (buf, sizeof (buf), "%g", (double) real);
         return buf;
+    }
+
+    /** What a typed entry means, in real units, for the formats that print a
+        unit a plain number parse would get wrong: "2.1k" and "2.1 kHz" are
+        2100 Hz. Everything else is the number in front, which is what JUCE's
+        own parse does -- so no existing format's text entry changes. */
+    float valueFromText (const std::string& text) const
+    {
+        const auto* s = text.c_str();
+        while (*s == ' ') ++s;
+
+        char* end = nullptr;
+        auto v = std::strtof (s, &end);
+
+        if (end == s)
+            return def;
+
+        if (format == ParamFormat::Hertz)
+        {
+            while (*end == ' ') ++end;
+            if (*end == 'k' || *end == 'K')
+                v *= 1000.0f;
+        }
+
+        return clampReal (v);
     }
 };
 

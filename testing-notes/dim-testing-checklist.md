@@ -1,5 +1,12 @@
 # BMO Dimension — Ableton testing checklist
 
+> **Controls renamed 2026-09-17, in the UI pass.** The panel and the host now
+> say GENERATE (the DETUNE switch), DETUNE (CENTS), DRIFT (DIFFUSE), DIMENSION
+> (WIDTH), BLOOM and BELOW (SHUFFLE and FREQ), TURN (ROTATE) and TILT (ASYM).
+> This checklist was written with the old names and keeps them; the map is in
+> `modules/dim/AGENTS.md`. The panel is now two sections, SOURCE and WIDTH, so
+> section 4 is partly answered -- see `ui-pass-dim-2026-09-17.md`.
+
 Build under test: `frosty-add-bmo-dimension`. VST3 bundles come from the GitHub
 Actions run's **BMO-Windows** artifact — Dimension is in the package now, which
 it was not in `ee6721d` (`tools/packager/package.sh` drove a hardcoded product
@@ -76,6 +83,10 @@ centre and also pin hard-panned material at the edges.
   localised — or as **phasey/hollow**?
 - Check it in **mono**. The sum is intended to change here, and does; nothing
   should cancel.
+- **Direction, since 2026-09-16:** turning ASYM **up** should favour the
+  **right** -- hard-right material louder, hard-left quieter -- the same way
+  ROTATE turns. The sign was flipped in the DSP so the panel could print L and
+  R; it is test-pinned, but not yet heard.
 
 If the widening reads badly there is a documented fallback at the shear in
 `modules/dim/dsp/DspCore.h` — `b = a/2` halves it at the cost of 2.18 dB of

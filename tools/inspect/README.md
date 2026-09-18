@@ -24,10 +24,21 @@ down.
 | `sheet` | several renders side by side with labels |
 | `hash`  | SHA-256 of the pixels, for before/after on a refactor |
 | `ratio` | contrast and L\* between colours, every pair both ways |
+| `gaps`  | runs of bare plate down a panel — the empty bands a reader sees |
 
 `ratio` takes either a hex or a pixel out of a render:
 
     ./Inspect.exe ratio "#8d8d98" snapshots/rack.png:260,364
+
+`gaps` takes the render and, optionally, the smallest band worth printing, the
+header height and the render scale:
+
+    ./Inspect.exe gaps snapshots/util-dark.png            # min 10, header 52, scale 2
+
+The last two are properties of `tools/snapshot`, not of the PNG — it renders at
+2x and a product editor puts `ProductHeader::kHeight` 28 plus a 24 px preset
+strip above the panel — so they are **printed on every run** rather than assumed
+quietly. Pass them if either ever moves.
 
 ## Why each one exists
 
@@ -53,6 +64,43 @@ happened. `testing-notes/ui-editor-handoff.md` §6 is the long version.
   refactor, render again, compare. Byte-identical or it was not a refactor.
   It hashes pixels rather than file bytes, because a PNG encoder is free to
   vary everything around them.
+- **`gaps` is the answer to "is this panel too airy", which the layout dump
+  cannot give you.** `ui_layout_tests --dump` prints control *boxes*, and a
+  panel's boxes are very nearly contiguous — on BMO Util the rule under VOLUME
+  and the PAN box are one pixel apart — while the ink inside them is not,
+  because a knob box carries padding above its face and below its caption. Read
+  from the dump alone, Util has no empty band worth the name. Rendered, its
+  worst is 46 px against BMO EQ's 21. Boxes are what a layout test asserts, ink
+  is what a reader sees, and only the render knows the difference.
+
+  Written during the 2026-09-14 UI pass on **AURORA**, where the first pass at
+  the question was made from the dump and got the wrong answer: the checklist
+  had named the gap between the VOLUME rule and PAN, which is the 1 px one.
+
+  It ranks the suite in one line each, and the numbers are the same in both
+  appearances, as layout should be:
+
+  | panel | largest empty band | where |
+  |---|---|---|
+  | DEQ compact | 20 px | 340..359 |
+  | BMO EQ | 21 px | 544..565 |
+  | DEQ expanded | 30 px | 536..565 |
+  | BMO Util | 46 px | 520..565 |
+  | BMO Opto | 48 px | 82..130 |
+  | BMO Saturator | 66 px | 91..156 |
+  | BMO Dimension | 72 px | 180..252 |
+  | BMO Tune RT | 110 px | 273..382 |
+  | BMO Vcomp | 190 px | 480..669 |
+
+  Vcomp's 190 is its standard mode, where the foot below COMPLEX / ARC holds
+  controls that are not shown; render it with `complex=1` to see the other
+  half. That is the general warning about this mode: **it measures the state
+  you rendered, not the panel.**
+
+  A hairline rule breaks a band, because it is a row with ink in it. Util's
+  empty foot prints as 46 and 31 either side of the rule centred on 566, not as
+  one run of 78 — read the two together when a rule sits between them.
+
 - **`ratio` prints L\* beside the contrast** because below about L\* 20 the
   ratio stops discriminating: from the dark plate the most contrast available
   by going darker, all the way to black, is 1.29:1. The dark set's structural

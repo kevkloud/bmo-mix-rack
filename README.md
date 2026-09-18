@@ -1,19 +1,29 @@
 # BMO Mix Rack
 
 **BMO (Bad Mixes Only)** is a set of mixing plugins by **LT3a**. This
-repository holds the whole suite: three modules today, one rack that chains
+repository holds the whole suite: seven modules today, one rack that chains
 them, and the shared code that makes a new module a few files rather than a
 new plugin.
 
 | Product | What it is | Width |
 |---|---|---|
-| **BMO EQ** | FrostyEQ, renamed: a Neve-style three-band EQ with low cut, oversampled | 280 |
+| **BMO CEQ** | the console EQ: Neve-style, three bands, low cut, oversampled. Was FrostyEQ, then BMO EQ | 280 |
 | **BMO Saturator** | Drive, tone and blend, with auto-gain | 260 |
 | **BMO Util** | Gain, pan, width, polarity, mono | 160 |
+| **BMO Opto** | A two-knob opto-style leveller, CRUSH and LEVEL, with a feedback detector | 220 |
+| **BMO Dimension** | A stereo imager in three stages, all of them on the side signal only | 220 |
+| **BMO DEQ** | A zero-latency dynamic parametric EQ; the one module with two widths | 320 compact, 600 full |
+| **LTV Comp** | A modern vocal compressor: AMOUNT, a gate on the meter, and OUTPUT, with timing, sidechain and band-split controls behind COMPLEX | 260 |
 | **BMO Mix Rack** | Up to eight of the above in series, re-orderable, with chain presets | as wide as its modules |
+| **BMO Tune RT** | A low-latency monophonic pitch corrector. In this repository, **not in the rack** | 360 |
 
 Every product ships as VST3 and Standalone on macOS and Windows, and AU on
 macOS. Nothing is signed or notarised yet: this is a tester build.
+
+BMO Tune RT is built here and shares `core/`, but it is in no rack chain.
+Either side builds without the other: `-DBMO_BUILD_TUNE=OFF` for the rack
+alone, `-DBMO_BUILD_RACK=OFF` for Tune alone. See
+[`modules/tune/AGENTS.md`](modules/tune/AGENTS.md).
 
 ## Building
 
@@ -42,7 +52,10 @@ core/       shared code: dsp/ (JUCE-free), state/, ui/, product/, rack/
 modules/    one folder per module: params.h, dsp/, panel/, presets/, Module.cpp
 products/   one thin CMakeLists + Product.h per plugin, and the rack's registry
 tools/      measure/ (offline DSP harnesses), snapshot/ (renders a panel), packager/
+            tune/ (BMO Tune RT's own harnesses and its own snapshot)
 tests/      dsp/ (JUCE-free) and plugin/ (schema, state, presets, rack)
+            dsp/tune/ and plugin/tune/ are BMO Tune RT's, named tune_* in ctest
+design/     tune/ panel studies
 libs/JUCE   submodule, pinned
 ```
 
@@ -64,8 +77,9 @@ panel, but they have no host lane, so a rack cannot automate them.
 ## Presets and themes
 
 Presets live under `~/Library/Audio/Presets/LT3 Audio/<Product>/` on macOS
-and `%APPDATA%\LT3 Audio\<Product>\Presets\` on Windows. BMO EQ migrates a
-FrostyEQ preset folder on first run.
+and `%APPDATA%\LT3 Audio\<Product>\Presets\` on Windows. BMO CEQ copies its BMO EQ and
+FrostyEQ preset folders across on first run, newest first, and leaves a
+`.migrated` marker there so the copy never runs twice.
 
 A theme is a flat JSON file of token name to hex colour at
 `LT3 Audio/Themes/Default.json`; every open editor re-reads it once a second.

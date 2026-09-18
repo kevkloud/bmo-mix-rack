@@ -130,6 +130,7 @@ private:
     Params   params;
     EqSettings currentSettings;
     bool     settingsValid = false;
+    bool     autoGainApplied = false;   // the Auto Gain state the smoother's target was last set from
 
     int maxBlock = 0, maxChannels = 0;
     int currentFactor = 0;

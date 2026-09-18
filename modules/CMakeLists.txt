@@ -23,6 +23,12 @@ function(bmo_add_module name)
     endif()
 endfunction()
 
+# The rack's modules. Guarded as one block rather than line by line: with
+# BMO_BUILD_RACK off, none of these targets exists and only BMO Tune RT is
+# configured. The bodies are left as they were so this reads as a diff of
+# one line at each end.
+if(BMO_BUILD_RACK)
+
 bmo_add_module(eq
     DSP_SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/eq/dsp/DspCore.cpp
@@ -58,3 +64,40 @@ bmo_add_module(dim
     UI_SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/dim/panel/DimPanel.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/dim/Module.cpp)
+
+bmo_add_module(deq
+    DSP_SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/deq/dsp/Design.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/deq/dsp/DspCore.cpp
+    UI_SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/deq/panel/DeqPanel.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/deq/panel/ResponseView.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/deq/Module.cpp)
+
+bmo_add_module(vcomp
+    DSP_SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/vcomp/dsp/DspCore.cpp
+    UI_SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/vcomp/panel/VcompPanel.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/vcomp/panel/LevelBars.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/vcomp/Module.cpp)
+
+endif()
+
+# BMO Tune RT. The same two targets as a rack module -- bmo_tune_dsp for the
+# tests and the measurement tools, bmo_tune for the plugin -- because the shape
+# is useful, not because it is in the rack. It is not registered anywhere, so
+# adding it to a rack chain would not compile.
+if(BMO_BUILD_TUNE)
+
+bmo_add_module(tune
+    DSP_SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/tune/dsp/Detector.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/tune/dsp/CorrectionLaw.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/tune/dsp/ClassicEngine.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/tune/dsp/TuneCore.cpp
+    UI_SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/tune/panel/TunePanel.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/tune/Module.cpp)
+
+endif()

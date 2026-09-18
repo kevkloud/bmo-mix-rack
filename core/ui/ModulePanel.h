@@ -1,6 +1,8 @@
 #pragma once
 
 #include "Controls.h"
+#include "Line.h"
+#include "core/dsp/AnalyserTap.h"
 #include "core/state/ParamSet.h"
 
 namespace bmo
@@ -10,6 +12,27 @@ struct ModuleDef;
 
 namespace bmo::ui
 {
+
+class ModulePanel;
+
+/** The palette a control should paint a *ground* with -- a meter trough, a
+    pressed button, anything cut into the faceplate.
+
+    Use this in place of `tokens()` wherever a control fills a recess. Ink is
+    unaffected: a line owns its ground and nothing else, so text, knob faces,
+    accents and meter colours all still come from `tokens()`.
+
+    Falls back to `tokens()` for a control that is not inside a panel. */
+Tokens panelTokensFor (const juce::Component& c);
+
+/** The line a control belongs to, found by walking up to its panel. BMO for a
+    control that is in no panel. */
+const Line& panelLineFor (const juce::Component& c);
+
+/** The colour a control should use in place of a module accent: the line own
+    ink where it has one, and `fallback` -- normally the module accent --
+    where it does not. */
+juce::Colour panelAccentFor (const juce::Component& c, juce::Colour fallback);
 
 /** What a module's panel is built against. The same whether the module is
     running as its own plugin or sitting in a rack slot. */
@@ -26,7 +49,36 @@ struct ModuleContext
     // default-constructed std::function throws if invoked.
     std::function<float()> inputPeak;         ///< input level, linear, before the DSP
     std::function<float()> inputRms;
-    std::function<float()> gainReductionDb;   ///< always >= 0
+    /** Gain the module is moving right now, dB, **signed: positive is gain
+        taken away, negative is gain added**.
+
+        It read "always >= 0" until 2026-09-15, and for BMO Opto and LTV Comp
+        it still is -- a compressor only cuts. BMO DEQ is why it widened: an
+        upward dynamic band was reporting zero, so a band boosting 12 dB drew
+        the same empty meter as a band switched off. A panel that reads this
+        and shows only reduction should clamp at zero rather than assume the
+        sign, because whether it can arrive depends on the module underneath
+        and not on this declaration. */
+    std::function<float()> gainReductionDb;
+
+    /** The rate the module is running at, or 0 before the host has prepared it.
+
+        For a panel that draws something rate-dependent. BMO DEQ's response
+        curve is the only one today: its bands are designed at the running rate
+        and it drew the 48 kHz design at every rate until 2026-09-15, which is
+        up to 1 dB out in the top octave at 44.1 and 96 k. Poll it rather than
+        reading it once -- a host can re-prepare a plugin with its editor open,
+        and 0 means "not yet", not "no audio". */
+    std::function<double()> sampleRate;
+
+    // The panel-to-DSP direction, and the only one that is not a parameter.
+    // `setSolo` is momentary: the panel calls it while a control is held and
+    // calls it with -1 on release. Nothing saves it and nothing automates it.
+    // `analyser` is null unless the module has a tap; a panel enables it when
+    // it opens and disables it when it closes, so a module with no editor on
+    // screen pays nothing (core/dsp/AnalyserTap.h).
+    std::function<void (int)> setSolo;
+    AnalyserTap* analyser = nullptr;
 };
 
 /** Base of every module panel: a fixed-size faceplate of the module's design
@@ -188,12 +240,14 @@ public:
 
     const ModuleContext& getContext() const noexcept { return context; }
 
-    void paint (juce::Graphics& g) override
-    {
-        g.fillAll (tokens().plate);
-        paintRules (g);
-        paintPanel (g);
-    }
+    /** Out of line, with paintRules and for the same reason: the ground comes
+        from the module's line and `def` is only forward-declared here. */
+    void paint (juce::Graphics& g) override;
+
+    /** The palette this panel paints with: the tokens in force with its
+        line's ground substituted. `tokens()` for every BMO module, silver or
+        graphite for an LTV one. See ui::Line. */
+    Tokens panelTokens() const;
 
 protected:
     /** Anything the module draws itself, over its rules and its plate. */
@@ -232,7 +286,8 @@ protected:
         measured 1.72-2.00:1 -- the panel's navigation was the second least
         readable thing on it. */
     void drawRuleLegend (juce::Graphics& g, juce::Rectangle<int> row,
-                         const juce::String& text, juce::Colour accent) const
+                         const juce::String& text, juce::Colour accent,
+                         juce::Colour plate) const
     {
         // The module's accent stepped until it is legible. A section legend is
         // the smaller of the two labels on a panel -- 13 pt against a knob
@@ -252,9 +307,12 @@ protected:
         const auto box = juce::Rectangle<float> (width, (float) row.getHeight())
                              .withCentre (row.toFloat().getCentre());
 
-        g.setColour (tokens().plate);
+        // The panel's plate, passed in rather than read from tokens(): a
+        // legend knocks a hole in the rule it sits on, and on an LTV panel
+        // that hole has to be silver or the rule shows through it.
+        g.setColour (plate);
         g.fillRect (box);
-        drawLabel (g, text, box, juce::Justification::centred, font, accentInk (accent));
+        drawLabel (g, text, box, juce::Justification::centred, font, accentInk (accent, plate));
     }
 
     ModuleContext context;

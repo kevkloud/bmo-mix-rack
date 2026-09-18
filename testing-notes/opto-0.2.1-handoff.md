@@ -263,13 +263,30 @@ the work, the soft-limit does not engage, and if it is meant to it needs a
 level-relative threshold rather than an absolute 0.42. Both are currently in
 the tree and nothing of the maintainer's has been reverted.
 
+**Resolved 2026-09-07, by the maintainer.** Kevin's `51a263b` ("Drop the
+voicing bell's soft-limit in favor of Frosty's Q/gain fit") removed the tanh
+stage from `Filters.h`; `Bell::process` is `x + amount * bp` and nothing
+under `modules/sat/` carries a 0.42 any more. The live response is the
+Q 1.40 / +13.5 dB bell alone. The ten Saturator preset levels, re-solved on
+2026-09-06 with the limiter still in, land within 0.005 dB today, which is
+independent confirmation that it was inert (0.2.4 review, AURORA,
+2026-09-14). `sat-voicing` is therefore a listening round and nothing else.
+
 ## 7. Open
 
 - **`Crushed <3` depth** — affordable now, undecided.
-- **The Saturator bell** — see the PR discussion. Two independent fixes for
-  the same reported symptom currently coexist.
-- **Naming** — TELE / ELD / COLOR are working names, not locked.
-- **Stereo Link** — whether to hard-patch it always-on is unresolved.
+- **~~The Saturator bell~~ — resolved 2026-09-07 by `51a263b`**, see the end
+  of §6. One fix in the tree, the Q/gain fit; never heard on either machine.
+- **~~Naming~~ — settled 2026-09-11 (Frosty).** TELE, ELD and COLOR are the
+  names. They were working names; they are not any more. The panel's button
+  labels are UI strings, so this costs nothing in the schema — the `Mode`
+  parameter's choices stay `Tele` / `Stressed`, which is what a saved session
+  references.
+- **~~Stereo Link~~ — settled 2026-09-11 (Frosty): LINK stays a control.**
+  Not hard-patched always-on. Hard-patching it would have taken a parameter
+  off the panel and out of the schema, and any session that had set it off
+  would open sounding different. It can be re-opened later as a deliberate
+  retirement rather than a leftover question.
 - **The 2–2.4 kHz LA-2A lift** is deliberately still not modelled. It was
   asked for, measured, found absent, and the release fix resolved the
   perception instead.

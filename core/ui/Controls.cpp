@@ -1,4 +1,5 @@
 #include "Controls.h"
+#include "ModulePanel.h"
 
 namespace bmo::ui
 {
@@ -26,9 +27,9 @@ juce::String compactFrequency (const juce::String& text)
 }
 
 //==============================================================================
-PlainKnob::PlainKnob (juce::RangedAudioParameter& parameter, const juce::String& captionText,
+PlainKnob::PlainKnob (juce::RangedAudioParameter& param, const juce::String& captionText,
                       Knob::Style style, float faceScale, juce::Colour accent, juce::Colour captionColourIn)
-    : caption (captionText), captionColour (captionColourIn), accentColour (accent)
+    : caption (captionText), captionColour (captionColourIn), accentColour (accent), parameter (param)
 {
     // A component name, so a layout test can find this knob by the caption a
     // reader sees. JUCE hands it to the accessibility layer as well.
@@ -40,17 +41,59 @@ PlainKnob::PlainKnob (juce::RangedAudioParameter& parameter, const juce::String&
     addAndMakeVisible (knob);
 
     attachment = std::make_unique<juce::SliderParameterAttachment> (parameter, knob);
+
+    // Only a knob that prints its value needs to hear it move; the attachment
+    // keeps its own listener, so this does not take anything from it.
+    knob.onValueChange = [this] { if (showsValue) repaint (valueBox()); };
 }
 
 juce::Rectangle<int> PlainKnob::captionBox() const
 {
-    return { 0, knob.getBottom(), getWidth(), captionRow() - 4 };
+    return { 0, knob.getBottom() - captionLift, getWidth(),
+             captionRow() - 4 - (showsValue ? valueRow() : 0) };
+}
+
+juce::Rectangle<int> PlainKnob::valueBox() const
+{
+    if (! showsValue)
+        return {};
+
+    const auto name = captionBox();
+    return { 0, name.getBottom(), getWidth(), valueRow() };
 }
 
 float PlainKnob::captionOverflow() const
 {
-    return juce::GlyphArrangement::getStringWidth (captionFont (captionSize), caption)
-             - (float) captionBox().getWidth();
+    auto overflow = juce::GlyphArrangement::getStringWidth (captionFont (captionSize), caption)
+                      - (float) captionBox().getWidth();
+
+    // The value too, at the widest it can be rather than at whatever it
+    // happens to read now: both ends of the range and the default, which
+    // between them are the long strings ("20.0 kHz", "-24.0 dB").
+    if (showsValue)
+        for (const auto n : { 0.0f, 1.0f, parameter.getDefaultValue() })
+            overflow = juce::jmax (overflow, juce::GlyphArrangement::getStringWidth (captionFont (kValueSize), valueText (parameter.getText (n, 0)))
+                                               - (float) valueBox().getWidth());
+
+    return overflow;
+}
+
+void PlainKnob::setShowsValue (bool shouldShow)
+{
+    showsValue = shouldShow;
+    resized();
+    repaint();
+}
+
+void PlainKnob::setValueFormat (std::function<juce::String (const juce::String&)> format)
+{
+    valueFormat = std::move (format);
+    repaint();
+}
+
+juce::String PlainKnob::valueText (const juce::String& hostText) const
+{
+    return valueFormat ? valueFormat (hostText) : hostText;
 }
 
 void PlainKnob::paint (juce::Graphics& g)
@@ -68,8 +111,14 @@ void PlainKnob::paint (juce::Graphics& g)
     // read as the same control wherever they are; setting those captions in
     // the accent put pink text on BMO EQ's blue cap and orange on the
     // Saturator's.
-    const auto system = knob.getStyle() == Knob::Style::character ? accentColour
-                                                                 : tokens().track;
+    // panelAccentFor: a product line may supply its own ink in place of the
+    // module's accent. LTV does, because its caps are fixed and the accent no
+    // longer reaches them, so the caption is the only thing left carrying the
+    // knob's colour. Nothing changes for a BMO panel.
+    const auto system = knob.getStyle() == Knob::Style::character
+                            ? panelAccentFor (knob, accentColour)
+                            : (knob.getUtilityTint().isTransparent() ? tokens().track
+                                                                     : knob.getUtilityTint());
 
     // The colour system as it stands, not stepped for contrast. A caption is
     // the larger of a panel's two labels -- 15 pt against a section legend's
@@ -95,6 +144,13 @@ void PlainKnob::paint (juce::Graphics& g)
     drawLabel (g, caption, box.toFloat(),
                juce::Justification::centred, captionFont (captionSize),
                knob.isEnabled() ? ink : ink.withAlpha (0.4f));
+
+    // The value in the caption face, a step down and in the secondary ink: it
+    // is read after the name, and it should not compete with it.
+    if (showsValue)
+        drawLabel (g, valueText (parameter.getCurrentValueAsText()), valueBox().toFloat(),
+                   juce::Justification::centredTop, captionFont (kValueSize),
+                   knob.isEnabled() ? tokens().text2 : tokens().text2.withAlpha (0.4f));
 }
 
 void PlainKnob::resized()
@@ -123,6 +179,12 @@ void PlainKnob::setCaptionSize (float points)
     repaint();
 }
 
+void PlainKnob::setCaptionLift (int pixels)
+{
+    captionLift = pixels;
+    repaint();
+}
+
 void PlainKnob::setKnobEnabled (bool shouldBeEnabled)
 {
     knob.setEnabled (shouldBeEnabled);
@@ -133,6 +195,24 @@ void PlainKnob::setAccent (juce::Colour accent)
 {
     accentColour = accent;
     knob.setAccent (accent);
+    repaint();
+}
+
+void PlainKnob::setUtilityTint (juce::Colour tint)
+{
+    knob.setUtilityTint (tint);
+    repaint();
+}
+
+void PlainKnob::setRestMark (bool b)
+{
+    knob.setRestMark (b);
+    repaint();
+}
+
+void PlainKnob::setEndMarks (Knob::EndMarks m)
+{
+    knob.setEndMarks (m);
     repaint();
 }
 
@@ -264,6 +344,29 @@ void ConcentricBand::setRingEnabled (bool shouldBeEnabled)
     repaint();
 }
 
+void ConcentricBand::setLegend (const juce::StringArray& labels)
+{
+    jassert (labels.size() == legend.size());   // one label a position
+    legend = labels;
+
+    // A filter's dial is nudged by its legend's ink (geometry()), so new
+    // words can move it.
+    resized();
+    repaint();
+}
+
+float ConcentricBand::legendOverflow() const
+{
+    auto overflow = -kLegendBoxWidth;
+
+    for (const auto& label : legend)
+        overflow = juce::jmax (overflow, juce::GlyphArrangement::getStringWidth (
+                                             kPointUsesCaption ? captionFont (kPointSize) : labelFont (kPointSize, true), label)
+                                           - kLegendBoxWidth);
+
+    return overflow;
+}
+
 float ConcentricBand::filterLabelRadius (float angle, const juce::String& text,
                                          float ringRadius, float maxRadius) const
 {
@@ -352,6 +455,21 @@ ConcentricBand::Geometry ConcentricBand::geometry() const
     return { ringRadius, 0.0f, maxRadius, juce::roundToInt (-(top + bottom) * 0.5f) };
 }
 
+int ConcentricBand::inkHalfWidth() const
+{
+    return juce::roundToInt (geometry().maxRadius + kLegendBoxWidth * 0.5f);
+}
+
+void ConcentricBand::setDialOffset (int dx)
+{
+    if (dialOffset == dx)
+        return;
+
+    dialOffset = dx;
+    resized();
+    repaint();
+}
+
 void ConcentricBand::paint (juce::Graphics& g)
 {
     if (legend.isEmpty())
@@ -360,7 +478,7 @@ void ConcentricBand::paint (juce::Graphics& g)
     const auto& t = tokens();
     const auto area = getLocalBounds().toFloat();
     const auto geo = geometry();
-    const auto centrePoint = area.getCentre().translated (0.0f, (float) geo.shift);
+    const auto centrePoint = area.getCentre().translated ((float) dialOffset, (float) geo.shift);
 
     const auto startAngle = ring.getRotaryParameters().startAngleRadians;
     const auto endAngle   = ring.getRotaryParameters().endAngleRadians;
@@ -425,7 +543,7 @@ void ConcentricBand::resized()
 {
     // The dial moves with its legend, so a filter is nudged down by the same
     // amount paint() nudges the labels -- see geometry().
-    const auto bounds = getLocalBounds().translated (0, geometry().shift);
+    const auto bounds = getLocalBounds().translated (dialOffset, geometry().shift);
 
     ring.setBounds (bounds);
 
@@ -487,6 +605,12 @@ void SwitchButton::setToggleStateSilently (bool shouldBeOn)
 void SwitchButton::setTint (juce::Colour tint)
 {
     button.setColour (juce::ToggleButton::tickColourId, tint);
+    button.repaint();
+}
+
+void SwitchButton::setLabelSize (float points)
+{
+    button.getProperties().set (BmoLookAndFeel::kSwitchLabelSize, points);
     button.repaint();
 }
 
@@ -638,29 +762,44 @@ float DynamicsMeter::fractionFor (float value, const std::vector<ScalePoint>& sc
 
 const std::vector<DynamicsMeter::ScalePoint>& DynamicsMeter::vuScale()
 {
-    // Approximates a classic VU faceplate: compressed toward -20, spread out
-    // from 0 to +3, where 0 VU sits noticeably right of centre rather than
-    // in the middle of the sweep. Not one real meter's calibration data --
-    // just close enough to read as the genre (see class comment).
-    // -2, -1, +1 and +2 are struck but not numbered: from -3 up the scale
-    // crowds into the last third of the sweep, and inking every one of them
-    // is what left the numbers illegibly small and touching. The numbered
-    // ones are the figures a VU is actually read against.
-    // The first point is struck but never printed, and it is where the needle
-    // parks in silence. 0.2.1 started the scale at -20, so an idle meter left
-    // the needle lying across its own leftmost numeral -- the rest state, and
-    // therefore the state the meter is in most of the time.
+    // The reduction scale below, mirrored. GR is read near its start, where a
+    // few dB is a decision; a VU is read near 0, so the same arc turned round
+    // puts the fine ticks at the top: a tick every dB from -2 to +3, the gaps
+    // widening toward +3 the way a real VU spreads there, then a tick every
+    // 2 dB down to -24. Frosty's call, 2026-09-17, on renders, so that the two
+    // faces of this meter are one design and switching IN/GR/OUT changes the
+    // figures rather than the instrument.
     //
-    // -7 and -3 lost their numbers as well. Five printed figures is what fits:
-    // at this radius the -10 to -5 gap is the tightest pair on the scale and
-    // clears by about 6 px, and every figure added between them takes that
-    // back. Hardware faceplates ink only the round figures for the same
-    // reason, and every tick is still struck here.
+    //   dB   -24  -22  -20  ...  -6   -4   -2   -1    0   +1   +2   +3
+    //   at  .000 .055 .109  ... .491 .545 .600 .665 .735 .810 .900 1.00
+    //   ink   y    .    .        y    .    .    .    y    .    .    y
+    //
+    // The top five dB are GR's 0..5 exactly (1 - its fractions). An exact
+    // mirror of all of GR spans 24 dB and would run -21..+3, printing -21,
+    // -15, -9 and -3; that was rendered and not taken for the figures. Starting
+    // at -24 costs the 2 dB gaps a little -- .055 of the sweep against GR's
+    // .06 -- and buys figures a VU is read against: 3, 0, -6, -12, -18, -24.
+    //
+    // It replaced a hand-placed table whose gaps ran .10, .17, .14, .09, .08,
+    // .09, then .05, .06, .07 up to 0 and .05 after it -- widening toward 0
+    // and snapping narrow above it. Also rendered and not taken: a true VU law
+    // (0 VU at .71; the low end crowds, the top goes sparse) and an even 1 dB
+    // ruler from -7 up.
+    //
+    // The first point is printed now and is where the needle parks in
+    // silence, the same as GR's 0. That is safe only because the figures sit
+    // outside the arc -- see paint(). Silence parks at -24 VU, which is
+    // -42 dBFS at kVuReference; anything quieter reads as rest.
+    constexpr float kStep = 0.60f / 11.0f;   ///< one 2 dB gap, -24 to -2
+
     static const std::vector<ScalePoint> scale {
-        { -30.0f, 0.00f, false },
-        { -20.0f, 0.10f }, { -15.0f, 0.27f, false }, { -10.0f, 0.41f }, { -7.0f, 0.50f, false }, { -5.0f, 0.58f },
-        { -3.0f, 0.67f, false }, { -2.0f, 0.72f, false }, { -1.0f, 0.78f, false }, { 0.0f, 0.85f },
-        { 1.0f, 0.90f, false }, { 2.0f, 0.95f, false }, { 3.0f, 1.00f },
+        { -24.0f, 0.0f },            { -22.0f, 1.0f * kStep, false }, { -20.0f, 2.0f * kStep, false },
+        { -18.0f, 3.0f * kStep },    { -16.0f, 4.0f * kStep, false }, { -14.0f, 5.0f * kStep, false },
+        { -12.0f, 6.0f * kStep },    { -10.0f, 7.0f * kStep, false }, {  -8.0f, 8.0f * kStep, false },
+        {  -6.0f, 9.0f * kStep },    {  -4.0f, 10.0f * kStep, false },
+        {  -2.0f, 1.0f - 0.400f, false }, { -1.0f, 1.0f - 0.335f, false },
+        {   0.0f, 1.0f - 0.265f },   {   1.0f, 1.0f - 0.190f, false }, {   2.0f, 1.0f - 0.100f, false },
+        {   3.0f, 1.0f },
     };
 
     return scale;
@@ -691,21 +830,28 @@ const std::vector<DynamicsMeter::ScalePoint>& DynamicsMeter::reductionScale()
     //
     // 0 and 24 are fixed points. Everything between is set against them.
     //
-    //   dB    0    1     2     3     4     5     6     9    12    15    18    21   24
-    //   at  .000 .100  .190  .265  .335  .400  .460  .555  .665  .745  .820  .912 1.000
-    //   ink  y    .     .     y     .     .     y     .     y     .     y     .    y
+    //   dB    0    1    2    3    4    5    6    8   10   12   14   16   18   20   22   24
+    //   at  .000 .100 .190 .265 .335 .400 .460 .520 .580 .640 .700 .760 .820 .880 .940 1.00
+    //   ink  y    .    .    y    .    .    y    .    .    y    .    .    y    .    .    y
     //
-    // A tick every dB through 0..6, and at 9, 15 and 21, so the arc reads as
-    // one continuous scale while only the round figures are inked. That is the
-    // rule vuScale above follows, and for the same reason -- it inks five of
-    // its thirteen points.
+    // Two regions. Through 0..6 a tick every dB, each gap a little narrower
+    // than the one before -- Frosty's placement, untouched. Above 6 a tick
+    // every 2 dB at an even .06 of the sweep, which is exactly the 5-to-6 gap,
+    // so the arc runs on past 6 at the spacing it arrived with instead of
+    // changing gear there. Every inked figure above 6 is even and lands on a
+    // tick. Frosty's call, 2026-09-17, on renders.
     //
-    // 9 is struck but not printed. It was inked until the whole panel was
-    // looked at rather than a crop: at six figures this reads as an
-    // instrument, at nine as a chart, and 9 was also the figure that made the
-    // tightest pair. Measured on the render, the closest inked pair is now
-    // 12 to 18 at 12.5 px, against 8.6 with the 9 inked and about 6 where the
-    // vuScale comment says figures stop clearing.
+    // It replaced ticks at 9, 15 and 21 whose gaps ran .095, .110, .080,
+    // .075, .092, .088 -- hand-placed and never smoothed, widest at 9..12,
+    // which read as a wobble through 3..12. Rendered and not taken: log curves
+    // above 6 (a hole after 6, 18 and 24 crowded), even 3 dB gaps (clean, but
+    // the tick rhythm halves at 6), and 1 dB ticks above 6 (a comb denser than
+    // the 0..6 it sits beside -- each dB there gets half the 5-to-6 arc).
+    //
+    // 9 was once inked and is not even struck now. At six figures this reads
+    // as an instrument, at nine as a chart. Inked figures above 6 sit .18 of
+    // the sweep apart, wider than the .155 that 12..18 had when it was the
+    // tightest pair.
     //
     // The needle is non-linear in dB as a result -- it moves further per dB at
     // small reductions, which is the point of all of this, and which VU
@@ -713,9 +859,9 @@ const std::vector<DynamicsMeter::ScalePoint>& DynamicsMeter::reductionScale()
     static const std::vector<ScalePoint> scale {
         { 0.0f,  0.000f },        { 1.0f,  0.100f, false }, { 2.0f,  0.190f, false },
         { 3.0f,  0.265f },        { 4.0f,  0.335f, false }, { 5.0f,  0.400f, false },
-        { 6.0f,  0.460f },        { 9.0f,  0.555f, false },
-        { 12.0f, 0.665f },        { 15.0f, 0.745f, false },
-        { 18.0f, 0.820f },        { 21.0f, 0.912f, false },
+        { 6.0f,  0.460f },        { 8.0f,  0.520f, false }, { 10.0f, 0.580f, false },
+        { 12.0f, 0.640f },        { 14.0f, 0.700f, false }, { 16.0f, 0.760f, false },
+        { 18.0f, 0.820f },        { 20.0f, 0.880f, false }, { 22.0f, 0.940f, false },
         { kGrRangeDb, 1.000f },
     };
 

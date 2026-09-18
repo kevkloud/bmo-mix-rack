@@ -6,6 +6,30 @@
 namespace bmo
 {
 
+/** The JUCE range for a spec -- the one place a standalone parameter's range
+    and a rack slot's are made, so the two cannot drift apart.
+
+    A linear spec gets JUCE's own {min, max, step}, exactly as before, which
+    is what every existing golden schema recorded. A logarithmic one gets
+    JUCE's range with its mapping handed back to the spec's own arithmetic:
+    ParamSpec is the only implementation of the log law, not one of two. */
+inline juce::NormalisableRange<float> rangeFor (const ParamSpec& s)
+{
+    if (! s.logarithmic)
+        return { s.min, s.max, s.step };
+
+    const auto spec = s;   // copied: the lambdas outlive the call
+
+    juce::NormalisableRange<float> range (
+        s.min, s.max,
+        [spec] (float, float, float n) { return spec.fromNormalised (n); },
+        [spec] (float, float, float v) { return spec.toNormalised (v); },
+        [spec] (float, float, float v) { return spec.clampReal (v); });
+
+    range.interval = s.step;
+    return range;
+}
+
 /** JUCE parameter objects from a spec list, for a standalone product.
 
     Types, names, ranges, steps and text functions have to come out exactly as
@@ -49,8 +73,16 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout makeLayout (const Par
                                    return juce::String (spec.text (v));
                                });
 
+                // Only the formats that print a unit a number parse misreads
+                // ("2.10 kHz") get a parser of their own; the rest keep JUCE's.
+                if (s.format == ParamFormat::Hertz)
+                    attr = attr.withValueFromStringFunction ([spec] (const juce::String& text)
+                    {
+                        return spec.valueFromText (text.toStdString());
+                    });
+
                 layout.add (std::make_unique<juce::AudioParameterFloat> (
-                    id, s.name, juce::NormalisableRange<float> { s.min, s.max, s.step }, s.def, attr));
+                    id, s.name, rangeFor (s), s.def, attr));
                 break;
             }
         }

@@ -34,6 +34,29 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
+  # BMO Tune RT is in this repository and not in the rack. That is only true
+  # while each side still builds and passes its own suites with the other
+  # switched off, so both directions are built here rather than trusted. Same
+  # container as the job above, seconds each.
+  independence:
+    name: Each side alone
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tune alone
+        run: |
+          cmake -B build-tune -DBMO_DSP_ONLY=ON -DCMAKE_BUILD_TYPE=Release -DBMO_BUILD_RACK=OFF
+          cmake --build build-tune --parallel
+          ctest --test-dir build-tune --output-on-failure
+
+      - name: The rack alone
+        run: |
+          cmake -B build-rack -DBMO_DSP_ONLY=ON -DCMAKE_BUILD_TYPE=Release -DBMO_BUILD_TUNE=OFF
+          cmake --build build-rack --parallel
+          ctest --test-dir build-rack --output-on-failure
+
   plugin:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}

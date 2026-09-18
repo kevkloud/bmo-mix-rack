@@ -63,6 +63,12 @@ public:
 
     ui::ModuleContext makeContext();
 
+    /** Wide or compact, for an expandable module; always false otherwise.
+        Standalone opens expanded (ModuleDef::expandedWidth). Message thread;
+        kept with the session, not with presets. */
+    bool isExpanded() const noexcept   { return expanded.load (std::memory_order_relaxed); }
+    void setExpanded (bool shouldBe)   { expanded.store (shouldBe && def.isExpandable(), std::memory_order_relaxed); }
+
 private:
     void parameterChanged (const juce::String&, float) override;
     void handleAsyncUpdate() override;
@@ -80,6 +86,8 @@ private:
     // the oversampling otherwise floods the host with setLatencySamples on
     // every move, which is enough to destabilise it.
     std::atomic<int> reportedLatency { -1 };
+
+    std::atomic<bool> expanded { def.isExpandable() };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SingleModuleProcessor)
 };

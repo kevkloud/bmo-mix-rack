@@ -39,30 +39,64 @@ PresetManager::PresetManager (PresetTarget& t, PresetInfo i, std::vector<Factory
     migrateLegacy();
 }
 
-juce::File PresetManager::directory() const
+juce::File PresetManager::folderFor (const juce::String& name) const
 {
     if (testDirectory != juce::File {})
-        return testDirectory.getChildFile (info.folderName);
+        return testDirectory.getChildFile (name);
 
-    return productFolder (info.folderName);
+    return productFolder (name);
+}
+
+juce::File PresetManager::directory() const
+{
+    return folderFor (info.folderName);
 }
 
 void PresetManager::migrateLegacy()
 {
-    if (info.legacyFolderName.isEmpty() || testDirectory != juce::File {})
+    if (info.legacy.empty())
         return;
 
-    if (! getUserNames().isEmpty())
+    // Once per machine, ever. The old gate was "only if the new folder is
+    // empty", which stranded anyone who had saved a single preset before the
+    // copy got its chance; the marker keeps the copy one-shot without caring
+    // what is in the folder, so a preset the user deletes afterwards does not
+    // come back on the next launch.
+    const auto marker = directory().getChildFile (kMigrationMarker);
+
+    if (marker.existsAsFile())
         return;
 
-    const auto legacy = productFolder (info.legacyFolderName);
+    juce::StringArray copied;
 
-    if (! legacy.isDirectory())
-        return;
+    for (const auto& old : info.legacy)
+    {
+        const auto folder = folderFor (old.folderName);
 
-    for (const auto& f : legacy.findChildFiles (juce::File::findFiles, false,
-                                                "*" + info.legacyExtension))
-        f.copyFileTo (directory().getChildFile (f.getFileNameWithoutExtension() + info.extension));
+        if (! folder.isDirectory())
+            continue;
+
+        for (const auto& f : folder.findChildFiles (juce::File::findFiles, false,
+                                                    "*" + old.extension))
+        {
+            const auto destination = directory().getChildFile (f.getFileNameWithoutExtension()
+                                                               + info.extension);
+
+            // Never overwrite: not the user's own work under the new name, and
+            // not a copy already taken from a more recent old name, which is
+            // why info.legacy is ordered newest first.
+            if (destination.existsAsFile())
+                continue;
+
+            if (f.copyFileTo (destination))
+                copied.add (old.folderName + "/" + f.getFileName());
+        }
+    }
+
+    marker.replaceWithText ("Presets here were copied from an earlier name of this product.\n"
+                            "Delete this file to run that copy again.\n\n"
+                            + (copied.isEmpty() ? juce::String ("Nothing to copy.\n")
+                                                : copied.joinIntoString ("\n") + "\n"));
 }
 
 //==============================================================================

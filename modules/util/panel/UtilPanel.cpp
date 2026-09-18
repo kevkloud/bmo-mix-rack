@@ -6,13 +6,29 @@ namespace bmo::util
 
 namespace
 {
-    constexpr int kKnobRow   = 126;
     constexpr int kSwitchRow = 34;
     constexpr int kSwitchGap = ui::Tokens::switchGap;
-    /// The image section -- named in the code, not on the panel -- carries two
-    /// knobs and a switch, and the space the meter and two rules used to take
-    /// is spent on them: 126 before, which is what GAIN still gets.
-    constexpr int kImageKnobRow = 150;
+
+    /** One row for all three knobs.
+
+        VOLUME had 126 against the other two's 150 until 2026-09-17, so the
+        control the module is named for was the smallest thing on the panel.
+        The 24 px it takes came out of the plate under MONO, which was this
+        panel's largest bare band at 46 px and is 22 now. Rendered at 150, 160
+        and 170: 160 leaves 14 px under MONO and 170 puts MONO on the rule, and
+        both were passed over -- a knob here cannot exceed 140 px anyway,
+        because the panel is 160 wide with 10 px of padding, so the two larger
+        rows buy a few pixels and spend the whole foot. Frosty's call. */
+    constexpr int kKnobRow = 150;
+
+    /** How far each caption comes up into the air under its knob's face.
+
+        Matched to the two compressors, Frosty 2026-09-17: BMO Opto's MAKEUP
+        sits 38 render px from face to caption ink and LTV Comp's 39, where
+        this panel sat at 61. At 11 it measures 39 -- LTV's exactly, and half a
+        design pixel off BMO Opto's. Rendered at 6, 11, 12 and 18 panel and
+        rack; by 18 the name is up against PAN's L and R marks. */
+    constexpr int kCaptionLift = 11;
 
     /** Air above and below the image section, and nothing more than that.
 
@@ -52,9 +68,75 @@ UtilPanel::UtilPanel (ui::ModuleContext ctx)
     // one size BMO EQ's column can afford; this knob is not one of those and
     // takes the room its own row gives it.
 
+    // PAN's ends are two directions, not two amounts: hard left is not less
+    // than hard right, and the minus and plus this knob wore said it was. The
+    // same marks BMO Dimension's TURN and TILT take, for the same reason.
+    pan.setEndMarks (ui::Knob::EndMarks::leftRight);
+
+    // VOLUME and PAN print what they are set to -- Frosty, 2026-09-17. These
+    // two are the ones a number answers: "how much gain" and "how far over",
+    // both questions with an amount for an answer that the caption cannot give.
+    // PAN's reads C, L 50, R 50.
+    gain.setShowsValue (true);
+    pan .setShowsValue (true);
+
+    // WIDTH reserves the same line and prints nothing on it, the way BMO
+    // Dimension's BLOOM does: a value line lifts a knob and its caption by its
+    // own height, so without this WIDTH's name would sit below the other two
+    // and the column would stop reading as one. No number, because width is a
+    // less-and-more control and its percentage names nothing a listener has a
+    // word for.
+    width.setShowsValue (true);
+    width.setValueFormat ([] (const juce::String&) { return juce::String(); });
+
+    // The names come up off the foot of each knob's box and into the air under
+    // its face, so they sit the same distance from it as the two compressors'
+    // do. See kCaptionLift.
+    for (auto* k : { &gain, &pan, &width })
+        k->setCaptionLift (kCaptionLift);
+
+    // WIDTH keeps its minus and plus. Frosty, 2026-09-17: Width runs 0..200 and
+    // rests at 100, so it reduces and increases around its rest position, which
+    // is what lessMore is for -- and the rest dot on the track is already the
+    // mark that says where that is.
+
     // Polarity is white in every module; its label is what says which module.
     for (auto* p : { &phaseL, &phaseR })
         p->setActiveInkFrom (context.def.accent);
+
+    lastMonoWasOn = context.params.param (Index::mono).getValue() > 0.5f;
+    width.setKnobEnabled (! lastMonoWasOn);
+
+    startTimerHz (15);
+}
+
+UtilPanel::~UtilPanel() { stopTimer(); }
+
+void UtilPanel::timerCallback()
+{
+    // MONO sums to (L+R)/2 *before* the mid/side stage, so while it is on the
+    // side signal is zero and WIDTH has nothing left to scale: turning it does
+    // nothing at all. Dim it, the way PlainKnob::setKnobEnabled was written for
+    // and BMO DEQ's gain knob uses on a cut filter.
+    //
+    // MONO itself is never dimmed. It is the switch that put WIDTH to sleep and
+    // it is the way back out, and DEQ's pass settled that dimming the way in
+    // reads as a door locked rather than as the door.
+    //
+    // **The dim is the full shipped one, caption and all**, which on the pale
+    // plate takes the caption from 1.72:1 to 1.25:1. A ladder was rendered that
+    // held the caption at full strength and dimmed only the face -- it measures
+    // better and Frosty did not take it, 2026-09-17: a knob whose name still
+    // reads at full strength while its face has gone pale reads as a knob that
+    // has broken, and the whole control fading says on purpose. Do not "fix"
+    // this to the ratio.
+    const auto monoOn = context.params.param (Index::mono).getValue() > 0.5f;
+
+    if (monoOn != lastMonoWasOn)
+    {
+        lastMonoWasOn = monoOn;
+        width.setKnobEnabled (! monoOn);
+    }
 }
 
 void UtilPanel::resized()
@@ -101,8 +183,8 @@ void UtilPanel::resized()
 
     // A bare rule. Only BMO EQ names its sections -- see modules/AGENTS.md.
     rule ({});
-    pan.setBounds   (area.removeFromTop (kImageKnobRow));
-    width.setBounds (area.removeFromTop (kImageKnobRow));
+    pan.setBounds   (area.removeFromTop (kKnobRow));
+    width.setBounds (area.removeFromTop (kKnobRow));
 
     // A knob pins its caption to the foot of its row, so MONO needs a gap put
     // in by hand or it sits against the word WIDTH and reads as a second line

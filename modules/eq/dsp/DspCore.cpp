@@ -187,19 +187,26 @@ void DspCore::updateCoefficients (int activeChannels) noexcept
     s.hpfFreqHz = hpfFreqHz (params.hpfIndex);
     s.lpfFreqHz = lpfFreqHz (params.lpfIndex);
 
-    if (settingsValid && sameSettings (s, currentSettings))
+    const auto settingsChanged = ! (settingsValid && sameSettings (s, currentSettings));
+
+    if (! settingsChanged && params.autoGain == autoGainApplied)
         return;
 
-    for (int ch = 0; ch < activeChannels; ++ch)
-        networks[(size_t) ch].setSettings (s);
+    if (settingsChanged)
+    {
+        for (int ch = 0; ch < activeChannels; ++ch)
+            networks[(size_t) ch].setSettings (s);
 
-    currentSettings = s;
-    settingsValid   = true;
+        currentSettings = s;
+        settingsValid   = true;
+    }
 
-    if (params.autoGain)
-        autoGainSm.setTarget ((float) (1.0 / networks[0].broadbandGain()));
-    else
-        autoGainSm.setTarget (1.0f);
+    // Auto Gain is re-decided on its own change as well as on a band's. Until
+    // 0.2.4 its target was only ever set after a settings change, so flipping
+    // the switch with nothing else moving did nothing at all, and the next
+    // knob move then jumped the level by the whole compensation at once.
+    autoGainApplied = params.autoGain;
+    autoGainSm.setTarget (params.autoGain ? (float) (1.0 / networks[0].broadbandGain()) : 1.0f);
 }
 
 //==============================================================================
@@ -244,7 +251,7 @@ void DspCore::process (float* const* channels, int numChannels, int numSamples) 
                 const auto delayed = dry[(size_t) readIndex];
 
                 float buffer[Oversampler::kMaxFactor] {};
-                oversamplers[(size_t) ch].upsample (input * inGain * polarity, buffer);
+                oversamplers[(size_t) ch].upsample (input * inGain, buffer);
 
                 for (int j = 0; j < factor; ++j)
                 {
@@ -266,7 +273,12 @@ void DspCore::process (float* const* channels, int numChannels, int numSamples) 
 
                 const auto processed = oversamplers[(size_t) ch].downsample (buffer) * outGain;
 
-                data[i] = processed * wet + delayed * dryLevel;
+                // Polarity flips the blend, not the wet path alone. Until 0.2.4
+                // it was applied before the iron while the dry ring held the
+                // un-flipped input, so at Mix 50 % a flat EQ cancelled itself
+                // and at Mix 0 the switch did nothing -- the fault the
+                // Saturator fixed in its own DspCore, and the same fix.
+                data[i] = (processed * wet + delayed * dryLevel) * polarity;
             }
 
             dryWrite = (dryWrite + 1) % dryLength;

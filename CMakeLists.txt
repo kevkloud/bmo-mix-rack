@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.22)
-project(BMOMixRack VERSION 1.0.0 LANGUAGES C CXX)
+# The version every plugin reports to its host (JucePlugin_VersionString) and
+# the one scripts/package.sh names the zip by. It said 1.0.0 from the first
+# commit while five tags went by; the 0.2.4 tester build shipped calling
+# itself 1.0.0. Keep it equal to the tag being built.
+project(BMOMixRack VERSION 0.2.4 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -9,6 +13,20 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # including a CI container. Configure with -DBMO_DSP_ONLY=ON to skip the
 # plugins and everything JUCE brings with them.
 option(BMO_DSP_ONLY "Build only the JUCE-free DSP tests and measurement tools" OFF)
+
+# BMO Tune RT lives in this repository and shares core/, but it is not a rack
+# module: nothing of it is in products/rack/Registry.cpp or on the rack's link
+# line. These two switches are how that stays true rather than being promised.
+# Each side configures, builds and tests with the other off, so a dependency
+# between them is a configure error instead of something a reviewer has to
+# notice. CI builds both ways.
+option(BMO_BUILD_RACK "Build the rack, its modules and its products" ON)
+option(BMO_BUILD_TUNE "Build BMO Tune RT" ON)
+
+if(NOT BMO_BUILD_RACK AND NOT BMO_BUILD_TUNE)
+    message(FATAL_ERROR
+        "Nothing to build: BMO_BUILD_RACK and BMO_BUILD_TUNE are both OFF.")
+endif()
 
 # Every file in the tree includes from the root: "core/...", "modules/eq/...".
 set(BMO_ROOT ${CMAKE_CURRENT_SOURCE_DIR})
@@ -123,9 +141,16 @@ if(NOT BMO_DSP_ONLY)
     # would orphan every session that references any LT3 Audio plugin. Each
     # product's plugin code is equally permanent. See plans/ and AGENTS.md.
     function(bmo_add_plugin target)
-        set(one PRODUCT_NAME PLUGIN_CODE BUNDLE_ID)
+        set(one PRODUCT_NAME PLUGIN_CODE BUNDLE_ID INSTALL_AFTER_BUILD)
         set(multi CATEGORIES SOURCES LIBRARIES)
         cmake_parse_arguments(ARG "" "${one}" "${multi}" ${ARGN})
+
+        # A product may opt out of the development install, which is what
+        # BMO Tune RT does while its builds are compared by ear against the
+        # installed one. Everything else takes the suite's rule above.
+        if(NOT DEFINED ARG_INSTALL_AFTER_BUILD)
+            set(ARG_INSTALL_AFTER_BUILD ${BMO_INSTALL_AFTER_BUILD})
+        endif()
 
         juce_add_plugin(${target}
             COMPANY_NAME                "LT3 Audio"
@@ -139,7 +164,7 @@ if(NOT BMO_DSP_ONLY)
             NEEDS_MIDI_OUTPUT           FALSE
             IS_MIDI_EFFECT              FALSE
             EDITOR_WANTS_KEYBOARD_FOCUS FALSE
-            COPY_PLUGIN_AFTER_BUILD     ${BMO_INSTALL_AFTER_BUILD}
+            COPY_PLUGIN_AFTER_BUILD     ${ARG_INSTALL_AFTER_BUILD}
             VST3_CATEGORIES             ${ARG_CATEGORIES}
             AU_MAIN_TYPE                kAudioUnitType_Effect)
 

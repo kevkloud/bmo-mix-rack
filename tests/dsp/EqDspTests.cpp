@@ -500,6 +500,47 @@ int main()
             check (identical, "mix at 0% must pass the dry signal through untouched");
         }
 
+        // Phase must flip the blend, not only the wet path. Until 0.2.4 the dry
+        // ring held the un-flipped input, so at Mix 50 % a flat EQ cancelled
+        // against its own dry copy and the output was near silence. Asserted
+        // as a level ratio against the input as well as a correlation, since
+        // the cancelled version still correlates perfectly with whatever is
+        // left of it.
+        {
+            DspCore core;
+            core.prepare (kSampleRate, n, 1);
+            DspCore::Params p;
+            p.eqIn = false;
+            p.phaseInvert = true;
+            p.oversampling = 1;
+            p.mixPercent = 50.0f;
+            core.setParams (p);
+
+            constexpr float amplitude = 1.0e-4f;
+
+            for (int i = 0; i < n; ++i)
+                left[(size_t) i] = right[(size_t) i] = amplitude
+                    * std::sin (2.0f * (float) kPi * 220.0f * (float) i / 48000.0f);
+
+            std::vector<float> reference = left;
+            core.process (channels, 2, n);
+
+            double dot = 0.0, energyA = 0.0, energyB = 0.0;
+
+            for (int i = 512; i < n; ++i)
+            {
+                const double a = left[(size_t) i], b = reference[(size_t) i];
+                dot += a * b;
+                energyA += a * a;
+                energyB += b * b;
+            }
+
+            checkClose (dot / std::sqrt (energyA * energyB), -1.0, 0.01,
+                        "phase invert at mix 50% still negates the signal");
+            checkClose (std::sqrt (energyA / energyB), 1.0, 0.1,
+                        "phase invert at mix 50% keeps the level: the dry half is flipped with the wet half");
+        }
+
         // Auto-gain should pull a heavily boosted setting back toward unity.
         {
             const auto rms = [&] (bool autoGain)
@@ -522,6 +563,42 @@ int main()
 
             check (levelled < boosted,
                    "auto-gain should reduce level relative to the uncompensated boost");
+        }
+
+        // And it must act when it is the only thing that changed. Two fresh
+        // cores, as above, cannot see the 0.2.4 fault: the target was only set
+        // after a band moved, so on one core the switch was inert until the
+        // next knob touch and then jumped.
+        {
+            DspCore core;
+            core.prepare (kSampleRate, n, 2);
+            DspCore::Params p;
+            p.lfGainDb = 16.0f; p.midGainDb = 12.0f; p.autoGain = false;
+            core.setParams (p);
+            fill();
+            core.process (channels, 2, n);
+
+            const auto rmsOf = [&]
+            {
+                double acc = 0.0;
+                for (int i = n / 2; i < n; ++i) acc += (double) left[(size_t) i] * left[(size_t) i];
+                return std::sqrt (acc / (double) (n / 2));
+            };
+
+            fill();
+            core.process (channels, 2, n);
+            const auto boosted = rmsOf();
+
+            p.autoGain = true;                 // nothing else moves
+            core.setParams (p);
+            fill();
+            core.process (channels, 2, n);     // the 20 ms smoother settles inside one block
+            fill();
+            core.process (channels, 2, n);
+            const auto levelled = rmsOf();
+
+            check (levelled < boosted * 0.9,
+                   "toggling Auto Gain on its own, with no band moving, changes the level");
         }
 
         // Nothing may allocate or blow up when the model is switched mid-stream.

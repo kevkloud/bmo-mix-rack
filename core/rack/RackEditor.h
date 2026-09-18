@@ -1,6 +1,7 @@
 #pragma once
 
 #include "RackProcessor.h"
+#include "core/ui/ExpandButton.h"
 #include "core/ui/PresetBar.h"
 #include "core/ui/ProductHeader.h"
 
@@ -12,8 +13,9 @@ namespace bmo
     it, and a strip on the right for adding another.
 
     The window is as wide as the modules in it, so it grows and shrinks as
-    the chain changes. Everything is laid out at design size and scaled as a
-    whole, like the standalone products.
+    the chain changes -- and when an expandable module switches between its
+    compact and wide layouts. Everything is laid out at design size and scaled
+    as a whole, like the standalone products.
 */
 class RackEditor final : public juce::AudioProcessorEditor,
                          private RackProcessor::Listener,
@@ -49,6 +51,7 @@ private:
         RackEditor& owner;
         const int slot;
         juce::TextButton name, left { "<" }, right { ">" }, remove { "x" };
+        std::unique_ptr<ui::ExpandButton> expand;   ///< only for an expandable module
     };
 
     /** The strip on the right: a "+" that offers the registry. */
@@ -92,6 +95,16 @@ private:
     void rebuildViews();
     void layoutPlate();
     int designWidth() const;
+
+    /** A slot's width now: its module's only one, or whichever of its two the
+        slot's view asks for (ModuleDef::expandedWidth). */
+    int slotWidth (int slot) const;
+
+    /** Constrains and re-sizes the window to the plate at `scale`. */
+    void refit (float scale);
+
+    /** An expandable module's slot bar asks for its other width here. */
+    void toggleSlotView (int slot);
 
     void showModuleMenu (juce::Component& target, std::function<void (const ModuleDef&)>);
 

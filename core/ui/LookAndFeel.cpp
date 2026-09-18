@@ -1,4 +1,5 @@
 #include "LookAndFeel.h"
+#include "ModulePanel.h"
 
 namespace bmo::ui
 {
@@ -139,8 +140,44 @@ void BmoLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int widt
     }
 
     const auto character = style == Knob::Style::character;
-    const auto face      = character ? faceOf (moduleAccent) : t.knobFace;
-    const auto accent    = character ? moduleAccent : t.track;
+
+    // A line may fix its caps rather than derive them from each module's
+    // accent -- LTV is black knobs on a silver panel. When it does, the
+    // pointer comes off the cap instead of off the appearance: `pointer` is
+    // near-black in the dark set because a dark cap is normally the accent at
+    // full strength and therefore light, and a fixed black cap would swallow
+    // it. onAccentOf hands back white on either of these.
+    // Every knob on the line, not only the character ones -- Frosty,
+    // 2026-09-15. LTV Comp's drawer knobs take the line's cap so they match
+    // AMOUNT and MAKEUP, while their dotted track, rest dot and caption stay
+    // the drawer's red. The cap says which instrument this is; the ink says
+    // which group of controls you are looking at.
+    const auto lineCap = capFor (panelLineFor (slider));
+
+    const auto tinted = knob != nullptr && ! knob->getUtilityTint().isTransparent();
+
+    const auto face       = lineCap ? *lineCap
+                                    : (character ? faceOf (moduleAccent)
+                                                 : (tinted ? knob->getUtilityTint() : t.knobFace));
+    const auto pointerInk = lineCap ? onAccentOf (*lineCap) : t.pointer;
+    // The dotted track, its plus and minus, and the rest dot. Routed through
+    // the line as well as the cap and the pointer: these are the knob's own
+    // marks, and leaving them on the module accent is what kept a periwinkle
+    // ring around a black LTV knob after the cap and the caption had moved.
+    // A utility knob may be tinted -- see Knob::setUtilityTint. Transparent
+    // means the suite azure, which is what every trim knob outside LTV Comp's
+    // drawer still draws in.
+    const auto utilityInk = knob != nullptr && ! knob->getUtilityTint().isTransparent()
+                                ? knob->getUtilityTint()
+                                : t.track;
+
+    // Routed through the line for utility knobs as well as character ones --
+    // Frosty, 2026-09-15. A tinted drawer keeps its colour on the *caption*
+    // and gives the marks back to the line, so LTV Comp's five drawer knobs
+    // carry the same track, rest dot and plus-minus as AMOUNT and MAKEUP and
+    // differ only in their lettering. Nothing changes on a BMO panel: with no
+    // line ink, panelAccentFor hands the fallback straight back.
+    const auto accent    = panelAccentFor (slider, character ? moduleAccent : utilityInk);
     const auto faceBox   = juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (centre);
 
     // Gain controls carry a dotted track, with the rest position marked on it
@@ -217,7 +254,7 @@ void BmoLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int widt
         const auto collides = std::abs (restAngle - plusAngle)  < clearArc
                            || std::abs (restAngle - minusAngle) < clearArc;
 
-        if (! collides)
+        if (! collides && (knob == nullptr || knob->hasRestMark()))
         {
             g.setColour (dim (accent));
             g.fillEllipse (juce::Rectangle<float> (5.0f, 5.0f).withCentre (at (restAngle, track)));
@@ -254,11 +291,48 @@ void BmoLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int widt
             // sitting on the bottom of the sweep and stopped anchoring that
             // end by accident.
             const auto minusAt = at (minusAngle, track);
-            g.fillRect (juce::Rectangle<float> (arm * 2.0f, weight).withCentre (minusAt));
+            const auto plusAt  = at (plusAngle, track);
 
-            const auto plusAt = at (plusAngle, track);
-            g.fillRect (juce::Rectangle<float> (arm * 2.0f, weight).withCentre (plusAt));
-            g.fillRect (juce::Rectangle<float> (weight, arm * 2.0f).withCentre (plusAt));
+            if (knob != nullptr && knob->getEndMarks() == Knob::EndMarks::leftRight)
+            {
+                // Letters, so these are set rather than drawn -- two letters are
+                // not balanced by construction the way two bars are, which is
+                // what the ink-centring below is for.
+                //
+                // Blender at 12, Frosty's call on 2026-09-16 from a rendered
+                // ladder of both faces at 9-13 pt. Minerva is the caption face
+                // and was the obvious candidate, but at this size its L and R
+                // are narrow enough to read as marks rather than letters;
+                // Blender's are rounder and read at a glance. At 12 pt the ink
+                // is 8.5 px tall, level with the plus it stands in for, and
+                // clears the caption below by 8 px.
+                const auto font = captionFont (12.0f);
+
+                // Centred on the letter's ink, not its advance box: L and R
+                // have different widths and sidebearings, and centring the
+                // boxes would put the two marks at different distances from
+                // the ends they name.
+                const auto mark = [&] (const juce::String& letter, juce::Point<float> where)
+                {
+                    juce::GlyphArrangement ga;
+                    ga.addLineOfText (font, letter, 0.0f, 0.0f);
+                    const auto ink = ga.getBoundingBox (0, -1, false);
+
+                    juce::Path p;
+                    ga.createPath (p);
+                    p.applyTransform (juce::AffineTransform::translation (where - ink.getCentre()));
+                    g.fillPath (p);
+                };
+
+                mark ("L", minusAt);
+                mark ("R", plusAt);
+            }
+            else
+            {
+                g.fillRect (juce::Rectangle<float> (arm * 2.0f, weight).withCentre (minusAt));
+                g.fillRect (juce::Rectangle<float> (arm * 2.0f, weight).withCentre (plusAt));
+                g.fillRect (juce::Rectangle<float> (weight, arm * 2.0f).withCentre (plusAt));
+            }
         }
     }
 
@@ -272,7 +346,7 @@ void BmoLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int widt
         const auto tip  = radius - 3.0f;
         const auto tail = radius * 0.05f;
 
-        g.setColour (dim (t.pointer));
+        g.setColour (dim (pointerInk));
         g.drawLine ({ at (angle, tail), at (angle, tip) }, 2.6f);
     }
 }
@@ -285,7 +359,16 @@ juce::Rectangle<float> BmoLookAndFeel::toggleLabelBox (const juce::ToggleButton&
 
 juce::Font BmoLookAndFeel::toggleLabelFont (const juce::ToggleButton& button)
 {
-    return labelFont (toggleLabelBox (button).getHeight() * 0.62f, true);
+    // 62% of the box, unless the switch pins a size. Deriving it from the
+    // height is right for a row of switches that are all the suite's own
+    // height, and wrong for one that is taller than it is wide: the text grows
+    // with the height, so it outgrows the width faster than the width grows.
+    // "HI-Q" overflows a square switch at *every* size because of it -- 11.3 px
+    // at 40, 16.0 at 54. BMO CEQ's HI-Q pins the size a 26 px switch would have
+    // used, so a square switch sets its label the same as the row does.
+    const auto pinned = (float) button.getProperties().getWithDefault (kSwitchLabelSize, 0.0);
+
+    return labelFont (pinned > 0.0f ? pinned : toggleLabelBox (button).getHeight() * 0.62f, true);
 }
 
 float BmoLookAndFeel::toggleLabelOverflow (const juce::ToggleButton& button)

@@ -36,6 +36,7 @@ public:
     {
         gainCur = gainTarget; widthCur = widthTarget;
         panLCur = panLTarget; panRCur = panRTarget;
+        signLCur = signLTarget; signRCur = signRTarget; monoCur = monoTarget;
     }
 
     void setParams (const float* v, int count) override
@@ -50,9 +51,14 @@ public:
         panLTarget = std::min (1.0f, 1.0f - p);
         panRTarget = std::min (1.0f, 1.0f + p);
 
-        signL = v[phaseL] > 0.5f ? -1.0f : 1.0f;
-        signR = v[phaseR] > 0.5f ? -1.0f : 1.0f;
-        monoOn = v[mono] > 0.5f;
+        // The three switches ride the same 5 ms one-pole as the knobs. A
+        // polarity flip is a sign that passes through zero on the way, a 5 ms
+        // fade out and back in; mono is a crossfade into the sum. Until 0.2.4
+        // all three were applied per sample the instant the parameter changed,
+        // which on a held bass note is a step of twice the sample.
+        signLTarget = v[phaseL] > 0.5f ? -1.0f : 1.0f;
+        signRTarget = v[phaseR] > 0.5f ? -1.0f : 1.0f;
+        monoTarget  = v[mono] > 0.5f ? 1.0f : 0.0f;
 
         if (! primed)
         {
@@ -75,18 +81,22 @@ public:
             widthCur += smoothCoeff * (widthTarget - widthCur);
             panLCur  += smoothCoeff * (panLTarget  - panLCur);
             panRCur  += smoothCoeff * (panRTarget  - panRCur);
+            signLCur += smoothCoeff * (signLTarget - signLCur);
+            signRCur += smoothCoeff * (signRTarget - signRCur);
+            monoCur  += smoothCoeff * (monoTarget  - monoCur);
 
             if (r == nullptr)
             {
-                l[i] *= gainCur * signL;
+                l[i] *= gainCur * signLCur;
                 continue;
             }
 
-            auto a = l[i] * gainCur * signL;
-            auto b = r[i] * gainCur * signR;
+            auto a = l[i] * gainCur * signLCur;
+            auto b = r[i] * gainCur * signRCur;
 
-            if (monoOn)
-                a = b = 0.5f * (a + b);
+            const auto sum = 0.5f * (a + b);
+            a += monoCur * (sum - a);
+            b += monoCur * (sum - b);
 
             const auto mid  = 0.5f * (a + b);
             const auto side = 0.5f * (a - b) * widthCur;
@@ -103,8 +113,9 @@ private:
     float gainTarget = 1.0f, gainCur = 1.0f;
     float widthTarget = 1.0f, widthCur = 1.0f;
     float panLTarget = 1.0f, panLCur = 1.0f, panRTarget = 1.0f, panRCur = 1.0f;
-    float signL = 1.0f, signR = 1.0f;
-    bool  monoOn = false, primed = false;
+    float signLTarget = 1.0f, signLCur = 1.0f, signRTarget = 1.0f, signRCur = 1.0f;
+    float monoTarget = 0.0f, monoCur = 0.0f;
+    bool  primed = false;
 };
 
 inline std::unique_ptr<ModuleDsp> createDsp() { return std::make_unique<UtilDsp>(); }

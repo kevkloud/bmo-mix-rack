@@ -16,9 +16,13 @@
 // at design size regardless of what the editor is later scaled to, so
 // constructing the editor is enough to ask where everything landed.
 
+#include "products/deq/Product.h"
+#include "modules/deq/panel/ResponseView.h"
+#include "modules/deq/panel/Widgets.h"
 #include "products/dim/Product.h"
 #include "products/eq/Product.h"
 #include "products/opto/Product.h"
+#include "products/vcomp/Product.h"
 #include "products/sat/Product.h"
 #include "products/util/Product.h"
 #include "products/rack/Product.h"
@@ -203,6 +207,82 @@ void checkOutputSection (bmo::ui::ModulePanel& panel, const juce::String& who)
     checkEquals (output->getBottom(), kOutputKnobBottom, who + " OUTPUT knob bottom");
 }
 
+/** An oversampling row: three switches side by side over one choice parameter,
+    and Off is the position none of them lights. The Saturator took one on
+    2026-09-17 and BMO CEQ the same day.
+
+    Both halves matter. The geometry, because these are the suite's switch size
+    and gap, and a row that drifted off them would be the only one in the rack
+    that had. The behaviour, because a click here does not toggle a button: it
+    sets a parameter, and the parameter lights the switches. If that loop breaks
+    nothing lights at all, and on the Saturator a render of the default state
+    cannot tell -- Off is the state with nothing lit either way.
+
+    `litAtInit` is the mask the row opens on: 0 for the Saturator, which starts
+    Off, and 1 for CEQ, which starts on 2x. */
+void checkOversamplingRow (bmo::ui::ModulePanel& panel, const juce::String& who, int litAtInit)
+{
+    juce::Button* row[3] {};
+    const char* names[3] { "2x", "4x", "8x" };
+
+    for (int i = 0; i < 3; ++i)
+    {
+        row[i] = dynamic_cast<juce::Button*> (findNamed (panel, names[i]));
+
+        if (row[i] == nullptr)
+        {
+            check (false, who + " has no " + names[i] + " switch");
+            return;
+        }
+    }
+
+    for (int i = 0; i < 3; ++i)
+    {
+        checkEquals (row[i]->getWidth(),  bmo::ui::Tokens::switchWidth,
+                     who + " " + names[i] + " width");
+        checkEquals (row[i]->getHeight(), bmo::ui::Tokens::switchHeight,
+                     who + " " + names[i] + " height");
+        checkEquals (row[i]->getY(), row[0]->getY(),
+                     who + " " + names[i] + " top, against 2x's");
+    }
+
+    for (int i = 1; i < 3; ++i)
+        checkEquals (row[i]->getX() - row[i - 1]->getRight(), bmo::ui::Tokens::switchGap,
+                     who + " gap before " + names[i]);
+
+    check (row[0]->getBottom() < kSwitchRowTop,
+           who + " oversampling row should sit above the output switches, is at "
+               + juce::String (row[0]->getY()));
+
+    const auto lit = [&row] { return (row[0]->getToggleState() ? 1 : 0)
+                                   + (row[1]->getToggleState() ? 2 : 0)
+                                   + (row[2]->getToggleState() ? 4 : 0); };
+
+    checkEquals (lit(), litAtInit, who + " oversampling at Init");
+
+    // Back to Off before the walk below, which starts from nothing lit. On CEQ
+    // that is itself the assertion that clicking the lit switch is the way to
+    // reach Off, since Off is the one position with no switch of its own.
+    for (int i = 0; i < 3; ++i)
+        if (litAtInit == (1 << i) && row[i]->onClick != nullptr)
+            row[i]->onClick();
+
+    checkEquals (lit(), 0, who + " clicking the lit switch reaches Off");
+
+    for (int i = 0; i < 3; ++i)
+    {
+        if (row[i]->onClick != nullptr)
+            row[i]->onClick();
+
+        checkEquals (lit(), 1 << i, who + " " + names[i] + " lit alone after a click");
+
+        if (row[i]->onClick != nullptr)
+            row[i]->onClick();
+
+        checkEquals (lit(), 0, who + " " + names[i] + " clicked again is Off");
+    }
+}
+
 /** The switch named `name` sits in the output section's switch row. */
 void checkOutputSwitch (bmo::ui::ModulePanel& panel, const juce::String& name,
                         const juce::String& who)
@@ -245,14 +325,20 @@ void checkEqBandColumn (bmo::ui::ModulePanel& panel)
 
     // 98 is the first row under the input section's rule; 558 is the top of
     // the output section's.
+    //
+    // The bands were 112 until 2026-09-17, when the oversampling section went
+    // in below LO-CUT and they paid for it: a rule, a switch row and the plate
+    // under it, 50 px, taken evenly off the three. The column no longer runs
+    // to the output rule on its own -- LO-CUT's foot plus that section does.
     constexpr Row rows[] = {
-        { "HIGH",   98, 112 },
-        { "MID",   226, 112 },
-        { "LOW",   354, 112 },
-        { "LO-CUT", 482, 76 },
+        { "HIGH",   98, 95 },
+        { "MID",   209, 95 },
+        { "LOW",   320, 95 },
+        { "LO-CUT", 431, 77 },
     };
 
     constexpr int kOutputRuleTop = 558;
+    constexpr int kOversamplingSection = 50;
 
     for (const auto& row : rows)
     {
@@ -271,8 +357,67 @@ void checkEqBandColumn (bmo::ui::ModulePanel& panel)
     }
 
     if (auto* lowCut = findNamed (panel, "LO-CUT"))
-        checkEquals (lowCut->getBottom(), kOutputRuleTop,
-                     "eq band column should end flush against the output rule, and its foot");
+        checkEquals (lowCut->getBottom() + kOversamplingSection, kOutputRuleTop,
+                     "eq band column plus the oversampling section should end flush against"
+                     " the output rule, and its foot");
+
+    // HI-Q went from the output switch row back to the mid band on 2026-09-17,
+    // where the control it affects is. It is laid over the band's own cell, so
+    // this pins the thing a reader would notice if it drifted: that it is
+    // beside the mid band and nowhere near the switch row.
+    auto* hiQ = findNamed (panel, "HI-Q");
+    auto* midBand = findNamed (panel, "MID");
+
+    if (hiQ == nullptr || midBand == nullptr)
+    {
+        check (false, "eq should have both a HI-Q switch and a MID band");
+        return;
+    }
+
+    checkEquals (hiQ->getBounds().getCentreY(), midBand->getBounds().getCentreY(),
+                 "eq HI-Q centres on the mid band");
+    check (hiQ->getY() >= midBand->getY() && hiQ->getBottom() <= midBand->getBottom(),
+           "eq HI-Q should sit within the mid band's own rows, is "
+               + juce::String (hiQ->getY()) + ".." + juce::String (hiQ->getBottom() - 1));
+    check (hiQ->getBottom() < kSwitchRowTop,
+           "eq HI-Q should no longer be on the output switch row");
+}
+
+/** Every trim knob is the shared trim height, wherever it appears.
+
+    **This exists because a panel that runs out of room fails silently.**
+    juce::Rectangle::removeFromTop *clamps* when the rectangle is shorter than
+    the amount asked for: it hands back what is left and leaves the rest empty.
+    So a layout whose rows no longer fit does not overflow, it squashes -- and
+    every other assertion in this file still passes, because nothing has
+    escaped the panel and nothing overlaps.
+
+    LTV Comp did exactly that on 2026-09-15. Its meter block grew a printed
+    scale and a tag row for the gate flag, the content stopped fitting in 688,
+    and LOW and HIGH came out **40 px tall against the 78 a trim knob is**.
+    The suite was green and the render was obviously wrong.
+
+    A trim knob is the right thing to pin because it is the one control with a
+    size the suite fixes rather than the panel: ModulePanel::styleTrimKnob sets
+    it, kTrimKnobRow is the number, and any panel that hands one less than that
+    has run out of room somewhere above it. */
+void checkTrimKnobHeights (bmo::ui::ModulePanel& panel, const juce::String& who,
+                           const juce::StringArray& captions)
+{
+    for (const auto& caption : captions)
+    {
+        auto* knob = findNamed (panel, caption);
+
+        if (knob == nullptr)
+        {
+            check (false, who + " has no " + caption + " knob");
+            continue;
+        }
+
+        checkEquals (knob->getHeight(), bmo::ui::ModulePanel::kTrimKnobRow,
+                     who + " " + caption + " is a trim knob and should be the trim height"
+                         + " -- a short one means the panel ran out of room above it");
+    }
 }
 
 /** Util reserves the output section without adopting it: the rule is on the
@@ -334,6 +479,247 @@ void checkCaptionsFit (bmo::ui::ModulePanel& panel, const juce::String& who)
                who + " caption '" + knob->getName() + "' overflows its box by "
                    + juce::String (overflow, 1) + " px");
     }
+
+    // A stepped dial's legend too. BMO EQ's are frequencies ("1k6"); BMO DEQ's
+    // shape dial is the first to carry words (setLegend), and words are what
+    // outgrow a 38 px box.
+    std::function<void (juce::Component&)> walk = [&] (juce::Component& c)
+    {
+        for (auto* child : c.getChildren())
+        {
+            if (auto* band = dynamic_cast<bmo::ui::ConcentricBand*> (child))
+                check (band->legendOverflow() <= 0.0f,
+                       who + " a legend on '" + c.getName() + "' overflows its box by "
+                           + juce::String (band->legendOverflow(), 1) + " px");
+
+            walk (*child);
+        }
+    };
+    walk (panel);
+}
+
+/** BMO DEQ's own: the band's knobs print their values, the shape is the
+    stepped dial with its name fitting under it, and AUTO shares the output
+    row with DEQ. Frosty's three calls on the first build (2026-09-11), so a
+    later layout pass cannot quietly undo one. */
+void checkDeqPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
+{
+    std::vector<bmo::ui::PlainKnob*> knobs;
+    collectKnobs (panel, knobs);
+
+    auto band = 0;
+    for (auto* knob : knobs)
+        if (knob->getName() != "OUTPUT")
+        {
+            ++band;
+            check (knob->isShowingValue(), who + " knob '" + knob->getName() + "' shows no value");
+        }
+
+    checkEquals (band, 8, who + " band knobs (FREQ GAIN Q THRESH RANGE RATIO ATTACK RELEASE)");
+
+    auto* shape = dynamic_cast<bmo::deq::ShapeDial*> (findNamed (panel, "SHAPE"));
+    check (shape != nullptr, who + " has no SHAPE dial");
+
+    if (shape != nullptr)
+        check (shape->captionOverflow() <= 0.0f,
+               who + " SHAPE or its legend overflows by " + juce::String (shape->captionOverflow(), 1) + " px");
+
+    // The gain-reduction bar's words. It is a Component that paints its own
+    // caption and readout, so neither checkCaptionFits nor checkSwitchLabelsFit
+    // has ever looked at it -- and the readout was clipping to "-12." on the
+    // full panel from the module's first build. Same class as MAKEUP -> MAKEU,
+    // one container over: the text that gets measured is the text somebody
+    // remembered to measure.
+    bmo::deq::GainReductionBar* gr = nullptr;
+
+    for (auto* child : panel.getChildren())
+        if (auto* bar = dynamic_cast<bmo::deq::GainReductionBar*> (child))
+            gr = bar;
+
+    check (gr != nullptr, who + " has no gain-reduction bar");
+
+    if (gr != nullptr)
+        check (gr->valueOverflow() <= 0.0f,
+               who + " GR bar's widest word (\"" + bmo::deq::GainReductionBar::widestValue()
+                   + "\") overflows its " + juce::String (gr->getWidth()) + " px cell by "
+                   + juce::String (gr->valueOverflow(), 1) + " px");
+
+    checkOutputSwitch (panel, "AUTO", who);
+}
+
+/** A mouse event good enough to drive a component's own handler.
+
+    The suite has never needed one: `ui_layout` asserts bounds, and everything
+    else a panel does was reachable through a parameter. BMO DEQ's band on/off
+    is the first control that is a **gesture and nothing else** -- no switch, no
+    affordance -- so it is the first one where "it compiles" is not evidence
+    that it works. */
+juce::MouseEvent clickAt (juce::Component& c, juce::Point<float> p, int clicks)
+{
+    const auto now = juce::Time::getCurrentTime();
+
+    return { juce::Desktop::getInstance().getMainMouseSource(), p, juce::ModifierKeys(),
+             juce::MouseInputSource::defaultPressure, juce::MouseInputSource::defaultOrientation,
+             juce::MouseInputSource::defaultRotation, juce::MouseInputSource::defaultTiltX,
+             juce::MouseInputSource::defaultTiltY, &c, &c, now, p, now, clicks, false };
+}
+
+/** A mouse event with a chosen set of buttons held. */
+juce::MouseEvent buttonsAt (juce::Component& c, juce::Point<float> p, juce::ModifierKeys mods)
+{
+    const auto now = juce::Time::getCurrentTime();
+
+    return { juce::Desktop::getInstance().getMainMouseSource(), p, mods,
+             juce::MouseInputSource::defaultPressure, juce::MouseInputSource::defaultOrientation,
+             juce::MouseInputSource::defaultRotation, juce::MouseInputSource::defaultTiltX,
+             juce::MouseInputSource::defaultTiltY, &c, &c, now, p, now, 1, false };
+}
+
+/** Right-clicking a node solos it, and **right-clicking one that is already
+    being dragged with the left button solos it without ending the drag.**
+
+    The second half is why this test exists. JUCE never delivers a second
+    mouseDown while a button is held -- `MouseInputSourceImpl::setButtons`
+    returns early, "ignore secondary clicks when there's already a button
+    down" -- so the gesture is only visible in `mouseDrag`'s modifiers. A
+    reasonable implementation in `mouseDown` would compile, pass review, and
+    silently never fire. */
+void checkDeqNodeSolo (bmo::ui::ModulePanel& panel, const juce::String& who, std::vector<int>& soloCalls)
+{
+    bmo::deq::ResponseView* curve = nullptr;
+
+    for (auto* child : panel.getChildren())
+        if (auto* v = dynamic_cast<bmo::deq::ResponseView*> (child))
+            curve = v;
+
+    check (curve != nullptr, who + " has no response view");
+
+    if (curve == nullptr)
+        return;
+
+    auto& params = panel.getContext().params;
+
+    // Band 1 at its default 30 Hz, switched on, as a bell so it has a gain and
+    // its node sits on the zero line rather than being pinned there.
+    const auto band = 0;
+    params.setReal (bmo::deq::indexOf (band, bmo::deq::Control::shape), 0.0f);
+    params.setReal (bmo::deq::indexOf (band, bmo::deq::Control::gain), 0.0f);
+    params.setReal (bmo::deq::indexOf (band, bmo::deq::Control::on), 1.0f);
+
+    // Where that node is, from the view's own geometry rather than a repeat of
+    // its log mapping: 30 Hz of a 20..20000 sweep, and 0 dB is the centre.
+    const auto r = curve->plot();
+    const auto x = r.getX() + r.getWidth() * (float) (std::log (30.0 / 20.0) / std::log (20000.0 / 20.0));
+    const juce::Point<float> node { x, r.getCentreY() };
+
+    const auto before = soloCalls.size();
+
+    // 1. A plain right-click on the node.
+    curve->mouseDown (buttonsAt (*curve, node, juce::ModifierKeys (juce::ModifierKeys::rightButtonModifier)));
+    check (soloCalls.size() == before + 1 && soloCalls.back() == band,
+           who + " right-clicking band 1's node should solo it");
+
+    curve->mouseUp (buttonsAt (*curve, node, juce::ModifierKeys()));
+    check (soloCalls.size() == before + 2 && soloCalls.back() == -1,
+           who + " releasing the node should clear the solo");
+
+    // 2. Left-drag the node, then add the right button mid-drag.
+    curve->mouseDown (buttonsAt (*curve, node, juce::ModifierKeys (juce::ModifierKeys::leftButtonModifier)));
+    curve->mouseDrag (buttonsAt (*curve, node, juce::ModifierKeys (juce::ModifierKeys::leftButtonModifier)));
+
+    check (soloCalls.size() == before + 2,
+           who + " dragging a node alone should not solo anything");
+
+    const auto both = juce::ModifierKeys (juce::ModifierKeys::leftButtonModifier | juce::ModifierKeys::rightButtonModifier);
+    curve->mouseDrag (buttonsAt (*curve, node, both));
+
+    check (soloCalls.size() == before + 3 && soloCalls.back() == band,
+           who + " right-clicking during a drag should solo the band being dragged");
+
+    // Still dragging: the freq parameter must keep following the mouse.
+    const auto movedTo = juce::Point<float> (r.getCentreX(), r.getCentreY());
+    curve->mouseDrag (buttonsAt (*curve, movedTo, both));
+    check (params.getReal (bmo::deq::indexOf (band, bmo::deq::Control::freq)) > 100.0f,
+           who + " the drag should continue while soloed, but band 1 stayed at "
+               + juce::String (params.getReal (bmo::deq::indexOf (band, bmo::deq::Control::freq)), 1) + " Hz");
+
+    // Letting go of the right button alone ends the solo, not the drag.
+    curve->mouseDrag (buttonsAt (*curve, movedTo, juce::ModifierKeys (juce::ModifierKeys::leftButtonModifier)));
+    check (soloCalls.size() == before + 4 && soloCalls.back() == -1,
+           who + " releasing the right button mid-drag should clear the solo");
+
+    curve->mouseUp (buttonsAt (*curve, movedTo, juce::ModifierKeys()));
+}
+
+/** Double-clicking a band's tab switches that band on, and again switches it
+    off.
+
+    This is the whole of band on/off since the ON switch was dropped on
+    2026-09-15, so if it breaks there is no other way to reach the parameter
+    from the panel and nothing else would notice. */
+void checkDeqBandToggle (bmo::ui::ModulePanel& panel, const juce::String& who)
+{
+    bmo::deq::BandTabs* tabs = nullptr;
+
+    for (auto* child : panel.getChildren())
+        if (auto* t = dynamic_cast<bmo::deq::BandTabs*> (child))
+            tabs = t;
+
+    check (tabs != nullptr, who + " has no band tabs");
+
+    if (tabs == nullptr)
+        return;
+
+    auto& params = panel.getContext().params;
+
+    // Band 5, so a failure cannot be the selected band or band 1 by accident.
+    const auto band = 4;
+    const auto onIndex = bmo::deq::indexOf (band, bmo::deq::Control::on);
+    const auto centre = tabs->tabBounds (band).getCentre().toFloat();
+
+    check (params.getReal (onIndex) < 0.5f, who + " band 5 should start off");
+
+    tabs->mouseDoubleClick (clickAt (*tabs, centre, 2));
+    check (params.getReal (onIndex) > 0.5f,
+           who + " double-clicking band 5's tab should switch it on");
+
+    tabs->mouseDoubleClick (clickAt (*tabs, centre, 2));
+    check (params.getReal (onIndex) < 0.5f,
+           who + " double-clicking band 5's tab again should switch it off");
+
+    // Right-click held is solo, released is not. Solo is the suite's first
+    // non-parameter path from editor to engine, so there is no value to read
+    // back: the call itself is the whole of the behaviour, and intercepting it
+    // is the only way to assert on it.
+    std::vector<int> soloCalls;
+    auto& ctx = const_cast<bmo::ui::ModuleContext&> (panel.getContext());
+    const auto realSolo = ctx.setSolo;
+
+    ctx.setSolo = [&soloCalls, realSolo] (int b)
+    {
+        soloCalls.push_back (b);
+        if (realSolo) realSolo (b);
+    };
+
+    const auto rightClick = juce::MouseEvent (juce::Desktop::getInstance().getMainMouseSource(), centre,
+                                              juce::ModifierKeys (juce::ModifierKeys::rightButtonModifier),
+                                              juce::MouseInputSource::defaultPressure, juce::MouseInputSource::defaultOrientation,
+                                              juce::MouseInputSource::defaultRotation, juce::MouseInputSource::defaultTiltX,
+                                              juce::MouseInputSource::defaultTiltY, tabs, tabs,
+                                              juce::Time::getCurrentTime(), centre, juce::Time::getCurrentTime(), 1, false);
+
+    tabs->mouseDown (rightClick);
+    check (soloCalls.size() == 1 && soloCalls.back() == band,
+           who + " right-clicking band 5's tab should solo band 5, got "
+               + (soloCalls.empty() ? juce::String ("no call") : juce::String (soloCalls.back())));
+
+    tabs->mouseUp (rightClick);
+    check (soloCalls.size() == 2 && soloCalls.back() == -1,
+           who + " releasing should clear the solo with -1");
+
+    checkDeqNodeSolo (panel, who, soloCalls);
+
+    ctx.setSolo = realSolo;
 }
 
 /** Every switch label fits its switch.
@@ -355,6 +741,32 @@ void checkSwitchLabelsFit (bmo::ui::ModulePanel& panel, const juce::String& who)
                who + " switch '" + sw->getName() + "' label overflows its box by "
                    + juce::String (overflow, 1) + " px");
     }
+
+    // And every toggle that is *not* inside a SwitchButton: BMO DEQ's rows of
+    // switches for a choice (STEREO / MID / SIDE, the five shapes) are plain
+    // ToggleButtons drawn by the same look and feel. They clipped to "BEL" and
+    // "LO CU" on DEQ's first render while this check still only looked for
+    // SwitchButtons -- the same blind spot MAKEUP fell through, one class over.
+    std::function<void (juce::Component&)> walk = [&] (juce::Component& c)
+    {
+        for (auto* child : c.getChildren())
+        {
+            if (dynamic_cast<bmo::ui::SwitchButton*> (child) != nullptr)
+                continue;
+
+            if (auto* toggle = dynamic_cast<juce::ToggleButton*> (child))
+            {
+                const auto overflow = bmo::ui::BmoLookAndFeel::toggleLabelOverflow (*toggle);
+
+                check (overflow <= 0.0f,
+                       who + " switch '" + toggle->getButtonText() + "' label overflows its box by "
+                           + juce::String (overflow, 1) + " px");
+            }
+
+            walk (*child);
+        }
+    };
+    walk (panel);
 }
 
 //== The meter scales ==========================================================
@@ -588,8 +1000,37 @@ int main (int argc, char** argv)
         { "util", +[] () -> std::unique_ptr<juce::AudioProcessor> { return createUtil(); } },
         { "opto", +[] () -> std::unique_ptr<juce::AudioProcessor> { return createOpto(); } },
         { "dim",  +[] () -> std::unique_ptr<juce::AudioProcessor> { return createDim(); } },
+        { "ltvcomp", +[] () -> std::unique_ptr<juce::AudioProcessor> { return createVcomp(); } },
+
+        // BMO DEQ twice, once per width: standalone opens it full, and the
+        // compact one is what a rack shows. Both are the same panel laid out
+        // from the width it is given, so both are held to everything above.
+        { "deq",  +[] () -> std::unique_ptr<juce::AudioProcessor> { return createDeq(); } },
+        { "deq compact", +[] () -> std::unique_ptr<juce::AudioProcessor>
+                         {
+                             auto p = createDeq();
+                             p->setExpanded (false);
+                             return std::unique_ptr<juce::AudioProcessor> (p.release());
+                         } },
     };
 
+
+    // Addressed by name, not by index. These were all[0], all[1], all[5] and
+    // all[6] until BMO Vcomp was added to the list above -- inserting a row
+    // anywhere but the end silently re-pointed every one of them, so DEQ's
+    // width assertions ran against the new module and failed talking about
+    // "deq". The list is one of the shared files every new module is told to
+    // edit (modules/AGENTS.md), so it has to survive being edited in the
+    // middle.
+    const auto named = [&all] (const char* who) -> const Product&
+    {
+        for (const auto& p : all)
+            if (juce::String (p.who) == who)
+                return p;
+
+        check (false, juce::String ("no product called ") + who + " in the layout list");
+        return all[0];
+    };
     if (dumping)
     {
         for (const auto& product : all)
@@ -611,7 +1052,7 @@ int main (int argc, char** argv)
         });
 
     // BMO EQ and the Saturator take both sections.
-    for (const auto& product : { all[0], all[1] })
+    for (const auto& product : { named ("eq"), named ("sat") })
         withPanel (product, [&] (bmo::ui::ModulePanel& panel)
         {
             checkInputSection  (panel, product.who);
@@ -619,17 +1060,62 @@ int main (int argc, char** argv)
             checkOutputSection (panel, product.who);
         });
 
-    // BMO EQ: Hi-Q joined the output switch row in 0.2.3, and the band column
-    // between the two shared sections is pinned row by row.
-    withPanel (all[0], [] (bmo::ui::ModulePanel& panel)
+    // The Saturator's oversampling section, added 2026-09-17: the parameter had
+    // been on the panel's schema and nowhere on the panel since 0.2.0.
+    withPanel (named ("sat"), [] (bmo::ui::ModulePanel& panel)
     {
-        checkOutputSwitch (panel, "HI-Q", "eq");
+        checkOversamplingRow (panel, "sat", 0);
+    });
+
+    // BMO CEQ: AUTO took the switch-row place HI-Q left when it went up to the
+    // mid band, the oversampling section arrived under LO-CUT, and the band
+    // column between the two shared sections is pinned row by row.
+    withPanel (named ("eq"), [] (bmo::ui::ModulePanel& panel)
+    {
+        checkOutputSwitch (panel, "AUTO", "eq");
+        checkOversamplingRow (panel, "eq", 1);
         checkEqBandColumn (panel);
     });
 
+    // LTV Comp is the fullest panel in the suite -- two character knobs, three
+    // metered bars with printed scales, two switches and a five-knob drawer in
+    // 688 px -- so it is the one that runs out of room first, and it has
+    // already done so once. See checkTrimKnobHeights.
+    withPanel (named ("ltvcomp"), [] (bmo::ui::ModulePanel& panel)
+    {
+        checkTrimKnobHeights (panel, "ltvcomp",
+                              { "ATTACK", "RELEASE", "DETECT", "LOW", "HIGH" });
+    });
+
+    // BMO DEQ takes the output section at both widths, so its OUTPUT knob and
+    // its DEQ switch sit on the same lines as every other module's in a rack.
+    //
+    // It is the other content-dense panel: thirteen controls a band, twelve
+    // bands, a curve and a meter, and the compact half does it in 320. So it
+    // gets checkTrimKnobHeights too -- LTV Comp's silent squash was a layout
+    // that no longer fitted and shrank instead of overflowing, and the panel
+    // most likely to run out of room next is this one.
+    for (const auto& product : { named ("deq"), named ("deq compact") })
+        withPanel (product, [&] (bmo::ui::ModulePanel& panel)
+        {
+            checkTrimKnobHeights (panel, product.who, { "OUTPUT" });
+            checkOutputRule    (panel, product.who);
+            checkOutputSection (panel, product.who);
+            checkOutputSwitch  (panel, "DEQ", product.who);
+            checkDeqPanel      (panel, product.who);
+        });
+
+    // Its own panel each time: this one moves parameters, and every check above
+    // reads a panel that has not been touched.
+    for (const auto& product : { named ("deq"), named ("deq compact") })
+        withPanel (product, [&] (bmo::ui::ModulePanel& panel) { checkDeqBandToggle (panel, product.who); });
+
+    withPanel (named ("deq"), [] (bmo::ui::ModulePanel& panel) { checkEquals (panel.getWidth(), 600, "deq opens full standalone"); });
+    withPanel (named ("deq compact"), [] (bmo::ui::ModulePanel& panel) { checkEquals (panel.getWidth(), 320, "deq compact width"); });
+
     // BMO Util reserves the output section and adopts neither half of it. This
     // is the case that proves a reservation is worth anything.
-    withPanel (all[2], [] (bmo::ui::ModulePanel& panel)
+    withPanel (named ("util"), [] (bmo::ui::ModulePanel& panel)
     {
         checkOutputRule             (panel, "util");
         checkReservesWithoutAdopting (panel, "util");
@@ -675,6 +1161,42 @@ int main (int argc, char** argv)
             rack->editorBeingDeleted (editor.get());
             editor.reset();
         }
+    }
+
+    // BMO DEQ in a rack: compact, where a rack opens it, and on the rack-wide
+    // output row like everything beside it. Its own block rather than a fifth
+    // module in the one above, whose four-panel expectations are written out.
+    {
+        auto rack = createRack();
+        rack->prepareToPlay (48000.0, 512);
+        rack->clearChain();
+        rack->addModule (*rack->findModule ("util"));
+        rack->addModule (*rack->findModule ("deq"));
+
+        std::unique_ptr<juce::AudioProcessorEditor> editor (rack->createEditorAndMakeActive());
+        std::vector<bmo::ui::ModulePanel*> panels;
+        collectPanels (*editor, panels);
+
+        check (panels.size() == 2, "a util-and-deq rack has two panels");
+
+        for (auto* panel : panels)
+        {
+            checkWithinPanel     (*panel, "rack deq slot");
+            checkNoOverlap       (*panel, "rack deq slot");
+            checkCaptionsFit     (*panel, "rack deq slot");
+            checkSwitchLabelsFit (*panel, "rack deq slot");
+        }
+
+        if (panels.size() == 2)
+        {
+            auto* deq = panels[0]->getX() > panels[1]->getX() ? panels[0] : panels[1];
+            checkEquals (deq->getWidth(), 320, "deq arrives in a rack compact");
+            checkOutputRule (*deq, "rack deq");
+            checkDeqPanel (*deq, "rack deq");
+        }
+
+        rack->editorBeingDeleted (editor.get());
+        editor.reset();
     }
 
     if (failures == 0)

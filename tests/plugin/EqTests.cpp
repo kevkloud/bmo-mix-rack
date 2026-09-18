@@ -1,5 +1,5 @@
 /*
-    BMO EQ as a host sees it: the parameter schema, presets, and level.
+    BMO CEQ as a host sees it: the parameter schema, presets, and level.
 
     The schema block is the important one and the least interesting to read.
     A parameter's ID, its position in the list, its range and its default are
@@ -257,8 +257,8 @@ int main()
 
         check (presets.getFactory().size() == P::factory().size(), "every factory preset is listed");
         check (presets.getCurrentName() == "Init", "the plugin starts on Init");
-        check (presets.extension() == ".bmoeq", "presets are .bmoeq files");
-        check (presets.directory().getFileName() == "BMO EQ", "presets live under BMO EQ");
+        check (presets.extension() == ".bmoceq", "presets are .bmoceq files");
+        check (presets.directory().getFileName() == "BMO CEQ", "presets live under BMO CEQ");
 
         for (int i = 0; i < (int) P::factory().size(); ++i)
         {
@@ -301,7 +301,7 @@ int main()
         checkClose (getValue (*proc, P::kMidGain), -6.5, 0.01, "user preset restores mid gain");
         checkClose (getValue (*proc, P::kHpfFreq),  3.0, 0.01, "user preset restores the filter");
 
-        const auto away = sandbox.getChildFile ("elsewhere/Shared.bmoeq");
+        const auto away = sandbox.getChildFile ("elsewhere/Shared.bmoceq");
         check (presets.exportTo (away), "exporting writes a file");
         presets.loadFactory (0);
         check (presets.importFrom (away), "importing succeeds");
@@ -317,6 +317,95 @@ int main()
 
         check (presets.deleteUser ("Round Trip"), "a user preset deletes");
         check (! presets.getUserNames().contains ("Round Trip"), "and leaves the list");
+
+        sandbox.deleteRecursively();
+        bmo::PresetManager::setDirectoryForTesting ({});
+    }
+
+    //== The rename chain: FrostyEQ -> BMO EQ -> BMO CEQ ======================
+    // This product has been renamed twice, so a user's presets can be sitting
+    // in either old folder, or in both. Until 2026-09-17 none of this was
+    // testable: migration returned early whenever the sandbox was in use, so
+    // the one thing that has to work on a stranger's machine was the one thing
+    // the suite never ran. It resolves the old folders through the sandbox now.
+    {
+        const auto sandbox = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                                 .getChildFile ("bmo-ceq-migration-tests");
+        const auto current = sandbox.getChildFile ("BMO CEQ");
+        const auto middle  = sandbox.getChildFile ("BMO EQ");
+        const auto oldest  = sandbox.getChildFile ("FrostyEQ");
+
+        sandbox.deleteRecursively();
+        bmo::PresetManager::setDirectoryForTesting (sandbox);
+
+        // Genuine preset files rather than hand-written XML: a preset is
+        // whatever the plugin exports, so this cannot drift from the format.
+        const auto writePreset = [&] (const juce::File& file, float midGain)
+        {
+            auto proc = createEq();
+            setValue (*proc, P::kMidGain, midGain);
+            check (proc->getPresets().exportTo (file), "seeding " + file.getFileName());
+        };
+
+        writePreset (middle.getChildFile ("Shared.bmoeq"),     -6.5f);
+        writePreset (oldest.getChildFile ("Shared.frostyeq"),   9.0f);
+        writePreset (oldest.getChildFile ("Ancient.frostyeq"),  3.0f);
+        writePreset (middle.getChildFile ("Recent.bmoeq"),     -2.0f);
+
+        // Seeding ran migration itself, each time; clear what it left so the
+        // first run under test is a genuine first run.
+        current.deleteRecursively();
+
+        {
+            auto proc = createEq();
+            auto& presets = proc->getPresets();
+
+            check (presets.getUserNames().contains ("Ancient"), "a FrostyEQ preset survives two renames");
+            check (presets.getUserNames().contains ("Recent"),  "a BMO EQ preset comes across");
+            check (current.getChildFile ("Ancient.bmoceq").existsAsFile(),
+                   "and it arrives under the new extension");
+
+            // The same name in both old folders. Newest wins: the FrostyEQ file
+            // is the same preset from before the user's later edits.
+            presets.loadUser ("Shared");
+            checkClose (getValue (*proc, P::kMidGain), -6.5, 0.01,
+                        "a name in both old folders arrives from BMO EQ, not FrostyEQ");
+
+            check (current.getChildFile (bmo::kMigrationMarker).existsAsFile(),
+                   "the copy leaves a marker");
+        }
+
+        // A preset the user deletes stays deleted. The old code gated on the
+        // folder being empty, which answered this by accident and stranded
+        // anyone who had saved one preset first; the marker answers it on
+        // purpose.
+        {
+            auto proc = createEq();
+            check (proc->getPresets().deleteUser ("Ancient"), "the user deletes a migrated preset");
+        }
+
+        {
+            auto proc = createEq();
+            check (! proc->getPresets().getUserNames().contains ("Ancient"),
+                   "and it does not come back on the next launch");
+        }
+
+        // The user's own work under the new name is never overwritten, even
+        // when an old folder holds the same name.
+        {
+            auto proc = createEq();
+            setValue (*proc, P::kMidGain, 12.0f);
+            check (proc->getPresets().saveUser ("Recent"), "the user saves over a migrated name");
+        }
+
+        current.getChildFile (bmo::kMigrationMarker).deleteFile();
+
+        {
+            auto proc = createEq();
+            proc->getPresets().loadUser ("Recent");
+            checkClose (getValue (*proc, P::kMidGain), 12.0, 0.01,
+                        "a re-run copy does not overwrite the user's own preset");
+        }
 
         sandbox.deleteRecursively();
         bmo::PresetManager::setDirectoryForTesting ({});
@@ -347,5 +436,5 @@ int main()
         }
     }
 
-    return finish ("BMO EQ");
+    return finish ("BMO CEQ");
 }

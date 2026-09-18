@@ -25,6 +25,22 @@ own tests could not see. What belongs *here* is anything every module shares.
 - [`dim/AGENTS.md`](dim/AGENTS.md) -- BMO Dimension. Side-only topology,
   Gerzon's asymmetry shear and its named fallback, and the width throb that
   is still open.
+- [`deq/AGENTS.md`](deq/AGENTS.md) -- BMO DEQ, the zero-latency dynamic EQ.
+  DSP only so far. Why latency is zero by construction, why the high shelf is
+  built from the low shelf, why bands are in series, and what waits on `main`.
+- [`vcomp/AGENTS.md`](vcomp/AGENTS.md) -- LTV Comp, the vocal compressor. Why
+  AMOUNT's ratio sweep starts at 1:1, why the makeup reference is a peak figure
+  and how getting it wrong stays silent, why ARC's slow branch is
+  programme-dependent because of its *attack* -- the one piece here most likely
+  to be simplified into something that does nothing -- and two faults the
+  measurement harness caught that no test had: a band split that silently
+  stopped compressing above 10.8 kHz, and a clipped caption that ui_layout
+  never saw because the module was missing from its product list.
+- [`tune/AGENTS.md`](tune/AGENTS.md) -- BMO Tune RT. **A product of this
+  repository, not a rack module**: nothing of it is in the rack's registry or
+  on its link line, and `-DBMO_BUILD_TUNE=OFF` / `-DBMO_BUILD_RACK=OFF` keep
+  the two sides independent. Also the latency rule, the frozen schema, and
+  what Tune owns outside this folder.
 
 The four older modules predate the rule and have none. That is a gap rather
 than a decision, and worth closing per module when one is next opened up
@@ -121,10 +137,16 @@ them was written by someone who had just been in the code.
    |---|---|
    | the module's bypass | the module's accent |
    | **mono** | **the module's accent**, so it matches the header bar |
+   | **a summing choice** | **the module's accent**, for the same reason |
    | **polarity** | **`tokens().polarity`, always** |
    | anything else | `tokens().switchAlt` |
 
-   The two named rows are the strict ones, and they pull opposite ways on
+   The summing row was added on 2026-09-15 for BMO DEQ, whose per-band MID
+   and SIDE light in the module colour: a mid/side choice is a summing
+   decision and not a per-channel one, which is the mono row's own argument.
+   White was asked for first and withdrawn on the polarity rule below.
+
+   The mono and polarity rows are the strict ones, and they pull opposite ways on
    purpose. Polarity means the same thing on every panel and is hunted for
    by sight rather than read, so it looks identical everywhere and takes no
    module colour at all; it spent three releases wearing each module's own
@@ -229,6 +251,13 @@ only caught because a review went looking. Work down this list:
 | `tests/plugin/RackTests.cpp` | `registry.size()`, `kBanks` | **fails, loud** |
 | `tests/ui/LayoutTests.cpp` | caption fit + overlap | unchecked, silent |
 | `tools/snapshot/main.cpp` | `snapshot <id>` | no render, loud on use |
+
+**A product that is not a rack module skips four of these rows**, and skipping
+them is the whole of what makes it one: the two `products/rack/` files, and
+the two test files that walk the rack's registry. BMO Tune RT is the one that
+does today -- it keeps its own panel test and its own snapshot instead. Every
+other row still applies, `products/AGENTS.md` included: an id and a plugin
+code are allocated whether or not the rack ever hosts it.
 
 `tools/packager/package.sh` is deliberately **not** on this list any more:
 it discovers products by globbing the build tree, so it cannot drift. Prefer

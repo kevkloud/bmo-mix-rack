@@ -56,7 +56,7 @@ inline const ParamSpecs& specs()
         // Off by default: the curve is anti-aliased by ADAA rather than by
         // rate, and the suite's rule is that a module reports zero latency in
         // its default state.
-        S::choiceParam (kOversampling, "Oversampling", { "Off", "2x", "4x", "HQ (8x)" }, 0),
+        S::choiceParam (kOversampling, "Oversampling", { "Off", "2x", "4x", "8x" }, 0),
 
         // Appended last: the voicing arrived after the first release.
         S::floatParam (kTone, "Tone", 0.0f, 100.0f, 0.1f, 100.0f, F::Percent),

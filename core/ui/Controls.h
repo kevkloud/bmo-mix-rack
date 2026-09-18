@@ -36,6 +36,30 @@ public:
 
     void setKnobEnabled (bool);
 
+    /** The colour a *utility* knob draws in, overriding the suite azure.
+        Forwards to Knob::setUtilityTint; see it for why. */
+    void setUtilityTint (juce::Colour);
+
+    /** Whether the rest-position dot is drawn at all.
+        Forwards to Knob::setRestMark; see it for why. */
+    void setRestMark (bool);
+
+    /** Draws the caption this many pixels higher, into the air a knob carries
+        under its face.
+
+        A caption hangs off the knob's *box*, and the box is square while the
+        face is drawn at `faceScale` of it, so there is always a gap between the
+        two. Closing it by shrinking the box would shrink the knob with it --
+        the box is bound by its height on every panel in the suite. This moves
+        the name alone, and the value line follows it up.
+
+        Zero is what every knob laid out as before this existed. */
+    void setCaptionLift (int pixels);
+
+    /** L and R at the ends of the track instead of minus and plus.
+        Forwards to Knob::setEndMarks; see it for why. */
+    void setEndMarks (Knob::EndMarks);
+
     /** Re-colours the knob and, unless a caption colour was passed in, its
         caption with it. For a module whose colour depends on its own state --
         BMO Opto runs greyscale in Tele and lavender in Stressed -- rather than
@@ -70,13 +94,44 @@ public:
         stranding it at the foot of the cell. */
     void setCaptionSize (float points);
 
+    /** Prints the parameter's value under its name -- "2.10 kHz", "-2.0 dB".
+
+        Off by default, and every module but BMO DEQ leaves it off: the suite's
+        knobs say less and more, not how much (the class comment). DEQ is a
+        parametric EQ with thirteen continuous controls a band, and Frosty's
+        call (2026-09-11) is that they need numbers. The text is the host's own
+        -- getCurrentValueAsText -- so it reads the same standalone and in a
+        rack slot, and cannot disagree with the automation lane. */
+    void setShowsValue (bool shouldShow);
+    bool isShowingValue() const noexcept { return showsValue; }
+
+    /** The cap's share of the knob's side, as the constructor's faceScale. The
+        dotted track sits a fixed Tokens::trackGap outside the cap, so a small
+        knob at a large scale runs its track off its own edge and is clipped;
+        a panel that sizes knobs at layout time sets this with the side. */
+    void setFaceScale (float scale)  { knob.setFaceScale (scale); knob.repaint(); }
+
+    /** Rewrites the host's text before it is drawn -- a narrow panel's
+        "2.10k" for "2.10 kHz". Paint only; the host, the automation lane and
+        typed entry keep the full text. Measured by captionOverflow like the
+        rest, so a format cannot hide an overflow. Empty restores the host's. */
+    void setValueFormat (std::function<juce::String (const juce::String&)> format);
+
 private:
-    /** Room under the knob for its name, at the current caption size.
+    juce::String valueText (const juce::String& hostText) const;
+    /** Room under the knob for its name, at the current caption size, and for
+        the value under that when one is shown.
 
         1.2 x the point size plus four, which is the 22 px row a 15 pt caption
         had when the number was fixed -- so a knob that never sets a size lays
         out exactly as it did. */
-    int captionRow() const { return juce::roundToInt (captionSize * 1.2f) + 4; }
+    int captionRow() const { return juce::roundToInt (captionSize * 1.2f) + 4 + (showsValue ? valueRow() : 0); }
+    int valueRow() const   { return juce::roundToInt (kValueSize * 1.2f) + 1; }
+
+    /** The box the value is drawn in; empty when none is shown. */
+    juce::Rectangle<int> valueBox() const;
+
+    static constexpr float kValueSize = 11.0f;
 
     /** The box the caption is drawn in. One definition, read by `paint` and by
         `captionOverflow`, so the drawing and the assertion cannot disagree. */
@@ -87,6 +142,10 @@ private:
     juce::Colour accentColour;
     int knobSide = std::numeric_limits<int>::max();
     float captionSize = 15.0f;
+    int captionLift = 0;
+    bool showsValue = false;
+    std::function<juce::String (const juce::String&)> valueFormat;
+    juce::RangedAudioParameter& parameter;
     Knob knob;
     std::unique_ptr<juce::SliderParameterAttachment> attachment;
 
@@ -118,6 +177,39 @@ public:
     void resized() override;
 
     void setRingEnabled (bool);
+
+    /** Replaces the legend read off the selector's spec, one label a position.
+
+        For a selector whose choices are not frequencies: BMO DEQ's band shape
+        is "Bell", "Low Shelf" and so on, which the host shows in full and a
+        38 px legend box cannot, so its panel hands in BELL, LS, HS, LC, HC.
+        The host's names are untouched; this is paint only. */
+    void setLegend (const juce::StringArray& labels);
+
+    /** How far the widest legend label runs past its box, in px; <= 0 fits.
+        For layout tests, like PlainKnob::captionOverflow. */
+    float legendOverflow() const;
+
+    /** Draws the dial and its legend this far right of the cell's own centre.
+
+        For a band whose cell has been cut short on one side to keep clear of
+        something beside it, while the dial itself should stay where it was. BMO
+        CEQ's mid bell does exactly that: HI-Q sits in the margin to its right,
+        the cell stops short of it so that neither takes the other's clicks, and
+        the dial is pushed back onto the panel's centre line with its
+        neighbours. Zero is what every other band draws at. */
+    void setDialOffset (int dx);
+
+    /** How far the dial's ink reaches either side of its centre: the legend's
+        own outer limit plus half a label box, so it holds wherever the widest
+        label is drawn.
+
+        A band is a circle in a letterbox -- its radius comes off the cell's
+        height, so there is bare plate either side of it. A panel that wants to
+        put something in that plate needs this to place it against the dial
+        rather than against the cell's edge. BMO CEQ puts HI-Q there, beside the
+        mid bell it belongs to. */
+    int inkHalfWidth() const;
 
 private:
     /** How far a band's fan stops short of 12 and 6 o'clock -- or runs past
@@ -175,6 +267,7 @@ private:
     juce::StringArray legend;
     juce::Colour accentColour;
     bool hasCentre = false, ringEnabled = true;
+    int dialOffset = 0;   ///< see setDialOffset
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ConcentricBand)
 };
@@ -207,6 +300,17 @@ public:
         against the plate, so it stays dark on a white switch whatever the
         plate underneath is doing. */
     void setActiveInkFrom (juce::Colour accent);
+
+    /** Sets the label at a fixed point size instead of one derived from the
+        switch's height.
+
+        Only a switch that is not the suite's own shape needs this. The derived
+        size is 62% of the box, which is right while every switch is 70 x 26 and
+        wrong for a square one: the label grows with the height and outgrows the
+        width, so "HI-Q" overflows a square switch at every size. BMO CEQ's
+        HI-Q, which sits square in the margin beside the mid bell, pins the size
+        the 26 px row uses so it sets like its neighbours. */
+    void setLabelSize (float points);
 
     /** Drawn engaged and not clickable, for a control the DSP holds on
         regardless of its parameter.

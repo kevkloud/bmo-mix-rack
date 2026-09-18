@@ -1,0 +1,534 @@
+<title>Tune RT Panel Studies</title>
+<meta name="description" content="Round 7 of the BMO Tune RT panel: the keyboard back in lime, and the lower section laid out as a clock around Retune.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Black+Ops+One&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=Michroma&display=swap">
+<style>
+  /* ---- Page chrome: quiet, cool greys, both themes ---------------------- */
+  :root {
+    --ground: #ececef;
+    --surface: #f7f7f9;
+    --bench: #dcdce1;
+    --ink: #1c1c21;
+    --muted: #595963;
+    --rule: #cfcfd6;
+    --focus: #1c1c21;
+    --pass: #1f7a3d;
+    --warn: #8a5a00;
+    --fail: #b3261e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #141416; --surface: #1c1c20; --bench: #0e0e10; --ink: #ececf0; --muted: #9c9ca7;
+      --rule: #2e2e35; --focus: #ececf0; --pass: #6fcf8e; --warn: #e7b85a; --fail: #ff8a80;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #141416; --surface: #1c1c20; --bench: #0e0e10; --ink: #ececf0; --muted: #9c9ca7;
+    --rule: #2e2e35; --focus: #ececf0; --pass: #6fcf8e; --warn: #e7b85a; --fail: #ff8a80;
+  }
+
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--ground); color: var(--ink); font: 15px/1.55 "IBM Plex Sans", "Segoe UI", system-ui, sans-serif; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 32px 24px 64px; display: grid; gap: 28px; }
+  header.page { display: grid; gap: 8px; max-width: 74ch; }
+  .eyebrow { font: 500 12px/1 "IBM Plex Mono", ui-monospace, monospace; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  h1 { margin: 0; font-size: 30px; line-height: 1.15; font-weight: 600; text-wrap: balance; letter-spacing: -.01em; }
+  h2 { margin: 0; font-size: 18px; font-weight: 600; text-wrap: balance; }
+  h3 { margin: 0; font-size: 14px; font-weight: 600; }
+  p { margin: 0; max-width: 70ch; }
+  .muted { color: var(--muted); }
+  code, .mono { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: .92em; }
+
+  .controls { display: flex; flex-wrap: wrap; gap: 20px 32px; align-items: flex-end; padding: 16px 18px; background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; }
+  .field { display: grid; gap: 6px; }
+  .field > span { font: 500 11px/1 "IBM Plex Mono", ui-monospace, monospace; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .seg { display: inline-flex; border: 1px solid var(--rule); border-radius: 5px; overflow: hidden; }
+  .seg button { font: 500 13px/1 "IBM Plex Sans", system-ui, sans-serif; color: var(--ink); background: transparent; border: 0; padding: 9px 12px; cursor: pointer; border-right: 1px solid var(--rule); }
+  .seg button:last-child { border-right: 0; }
+  .seg button[aria-pressed="true"] { background: var(--ink); color: var(--ground); }
+  .hint { font-size: 14px; color: var(--muted); max-width: 60ch; }
+  button:focus-visible, input:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+  .bench { background: var(--bench); border-radius: 8px; padding: 28px 24px 20px; overflow-x: auto; }
+  .bench-row { display: flex; gap: 40px; justify-content: center; min-width: min-content; }
+  figure { margin: 0; display: grid; gap: 10px; justify-items: center; }
+  figcaption { font: 12px "IBM Plex Mono", ui-monospace, monospace; color: var(--muted); }
+  .bench-note { text-align: center; margin: 14px auto 0; max-width: 72ch; color: var(--muted); font-size: 14px; }
+
+  /* ---- The panel: design size, the suite's tokens ------------------------ */
+  .panel { position: relative; width: 360px; height: 740px; border-radius: 4px; overflow: hidden; user-select: none;
+           box-shadow: 0 1px 2px rgba(0,0,0,.25), 0 10px 30px rgba(0,0,0,.18); }
+  .p-bar { position: absolute; left: 0; right: 0; top: 0; height: 3px; }
+  .p-head { position: absolute; left: 0; right: 0; top: 3px; height: 25px; display: flex; justify-content: space-between; align-items: center; padding: 0 10px; }
+  .p-head .name { font: 16px/1 "Black Ops One", Impact, sans-serif; letter-spacing: .01em; }
+  .p-head .maker { font: 13px/1 "Black Ops One", Impact, sans-serif; }
+  .p-presets { position: absolute; left: 6px; right: 6px; top: 28px; height: 24px; display: grid; grid-template-columns: 24px 1fr 24px; gap: 5px; align-items: center; }
+  .p-pill { height: 18px; border-radius: 5px; display: grid; place-items: center; font: 11px/1 "Black Ops One", Impact, sans-serif; }
+  .p-hair { position: absolute; left: 0; right: 0; top: 52px; height: 1px; }
+  .p-block { position: absolute; display: grid; justify-items: center; transform: translateX(-50%); }
+  .p-block.left { transform: none; justify-items: start; }
+  .p-cap { font-family: "Michroma", "Arial Black", sans-serif; text-transform: uppercase; line-height: 1; margin-top: -4px; white-space: nowrap; }
+  .p-small { font: 9px/1 "Michroma", "Arial Black", sans-serif; letter-spacing: .06em; text-transform: uppercase; margin-bottom: 5px; }
+  .p-rule { position: absolute; left: 16px; right: 16px; height: 1px; }
+  .p-row { display: flex; gap: 8px; }
+  .p-stack { display: grid; gap: 8px; }
+  .p-sw { width: 70px; height: 26px; border: 0; border-radius: 3px; cursor: pointer; padding: 0;
+          font: 12px/1 "Black Ops One", "Segoe UI Symbol", Impact, sans-serif; letter-spacing: .03em; text-transform: uppercase; }
+  .p-sw.glyph { font: 17px/1 "Segoe UI Symbol", "Noto Sans Symbols", "DejaVu Sans", sans-serif; text-transform: none; }
+  .p-sw:disabled { cursor: default; opacity: .35; }
+  .p-box { border: 0; border-radius: 5px; cursor: pointer; padding: 0 10px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .p-box .val { font-family: "Black Ops One", "Segoe UI Symbol", Impact, sans-serif; letter-spacing: .02em; }
+  .p-box .chev { width: 0; height: 0; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 5px solid currentColor; opacity: .75; }
+  .p-box[aria-expanded="true"] .chev { transform: rotate(180deg); }
+  .p-input { font: 13px "Black Ops One", Impact, sans-serif; width: 100%; border: 0; background: transparent; padding: 0; letter-spacing: .02em; }
+  .p-input:focus { outline: none; }
+  .p-corner { position: absolute; right: 0; bottom: 0; }
+  svg { display: block; overflow: visible; }
+  svg .knob { cursor: ns-resize; }
+  svg .key { cursor: pointer; }
+
+  /* The popup menu: fixed to the window, the way a JUCE PopupMenu is fixed
+     to the screen, and kept inside it. */
+  .p-menu { position: fixed; z-index: 50; border-radius: 4px; padding: 4px; overflow-y: auto;
+            box-shadow: 0 6px 24px rgba(0,0,0,.35); display: grid; gap: 1px; }
+  .p-menu[hidden] { display: none; }
+  .p-menu .item { display: flex; justify-content: space-between; align-items: center; gap: 16px; height: 24px; padding: 0 10px;
+                  border-radius: 3px; cursor: pointer; font: 12px/1 "Black Ops One", "Segoe UI Symbol", Impact, sans-serif; letter-spacing: .02em; white-space: nowrap; }
+  .p-menu .item small { font: 8.5px/1 "Michroma", sans-serif; letter-spacing: .06em; text-transform: uppercase; opacity: .8; }
+  .p-menu .sep { height: 1px; margin: 3px 4px; }
+
+  /* ---- Lime study and notes ---------------------------------------------- */
+  .section { display: grid; gap: 12px; }
+  .table-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+  th, td { padding: 9px 12px; text-align: left; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+  thead th { font: 500 11px/1.3 "IBM Plex Mono", ui-monospace, monospace; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  tbody tr:last-child td { border-bottom: 0; }
+  tbody tr.current td { background: color-mix(in srgb, var(--ink) 5%, transparent); }
+  td.num { font-family: "IBM Plex Mono", ui-monospace, monospace; }
+  .chip { display: inline-flex; align-items: center; gap: 7px; }
+  .chip i { width: 16px; height: 16px; border-radius: 3px; display: inline-block; border: 1px solid rgba(0,0,0,.18); }
+  .ok { color: var(--pass); } .low { color: var(--warn); } .bad { color: var(--fail); }
+  .notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 16px; }
+  .note { background: var(--surface); border: 1px solid var(--rule); border-radius: 6px; padding: 14px 16px; display: grid; gap: 6px; align-content: start; }
+  .note p { font-size: 14px; color: var(--muted); }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <header class="page">
+    <div class="eyebrow">BMO Tune RT · panel studies · round 7 · 2026-09-10</div>
+    <h1>Tune RT panel studies</h1>
+    <p class="muted">Keyboard-led, lime, coloured by the suite's own rules. Classic or Hybrid is a banner across the top. Under it, the target section is unchanged but lower, with Ref A back under Pitch Range and Latency level with it under Key. Everything that shapes the correction is in the section below, a clock of controls around a centred Retune, drawn for the chosen mode. Both appearances are drawn at design size from the suite's token sets; everything on the panels works.</p>
+  </header>
+
+  <section class="controls" aria-label="Study controls">
+    <p class="hint">Switch Classic and Hybrid on the banner of either panel to see each mode's lower section. Menus stay inside the window: scroll a box near the bottom edge and its menu opens upward.</p>
+  </section>
+
+  <section class="bench" aria-label="Panel renders">
+    <div class="bench-row" id="bench"></div>
+    <p class="bench-note" id="benchNote"></p>
+  </section>
+
+  <section class="section" aria-labelledby="limeTitle">
+    <h2 id="limeTitle">Lime on both plates</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Role</th><th>Dark · #2e2e32</th><th>Ratio</th><th>Light · #efefef</th><th>Ratio</th><th>Rule</th></tr></thead>
+        <tbody id="limeTable"></tbody>
+      </table>
+    </div>
+    <p class="muted" style="font-size:14px">By the suite's rules, as decided: <code>accentTextOn</code> darkens lime's caption ink until it reads on the pale plate, and lit selectors and knob caps carry the accent by hue there, as every module's do. Everything read as text clears 4.5:1 on both plates.</p>
+  </section>
+
+  <section class="section" aria-labelledby="decideTitle">
+    <h2 id="decideTitle">What changed, and what is still open</h2>
+    <div class="notes">
+      <div class="note"><h3>Key</h3><p>The box shows the root. Its menu lists the seven natural notes; the stacked ♯ and ♭ switches raise or lower the chosen one, and clicking the lit one returns to the natural. E♯, B♯, C♭ and F♭ are greyed out. The parameter is still one of twelve pitch classes; which spelling you chose, A♯ or B♭, is saved as panel state beside the parameters.</p></div>
+      <div class="note"><h3>Ref A</h3><p>440 is ISO 16, the international standard. 442 and 443 are what most German, Austrian, Italian and French orchestras tune to, 444 a few go higher still, and 415 is the period-instrument Baroque standard. 432 is the “Verdi tuning” people ask for. Custom accepts any value from 380 to 480 Hz, for a track bounced off-speed. No schema change: Ref A was already continuous.</p></div>
+      <div class="note"><h3>Menus in the plugin</h3><p>A JUCE <code>PopupMenu</code> shown against its target component already flips upward and stays on the display the window is on, so the real menus inherit the behaviour this page imitates. They take the suite's <code>LookAndFeel</code> for colour and type.</p></div>
+      <div class="note"><h3>Two modes</h3><p>Classic or Hybrid is the banner across the top, and decides what the lower section draws. The banner is wider than the suite's 70 × 26 switch on purpose; it is the one control that reshapes the panel. The lower section is a clock around Retune: Vibrato and Flex at 10 and 2 o'clock in both modes; on Hybrid, Glide and Shift at 8 and 4, and Formant Keep or Follow under Retune, between them. Controls a mode does not use are not drawn, and nothing moves into their places; their parameters stay in the host, so automation written for Hybrid survives a trip through Classic.</p></div>
+      <div class="note"><h3>Formant: Keep or Follow</h3><p>Keep leaves the singer's formants where they are, Hybrid's natural sound. Follow lets them move with the correction the way Classic's do, while notes still move Hybrid's way and can glide. Shift offsets them either way. The parameter is the same Formant Correct switch; only the labels changed.</p></div>
+      <div class="note"><h3>The hide rule, protected</h3><p>Which controls Classic hides is now one list in the plugin's code, <code>isHybridOnly()</code>, and a test holds it to the sound: each of Glide, Formant and Shift must change nothing at all on Classic and something on Hybrid. If either ever stops being true, the build fails before the panel can hide a working control or show a dead one.</p></div>
+      <div class="note"><h3>Live and Studio</h3><p>Independent of the mode. Both engines share one latency contract: Live rests at 0.4 ms and reports 0, Studio reports the same fixed figure for either engine, so switching modes never moves the host's delay compensation.</p></div>
+    </div>
+  </section>
+</div>
+
+<div class="p-menu" id="menu" role="listbox" hidden></div>
+
+<script>
+(() => {
+  // ==== The suite's tokens (core/ui/Tokens.h, Tokens.cpp) =================
+  const TOKENS = {
+    dark: {
+      plate: "#2e2e32", plateEdge: "#37373b", well: "#1b1b1f", hairline: "#5e5e62", outline: "#727276",
+      text1: "#e6e6ea", text2: "#9a9aa4", pointer: "#2b2b2e", switchOff: "#6f7076",
+      keyWhite: "#3e3e42", keyBlack: "#1b1b1f", menuHover: "#37373b",
+    },
+    light: {
+      plate: "#efefef", plateEdge: "#e4e4e4", well: "#d6d6d6", hairline: "#b4b4b4", outline: "#9e9e9e",
+      text1: "#6f6f6f", text2: "#9a9a9a", pointer: "#ffffff", switchOff: "#6f7076",
+      keyWhite: "#ffffff", keyBlack: "#8a8a90", menuHover: "#c8c8cc",
+    },
+  };
+  const LIME = "#b6e35d";
+
+  // ==== Colour maths =======================================================
+  const rgb = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16));
+  const hex = c => "#" + c.map(v => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, "0")).join("");
+  const toLin = v => { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+  const lum = h => { const [r, g, b] = rgb(h).map(toLin); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+  const ratio = (a, b) => { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); };
+  const mix = (a, b, t) => { const p = rgb(a), q = rgb(b); return hex(p.map((v, i) => v + (q[i] - v) * t)); };
+
+  // The suite's rule: toward black or white in 2 % steps (accentTextOn, onAccentOf).
+  const stepAway = (from, ground, min = 4.5) => {
+    const target = lum(ground) > 0.18 ? "#000000" : "#ffffff";
+    for (let i = 0; i <= 50; i++) { const c = mix(from, target, i * 0.02); if (ratio(c, ground) >= min) return c; }
+    return target;
+  };
+  const onFill = fill => stepAway(fill, fill);
+
+  const state = {
+    retune: 14, vibrato: 45, flex: 0, glide: 30, shift: 0, refA: 440,
+    natural: 5, accidental: 0,          // A, natural: 5 = index into NATURALS
+    scale: 2, engine: 1, range: 0, formant: true, latency: 0,
+    notes: Array(12).fill(true),
+    customEditing: null,
+  };
+
+  const NATURALS = [["C", 0], ["D", 2], ["E", 4], ["F", 5], ["G", 7], ["A", 9], ["B", 11]];
+  const SCALES = ["Chromatic", "Major", "Minor"];
+  const INTERVALS = [[0,1,2,3,4,5,6,7,8,9,10,11], [0,2,4,5,7,9,11], [0,2,3,5,7,8,10]];
+  // modules/tune/params.h, limitsOf()
+  const RANGES = [["Auto", "80–1400 Hz"], ["Soprano", "160–1400 Hz"], ["Alto/Tenor", "100–1000 Hz"],
+                  ["Bass", "55–500 Hz"], ["Instrument", "55–1760 Hz"]];
+  const REFS = [[440, "Standard"], [442, "Orchestral"], [443, "Orchestral"], [444, ""], [432, "Verdi"], [415, "Baroque"]];
+  const SPEC = { retune: [0, 100, 0], vibrato: [0, 150, 0], flex: [0, 100, 0], glide: [0, 200, 0], shift: [-600, 600, 0] };
+
+  const keyClass = () => (NATURALS[state.natural][1] + state.accidental + 12) % 12;
+  const keyName = () => NATURALS[state.natural][0] + (state.accidental > 0 ? "♯" : state.accidental < 0 ? "♭" : "");
+  const sharpAllowed = n => !["E", "B"].includes(NATURALS[n][0]);
+  const flatAllowed = n => !["C", "F"].includes(NATURALS[n][0]);
+  const inScale = n => INTERVALS[state.scale].some(i => (i + keyClass()) % 12 === n);
+  const refText = v => (Number.isInteger(v) ? v : v.toFixed(1)) + " Hz";
+
+  // Lime by the suite's own rules (Frosty, 2026-09-10): faceOf and accentInk
+  // trade places between the plates, and selectors light in the raw accent.
+  function palette(mode) {
+    const T = TOKENS[mode];
+    return mode === "dark"
+      ? { T, cap: LIME, ink: mix(LIME, "#ffffff", 0.5), fill: LIME, bar: LIME }
+      : { T, cap: mix(LIME, "#ffffff", 0.5), ink: stepAway(LIME, T.plate), fill: LIME, bar: LIME };
+  }
+
+  // ==== Drawing ============================================================
+  const pt = (cx, cy, r, deg) => { const a = deg * Math.PI / 180; return [cx + r * Math.sin(a), cy - r * Math.cos(a)]; };
+  const ang = n => -135 + 270 * n;
+  const nrm = p => (state[p] - SPEC[p][0]) / (SPEC[p][1] - SPEC[p][0]);
+
+  function knob(P, p, face, caption, capSize) {
+    const { T, cap, ink } = P;
+    const r = face / 2, R = r + 10, pad = 14, W = 2 * (R + pad), cy = R + pad, cx = W / 2, H = Math.round(cy + R * 0.74 + 12);
+    let dots = "";
+    for (let i = 0; i < 23; i++) { const [x, y] = pt(cx, cy, R, -135 + 270 * i / 22); dots += `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="1.1" fill="${ink}" opacity=".7"/>`; }
+    const d = (SPEC[p][2] - SPEC[p][0]) / (SPEC[p][1] - SPEC[p][0]);
+    const [rx, ry] = pt(cx, cy, R, ang(d)), [mx, my] = pt(cx, cy, R + 2, -135), [px, py] = pt(cx, cy, R + 2, 135);
+    const [ex, ey] = pt(cx, cy, r * 0.86, ang(nrm(p))), [sx, sy] = pt(cx, cy, r * 0.12, ang(nrm(p)));
+    return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${caption}">
+      ${dots}<circle cx="${rx.toFixed(1)}" cy="${ry.toFixed(1)}" r="2.8" fill="${ink}"/>
+      <text x="${(mx - 4).toFixed(1)}" y="${(my + 10).toFixed(1)}" fill="${ink}" font-family="Michroma,sans-serif" font-size="11" text-anchor="middle">−</text>
+      <text x="${(px + 4).toFixed(1)}" y="${(py + 10).toFixed(1)}" fill="${ink}" font-family="Michroma,sans-serif" font-size="11" text-anchor="middle">+</text>
+      <g class="knob" data-knob="${p}" tabindex="0" role="slider" aria-label="${caption}" aria-valuenow="${Math.round(state[p])}">
+        <circle cx="${cx}" cy="${cy}" r="${r + 6}" fill="transparent"/>
+        <circle cx="${cx}" cy="${cy}" r="${r}" fill="${cap}" stroke="${T.outline}" stroke-width="2.2"/>
+        <line x1="${sx.toFixed(1)}" y1="${sy.toFixed(1)}" x2="${ex.toFixed(1)}" y2="${ey.toFixed(1)}" stroke="${T.pointer}" stroke-width="3.4" stroke-linecap="round"/>
+      </g></svg><div class="p-cap" style="font-size:${capSize}px;color:${ink}">${caption}</div>`;
+  }
+
+  // Every switch is the suite's 70 x 26 unless a size is given -- which only
+  // the mode banner does.
+  function sw(P, { param, value, label, lit, disabled, glyph, w, h, size }) {
+    const f = lit ? P.fill : P.T.switchOff;
+    const text = lit ? onFill(f) : "#ffffff";
+    const glow = lit ? `box-shadow:0 0 0 1px ${f}, 0 0 10px ${f}66;` : "";
+    const dims = w ? `width:${w}px;height:${h}px;font-size:${size}px;` : "";
+    return `<button class="p-sw${glyph ? " glyph" : ""}" type="button" data-sw="${param}" data-val="${value}" aria-pressed="${!!lit}"
+      ${disabled ? "disabled" : ""} style="background:${f};color:${text};${glow}${dims}">${label}</button>`;
+  }
+
+  function box(P, id, w, h, value, size) {
+    const open = menuState && menuState.id === id && menuState.mode === P.mode;
+    return `<button class="p-box" type="button" data-box="${id}" aria-haspopup="listbox" aria-expanded="${!!open}"
+      style="width:${w}px;height:${h}px;background:${P.T.well};color:${P.T.text1}">
+      <span class="val" style="font-size:${size}px">${value}</span><span class="chev"></span></button>`;
+  }
+
+  function keyboard(P, w, h) {
+    const { T, fill } = P;
+    const whites = [0, 2, 4, 5, 7, 9, 11], blacks = [[1, 0], [3, 1], [6, 3], [8, 4], [10, 5]];
+    const kw = w / 7, bw = kw * 0.62, bh = h * 0.6, dot = onFill(fill), k = keyClass();
+    const draw = (n, x, ww, hh, base) => {
+      const sc = inScale(n), on = sc && state.notes[n];
+      return `<g class="key" data-note="${n}" opacity="${sc ? 1 : 0.35}">
+        <rect x="${x.toFixed(1)}" y="0" width="${ww.toFixed(1)}" height="${hh}" rx="2.5" fill="${on ? fill : base}" stroke="${T.outline}" stroke-width="1"/>
+        ${n === k ? `<circle cx="${(x + ww / 2).toFixed(1)}" cy="${hh - 8}" r="2.8" fill="${on ? dot : T.text2}"/>` : ""}
+        ${sc && !state.notes[n] ? `<line x1="${(x + ww * .3).toFixed(1)}" y1="${hh - 14}" x2="${(x + ww * .7).toFixed(1)}" y2="${hh - 14}" stroke="${T.text2}" stroke-width="1.6"/>` : ""}
+      </g>`;
+    };
+    let out = "";
+    whites.forEach((n, i) => out += draw(n, i * kw + 1, kw - 2, h, T.keyWhite));
+    blacks.forEach(([n, after]) => out += draw(n, (after + 1) * kw - bw / 2, bw, bh, T.keyBlack));
+    return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="Allowed notes">${out}</svg>`;
+  }
+
+  const at = (x, top, html, cls = "") => `<div class="p-block ${cls}" style="left:${x}px;top:${top}px">${html}</div>`;
+  const rule = (T, y) => `<div class="p-rule" style="top:${y}px;background:${T.hairline}"></div>`;
+  const small = (T, text) => `<div class="p-small" style="color:${T.text2}">${text}</div>`;
+
+  // The panel at design size. Top to bottom: the mode banner; what to tune to
+  // (keyboard, key, scale, range, reference) with the latency contract beside
+  // the reference; then everything that shapes the correction, drawn for the
+  // mode the banner has chosen.
+  const BOX_W = 134;
+
+  function panel(mode) {
+    const P = { ...palette(mode), mode }, T = P.T;
+    const hybrid = state.engine === 1;
+    const labelled = (text, html) => `${small(T, text)}${html}`;
+
+    const keyGroup = labelled("Key", `<div class="p-row">${box(P, "key", 92, 60, keyName(), 28)}
+      <div class="p-stack">${sw(P, { param: "acc", value: 1, label: "♯", lit: state.accidental > 0, disabled: !sharpAllowed(state.natural), glyph: true })}
+      ${sw(P, { param: "acc", value: -1, label: "♭", lit: state.accidental < 0, disabled: !flatAllowed(state.natural), glyph: true })}</div></div>`);
+    const scaleBox = labelled("Scale", box(P, "scale", BOX_W, 26, SCALES[state.scale], 13));
+    const rangeBox = labelled("Pitch range", box(P, "range", BOX_W, 26, RANGES[state.range][0], 13));
+    const refBox = labelled("Ref A", state.customEditing === mode
+      ? `<div class="p-box" style="width:${BOX_W}px;height:26px;background:${T.well};color:${T.text1};cursor:text">
+           <input class="p-input" id="customRef" inputmode="decimal" value="${state.refA}" aria-label="Custom reference pitch in hertz" style="color:${T.text1}"></div>`
+      : box(P, "ref", BOX_W, 26, refText(state.refA), 13));
+    const latencyGroup = labelled("Latency", `<div class="p-row">${sw(P, { param: "latency", value: 0, label: "Live", lit: state.latency === 0 })}${sw(P, { param: "latency", value: 1, label: "Studio", lit: state.latency === 1 })}</div>`);
+
+    // The mode banner: the one choice that decides what the rest of the panel
+    // shows, so it runs the width of the panel. Wider than the suite's
+    // 70 x 26 switch on purpose -- a banner is not a switch row.
+    const banner = `<div class="p-row" style="gap:4px">
+      ${sw(P, { param: "engine", value: 0, label: "Classic", lit: !hybrid, w: 166, h: 30, size: 13 })}
+      ${sw(P, { param: "engine", value: 1, label: "Hybrid", lit: hybrid, w: 166, h: 30, size: 13 })}</div>`;
+    const formantGroup = labelled("Formant", `<div class="p-row">${sw(P, { param: "formant", value: 1, label: "Keep", lit: state.formant })}${sw(P, { param: "formant", value: 0, label: "Follow", lit: !state.formant })}</div>`);
+
+    // Everything that shapes the correction, as a clock around Retune, which
+    // sits at the centre of the section (340-740) in both modes. Vibrato and
+    // Flex at 10 and 2 o'clock; on Hybrid, Glide and Shift at 8 and 4, and
+    // Formant Keep/Follow straight under Retune, between them. A mode's
+    // hidden controls leave their places empty rather than moving the rest,
+    // so a hand that knows where Vibrato is finds it in either mode.
+    // Knob blocks are placed by their top edge: a 36 face's centre is 42
+    // below it, a 72 face's is 60.
+    const CX = 180, CY = 540, DX = 126, DY = 72;
+    const orbit = (p, caption, dx, dy) => at(CX + dx, CY + dy - 42, knob(P, p, 36, caption, 15));
+    const lower = at(CX, CY - 60, knob(P, "retune", 72, "Retune", 18))
+      + orbit("vibrato", "Vibrato", -DX, -DY) + orbit("flex", "Flex", DX, -DY)
+      + (hybrid ? orbit("glide", "Glide", -DX, DY) + orbit("shift", "Shift", DX, DY) + at(CX, CY + 68, formantGroup) : "");
+
+    const corner = `<svg class="p-corner" width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
+      ${[6, 11, 16].map(o => `<line x1="${20 - o}" y1="20" x2="20" y2="${20 - o}" stroke="${T.text2}" stroke-width="1.2"/>`).join("")}</svg>`;
+
+    return `<figure><div class="panel" data-mode="${mode}" style="background:${T.plate}">
+      <div class="p-bar" style="background:${P.bar}"></div>
+      <div class="p-head"><span class="name" style="color:${T.text1}">BMO Tune RT</span><span class="maker" style="color:${T.text2}">LT3a</span></div>
+      <div class="p-presets"><div class="p-pill" style="background:${T.well};color:${T.text1}">&lt;</div>
+        <div class="p-pill" style="background:${T.well};color:${T.text1}">Init</div><div class="p-pill" style="background:${T.well};color:${T.text1}">&gt;</div></div>
+      <div class="p-hair" style="background:${T.hairline}"></div>
+      ${at(180, 62, banner)}
+      ${at(180, 104, keyboard(P, 320, 70))}
+      ${at(20, 197, keyGroup, "left")}
+      ${at(206, 188, `<div class="p-stack"><div>${scaleBox}</div><div>${rangeBox}</div><div>${refBox}</div></div>`, "left")}
+      ${at(20, 284, latencyGroup, "left")}
+      ${rule(T, 340)}
+      ${lower}
+      ${corner}
+    </div><figcaption>${mode === "dark" ? "Dark" : "Light"} · plate ${T.plate} · 360 × 740 · ${hybrid ? "Hybrid" : "Classic"}</figcaption></figure>`;
+  }
+
+  // ==== The menu ===========================================================
+  let menuState = null;      // { id, mode, anchor }
+  const menu = document.getElementById("menu");
+
+  function openMenu(id, mode, anchor) {
+    menuState = { id, mode };
+    const P = palette(mode), T = P.T;
+    let items;
+    if (id === "key")
+      items = NATURALS.map(([name], i) => ({ label: name, value: i, selected: state.natural === i }));
+    else if (id === "scale")
+      items = SCALES.map((name, i) => ({ label: name, value: i, selected: state.scale === i }));
+    else if (id === "range")
+      items = RANGES.map(([name, span], i) => ({ label: name, note: span, value: i, selected: state.range === i }));
+    else
+      items = [...REFS.map(([hz, note]) => ({ label: hz + " Hz", note, value: hz, selected: state.refA === hz })),
+               "sep", { label: "Custom…", value: "custom", selected: !REFS.some(([hz]) => hz === state.refA) }];
+
+    menu.style.background = T.well;
+    menu.style.border = `1px solid ${T.hairline}`;
+    menu.innerHTML = items.map((it, i) => it === "sep" ? `<div class="sep" style="background:${T.hairline}"></div>`
+      : `<div class="item" role="option" tabindex="-1" data-choice="${it.value}" aria-selected="${it.selected}"
+          style="background:${it.selected ? P.fill : "transparent"};color:${it.selected ? onFill(P.fill) : T.text1}"
+          data-hover="${T.menuHover}"><span>${it.label}</span>${it.note ? `<small>${it.note}</small>` : ""}</div>`).join("");
+    menu.hidden = false;
+    placeMenu(anchor);
+    render();
+    const sel = menu.querySelector('[aria-selected="true"]') || menu.querySelector(".item");
+    if (sel) sel.focus();
+  }
+
+  // Below if it fits; above if that has more room; never past the window's
+  // edges, scrolling inside itself as a last resort -- what JUCE's PopupMenu
+  // does against the screen.
+  function placeMenu(anchor) {
+    const r = anchor.getBoundingClientRect(), margin = 8, gap = 3;
+    menu.style.maxHeight = "none";
+    menu.style.minWidth = r.width + "px";
+    const natural = menu.scrollHeight + 2, w = Math.max(menu.offsetWidth, r.width);
+    const below = window.innerHeight - r.bottom - margin - gap, above = r.top - margin - gap;
+    const up = natural > below && above > below;
+    const h = Math.min(natural, up ? above : below);
+    menu.style.maxHeight = h + "px";
+    menu.style.top = (up ? r.top - gap - h : r.bottom + gap) + "px";
+    menu.style.left = Math.max(margin, Math.min(r.left, window.innerWidth - w - margin)) + "px";
+    menu.dataset.direction = up ? "up" : "down";
+  }
+
+  function closeMenu() { if (!menuState) return; menuState = null; menu.hidden = true; render(); }
+
+  function choose(value) {
+    const { id, mode } = menuState;
+    if (id === "key") {
+      state.natural = Number(value);
+      if ((state.accidental > 0 && !sharpAllowed(state.natural)) || (state.accidental < 0 && !flatAllowed(state.natural))) state.accidental = 0;
+    } else if (id === "scale") {
+      state.scale = Number(value);
+    } else if (id === "range") {
+      state.range = Number(value);
+    } else if (value === "custom") {
+      state.customEditing = mode;
+    } else state.refA = Number(value);
+    closeMenu();
+    if (state.customEditing) { const input = document.getElementById("customRef"); if (input) { input.focus(); input.select(); } }
+  }
+
+  // ==== Rendering and interaction ==========================================
+  function render() {
+    document.getElementById("bench").innerHTML = panel("dark") + panel("light");
+    document.getElementById("benchNote").textContent = state.engine === 0
+      ? "Classic: Retune, with Vibrato and Flex at 10 and 2 o'clock. Select Hybrid on the banner to add Glide, Shift and Formant in the places left for them."
+      : "Hybrid, A minor, Retune 14. Select Classic on the banner to see its lower section. Click a key to switch that note out; the dot marks the root.";
+    document.getElementById("limeTable").innerHTML = limeRows();
+  }
+
+  function limeRows() {
+    const D = TOKENS.dark, L = TOKENS.light;
+    const cell = (c, g, min, accepted) => {
+      const v = ratio(c, g), cls = v >= min ? "ok" : accepted ? "low" : "bad";
+      return `<td><span class="chip"><i style="background:${c}"></i><span class="mono">${c}</span></span></td><td class="num ${cls}">${v.toFixed(2)}:1</td>`;
+    };
+    const rows = [
+      ["Caption ink", cell(mix(LIME, "#ffffff", .5), D.plate, 4.5), cell(stepAway(LIME, L.plate), L.plate, 4.5), "4.5:1, text"],
+      ["Lit selector / key", cell(LIME, D.plate, 3), cell(LIME, L.plate, 3, true), "hue-carried on pale, as every accent is"],
+      ["Label on lit fill", cell(onFill(LIME), LIME, 4.5), cell(onFill(LIME), LIME, 4.5), "4.5:1, text"],
+      ["Knob cap", cell(LIME, D.plate, 3), cell(mix(LIME, "#ffffff", .5), L.plate, 3, true), "hue-carried on pale, as every accent is"],
+    ];
+    return rows.map(([role, d, l, r]) => `<tr><td>${role}</td>${d}${l}<td class="muted">${r}</td></tr>`).join("");
+  }
+
+  document.addEventListener("click", e => {
+    if (!menu.hidden && !e.target.closest("#menu") && !e.target.closest("[data-box]")) { closeMenu(); }
+    const c = e.target.closest("[data-choice]");
+    if (c) { choose(c.dataset.choice); return; }
+    const b = e.target.closest("[data-box]");
+    if (b) {
+      const mode = b.closest(".panel").dataset.mode;
+      if (menuState && menuState.id === b.dataset.box && menuState.mode === mode) closeMenu();
+      else openMenu(b.dataset.box, mode, b);
+      return;
+    }
+    const t = e.target.closest("[data-sw],[data-note]");
+    if (!t) return;
+    const d = t.dataset;
+    if (d.sw === "formant") state.formant = d.val === "1";
+    else if (d.sw === "acc") state.accidental = state.accidental === Number(d.val) ? 0 : Number(d.val);
+    else if (d.sw) state[d.sw] = Number(d.val);
+    else if (d.note !== undefined) { const n = Number(d.note); if (inScale(n)) state.notes[n] = !state.notes[n]; }
+    render();
+  });
+
+  menu.addEventListener("pointerover", e => {
+    const it = e.target.closest(".item");
+    menu.querySelectorAll(".item").forEach(x => { if (x.getAttribute("aria-selected") !== "true") x.style.background = "transparent"; });
+    if (it && it.getAttribute("aria-selected") !== "true") it.style.background = it.dataset.hover;
+  });
+
+  document.addEventListener("keydown", e => {
+    if (!menu.hidden) {
+      const items = [...menu.querySelectorAll(".item")];
+      const i = items.indexOf(document.activeElement);
+      if (e.key === "Escape") { closeMenu(); e.preventDefault(); return; }
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        const next = items[(i + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length];
+        next.focus(); e.preventDefault(); return;
+      }
+      if ((e.key === "Enter" || e.key === " ") && i >= 0) { choose(items[i].dataset.choice); e.preventDefault(); return; }
+    }
+    if (e.target.id === "customRef") {
+      if (e.key === "Enter") commitCustom(e.target.value);
+      if (e.key === "Escape") { state.customEditing = null; render(); }
+      return;
+    }
+    const k = e.target.closest && e.target.closest("[data-knob]");
+    if (k && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+      const p = k.dataset.knob, s = SPEC[p], mode = k.closest(".panel").dataset.mode;
+      state[p] = Math.max(s[0], Math.min(s[1], state[p] + (e.key === "ArrowUp" ? 1 : -1) * (s[1] - s[0]) / 50));
+      e.preventDefault(); render();
+      const again = document.querySelector(`.panel[data-mode="${mode}"] [data-knob="${p}"]`);
+      if (again) again.focus();
+    }
+  });
+
+  function commitCustom(text) {
+    const v = parseFloat(text);
+    if (Number.isFinite(v)) state.refA = Math.round(Math.max(380, Math.min(480, v)) * 10) / 10;
+    state.customEditing = null;
+    render();
+  }
+  document.addEventListener("focusout", e => { if (e.target.id === "customRef") commitCustom(e.target.value); });
+
+  let drag = null;
+  document.addEventListener("pointerdown", e => {
+    const k = e.target.closest("[data-knob]");
+    if (!k) return;
+    drag = { p: k.dataset.knob, y: e.clientY, start: state[k.dataset.knob] };
+    e.preventDefault();
+  });
+  document.addEventListener("pointermove", e => {
+    if (!drag) return;
+    const s = SPEC[drag.p];
+    state[drag.p] = Math.max(s[0], Math.min(s[1], drag.start + (drag.y - e.clientY) / 180 * (s[1] - s[0])));
+    render();
+  });
+  document.addEventListener("pointerup", () => { drag = null; });
+  document.addEventListener("dblclick", e => {
+    const k = e.target.closest("[data-knob]");
+    if (!k) return;
+    state[k.dataset.knob] = SPEC[k.dataset.knob][2];
+    render();
+  });
+  // A menu belongs to where it opened; if the page moves under it, close it
+  // rather than leave it floating over the wrong control.
+  window.addEventListener("scroll", closeMenu, { passive: true });
+  window.addEventListener("resize", closeMenu);
+
+  render();
+})();
+</script>

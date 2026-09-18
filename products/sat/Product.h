@@ -10,7 +10,7 @@ namespace bmo::products
 inline ProductInfo satInfo()
 {
     return { "BMO Saturator",
-             { "BMO Saturator", ".bmosat", {}, {} },
+             { "BMO Saturator", ".bmosat" },
              sat::kVersionHint, sat::kStateVersion };
 }
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/state/ParamSpec.h"
+#include "core/state/Parameters.h"
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <atomic>
 
@@ -59,8 +60,7 @@ public:
     {
         spec.store (s, std::memory_order_release);
 
-        range = s != nullptr ? juce::NormalisableRange<float> (s->min, s->max, s->step)
-                             : juce::NormalisableRange<float> (0.0f, 1.0f);
+        range = s != nullptr ? rangeFor (*s) : juce::NormalisableRange<float> (0.0f, 1.0f);
 
         value.store (getDefaultValue(), std::memory_order_relaxed);
     }
@@ -161,6 +161,9 @@ public:
             const auto side = t.startsWithIgnoreCase ("L") ? -1.0f : 1.0f;
             return s->toNormalised (side * t.retainCharacters ("0123456789.").getFloatValue());
         }
+
+        if (s->format == ParamFormat::Hertz)
+            return s->toNormalised (s->valueFromText (t.toStdString()));
 
         return s->toNormalised (t.getFloatValue());
     }

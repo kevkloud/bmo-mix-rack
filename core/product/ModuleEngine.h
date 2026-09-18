@@ -3,6 +3,7 @@
 #include "ModuleDef.h"
 #include "core/dsp/Meter.h"
 #include "core/state/ParamSet.h"
+#include <atomic>
 
 namespace bmo
 {
@@ -37,12 +38,22 @@ public:
     const Meter& inputMeter() const noexcept { return inMeter; }
     const GainReductionMeter& gainReduction() const noexcept { return grMeter; }
 
-    void prepare (double sampleRate, int maxBlockSize, int numChannels)
+    /** The rate the module is running at, or 0 before the first prepare.
+
+        Published for a panel that draws something rate-dependent -- BMO DEQ's
+        response curve is designed at the running rate, and drew the 48 kHz
+        design at every rate until 2026-09-15, which put it up to 1 dB out in
+        the top octave at 44.1 and 96 k. Atomic because a panel's timer reads
+        it while the message thread may be in prepare(). */
+    double sampleRate() const noexcept { return rate.load (std::memory_order_relaxed); }
+
+    void prepare (double sampleRateHz, int maxBlockSize, int numChannels)
     {
         // Parameters go in first: an oversampling choice sizes the buffers.
         read();
         dsp->setParams (values.data(), (int) values.size());
-        dsp->prepare (sampleRate, maxBlockSize, numChannels);
+        dsp->prepare (sampleRateHz, maxBlockSize, numChannels);
+        rate.store (sampleRateHz, std::memory_order_relaxed);
         outputMeter.reset();
         inMeter.reset();
         grMeter.reset();
@@ -74,6 +85,13 @@ public:
         return dsp->latencyForParams (now.data(), (int) now.size());
     }
 
+    /** Momentary, from the panel; -1 clears it. Not a parameter, so it is not
+        in paramSet, not in a preset and not in a saved session. */
+    void setSolo (int index) noexcept { dsp->setSolo (index); }
+
+    /** The module's analyser window, or null if it has none. */
+    AnalyserTap* analyser() noexcept { return dsp->analyser(); }
+
 private:
     void read() noexcept { paramSet.readAll (values.data()); }
 
@@ -84,6 +102,7 @@ private:
     Meter outputMeter;
     Meter inMeter;
     GainReductionMeter grMeter;
+    std::atomic<double> rate { 0.0 };
 };
 
 } // namespace bmo

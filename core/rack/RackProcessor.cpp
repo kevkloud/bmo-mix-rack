@@ -79,7 +79,24 @@ ui::ModuleContext RackProcessor::makeContext (int slot)
              [engine] { return engine->meter().maxRms(); },
              [engine] { return engine->inputMeter().maxPeak(); },
              [engine] { return engine->inputMeter().maxRms(); },
-             [engine] { return engine->gainReduction().get(); } };
+             [engine] { return engine->gainReduction().get(); },
+             [engine] { return engine->sampleRate(); },
+             [engine] (int band) { engine->setSolo (band); },
+             engine->analyser() };
+}
+
+bool RackProcessor::isSlotExpanded (int slot) const noexcept
+{
+    return slot >= 0 && slot < kSlots && slots[(size_t) slot].expanded;
+}
+
+void RackProcessor::setSlotExpanded (int slot, bool shouldBe) noexcept
+{
+    if (slot >= 0 && slot < kSlots)
+    {
+        auto& s = slots[(size_t) slot];
+        s.expanded = shouldBe && s.def != nullptr && s.def->isExpandable();
+    }
 }
 
 //==============================================================================
@@ -87,9 +104,18 @@ std::vector<std::pair<const ModuleDef*, std::unique_ptr<juce::XmlElement>>> Rack
 {
     std::vector<std::pair<const ModuleDef*, std::unique_ptr<juce::XmlElement>>> chain;
 
+    // The view rides on the module's own state, so a chain edit that moves the
+    // module takes its view with it, the same way it takes its settings.
     for (auto& s : slots)
         if (s.def != nullptr && s.engine != nullptr)
-            chain.emplace_back (s.def, s.engine->params().toXml (s.def->schemaVersion));
+        {
+            auto state = s.engine->params().toXml (s.def->schemaVersion);
+
+            if (s.expanded)
+                state->setAttribute (kViewAttribute, kViewExpanded);
+
+            chain.emplace_back (s.def, std::move (state));
+        }
 
     return chain;
 }
@@ -110,6 +136,12 @@ void RackProcessor::rebuild (std::vector<std::pair<const ModuleDef*, std::unique
             slot.engine.reset();
             slot.overflow.reset();
             slot.def = s < (int) chain.size() ? chain[(size_t) s].first : nullptr;
+
+            // Compact unless the module's state says otherwise: a module newly
+            // added, a preset's chain and an old session all arrive compact.
+            const auto* carried = s < (int) chain.size() ? chain[(size_t) s].second.get() : nullptr;
+            slot.expanded = slot.def != nullptr && slot.def->isExpandable() && carried != nullptr
+                         && carried->getStringAttribute (kViewAttribute) == kViewExpanded;
 
             // Not a ternary with a temporary on one side: the specs have to
             // be the module's own static list, because the parameters keep
@@ -279,7 +311,26 @@ void RackProcessor::resetToDefaults()
 void RackProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     if (auto xml = captureState())
+    {
+        // Views go in the session and not in captureState, which rack preset
+        // files are also written from. A slot's PARAMS element is the one its
+        // module's state travels in, so that is where the view is read back.
+        int s = 0;
+
+        for (auto* e : xml->getChildWithTagNameIterator (kSlotTag))
+        {
+            while (s < kSlots && (slots[(size_t) s].def == nullptr || slots[(size_t) s].engine == nullptr))
+                ++s;
+
+            if (s < kSlots && slots[(size_t) s].expanded)
+                if (auto* p = e->getChildByName (ParamSet::kRootTag))
+                    p->setAttribute (kViewAttribute, kViewExpanded);
+
+            ++s;
+        }
+
         copyXmlToBinary (*xml, destData);
+    }
 }
 
 void RackProcessor::setStateInformation (const void* data, int sizeInBytes)

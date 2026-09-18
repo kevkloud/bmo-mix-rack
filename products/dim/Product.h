@@ -10,7 +10,7 @@ namespace bmo::products
 inline ProductInfo dimInfo()
 {
     return { "BMO Dimension",
-             { "BMO Dimension", ".bmodim", {}, {} },
+             { "BMO Dimension", ".bmodim" },
              dim::kVersionHint, dim::kStateVersion };
 }
 

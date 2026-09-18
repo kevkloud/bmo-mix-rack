@@ -13,6 +13,14 @@ ear still owes, and it is longer than PR #9's description says.
 
 ## 1. What is installed, and that it is the right thing
 
+> **Superseded 2026-09-17, later the same day.** ICE QUEEN was re-installed
+> from the 0.2.5 build (PR #10's CI run 35309123745); the hashes below name
+> the build that was there before. The current table is in
+> `install-0.2.5-2026-09-17.md`. **The listening list in §2 is unaffected** —
+> `00ba5c1` moves one line of `CMakeLists.txt` and no `.cpp` or `.h` at all,
+> so all six changes are still unheard and still comparable.
+
+
 All nine bundles in `C:\Program Files\Common Files\VST3` on **ICE QUEEN** were
 verified on 2026-09-17 as **byte-identical** to the `BMO-Windows` artifact of
 CI run **35290922537** (`ui-pass` at `102f6571`, green on all four jobs). That

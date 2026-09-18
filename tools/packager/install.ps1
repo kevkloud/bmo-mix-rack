@@ -19,12 +19,32 @@ if (-not (Test-Path (Join-Path $here 'VST3'))) {
     exit 1
 }
 
-$admin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()
-         ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-if (-not $admin) {
-    Write-Host "This needs to run as Administrator -- $vst3Dir is under Program Files."
-    Write-Host "Right-click install.ps1 and choose 'Run with PowerShell' from an admin account,"
-    Write-Host "or open an elevated PowerShell and run:"
+# Whether the plug-in folder can actually be written is the question, so ask
+# it directly rather than through the Administrator role. The two are not the
+# same: Program Files is writable without elevation on a machine whose admin
+# group has been granted it, and refusing there sends someone off to open an
+# elevated prompt they never needed. Asking the real question is also what the
+# macOS script does for the quarantine step, for the same reason.
+function Test-Writable([string]$dir) {
+    if (-not (Test-Path $dir)) {
+        try   { New-Item -ItemType Directory -Force -Path $dir -ErrorAction Stop | Out-Null; return $true }
+        catch { return $false }
+    }
+    $probe = Join-Path $dir (".bmo-write-test-" + [guid]::NewGuid().ToString("N"))
+    try {
+        New-Item -ItemType File -Path $probe -ErrorAction Stop | Out-Null
+        Remove-Item -Force $probe -ErrorAction SilentlyContinue
+        return $true
+    } catch { return $false }
+}
+
+if (-not (Test-Writable $vst3Dir)) {
+    Write-Host "Cannot write to $vst3Dir."
+    Write-Host ""
+    Write-Host "It is under Program Files, so this usually means the installer"
+    Write-Host "needs to run elevated. Right-click install.ps1 and choose 'Run"
+    Write-Host "with PowerShell' from an admin account, or from an elevated"
+    Write-Host "PowerShell run:"
     Write-Host "    powershell -ExecutionPolicy Bypass -File `"$($MyInvocation.MyCommand.Path)`""
     exit 1
 }

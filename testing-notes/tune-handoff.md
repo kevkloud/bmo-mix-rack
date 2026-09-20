@@ -161,7 +161,7 @@ the key was opened.
 ## Rules that still hold
 
 - Name the machine in anything that records where something happened:
-  AURORA (laptop, `C:\Users\thesp`) or ICE QUEEN (desktop, `C:\Users\stefr`).
+  AURORA (laptop, `%USERPROFILE%`) or ICE QUEEN (desktop, `%USERPROFILE%`).
 - Measure, never judge by eye or ear alone; nothing is fixed that a test did
   not first fail on; Frosty hears every fix before it is called fixed.
 - The schema is frozen; new meaning gets a new id (`kRetiredIds`).

@@ -382,4 +382,4 @@ or DSP file has been touched on this branch.
 
 *LT3a · BMO Mix Rack · branch `ui-editor` · 2026-09-08*
 *Interactive version with rendered swatches:
-<https://claude.ai/code/artifact/8df1a5fa-72ec-4110-824e-2cf331e63a40>*
+Frosty has the link.*

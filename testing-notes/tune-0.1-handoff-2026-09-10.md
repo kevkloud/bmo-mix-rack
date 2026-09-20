@@ -8,7 +8,7 @@ CLI, then the JUCE wrapper.
 
 ## 1. Where it is
 
-- Repository: `C:\Users\thesp\OneDrive\Documents\REPO\bmo-tune-rt`, a
+- Repository: `%USERPROFILE%\OneDrive\Documents\REPO\bmo-tune-rt`, a
   repository of its own. Local git only -- **no remote, nothing pushed**, by
   Frosty's decision on 2026-09-10. Pushes wait for Frosty's approval.
 - Branch `main`, each commit a coherent stage with its evidence in the

@@ -220,8 +220,8 @@ numbers in the commit that tried it.
 
 ## Rules that still hold
 
-- Name the machine: AURORA (laptop, `C:\Users\thesp`) or ICE QUEEN (desktop,
-  `C:\Users\stefr`).
+- Name the machine: AURORA (laptop, `%USERPROFILE%`) or ICE QUEEN (desktop,
+  `%USERPROFILE%`).
 - Measure, never judge by ear alone -- **and never by measurement alone**,
   which is this session's lesson. Nothing is fixed that a test did not first
   fail on; Frosty hears every fix before it is called fixed.

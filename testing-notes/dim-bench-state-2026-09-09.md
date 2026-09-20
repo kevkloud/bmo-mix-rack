@@ -1,4 +1,4 @@
-# Dimension listening pass — bench state, 2026-09-09 (stefr machine)
+# Dimension listening pass — bench state, 2026-09-09 (ICE QUEEN)
 
 What was set up and mechanically settled before the listening pass, so the
 subjective session spends its time only on what needs ears.
@@ -21,7 +21,7 @@ carrying the measured numbers:
 | `dim-testing-checklist.md` | what to listen for | current |
 | this file | bench state and what needs no ears | current |
 
-    https://claude.ai/code/artifact/7e52e5d4-1be1-42f8-a3dc-1473f8821d10
+    (the link is in Frosty's claude.ai workspace, not recorded here)
 
 `~/Downloads/dimtestingchecklist.md` is **byte-identical** to
 `testing-notes/dim-testing-checklist.md`, so there is no second version to
@@ -36,12 +36,12 @@ merges out of date. The build under test is now `c957ebf` — see §4.
 
 ## 1. Correction: the handoff's machine section does not describe this box
 
-`session-handoff-2026-09-09.md` §4 says the machine is `AURORA\thesp` and that
-handoffs naming `C:/Users/stefr/...` are stale. **On this machine that is
-backwards.** This is `stefr`, and its toolchain is current and working:
+`session-handoff-2026-09-09.md` §4 says the machine is AURORA and that
+handoffs naming ICE QUEEN's user folder are stale. **On this machine that is
+backwards.** This is ICE QUEEN, and its toolchain is current and working:
 
     git 2.55.0.windows.5, cmake 4.4.3, gh 2.100.0, Ableton Live 12 Suite
-    -- BMO fonts: C:/Users/stefr/Documents/FONTS (.bmo-fontdir)
+    -- BMO fonts: %USERPROFILE%/Documents/FONTS (.bmo-fontdir)
 
     cmake -S . -B build      # configures clean
     bash scripts/build.sh    # 12/12 ctest at c957ebf
@@ -71,7 +71,7 @@ The same source Opto and Saturator were tested with, so continuity of source
 holds. 44.1 kHz, 16-bit stereo, 20.20 s.
 
 Do **not** search for it by the name "Fuji": the two folders that match on
-this machine — `C:\Users\stefr\Documents\FUJI` and `D:\VISUAL\FUJI` — are
+this machine — `%USERPROFILE%\Documents\FUJI` and `D:\VISUAL\FUJI` — are
 Fujifilm camera directories of JPG/RAF. The audio lives under
 `D:\VISUAL\PLUGINS\MIX RACK\`, which is also where every other module's test
 material and the D: handoffs sit.

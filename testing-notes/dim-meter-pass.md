@@ -5,7 +5,7 @@ to listen for*; this says **how to instrument it** so the answers are worth
 something.
 
 A tickable version of this lives as an artifact, which is easier to work from
-at the desk: <https://claude.ai/code/artifact/7e52e5d4-1be1-42f8-a3dc-1473f8821d10>
+at the desk. Frosty has the link; it is not recorded here.
 
 Dimension has no meter of its own — a goniometer is the meter its panel wants
 and is deliberately deferred. **SSL Meter Pro stands in for it.**

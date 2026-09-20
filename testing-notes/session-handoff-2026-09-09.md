@@ -65,7 +65,7 @@ wrapper — hiding the two-remote setup hides an open question for Kevin. Pass
 
 ## 4. This machine
 
-Rebuilt 2026-09-09 as `AURORA\thesp`. Handoffs naming `C:/Users/stefr/...`
+Rebuilt 2026-09-09 as AURORA. Handoffs naming ICE QUEEN's user folder
 describe the **old** machine and are stale.
 
 Installed and verified this session: Git for Windows 2.55.0.3, CMake 4.4.3, VS
@@ -76,10 +76,10 @@ Build Tools 2022 (MSVC 19.44), Windows SDK 10.0.26100, GitHub CLI 2.100
     bash scripts/build.sh            # builds and runs ctest — 12/12 on the dim branch
     ./build/tools/Debug/snapshot.exe dim snapshots/dim.png
 
-Fonts resolve from `.bmo-fontdir` → `C:/Users/thesp/OneDrive/Documents/FONTS`.
+Fonts resolve from `.bmo-fontdir` → `%USERPROFILE%/OneDrive/Documents/FONTS`.
 A correct configure prints:
 
-    -- BMO fonts: C:/Users/thesp/OneDrive/Documents/FONTS (.bmo-fontdir)
+    -- BMO fonts: %USERPROFILE%/OneDrive/Documents/FONTS (.bmo-fontdir)
 
 **Installing a tester build:** take the **BMO-Windows** artifact from the
 Actions run, unzip, copy the `.vst3` bundles into

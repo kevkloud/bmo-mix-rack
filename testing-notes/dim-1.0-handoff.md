@@ -301,7 +301,7 @@ and is gitignored.
 
 This branch was developed and measured with:
 
-    -- BMO fonts: C:/Users/stefr/Documents/FONTS (.bmo-fontdir)
+    -- BMO fonts: %USERPROFILE%/Documents/FONTS (.bmo-fontdir)
 
 That path is local to one machine and is deliberately not committed — set
 your own once with `scripts/set-font-dir.sh <path>` and every build in that

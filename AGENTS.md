@@ -79,39 +79,27 @@ the result in the PR checklist. `WORKFLOWS.md` stage 5 carries the same check.
 
 ## Which machine you are on
 
-Frosty works on two Windows machines:
+Frosty works on two Windows machines: **ICE QUEEN**, the desktop, and
+**AURORA**, the laptop. Windows reports the same computer name on both, so the
+hostname is no help.
 
-| name | machine | user folder |
-|---|---|---|
-| **ICE QUEEN** | desktop | `C:\Users\stefr` |
-| **AURORA** | laptop | `C:\Users\thesp` |
+Each machine names itself in its own user-level `~\.claude\CLAUDE.md`. That
+file is machine-local and is deliberately never committed — it is also where
+the user folder that tells the two apart is written down, which is why it stays
+out of this repository and why no path here names one. Read it to find out
+where you are. If it does not name the machine, ask Frosty rather than
+guessing from the disk.
 
-Windows reports the same computer name on both, so the hostname is no help.
-The user folder in your working path tells you which one you are on. Each
-machine also names itself in its own user-level `~\.claude\CLAUDE.md`, which
-is machine-local and never committed. ICE QUEEN's was set up on 2026-09-10.
+The rules it carries, and the reason this section exists at all:
 
-**On AURORA, if `C:\Users\thesp\.claude\CLAUDE.md` does not name the machine,
-create it.** Confirm with Frosty that this is the laptop before writing it.
-Use this, which mirrors ICE QUEEN's:
-
-```markdown
-# This machine: AURORA
-
-This is **AURORA**, Frosty's **laptop**, user folder `C:\Users\thesp`.
-Frosty's desktop is **ICE QUEEN**, user folder `C:\Users\stefr`. Windows
-reports the same computer name on both, so the user folder and this file are
-what tell them apart. This file is machine-local on purpose: do not copy it to
-ICE QUEEN, and do not commit it anywhere.
-
-- **Say where work happened.** When you record where something was done — a
-  build, a test, a measurement, an install, a listening result — in a handoff
-  doc, `testing-notes/`, a PR description, or a summary to Frosty, name the
-  machine: "on AURORA". Name ICE QUEEN only when Frosty says the work happened
+- **Say where work happened.** Whenever you record a build, a test, a
+  measurement, an install or a listening result — in a handoff, in
+  `testing-notes/`, in a PR description, in a summary to Frosty — name the
+  machine: "on AURORA". Name the other only when Frosty says the work happened
   there.
-- **Never infer ICE QUEEN from this disk.** Installed plugins, build trees and
-  local files here are AURORA's alone. If it matters what ICE QUEEN has, ask.
-```
+- **Never infer one machine from the other's disk.** Installed plugins, build
+  trees and local files belong to the machine you are on. If it matters what
+  the other has, ask.
 
 **Why it matters:** a record of where something happened is only useful if it
 names the machine. On 2026-09-10 a session on ICE QUEEN was wrongly taken to be

@@ -25,7 +25,7 @@ renders headlessly on Windows.
 
 A correct configure prints the font folder it chose:
 
-    -- BMO fonts: C:/Users/stefr/Documents/FONTS (.bmo-fontdir)
+    -- BMO fonts: %USERPROFILE%/Documents/FONTS (.bmo-fontdir)
 
 **`.bmo-fontdir` does not travel.** It is a working-tree file and is not in
 git, so a fresh clone or a second worktree does not get it and the build stops

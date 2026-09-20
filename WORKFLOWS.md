@@ -58,9 +58,13 @@ the order of everything that follows.
 Neither travels with a branch, and both fail loudly:
 
 ```
-scripts/set-font-dir.sh "C:/Users/thesp/OneDrive/Documents/FONTS"   # AURORA's path
+scripts/set-font-dir.sh "<the folder holding the two licensed .otf files>"
 git submodule update --init libs/JUCE
 ```
+
+The font folder differs per machine, so it is not written down here — the
+existing worktree's `.bmo-fontdir` holds the path this machine uses, and
+`assets/fonts/README.md` says which two files have to be in it.
 
 ---
 

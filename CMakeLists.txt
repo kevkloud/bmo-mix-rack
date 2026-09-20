@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.22)
 # the one scripts/package.sh names the zip by. It said 1.0.0 from the first
 # commit while five tags went by; the 0.2.4 tester build shipped calling
 # itself 1.0.0. Keep it equal to the tag being built.
-project(BMOMixRack VERSION 0.2.4 LANGUAGES C CXX)
+project(BMOMixRack VERSION 0.2.5 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

@@ -252,8 +252,10 @@ Jobs: **DSP** (Linux, seconds), **Each side alone** (Linux, the two switches),
 #### Installing an artifact
 
 Unzip it and run the installer beside the bundles — `install.command` on
-macOS, `install.ps1` elevated on Windows. It removes bundles an earlier build
-left under a name this one no longer uses (`tools/packager/superseded.txt`),
+macOS, `install.ps1` on Windows. `install.ps1` probes the shared VST3 folder
+rather than assuming Program Files needs elevation, and asks for an elevated
+run only when it genuinely cannot write there. It removes bundles an earlier
+build left under a name this one no longer uses (`tools/packager/superseded.txt`),
 copies everything into place, and on macOS clears the quarantine flag that
 makes an unsigned plugin report itself as **"damaged and can't be opened"**.
 That message is Gatekeeper, not a broken build; nothing in CI signs or

@@ -19,7 +19,7 @@ implicit `if: success()`, so a failing test withholds the build.
 | `AU/*.component` | macOS only |
 | `Standalone/*` | `.app` on macOS, `.exe` on Windows |
 | `install.command` | the macOS installer — double-clickable |
-| `install.ps1` | the Windows installer — needs Administrator |
+| `install.ps1` | the Windows installer — elevated only if the VST3 folder needs it |
 | `superseded.txt` | the old bundle names the installers remove |
 | `README.txt` | generated; what a tester reads |
 | `LICENSE.txt` | |

@@ -102,8 +102,11 @@ Install
   everything into place, and on macOS clears the quarantine flag.
 
     macOS     double-click install.command
-    Windows   right-click install.ps1 -> Run with PowerShell (as
-              Administrator; the shared VST3 folder is under Program Files)
+    Windows   right-click install.ps1 -> Run with PowerShell. The shared
+              VST3 folder is under Program Files, so this often needs an
+              elevated run -- but not always, and the installer checks
+              rather than assuming. If it cannot write there it stops and
+              tells you, before it has changed anything.
 
   By hand, if you would rather:
     macOS

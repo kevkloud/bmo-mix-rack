@@ -3,7 +3,8 @@
 > **Outcome, 2026-09-14: nothing here was adopted.** Three blind rounds could
 > not distinguish either candidate from the shipped build, and the 10 ms attack
 > stays in both cells. The implementation of candidate B exists only on the
-> unmerged branch `opto-attack-b`; `modules/opto/` in this tree is unchanged.
+> unmerged branch `opto-attack-b`, on the fork `badmixesonly/bmo-mix-rack-333`;
+> `modules/opto/` in this tree is unchanged.
 > Read to the end before acting on any section — "What is implemented here"
 > describes that branch, not this one. The last section is the one that
 > decides.

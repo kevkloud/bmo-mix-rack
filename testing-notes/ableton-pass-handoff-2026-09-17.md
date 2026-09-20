@@ -11,6 +11,40 @@ ear still owes, and it is longer than PR #9's description says.
 
 ---
 
+> ## 0.2.5 is ready, and the pass is every module
+>
+> **Frosty, 2026-09-19: 0.2.5 is ready for the Ableton pass, and every module
+> needs testing.** That is wider than this brief was written for. Take §2's six
+> changes and §3's panel debts as the **floor** — the things that are known to
+> have moved and must not be skipped — not as the scope. **"Not in scope, and
+> why" below is superseded**: it explained what to leave alone on a narrow pass,
+> and this is not one. Every module gets ears.
+>
+> **The build.** `v0.2.5` at `1d6356d`, tag run **35486489889**, green on all
+> four jobs. This is a tag build, so it is also the first **universal** macOS
+> package since the split — 104 MB against the 49 MB arm64-only a branch run
+> makes, and the first 0.2.x an Intel Mac can load. Artifacts expire
+> **2026-12-19**.
+>
+> **Installed on AURORA**, 2026-09-19, all nine bundles verified byte-identical
+> to the `BMO-Windows` artifact, `Version` reading 0.2.5 throughout. The hashes
+> and the method are in `install-0.2.5-aurora-2026-09-19.md`. **ICE QUEEN is not
+> done yet** — Frosty is copying the package across by hand, and that install is
+> its own record. Nothing here describes ICE QUEEN's state.
+>
+> **Before you open Live, one thing will look like a broken session.**
+> `BMO Vcomp` is now **LTV Comp**, and its identifier moved `Bvcp` → `Ltvc`, so
+> any set that loaded BMO Vcomp will **not** find LTV Comp in its place and
+> needs it re-inserted on those tracks. Presets do come across on first run.
+> `BMO EQ` → **BMO CEQ** is the safe one: the plugin code stayed `Fsty` through
+> both renames on purpose, so those sessions open as they were. Rescan plugins
+> first.
+>
+> §1's hash table below names an older build again. The current one for this
+> machine is the AURORA record named above.
+
+---
+
 ## 1. What is installed, and that it is the right thing
 
 > **Superseded 2026-09-17, later the same day.** ICE QUEEN was re-installed
@@ -68,6 +102,13 @@ end still arrive at AMOUNT 70–90 with LOW THRU at 150–300, or does capping i
 make LOW THRU feel like it stops working at the top of the knob?
 
 ### Not in scope, and why
+
+> **Superseded 2026-09-19: all of it is in scope now.** Frosty's instruction
+> for the 0.2.5 pass is that every module gets tested, so nothing below is a
+> reason to skip anything. Keep reading it anyway — each entry records *what
+> was already heard, when, and on which machine*, which is worth having when
+> something sounds wrong and you need to know whether it is new. It is
+> provenance now, not permission to skip.
 
 - **ROTATE / TURN.** Its sign was flipped on 2026-09-09 in `0d2d659` and
   **confirmed by ear** in that day's Ableton pass — "`-` moved the image right

@@ -138,6 +138,33 @@ public:
         to check the three bars line up, and what the handle maths uses. */
     juce::Rectangle<int> wellBounds() const;
 
+    //== The gate marker, and the rule it exists to enforce ====================
+    //
+    // **Where two painted things must agree, they take their number from one
+    // function.** That is a rule rather than a preference here, because this
+    // one class has produced the same bug three times: the ticks and the
+    // printed figures disagreed about where a dB was until ScaleMark carried
+    // both; a drag and the handle it dragged walked different curves until
+    // dbAtFraction became the inverse of normalised; and the flag and its name
+    // moved apart until 2026-09-19, because the label applied a clamp the flag
+    // did not. Each was a second derivation of one number.
+    //
+    // So the marker has exactly one, and paint reads it rather than repeating
+    // it. Both are public for the reason ModulePanel::getRules and
+    // DynamicsMeter::vuScale are: a flag, a stem and a name are *painted*, so
+    // unlike every other thing on a panel they have no bounds a test can read.
+    //
+    // They take the dB rather than reading the parameter, so a test can ask
+    // about the ends of the travel without moving anything.
+
+    /** The centre of the gate marker at `db`, in this component's coordinates. */
+    float gateMarkerXFor (float db) const;
+
+    /** The box the gate's name is drawn in at `db`. Centred on
+        gateMarkerXFor, and clamped only to the component -- see the note in
+        the .cpp for why that clamp cannot engage at this parameter's range. */
+    juce::Rectangle<float> gateLabelBoundsFor (float db) const;
+
     static constexpr int kCaptionWidth = 38;
     static constexpr int kBarHeight    = 14;
 

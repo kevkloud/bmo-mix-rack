@@ -189,6 +189,14 @@ its own. Consider also widening the structural greys: `plate #efefef` to
   `gh repo set-default`, or a wrapper — whether this working copy should have
   an `upstream` remote at all is Frosty's question for Kevin, and a fix that
   hides the two-remote setup would hide the question with it.
+
+  **It has a running cost, and this is it.** GitHub does not pass repository
+  secrets to a pull request opened from a fork, so the Windows and macOS jobs
+  fail on every PR raised that way — not because a secret is wrong, but
+  because it arrives empty. It is not a thing to fix in the workflow. Either
+  the branch lives in Kevin's repository and the PR is same-repo, or the PR
+  merges on DSP, "Each side alone" and the author's local suite.
+  `assets/fonts/README.md` has the detail and both options written out.
 - **Frosty decides character and version numbers.** Layout, colour and preset
   character are his calls — offer real options with measured trade-offs
   (contrast ratios, dB) rather than picking one quietly.

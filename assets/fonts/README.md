@@ -98,6 +98,41 @@ from your own font folder:
     gzip -c "$FONTS/TG-Blender.otf" | base64 | gh secret set FONT_TG_BLENDER_B64
     gzip -c "$FONTS/TG-MinervaBlack-Black.otf" | base64 | gh secret set FONT_TG_MINERVA_BLACK_B64
 
+### A pull request from a fork always fails these two jobs
+
+**This is not a broken secret and there is nowhere to point one.** GitHub does
+not pass repository secrets to a pull request whose head branch lives in a
+fork, by design, so that untrusted code cannot read them. They can be set
+perfectly well in `kevkloud/bmo-mix-rack` and still arrive empty.
+
+The restore step says so and prints the proof -- if `this repo` and `head repo`
+differ in its output, that is the whole explanation:
+
+    this repo: kevkloud/bmo-mix-rack
+    head repo: badmixesonly/bmo-mix-rack-333
+
+Only the **plugin** matrix needs the faces. **DSP** and **Each side alone**
+never touch them and pass normally, so a fork PR is not unverified -- it is
+verified by everything that does not need a licensed font, plus whatever the
+author ran locally. Say in the PR body what the local `ctest` came back as.
+
+Two ways to get a green plugin build, and the choice is not a technical one:
+
+1. **Push the branch to `kevkloud/bmo-mix-rack` and open the pull request from
+   there.** A same-repo PR gets the secrets. This is what the restore step
+   recommends and it needs only push rights, not admin. The cost is that the
+   branch then lives in Kevin's repository rather than in the fork, which is a
+   working-practice question rather than a CI one -- see the two-remote flag
+   in `docs/ui-workflow-brief.md`.
+
+2. **Merge on the other jobs.** DSP, Each side alone and the author's local
+   suite. Reasonable for a change that cannot affect a plugin build, and not
+   reasonable for one that can.
+
+`pull_request_target` would also hand the secrets over and **should not be
+used**: it runs the base branch's workflow with secrets in scope while
+checking out the fork's code, which is the standard way this goes wrong.
+
 ## Where they are named
 
 `CMakeLists.txt` at the root resolves the directory, lists the two files and

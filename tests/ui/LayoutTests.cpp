@@ -19,6 +19,8 @@
 #include "products/deq/Product.h"
 #include "modules/deq/panel/ResponseView.h"
 #include "modules/deq/panel/Widgets.h"
+#include "modules/vcomp/panel/LevelBars.h"
+#include "modules/vcomp/params.h"
 #include "products/dim/Product.h"
 #include "products/eq/Product.h"
 #include "products/opto/Product.h"
@@ -417,6 +419,52 @@ void checkTrimKnobHeights (bmo::ui::ModulePanel& panel, const juce::String& who,
         checkEquals (knob->getHeight(), bmo::ui::ModulePanel::kTrimKnobRow,
                      who + " " + caption + " is a trim knob and should be the trim height"
                          + " -- a short one means the panel ran out of room above it");
+    }
+}
+
+/** The gate's flag and the name over it move as one control.
+
+    **The class of bug this catches is invisible to everything else here.**
+    Both are *painted*, so neither has bounds for the walkers above to read --
+    the same blind spot ModulePanel::getRules and DynamicsMeter::vuScale were
+    each made public to close. It shipped in #9 and Frosty found it by using
+    the plugin: the label was clamped into the well while the flag was not, so
+    over the last 17 px of leftward travel the marker went on without its name.
+
+    Asserted at **both ends of the parameter's travel**, because the middle was
+    always right -- the clamp only engaged near the rail, which is exactly where
+    the gate rests by default.
+
+    It calls the same two functions paint calls. A check that re-derived either
+    position its own way could agree with the bug it exists to catch, which is
+    the discipline PlainKnob::captionOverflow was written under. */
+void checkGateMarkerCarriesItsName (bmo::ui::ModulePanel& panel)
+{
+    auto* found = findNamed (panel, "IN");
+    auto* bar = dynamic_cast<bmo::vcomp::LevelBar*> (found);
+
+    if (bar == nullptr)
+    {
+        check (false, "ltvcomp has no IN bar to carry the gate");
+        return;
+    }
+
+    // The ends of kGate's own range, from modules/vcomp/params.h.
+    for (const auto db : { bmo::vcomp::kGateOffDb, -10.0f })
+    {
+        const auto marker = bar->gateMarkerXFor (db);
+        const auto label  = bar->gateLabelBoundsFor (db);
+        const auto name   = juce::String (db, 1) + " dB";
+
+        checkEquals (juce::roundToInt (label.getCentreX()), juce::roundToInt (marker),
+                     "ltvcomp gate name should be centred on its flag at " + name
+                         + " -- they are one control");
+
+        check (label.getX() >= 0.0f && label.getRight() <= (float) bar->getWidth(),
+               "ltvcomp gate name should stay inside the meter component at " + name
+                   + ", is " + juce::String (label.getX(), 1) + ".."
+                   + juce::String (label.getRight(), 1) + " of "
+                   + juce::String (bar->getWidth()));
     }
 }
 
@@ -1085,6 +1133,7 @@ int main (int argc, char** argv)
     {
         checkTrimKnobHeights (panel, "ltvcomp",
                               { "ATTACK", "RELEASE", "DETECT", "LOW", "HIGH" });
+        checkGateMarkerCarriesItsName (panel);
     });
 
     // BMO DEQ takes the output section at both widths, so its OUTPUT knob and

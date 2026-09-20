@@ -4,9 +4,21 @@
 **AURORA**. Frosty set the plan; this file is the map, so a session can start
 on one piece without re-deriving how the pieces fit.
 
-This file lives on the **fork** (`badmixesonly/bmo-mix-rack-333`), on the
-integration branch. It is not for Kevin's repository: it describes how Frosty's
-two machines work, not how the suite is built.
+> **Updated 2026-09-19 on AURORA: the fork workflow described below is over,
+> and the staged plan it served is finished.** DEQ, Tune, Vcomp and the UI pass
+> all reached `kevkloud/bmo-mix-rack` through PR #9. The `integration` branch,
+> the per-piece branches and the worktrees they lived in have been pruned, and
+> the working copy now has **one remote**: `origin` is Kevin's repository.
+>
+> The remote and branching rules have been rewritten in place. **The five
+> stages below are kept as history** — they explain why the suite was built in
+> the order it was, and the control audit is still the record of which
+> questions were settled and when. Read them as an account of what happened,
+> not as instructions.
+
+This file used to say it belonged only on the fork. It reached Kevin's
+repository with the UI pass and now lives here, which is the right place for
+the parts that describe how the suite is built, tested and packaged.
 
 **Start from `testing-notes/session-handoff-2026-09-14.md`** — the state after
 the 0.2.4 review, what is installed, the two blind sets waiting on ears, and
@@ -16,17 +28,28 @@ the order of everything that follows.
 
 ## The rules that apply to every workflow below
 
-- **Push to the fork only.** `origin` is `badmixesonly/bmo-mix-rack-333`.
-  Nothing goes to `kevkloud/bmo-mix-rack` except through Frosty, as a pull
-  request he opens. Never push a `frosty-*` branch there yourself.
+- **One remote.** `origin` is `kevkloud/bmo-mix-rack`. Push `frosty-*` branches
+  straight there and open the pull request on that repository. This is not a
+  preference: GitHub does not pass repository secrets to a pull request whose
+  head branch lives in a fork, so a fork PR fails the Windows and macOS jobs at
+  `Restore fonts` every time. A same-repo PR gets them. `assets/fonts/README.md`
+  has the detail.
+- **Merging is Frosty's.** Push the branch and open the PR; leave the merge to
+  him.
+- **The old fork is an archive, not a remote.** `badmixesonly/bmo-mix-rack-333`
+  is kept dormant because two testing notes here point at branches that exist
+  only on it — `opto-attack-b` and `tune-phrase-end`, the two rejected A/B
+  candidates. Don't push to it. Add it as a named remote if you need to read
+  those branches.
 - **Name the machine** in every note, handoff and commit body that records
   where a build, test, measurement or listening result happened: "on AURORA"
   or "on ICE QUEEN". Root `AGENTS.md` says how to tell which you are on.
 - **Ask before pushing, and batch.** A CI round trip is about 22 minutes on
   Windows, and the workflow's concurrency group cancels a running build on the
   same ref.
-- **Don't touch another worktree.** `..\bmo-mix-rack-333-deq` and
-  `..\bmo-tune-rt` belong to other sessions.
+- **Don't touch another worktree.** `git worktree list` says which exist; each
+  belongs to a session that may still be using it. The DEQ, Tune and
+  integration worktrees were removed on 2026-09-19 once their branches merged.
 - Frosty decides character, colour, version numbers and anything a listener
   would notice. Offer options with measured trade-offs; don't pick quietly.
 
@@ -42,6 +65,13 @@ git submodule update --init libs/JUCE
 ---
 
 ## The order, and why it is this order
+
+> **History, from here to the end of stage 5.** This plan ran its course: the
+> suite shipped to Kevin as PR #9 on 2026-09-18, and `integration` and the
+> fork are gone as working things. It is kept because it records *why* the
+> pieces were built in this order — the control audit below is still the
+> answer to which questions were settled and when. The live rules are at the
+> top of this file.
 
 **Frosty set the shape on 2026-09-11: finish DEQ and Tune on the fork, then
 one round of testing across every module -- look and sound -- and only then
@@ -179,7 +209,7 @@ code, so Tune's UI work belongs in the UI pass, not in `bmo-tune-work`.
 
 ```
 git -C <worktree> fetch origin
-git worktree add -b <branch> ../bmo-mix-rack-333-<short> origin/integration
+git worktree add -b <branch> ../bmo-mix-rack-333-<short> origin/main
 ```
 
 Then the two setup lines above, then build.
@@ -226,10 +256,11 @@ build/tools/tune/Release/bmo-tune-ref.exe bmo
 build/tools/tune/Release/bmo-tune-field.exe
 ```
 
-### CI on the fork
+### CI
 
-CI does not run itself on a feature branch. Dispatch it, and give Frosty the
-run id:
+CI does not run itself on a feature branch. Opening the pull request is what
+normally starts it; dispatch it by hand if you want a run before that, and
+give Frosty the run id:
 
 **But it DOES run itself on a version tag.** `build.yml`'s triggers are `push`
 on `branches: [main]` **and `tags: ['v*']`**, plus pull requests and
@@ -241,8 +272,8 @@ written; this file had never said so. The concurrency group is keyed on
 Expect two, and cancel one yourself if the runner time matters.
 
 ```
-gh workflow run build.yml --repo badmixesonly/bmo-mix-rack-333 --ref <branch>
-gh run list --repo badmixesonly/bmo-mix-rack-333 --limit 5
+gh workflow run build.yml --ref <branch>
+gh run list --limit 5
 ```
 
 Jobs: **DSP** (Linux, seconds), **Each side alone** (Linux, the two switches),
@@ -276,13 +307,15 @@ DEQ-plus-Tune batching that this section used to describe is done.
 ### Finishing a workflow
 
 1. Full `ctest` in Release passes on the machine you are on.
-2. Push the branch to the fork, dispatch CI, wait for all four jobs.
+2. Push the branch to `origin` and open the pull request. That starts CI; wait
+   for all four jobs.
 3. Write what you measured into `testing-notes/`, naming the machine.
-4. Tell Frosty. Merging into `integration`, and anything that reaches Kevin,
-   is his.
+4. Tell Frosty. **The merge is his**, not yours.
 
-No pull request is opened along the way. Every branch ends in `integration`,
-and Kevin sees the work at stage 5, after the suite has been heard.
+A docs-only branch starts no CI at all — `build.yml` carries
+`paths-ignore: ['**.md']` on every trigger — so a PR that changes only
+Markdown shows no checks. That is the workflow behaving as written, not checks
+that failed to run.
 
 ---
 
@@ -292,9 +325,9 @@ and Kevin sees the work at stage 5, after the suite has been heard.
 One build, every module, on both machines. It happens once, after the UI pass,
 and it is the gate before anything reaches Kevin.
 
-- Build it in CI on `integration`, not locally, so both machines install the
-  same bytes: `gh workflow run build.yml --repo badmixesonly/bmo-mix-rack-333
-  --ref integration`, then the `BMO-Windows` and `BMO-macOS` artifacts.
+- Build it in CI, not locally, so both machines install the same bytes:
+  `gh workflow run build.yml --ref <branch>`, then the `BMO-Windows` and
+  `BMO-macOS` artifacts.
 - Record the artifact's run id and each plugin's SHA-256 in the testing note,
   and check the hashes again after the session. The DETUNE host checks were
   once attributed to the wrong build for want of that.
@@ -318,9 +351,9 @@ and it is the gate before anything reaches Kevin.
 
 ## Stage 5 — the pull requests
 
-Frosty opens them, in this order, each rebased onto `main` so it carries only
-its own work: **DEQ**, then **Tune**, then the **UI pass**. Kevin reviews each
-on its own. `WORKFLOWS.md` itself never goes: it is the fork's file.
+**Done, 2026-09-18.** All of it went as PR #9 rather than three, and this file
+went with it. What follows is kept because the audio check is worth doing on
+every branch, not because the staging still applies.
 
 **Check every branch for audio before the PR is opened**, on the rebased
 branch:

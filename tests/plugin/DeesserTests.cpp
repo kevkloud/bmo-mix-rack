@@ -102,6 +102,37 @@ int main()
                "threshold at -6.5 should read '-6.5 dB over', got '" + text (P::kThresh, -6.5f) + "'");
         check (text (P::kThresh, 24.0f) == "+24.0 dB over",
                "threshold at the top should read '+24.0 dB over', got '" + text (P::kThresh, 24.0f) + "'");
+
+        // **A hair either side of zero still reads as zero**, and these call
+        // the formatter directly rather than going through the parameter.
+        //
+        // That is the whole point. `text()` above *sets* the parameter, and
+        // `thresh` has a 0.1 dB step, so a value of 0.01 is snapped to exactly
+        // 0 before the formatter is ever reached -- which is why the four
+        // assertions above could not catch this and why a first attempt at a
+        // regression test for it passed against the bug.
+        //
+        // The bug: the sign came from the raw value and the digits from %.1f,
+        // two derivations of one fact, so 0.01 printed "+0.0 dB over" and
+        // -0.01 printed "-0.0". macOS CI is where it surfaced, because
+        // `thresh` round-trips through a host's 32-bit normalised float and
+        // -24 + 0.5 * 48 does not come back exactly 0 on every target -- so the
+        // value reaching the formatter there was a hair off zero *despite* the
+        // step, the snapping being float arithmetic itself.
+        for (const auto hair : { 0.01f, -0.01f, 0.049f, -0.049f })
+            check (P::detail::threshText (hair) == "0.0 dB over",
+                   "threshText(" + juce::String (hair, 3)
+                       + ") should read '0.0 dB over', got '"
+                       + juce::String (P::detail::threshText (hair)) + "'");
+
+        // And it still crosses to a signed reading where the rounding says it
+        // should, so the fix is not "never print a sign near zero".
+        check (P::detail::threshText (0.06f) == "+0.1 dB over",
+               "threshText(0.06) should read '+0.1 dB over', got '"
+                   + juce::String (P::detail::threshText (0.06f)) + "'");
+        check (P::detail::threshText (-0.06f) == "-0.1 dB over",
+               "threshText(-0.06) should read '-0.1 dB over', got '"
+                   + juce::String (P::detail::threshText (-0.06f)) + "'");
     }
 
     //== The choice list, in order ============================================

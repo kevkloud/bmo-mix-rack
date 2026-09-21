@@ -113,9 +113,31 @@ namespace detail
         figure in the suite apart from the trailing word. */
     inline std::string threshText (float prominenceDb)
     {
+        // **Round first, then take the sign from the rounded value.**
+        //
+        // This took the sign off the raw float and printed the digits with
+        // %.1f, which is two derivations of one fact, and they disagreed: any
+        // value in (0, 0.05) came out "+0.0 dB over" and anything in
+        // (-0.05, 0) came out "-0.0". A threshold that is zero to the precision
+        // being shown has to read as zero.
+        //
+        // macOS is where CI caught it, and only because the default lands a
+        // hair above zero there where Windows and Linux land exactly on it:
+        // `thresh` round-trips through a host's 32-bit normalised float, and
+        // -24 + 0.5 * 48 is not obliged to come back as exactly 0 on every
+        // target. The formatter was wrong on all three; one of them was honest
+        // about it.
+        auto rounded = std::round ((double) prominenceDb * 10.0) / 10.0;
+
+        // Not a no-op assignment: -0.0 == 0.0 is true, so this branch is
+        // reached for negative zero, and it clears the sign bit that would
+        // otherwise print "-0.0".
+        if (rounded == 0.0)
+            rounded = 0.0;
+
         char buf[64];
         std::snprintf (buf, sizeof (buf), "%s%.1f dB over",
-                       prominenceDb > 0.0f ? "+" : "", (double) prominenceDb);
+                       rounded > 0.0 ? "+" : "", rounded);
         return buf;
     }
 }

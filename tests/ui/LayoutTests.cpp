@@ -336,14 +336,26 @@ void checkFetcompSwitches (bmo::ui::ModulePanel& panel, const juce::String& who)
                          who + " " + names[i] + " height");
         }
 
-        // Two rows of two and then ALL: the four ratios pair off and the fifth
-        // position sits apart, because it is a different curve rather than a
-        // steeper one.
-        checkEquals (row[0]->getY(), row[1]->getY(), who + " 8:1 sits beside 4:1");
-        checkEquals (row[2]->getY(), row[3]->getY(), who + " 20:1 sits beside 12:1");
-        check (row[4]->getY() > row[2]->getY(), who + " ALL sits under the four ratios");
-        checkEquals (row[1]->getX() - row[0]->getRight(), bmo::ui::Tokens::switchGap,
-                     who + " gap between 4:1 and 8:1");
+        // One column beside INPUT and OUTPUT: the four ratios run down it in
+        // order, and ALL sits apart at the foot because it is a different
+        // curve rather than a steeper one.
+        //
+        // This was a 2 x 2 block with ALL underneath until 2026-09-20, when the
+        // strip moved into the column beside the stacked drive knobs. What is
+        // pinned here is unchanged in substance -- the four are evenly spaced,
+        // and the fifth is set further off than they are from each other -- so
+        // that the separation cannot quietly be lost to a tidy-up.
+        for (int i = 0; i < 4; ++i)
+            checkEquals (row[i]->getX(), row[0]->getX(),
+                         who + " " + names[i] + " shares the ratio column");
+
+        for (int i = 1; i < 4; ++i)
+            checkEquals (row[i]->getY() - row[i - 1]->getBottom(), bmo::ui::Tokens::switchGap,
+                         who + " gap above " + names[i]);
+
+        check (row[4]->getY() > row[3]->getBottom(), who + " ALL sits under the four ratios");
+        check (row[4]->getY() - row[3]->getBottom() > row[1]->getY() - row[0]->getBottom(),
+               who + " ALL is set further apart than the ratios are from each other");
 
         const auto lit = [&row]
         {
@@ -382,8 +394,12 @@ void checkFetcompSwitches (bmo::ui::ModulePanel& panel, const juce::String& who)
         if (blue == nullptr || black == nullptr)
             return;
 
-        checkEquals (blue->getY(), black->getY(), who + " BLACK sits beside BLUE");
-        checkEquals (black->getX() - blue->getRight(), bmo::ui::Tokens::switchGap,
+        // BLUE over BLACK in the switch column, under the ratio strip. The
+        // pair was abreast at the foot of the panel until 2026-09-20; what is
+        // pinned is that they are a pair -- same column, one switch gap apart,
+        // in that order -- rather than where on the panel the pair sits.
+        checkEquals (blue->getX(), black->getX(), who + " BLACK shares BLUE's column");
+        checkEquals (black->getY() - blue->getBottom(), bmo::ui::Tokens::switchGap,
                      who + " gap between BLUE and BLACK");
 
         // Black is the default, and it is permanent.

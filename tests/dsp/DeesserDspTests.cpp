@@ -20,6 +20,7 @@
 
 #include "modules/deesser/dsp/DeesserDsp.h"
 #include "modules/deesser/dsp/DspCore.h"
+#include "modules/deesser/dsp/Detector.h"
 
 #include <algorithm>
 #include <cmath>
@@ -293,6 +294,225 @@ void testTheScheduleIsFiveParameters()
 
 } // namespace
 
+//==============================================================================
+// The detector, tested as arithmetic rather than through the audio path.
+//
+// modules/deesser/dsp/Detector.h is JUCE-free and holds no state between runs,
+// so these feed it levels directly instead of rendering audio and inferring
+// what it must have seen. What is checked here is the part that cannot be
+// heard: that prominence is level-independent, that the gates are gates, and
+// that the static curve is the one 10 section 4 prints.
+
+/** Feeds a steady band level and reference level until the envelopes settle,
+    and returns the prominence. */
+double settledProminence (Prominence::Config config, double bandLevel,
+                          double referenceLevel, double seconds = 3.0)
+{
+    Prominence p;
+    p.prepare (config, kSampleRate);
+
+    double out = Prominence::kSilent;
+    const auto n = (size_t) (seconds * kSampleRate);
+
+    for (size_t i = 0; i < n; ++i)
+        out = p.process (bandLevel, referenceLevel);
+
+    return out;
+}
+
+/** The whole reason this detector shape exists: every term is the log of a
+    level, so an input gain adds the same constant to B, W and S and cancels
+    exactly -- at every kappa, not only at 1. A threshold that had to be
+    re-ridden when the take got louder would be the ordinary kind of de-esser
+    this module is deliberately not.
+
+    24 dB of gain, which is the sweep 11 section 5 asks for. */
+void testProminenceIsLevelIndependent()
+{
+    for (const auto kappa : { 0.0, 0.6, 1.0 })
+    {
+        Prominence::Config config;
+        config.kappa = kappa;
+
+        const auto quiet = settledProminence (config, 0.02, 0.2);
+        const auto loud  = settledProminence (config, 0.02 * 15.85, 0.2 * 15.85);
+
+        checkNear (loud, quiet, 1.0e-9,
+                   "prominence is unchanged by 24 dB of input gain at kappa "
+                       + std::to_string (kappa));
+    }
+}
+
+/** Both gates hard-zero rather than clamping, and the result is
+    distinguishable from a genuine prominence of 0 dB -- which is a real
+    reading meaning "typical vocal balance", not "nothing here". */
+void testTheGatesAreGates()
+{
+    Prominence::Config config;
+
+    // A reference at about -70 dBFS is below the -55 dB gate. Without the gate
+    // this is the case that reads as enormous prominence: room tone with a
+    // little hiss in it, band over reference, and the module de-essing silence.
+    check (settledProminence (config, 1.0e-4, 3.2e-4) <= Prominence::kSilent,
+           "a reference under the gate reports silence, not a huge prominence");
+
+    // And the band gate, which is what catches breaths.
+    check (settledProminence (config, 1.0e-4, 0.2) <= Prominence::kSilent,
+           "a band under the gate reports silence");
+
+    // Neither gate engaged: a real reading, and one the caller can act on.
+    check (settledProminence (config, 0.02, 0.2) > Prominence::kSilent,
+           "an ordinary balance reports a real prominence");
+}
+
+/** The static curve, 10 section 4, read at the four points that define its
+    shape. Absolutes, not comparisons with each other -- the house rule from
+    tests/dsp/OptoDspTests.cpp, which passed for a release while both modes
+    were broken because it only compared them to one another. */
+void testTheStaticCurve()
+{
+    GainComputer g;
+    g.thresholdDb = 0.0;
+    g.kneeDb      = 6.0;
+    g.slope       = 4.0;
+    g.rangeDb     = 18.0;
+
+    checkNear (g.reductionDb (-3.0), 0.0, 1.0e-12,
+               "flat below the knee: the curve starts at T - W/2");
+
+    // At the threshold the parabola has covered (0 + 3)^2 / 12 = 0.75 dB of
+    // over, times the 0.75 slope.
+    checkNear (g.reductionDb (0.0), 0.5625, 1.0e-12,
+               "the knee's midpoint, about half a dB rather than a corner");
+
+    checkNear (g.reductionDb (12.0), 9.0, 1.0e-12,
+               "0.75 dB of cut per dB of prominence in the linear region");
+
+    checkNear (g.reductionDb (100.0), 18.0, 1.0e-12,
+               "the curve flattens hard at RANGE");
+
+    checkNear (g.reductionDb (Prominence::kSilent), 0.0, 1.0e-12,
+               "a gated detector asks for no reduction");
+}
+
+/** RANGE is a ceiling on the applied figure, at every setting it can take. */
+void testRangeIsACeiling()
+{
+    GainComputer g;
+    g.thresholdDb = 0.0;
+
+    for (const auto range : { 1.0, 8.0, 18.0 })
+    {
+        g.rangeDb = range;
+        checkNear (g.reductionDb (60.0), range, 1.0e-12,
+                   "a loud ess reaches exactly RANGE at " + std::to_string (range));
+    }
+}
+
+/** Attack is one pole at 0.8 ms, and that number is what lets this module
+    refuse lookahead: about 90 % applied 2 ms into an onset. Measured the way
+    the tau convention says, from the sample before the step. */
+void testAttackReachesTheEventInTime()
+{
+    Reduction::Config config;
+    Reduction r;
+    r.prepare (config, kSampleRate);
+
+    const auto target   = 8.0;
+    const auto atTau    = (int) std::lround (0.8e-3 * kSampleRate);
+    const auto atTwoMs  = (int) std::lround (2.0e-3 * kSampleRate);
+
+    double oneTau = 0.0;
+
+    for (int i = 0; i < atTwoMs; ++i)
+    {
+        const auto applied = r.process (target);
+
+        if (i == atTau - 1)
+            oneTau = applied;
+    }
+
+    checkNear (oneTau / target, 0.632, 0.02,
+               "attack covers 63.2 % of the step in one tau");
+    check (r.appliedDb() / target > 0.9,
+           "about 90 % of the reduction is applied 2 ms into an onset");
+}
+
+/** The hold is what keeps an /s/-/t/ cluster one event. Without it the
+    follower starts releasing into the stop and has to attack again on the
+    burst, which is audible as a flutter on one syllable. */
+void testHoldKeepsAClusterTogether()
+{
+    Reduction::Config config;
+    Reduction r;
+    r.prepare (config, kSampleRate);
+
+    for (int i = 0; i < (int) (0.02 * kSampleRate); ++i)
+        r.process (8.0);
+
+    const auto engaged = r.appliedDb();
+
+    // A 3 ms gap, shorter than the 5 ms hold.
+    for (int i = 0; i < (int) (0.003 * kSampleRate); ++i)
+        r.process (0.0);
+
+    checkNear (r.appliedDb(), engaged, 1.0e-9,
+               "a gap shorter than the hold does not release at all");
+
+    for (int i = 0; i < (int) (0.03 * kSampleRate); ++i)
+        r.process (0.0);
+
+    check (r.appliedDb() < engaged * 0.5,
+           "past the hold the reduction does release");
+}
+
+/** The slow branch is for a sustained bright passage rather than a phoneme,
+    so an ordinary ess must not reach it however loud it is. */
+void testTheSlowBranchNeedsMoreThanAPhoneme()
+{
+    const auto releaseAfter = [] (double heldSeconds)
+    {
+        Reduction::Config config;
+        Reduction r;
+        r.prepare (config, kSampleRate);
+
+        for (int i = 0; i < (int) (heldSeconds * kSampleRate); ++i)
+            r.process (8.0);
+
+        const auto engaged = r.appliedDb();
+
+        // 60 ms of release, two fast time constants.
+        for (int i = 0; i < (int) (0.06 * kSampleRate); ++i)
+            r.process (0.0);
+
+        return r.appliedDb() / engaged;
+    };
+
+    const auto phoneme = releaseAfter (0.12);   // a long ess
+    const auto passage = releaseAfter (0.4);    // a bright passage
+
+    check (phoneme < 0.25, "an ess releases on the fast branch");
+    check (passage > phoneme * 1.5,
+           "a sustained passage releases more slowly than a phoneme");
+}
+
+/** Hysteresis is claimed only while the module is actually engaged. */
+void testHysteresisFollowsEngagement()
+{
+    Reduction::Config config;
+    Reduction r;
+    r.prepare (config, kSampleRate);
+
+    checkNear (r.thresholdOffsetDb(), 0.0, 1.0e-12,
+               "an idle module claims no hysteresis");
+
+    for (int i = 0; i < (int) (0.02 * kSampleRate); ++i)
+        r.process (8.0);
+
+    checkNear (r.thresholdOffsetDb(), config.hysteresisDb, 1.0e-12,
+               "an engaged module drops its threshold by the stated amount");
+}
+
 int main()
 {
     testPlaceholderIsAWire();
@@ -301,6 +521,15 @@ int main()
     testListenIsMomentary();
     testGainReductionIsZeroForNow();
     testTheScheduleIsFiveParameters();
+
+    testProminenceIsLevelIndependent();
+    testTheGatesAreGates();
+    testTheStaticCurve();
+    testRangeIsACeiling();
+    testAttackReachesTheEventInTime();
+    testHoldKeepsAClusterTogether();
+    testTheSlowBranchNeedsMoreThanAPhoneme();
+    testHysteresisFollowsEngagement();
 
     std::printf ("%s  BMO Defang DSP: %d checks, %d failures\n",
                  failures == 0 ? "PASS" : "FAIL", checks, failures);

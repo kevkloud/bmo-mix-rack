@@ -1099,23 +1099,57 @@ void testReductionPastThePin()
     }
 }
 
-/** The alias floor, separated from harmonic content by construction.
+/** The alias floor, and which harmonic is actually in the bin.
 
     A tone at 0.1875*fs has its third harmonic above Nyquist, folding to
-    0.4375*fs -- a bin no harmonic of the tone can occupy, so what is measured
-    there is aliasing and nothing else. 16384 samples, and both land on whole
-    Goertzel bins.
+    0.4375*fs. The old version of this test measured that one bin, asserted
+    -60 at Off, and then only that 2x and 4x were within 0.5 dB of Off. That
+    second assertion was fitted to what the code already did and could not
+    fail; it is gone.
 
-    **Only the Off target is load-bearing**, because it is the one that
-    decides the default (10 section 9). 2x and 4x buy little here and that is
-    a measured finding rather than a bug: the dominant source is the cell's
-    own gain modulation, which aliases inside whatever rate it runs at, and
-    ADAA already covers the static shapers. */
+    The comment it replaced said the image bin was "a bin no harmonic of the
+    tone can occupy". That is not true, and it is the whole story. Harmonics
+    fold *inside* the oversampled domain too, and at 2x the thirteenth lands
+    on exactly that bin, below base Nyquist, in the decimation filter's
+    passband where no filter can reach it. At 4x it is the nineteenth. The
+    earlier note's guess -- gain modulation aliasing inside whatever rate it
+    runs at -- was right, and is now measured rather than assumed:
+    `testing-notes/fetcomp-alias-origin-2026-09-21.md`, AURORA, and
+    `measure_fetcomp aliasorigin` reproduces it.
+
+    So what is pinned here is the **mechanism**, by detuning the tone by
+    fs/512 so the candidates separate onto their own whole Goertzel bins:
+
+      - Off leaves the third harmonic in the bin.
+      - 2x removes the third harmonic outright.
+      - 4x additionally removes the thirteenth.
+
+    Each of those is a structural fact about the oversampler doing its job,
+    falsifiable and not fitted to a measured level. What survives -- the
+    nineteenth at 4x, about -74 dB -- is the flat skirt of the detector's
+    rectifier, which is not bandlimited, and no factor removes it because
+    there is always a higher harmonic to take the bin.
+
+    **The pack's -80 at 2x and -90 at 4x (10 section 9, 11 section 3) are
+    deliberately not asserted here.** They assume a decaying skirt; the
+    measured skirt is flat within 2.8 dB from the third harmonic to the
+    nineteenth, so no oversampling factor reaches them. Changing those
+    targets is the owner's call and has not been made. This is a stated gap,
+    not a quiet loosening -- if the targets stand, the fix is to bandlimit
+    the rectifier and this test grows the numbers back. */
 void testAliasFloor()
 {
+    // fs/512, which is 32 bins of the 16384-sample window, so the fundamental
+    // and every displaced harmonic below still land on whole bins.
+    constexpr double delta = kSampleRate / 512.0;
+
+    const auto toneHz  = 0.1875 * kSampleRate + delta;
+    const auto nominal = 0.4375 * kSampleRate;
+
     for (const auto v : { Voicing::blue, Voicing::black })
     {
-        double floorDb[3] {};
+        // Indexed by factor: 0 = Off, 1 = 2x, 2 = 4x.
+        double thirdDb[3] {}, thirteenthDb[3] {}, plainFloorDb[3] {};
         int index = 0;
 
         for (const auto factor : { 1, 2, 4 })
@@ -1128,23 +1162,63 @@ void testAliasFloor()
             p.oversampling = factor;
             p.inputDb = 26.0f;                       // about 20 dB of reduction
 
-            const auto toneHz = 0.1875 * kSampleRate;
-            auto core = prepared (p);
-            const auto out = run (core, sine (toneHz, 0.9, std::pow (10.0, -18.0 / 20.0)));
-
             const auto from = (size_t) (0.4 * kSampleRate);
             constexpr size_t count = 16384;
 
-            const auto tone  = magnitudeAt (out, toneHz, kSampleRate, from, count);
-            const auto image = magnitudeAt (out, 0.4375 * kSampleRate, kSampleRate, from, count);
+            // The undetuned tone still gives the plain floor the pack's Off
+            // target is written against.
+            {
+                auto core = prepared (p);
+                const auto out = run (core, sine (0.1875 * kSampleRate, 0.9,
+                                                  std::pow (10.0, -18.0 / 20.0)));
 
-            floorDb[index++] = dbOf (image / std::max (tone, 1.0e-15));
+                const auto tone  = magnitudeAt (out, 0.1875 * kSampleRate, kSampleRate, from, count);
+                const auto image = magnitudeAt (out, nominal, kSampleRate, from, count);
+
+                plainFloorDb[index] = dbOf (image / std::max (tone, 1.0e-15));
+            }
+
+            auto core = prepared (p);
+            const auto out = run (core, sine (toneHz, 0.9, std::pow (10.0, -18.0 / 20.0)));
+
+            const auto tone = magnitudeAt (out, toneHz, kSampleRate, from, count);
+
+            const auto third      = magnitudeAt (out, nominal -  3.0 * delta, kSampleRate, from, count);
+            const auto thirteenth = magnitudeAt (out, nominal + 13.0 * delta, kSampleRate, from, count);
+
+            thirdDb[index]      = dbOf (third      / std::max (tone, 1.0e-15));
+            thirteenthDb[index] = dbOf (thirteenth / std::max (tone, 1.0e-15));
+            ++index;
         }
 
-        check (floorDb[0] <= -60.0,
-               "the alias floor at Off is at or under -60 dB, got " + std::to_string (floorDb[0]));
-        check (floorDb[1] <= floorDb[0] + 0.5 && floorDb[2] <= floorDb[0] + 0.5,
-               "oversampling does not make the alias floor worse");
+        const std::string who { v == Voicing::blue ? "Blue" : "Black" };
+
+        check (plainFloorDb[0] <= -60.0,
+               who + ": the alias floor at Off is at or under -60 dB, got "
+                   + std::to_string (plainFloorDb[0]));
+
+        // The detuned tone must put the third harmonic in the bin at Off,
+        // otherwise the two assertions below are vacuous.
+        check (thirdDb[0] >= -90.0,
+               who + ": at Off the third harmonic is in the image bin, got "
+                   + std::to_string (thirdDb[0]));
+
+        check (thirdDb[1] <= thirdDb[0] - 30.0,
+               who + ": 2x removes the third harmonic, which went from "
+                   + std::to_string (thirdDb[0]) + " to " + std::to_string (thirdDb[1]));
+
+        check (thirdDb[2] <= thirdDb[0] - 30.0,
+               who + ": 4x removes the third harmonic too, got "
+                   + std::to_string (thirdDb[2]));
+
+        check (thirteenthDb[1] >= -100.0,
+               who + ": at 2x the thirteenth harmonic is the one in the bin, got "
+                   + std::to_string (thirteenthDb[1]));
+
+        check (thirteenthDb[2] <= thirteenthDb[1] - 30.0,
+               who + ": 4x removes the thirteenth harmonic, which went from "
+                   + std::to_string (thirteenthDb[1]) + " to "
+                   + std::to_string (thirteenthDb[2]));
     }
 }
 

@@ -40,6 +40,44 @@ well-built DSP. Four things are wrong with it and none of them is its character.
 
 ## 1. The alias floor, and the test that lets it pass
 
+> **RESOLVED on AURORA, 2026-09-21 — the code is right and the targets are not
+> reachable. One decision is left, and it is Frosty's.** Full measurement:
+> `testing-notes/fetcomp-alias-origin-2026-09-21.md`; reproduce with
+> `measure_fetcomp aliasorigin`.
+>
+> The floor is **aliasing inside the oversampled domain**. The detector's
+> `abs`, `max` and clamp are not bandlimited, so they throw harmonics past the
+> oversampled Nyquist; those fold within that domain; and the ones landing
+> below base Nyquist sit in the decimation filter's **passband**, untouchable.
+> Measured by detuning the tone by `fs/512` so the candidates separate: at 2x
+> the filter removes the third harmonic outright (-73.8 to -120.4, 46 dB) and
+> the **thirteenth** is what is left in the bin; at 4x the thirteenth goes too
+> and the **nineteenth** takes over at -74.3.
+>
+> Oversampling therefore cannot fix this — each factor hands the bin to a
+> higher harmonic, and the skirt is flat: **2.8 dB across k = 3 to 19**. The
+> pack's -80 at 2x and -90 at 4x assume a decaying skirt, so no factor reaches
+> them. 8x would find another harmonic at about -74.
+>
+> **The decision left:** change `10 §9` and `11 §3` against the measurement
+> (recommended), or bandlimit the rectifier — which risks the attack overshoot
+> table and the THD figures that currently conform. The targets have **not**
+> been touched.
+>
+> **The test is fixed.** `testAliasFloor` no longer asserts a fitted threshold;
+> it pins the mechanism (2x removes H3, 4x removes H13) and is proved
+> falsifiable — forcing `oversampling = 1` yields 6 failures, where the old
+> assertion passed that mutant. The pack's -80/-90 are deliberately not
+> asserted, and the test says so in its own comment.
+>
+> A third hypothesis, mine, was also wrong and is recorded in the note so it is
+> not re-run: the image bin sits in the halfband's transition band at -41.7 dB.
+> True of the filter, not the cause — 46 dB of measured rejection is ample.
+
+*What follows is the original statement of the problem, kept because it is how
+the question was framed and what the numbers were before it was answered.*
+
+
 **What the pack asks** (11 section 3): -60 dB at Off, **-80 at 2x**, **-90 at
 4x**, per rate, per factor, at 10/20/30 dB GR, both voicings.
 

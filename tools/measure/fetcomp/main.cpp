@@ -10,6 +10,7 @@
         measure_fetcomp timing [voicing]   attack overshoot table, release times
         measure_fetcomp thd    [voicing]   THD and H2/H3 vs level at 10/20/30 dB GR
         measure_fetcomp alias  [voicing]   the alias floor per factor per rate
+        measure_fetcomp aliasorigin [voicing] which harmonic is in the image bin
         measure_fetcomp slam   [voicing]   LF ripple H3 against the release detents
         measure_fetcomp allbuttons         the plateau, the standing bias, the lag
         measure_fetcomp bench  [voicing]   ns/sample, for the CPU budget
@@ -526,6 +527,91 @@ int alias (Voicing v)
     return 0;
 }
 
+/** Where the alias floor actually comes from.
+
+    `alias` measures one bin and cannot say what put energy in it. This detunes
+    the tone by a known delta and separates the candidates, because a harmonic
+    that folds arrives displaced by k times that delta:
+
+        tone f = (0.1875 + d) * fs, d = fs/512
+
+        k=3  at Off/2x/4x  ->  0.4375*fs - 3d     (the third harmonic, which
+                               the decimation filter is supposed to remove)
+        k=13 at 2x         ->  0.4375*fs + 13d    (aliased inside the 2x domain,
+                               landing BELOW base Nyquist where no decimation
+                               filter can reach it)
+        k=19 at 2x and 4x  ->  0.4375*fs - 19d    (the same trap one octave up)
+
+    Every one of those lands on a whole Goertzel bin for a 16384-sample window,
+    so the three are read cleanly and independently. If the floor is the third
+    harmonic surviving the filter's transition band, the energy is at -3d and
+    the others are empty. If it is in-domain aliasing of a non-bandlimited
+    detector, the energy is at +13d and -19d, and oversampling cannot fix it --
+    it only changes which harmonic lands on the bin. */
+int aliasOrigin (Voicing v)
+{
+    constexpr double rate  = kSampleRate;
+    constexpr size_t count = 16384;
+    constexpr double d     = rate / 512.0;          // 32 bins of the window
+
+    const auto toneHz = 0.1875 * rate + d;
+    const auto nominal = 0.4375 * rate;
+
+    std::printf ("Where the alias floor comes from, %s, 20:1, fastest attack and\n"
+                 "release, 20 dB GR, 48 kHz. Tone detuned to %.4f Hz (0.1875*fs + fs/512)\n"
+                 "so that harmonics which fold onto the image bin separate by k*delta.\n"
+                 "Every figure is dB relative to the fundamental.\n\n", nameOf (v), toneHz);
+
+    std::printf ("%-8s %-12s", "factor", "image bin");
+
+    const int ks[] = { 3, 13, 19 };
+
+    for (const auto k : ks)
+        std::printf (" H%-2d @ %-9s", k, k == 13 ? "+13d" : (k == 3 ? "-3d" : "-19d"));
+
+    std::printf ("\n");
+
+    for (const auto factor : { 1, 2, 4 })
+    {
+        DspCore::Params p;
+        p.ratio = Ratio::twenty;
+        p.voicing = v;
+        p.attackPosition = 7.0f;
+        p.releasePosition = 7.0f;
+        p.oversampling = factor;
+
+        const auto amplitude = std::pow (10.0, -18.0 / 20.0);
+        p.inputDb = driveForGr (p, 20.0, -18.0, rate);
+
+        auto core = prepared (p, rate);
+        const auto out = render (core, sine (toneHz, 2.0, amplitude, rate));
+
+        const auto from = (size_t) (0.5 * rate);
+        const auto tone = magnitudeAt (out, toneHz, rate, from, count);
+
+        std::printf ("%-8d %-12.1f", factor, dbOf (magnitudeAt (out, nominal, rate, from, count)
+                                                     / std::max (tone, 1.0e-12)));
+
+        for (const auto k : ks)
+        {
+            const auto hz = (k == 13) ? nominal + 13.0 * d : nominal - (double) k * d;
+
+            std::printf (" %-15.1f", dbOf (magnitudeAt (out, hz, rate, from, count)
+                                             / std::max (tone, 1.0e-12)));
+        }
+
+        std::printf ("\n");
+    }
+
+    std::printf ("\nThe third harmonic itself, at %.1f Hz in the oversampled domain,\n"
+                 "is attenuated by the decimation filter's response 1.125x above base\n"
+                 "Nyquist -- measured at -41.7 dB from the filter's own coefficients.\n",
+                 3.0 * toneHz);
+
+    return 0;
+}
+
+
 int slam (Voicing v)
 {
     std::printf ("LF ripple, %s, 20 dB GR at 20:1, release swept over the detents.\n"
@@ -677,11 +763,12 @@ int main (int argc, char** argv)
     if (mode == "timing")     return timing (v);
     if (mode == "thd")        return thd (v);
     if (mode == "alias")      return alias (v);
+    if (mode == "aliasorigin") return aliasOrigin (v);
     if (mode == "slam")       return slam (v);
     if (mode == "allbuttons") return allButtons();
     if (mode == "bench")      return bench (v);
 
     std::fprintf (stderr, "usage: measure_fetcomp <latency|positions|curve|timing|thd|alias"
-                          "|slam|allbuttons|bench> [blue|black]\n");
+                          "|aliasorigin|slam|allbuttons|bench> [blue|black]\n");
     return 2;
 }

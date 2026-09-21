@@ -26,6 +26,7 @@ it goes stale.
 ### Measurements
 
 - `testing-notes/fetcomp-dsp-2026-09-21.md` — the DSP measured on AURORA: attack, release, programme dependence, THD, ripple, latency, the GR curve and the alias floor.
+- `testing-notes/fetcomp-alias-origin-2026-09-21.md` — which harmonic is actually in the alias bin, and why oversampling cannot lower the floor.
 - `testing-notes/ui-pass-fetcomp-2026-09-20.md` — the visual pass: render hashes, contrast ratios, layout gaps.
 
 ## Decided

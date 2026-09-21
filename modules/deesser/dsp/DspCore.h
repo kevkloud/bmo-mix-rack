@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/dsp/AnalyserTap.h"
 #include "modules/deesser/dsp/Band.h"
 #include "modules/deesser/dsp/Detector.h"
 #include "modules/deesser/params.h"
@@ -130,6 +131,41 @@ public:
         modulation behaviour changes with the sample rate (10 section 7). */
     static constexpr int kControlInterval = 8;
 
+    //== The ribbon's tap =======================================================
+    //
+    /** What the panel's sibilance ribbon draws, and the reason this module has
+        an `analyser()` at all.
+
+        **Four floats a frame, not three.** The frame carries what arrived, how
+        much of it was in the band, how much was taken off and how prominent
+        the band was -- and then a fourth slot it does not need, because
+        `AnalyserTap`'s ring is a power of two and its reader hands back the
+        newest N samples from wherever the write head happens to be. With a
+        frame size of four the head is always a multiple of four and a read of
+        a multiple of four lands on a frame boundary; with three it would
+        land one sample into a frame about a third of the time, and the ribbon
+        would draw the band's energy as the signal and the reduction as the
+        band. The spare slot is cheaper than a header.
+
+        **Decimated to `kRibbonHz`, not written per sample.** The ribbon is
+        about 230 px wide and shows a few seconds, so a pixel is some tens of
+        milliseconds; audio rate would be four orders of magnitude more data
+        than the drawing can use. What each frame carries is the *peak* over
+        its window rather than a sample from it, so a 2 ms ess onset cannot
+        fall between two frames and go missing.
+
+        It costs nothing until a panel enables it, which is `AnalyserTap`'s
+        whole contract. */
+    AnalyserTap& ribbonTap() noexcept { return ribbon; }
+
+    /** Frames a second. 400 is about six per ribbon pixel at the width this
+        panel gives it -- enough that the peak in a pixel is a real peak and
+        not one sample's luck. */
+    static constexpr int kRibbonHz = 400;
+
+    /** One frame, in the order the tap carries them. */
+    enum RibbonSlot { ribbonInput = 0, ribbonBand, ribbonReduction, ribbonProminence, ribbonFrame };
+
     //==========================================================================
 
     void prepare (double newSampleRate, int /*maxBlockSize*/, int numChannels) noexcept
@@ -163,6 +199,10 @@ public:
         // cannot raise the fullband level the band is judged against and stop
         // the module hearing an ess over it. A plain second-order high-pass,
         // which is what `detectorDesign` builds in shelf mode.
+        // Four seconds of frames, rounded up to a power of two inside the tap.
+        ribbonWindow = std::max (1, (int) std::lround (rate / (double) kRibbonHz));
+        ribbon.prepare (ribbonFrame * kRibbonHz * 4);
+
         refCoeffs = dsp::SvfCoeffs::fromBiquad (
             detectorDesign (Shape::highShelf, kRefHighPassHz, 0.707, rate));
         refTaps = dsp::SvfTaps::of (refCoeffs.g, refCoeffs.k);
@@ -187,6 +227,10 @@ public:
         primed = false;
         sinceTick = 0;
         depthAtTick = depthTwoTicksAgo = 0.0;
+
+        ribbonCountdown = 0;
+        ribbonInputPeak = ribbonBandPeak = ribbonReductionPeak = 0.0f;
+        ribbonProminencePeak = -1000.0f;
         reportedDb.store (0.0f, std::memory_order_relaxed);
     }
 
@@ -291,6 +335,39 @@ public:
             // put a step exactly where the glide was.
             const auto unity = applied == 0.0 && depthAtTick == 0.0 && depthTwoTicksAgo == 0.0;
 
+            //== The ribbon's frame ===========================================
+            //
+            // Accumulated as peaks over the window and written once it closes.
+            // Guarded on isEnabled() so a module with no editor open pays for
+            // one branch a sample and nothing else -- AnalyserTap's contract,
+            // and the reason it is worth keeping even at 400 frames a second.
+            if (ribbon.isEnabled())
+            {
+                const auto input = (float) std::abs (channels[0][n]);
+
+                ribbonInputPeak      = std::max (ribbonInputPeak, input);
+                ribbonBandPeak       = std::max (ribbonBandPeak, (float) detector.bandEnvelope());
+                ribbonReductionPeak  = std::max (ribbonReductionPeak, (float) applied);
+                ribbonProminencePeak = std::max (ribbonProminencePeak, (float) prominence);
+
+                if (--ribbonCountdown <= 0)
+                {
+                    ribbonCountdown = ribbonWindow;
+
+                    const float frame[ribbonFrame]
+                    {
+                        ribbonInputPeak, ribbonBandPeak,
+                        ribbonReductionPeak, ribbonProminencePeak
+                    };
+
+                    const float* one[] { frame };
+                    ribbon.write (one, 1, ribbonFrame);
+
+                    ribbonInputPeak = ribbonBandPeak = ribbonReductionPeak = 0.0f;
+                    ribbonProminencePeak = -1000.0f;
+                }
+            }
+
             //== Cut ==========================================================
             for (int c = 0; c < chans; ++c)
             {
@@ -394,6 +471,14 @@ private:
 
     /** Written once a block by the audio thread, read by the panel. */
     std::atomic<float> reportedDb { 0.0f };
+
+    /** The ribbon's ring, and the window being accumulated into the next
+        frame. Peaks rather than samples, so a short onset cannot fall between
+        two frames. */
+    AnalyserTap ribbon;
+    int  ribbonCountdown = 0, ribbonWindow = 0;
+    float ribbonInputPeak = 0.0f, ribbonBandPeak = 0.0f;
+    float ribbonReductionPeak = 0.0f, ribbonProminencePeak = -1000.0f;
 
     /** An atomic store on the panel's side and a relaxed load on the audio
         thread's: no allocation and no lock, which is the whole of the

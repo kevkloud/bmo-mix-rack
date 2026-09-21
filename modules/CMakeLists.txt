@@ -88,6 +88,7 @@ bmo_add_module(deesser
         ${CMAKE_CURRENT_SOURCE_DIR}/deesser/dsp/DspCore.cpp
     UI_SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/deesser/panel/DeesserPanel.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/deesser/panel/Ribbon.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/deesser/Module.cpp)
 
 endif()

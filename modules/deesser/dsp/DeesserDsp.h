@@ -68,6 +68,13 @@ public:
         return DspCore::latencySamples();
     }
 
+    /** The ribbon's tap: four floats a frame at DspCore::kRibbonHz. Null for
+        every module that does not offer one, which is all of them but this.
+        Enabling it is the panel's job and disabling it again is the panel's
+        destructor, so a session with no BMO Defang window open costs the
+        audio thread one branch a sample. */
+    AnalyserTap* analyser() noexcept override { return &core.ribbonTap(); }
+
     /** The panel's GR meter reads this through ModuleEngine. Signed, positive =
         gain taken away, and it is the **peak band reduction** rather than a
         wideband figure; the placeholder core reports a flat zero. */

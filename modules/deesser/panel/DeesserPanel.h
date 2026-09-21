@@ -2,6 +2,7 @@
 
 #include "core/product/ModuleDef.h"
 #include "core/ui/LevelBars.h"
+#include "modules/deesser/panel/Ribbon.h"
 
 #include <array>
 #include <optional>
@@ -110,12 +111,16 @@ private:
     one, and the two pairs read as "where and how wide" then "how much and how
     deep".
 
-    **THRESH is the one knob that prints its value.** Its number is in
+    **THRESH and FREQ print their values.** THRESH's number is in
     *prominence* dB and not dBFS -- how far the band stands above the
-    detector's reference -- and a bare number cannot say that. The other three
-    are either drawn in the sketch (FREQ, Q, and RANGE as its depth) or carry
-    an obvious unit. The caption is the short form, as BMO DEQ's band already
-    spells it; the parameter is named "Threshold" where a host shows it.
+    detector's reference -- and a bare number cannot say that. The caption is the short
+    form, as BMO DEQ's band already spells it; the parameter is named
+    "Threshold" where a host shows it.
+
+    FREQ prints because the sketch shows *where* the band is but not the
+    number -- and the frequency is the one setting anybody would carry to
+    another track or another session (Frosty, 2026-09-21). Q and RANGE stay
+    silent: the drawing is the whole of what they mean.
 
     **LISTEN is momentary and is not a parameter.** It is held, not toggled,
     and it rides `ModuleContext::setSolo` -- BMO DEQ's band-solo precedent
@@ -211,6 +216,7 @@ private:
 
     ui::PlainKnob freqKnob, qKnob, threshKnob, rangeKnob;
     BandSketch sketch;
+    Ribbon ribbon;
     ui::LevelBar grBar;
 
     juce::ToggleButton bellButton, shelfButton;

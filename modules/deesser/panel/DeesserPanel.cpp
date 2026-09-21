@@ -47,6 +47,13 @@ namespace
 
     constexpr int kSketchHeight = 104;
 
+    /** The ribbon under it. 44 px of the 51 the needle left behind, which is
+        where that space was always going -- see the class comment. Shallower
+        than the sketch on purpose: the sketch is the thing being set and the
+        ribbon is the thing being watched, and a reader should be able to tell
+        which is which without reading either. */
+    constexpr int kRibbonHeight = 44;
+
     //== The sketch's axes =====================================================
     //
     // Both are fixed rather than fitted to the band, so that moving FREQ moves
@@ -237,6 +244,7 @@ DeesserPanel::DeesserPanel (ui::ModuleContext ctx)
       rangeKnob  (context.params.param (Index::range),  "RANGE",
                   ui::Knob::Style::character, 0.62f, context.def.accent),
       sketch (context.def.accent),
+      ribbon (context.def.accent),
       grBar ("GR", ui::LevelBar::Grow::leftward, 0.0f, kMaxReductionDb,
              [this]
              {
@@ -257,6 +265,17 @@ DeesserPanel::DeesserPanel (ui::ModuleContext ctx)
     // lane that says so. The other three are either drawn in the sketch above
     // them or carry a unit that speaks for itself.
     threshKnob.setShowsValue (true);
+
+    // FREQ prints its value too -- Frosty, 2026-09-21.
+    //
+    // The sketch above already shows *where* the band is, which was the
+    // argument for leaving this off. What a drawing cannot give anyone is the
+    // number: the one to write down, to type into the same module on another
+    // track, or to compare against the take from last week. A de-esser is
+    // tuned to a voice, and the frequency is the setting worth carrying
+    // between sessions. The format is Hertz, so it reads "6.50 kHz" and not a
+    // bare 6500.
+    freqKnob.setShowsValue (true);
 
     // The printed scale. Positions are amounts of reduction, 0..18 and
     // positive, because that is what the DSP reports; the text is negative,
@@ -305,8 +324,13 @@ DeesserPanel::DeesserPanel (ui::ModuleContext ctx)
     addAndMakeVisible (listenButton);
 
     for (auto* c : std::initializer_list<juce::Component*> {
-             &sketch, &freqKnob, &qKnob, &threshKnob, &rangeKnob, &grBar })
+             &sketch, &ribbon, &freqKnob, &qKnob, &threshKnob, &rangeKnob, &grBar })
         addAndMakeVisible (c);
+
+    // The ribbon's tap. Handing it over is what enables it, and ~Ribbon is
+    // what switches it off again -- so a session with no BMO Defang window
+    // open costs the audio thread one branch a sample and nothing else.
+    ribbon.setTap (context.analyser);
 
     // One timer for the panel, not one per bar. `ui::LevelBar::refresh` is
     // driven from outside for that reason.
@@ -389,6 +413,10 @@ void DeesserPanel::refreshSketch()
                     context.params.getReal (Index::q),
                     juce::roundToInt (context.params.getReal (Index::shape)),
                     context.params.getReal (Index::range));
+
+    // The ribbon is drawn against RANGE too, so a full-height notch there and
+    // a full bar below mean the same thing.
+    ribbon.setRangeDb (context.params.getReal (Index::range));
 }
 
 bool DeesserPanel::setUiState (const juce::String& key, const juce::String& value)
@@ -432,7 +460,7 @@ void DeesserPanel::resized()
     // 4, the same content inset every other panel measures from.
     auto area = getLocalBounds().reduced (kPad, 4);
 
-    const auto content = kSketchHeight + kPairRow + kPairRow + kSwitchHeight
+    const auto content = kSketchHeight + kRibbonHeight + kPairRow + kPairRow + kSwitchHeight
                            + kBarRow + kSwitchHeight;
 
     // Seven divisions for six blocks: a margin above the first and below the
@@ -467,6 +495,11 @@ void DeesserPanel::resized()
     // The picture first: all four knobs move it, so it sits over all four
     // rather than beside any one of them.
     sketch.setBounds (area.removeFromTop (kSketchHeight));
+
+    // Directly under the sketch with only a hairline of air, because the two
+    // are one instrument: where the band is, and what it has been doing.
+    area.removeFromTop (4);
+    ribbon.setBounds (area.removeFromTop (kRibbonHeight));
     area.removeFromTop (gap);
 
     // Where the band is, and how wide.

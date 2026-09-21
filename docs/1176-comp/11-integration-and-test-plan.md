@@ -116,8 +116,38 @@ Runs against `DspCore`, seconds, CI `dsp` job. Model on `VcompDspTests.cpp`.
   threshold anchor (01's −24 dB ±2). On top of the array, assert four shape
   properties a coding error would break: local slope **monotonically
   decreasing** with depth, every setting **above 2:1** everywhere, the four
-  settings strictly **ordered** at every depth, and the curve **still
-  well-formed at 30 dB GR** (finite, monotone in input, no discontinuity).
+  settings strictly **ordered**, and the curve **still well-formed at 30 dB
+  GR** (finite, monotone in input, no discontinuity).
+
+  **The slope and ordering properties are asserted to 20 dB GR and not past
+  it, changed on 2026-09-21 against measurement**
+  (`testing-notes/fetcomp-curve-slope-2026-09-21.md`, AURORA). They read "at
+  every depth" and that was not reachable. Above 20 dB the four settings need
+  very different drives to reach the same reduction — at 30 dB GR it is 48.5 dB
+  over threshold for 4:1 against 35.6 for 20:1 — so the **input amplifier's own
+  soft compression** contributes slope, and contributes most to whichever
+  setting is driven hardest.
+
+  That is measured, not inferred. The static divider law's own slope falls
+  monotonically at every ratio and keeps the four ordered at 30 dB
+  (4:1 2.10 < 8:1 2.32 < 12:1 2.56 < 20:1 3.03); the implementation departs
+  from it by +0.54 on 4:1 and +0.02 on 20:1, in drive order. **Linearising
+  `inputAmp` in `Stages.h` restores both properties** — 4:1 then falls
+  2.32 → 2.21 → 2.19 and the four stay ordered. The divider law, the solve and
+  the bias are all exonerated.
+
+  **Blue breaks first, at 25 dB**, where 4:1 rises 2.37 → 2.67 and crosses
+  above 8:1 at 2.65. Black holds to 25 and breaks at 30. The earlier record
+  showed only Black — the second time a Black-only sweep has hidden Blue
+  behaviour, after the alias floor — so 20 dB is the honest cutoff for both.
+
+  **What still holds above 20 dB and is still asserted there:** every setting
+  stays above 2:1, and the curve stays well-formed — finite, monotone in input,
+  no discontinuity — out to +20 dBFS at every ratio and both voicings. Those
+  are the properties a coding error would break. The slope ordering above 20 dB
+  is a property of a model being driven past where its settings are comparable,
+  and asserting it would mean removing input-stage character that the THD
+  figures depend on. **None of this has been heard.**
   All-buttons is DOCUMENTED-observed only: assert shape, not numbers — 1–2 dB
   standing GR at silence, effective slope above 12:1 near threshold, and a
   plateau (a region where the curve flattens or reverses).

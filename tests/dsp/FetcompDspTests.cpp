@@ -558,6 +558,106 @@ void testGainReductionCurve()
     }
 }
 
+
+/** The curve above 20 dB GR: what still holds where the slope ordering does
+    not, and it is not nothing.
+
+    `testGainReductionCurve` stops its slope and ordering assertions at 20 dB
+    because above that the four settings need very different drives -- 48.5 dB
+    over threshold for 4:1 at 30 dB GR against 35.6 for 20:1 -- and the input
+    amplifier's own soft compression contributes slope to whichever is driven
+    hardest. **That is measured, not assumed** (AURORA, 2026-09-21,
+    `testing-notes/fetcomp-curve-slope-2026-09-21.md`): the static divider law
+    keeps falling and keeps the four ordered at 30 dB, the implementation
+    departs from it by +0.54 on 4:1 against +0.02 on 20:1, and linearising
+    `inputAmp` in `Stages.h` restores both properties outright.
+
+    11 section 3 asks for four shape properties. Two of them -- **above 2:1**
+    and **well-formed at 30 dB GR** -- hold all the way up and had nothing
+    asserting them there, because the whole slope block stopped at 20. This is
+    that assertion.
+
+    Well-formed means what the pack says it means: finite, monotone in input,
+    no discontinuity. A jump of more than 2 dB of reduction for 1 dB of drive
+    is the discontinuity check -- at these depths the curve is shallow, so a
+    real one would stand out by an order of magnitude. */
+void testCurveAboveTwentyDb()
+{
+    for (const auto v : { Voicing::blue, Voicing::black })
+    {
+        const std::string who { v == Voicing::blue ? "Blue" : "Black" };
+
+        for (int i = 0; i < 4; ++i)
+        {
+            const std::string at = who + ", ratio index " + std::to_string (i);
+
+            DspCore::Params p;
+            p.ratio = (Ratio) i;
+            p.voicing = v;
+
+            auto previousGr = -1.0e9;
+            auto previousStep = 0.0;
+
+            for (const auto target : { 25.0, 30.0 })
+            {
+                // The drive the static law says reaches this depth.
+                const auto g = std::pow (10.0, target / 20.0);
+                const auto beta = kRatioBeta[(size_t) i];
+                const auto s = 1.0 + (g - 1.0) / beta;
+                const auto driveDb = kRatioThresholdDb[(size_t) i]
+                                       + 20.0 * std::log10 (s) + target;
+
+                const auto a = deliveredGrDb (p, driveDb - 0.5);
+                const auto b = deliveredGrDb (p, driveDb + 0.5);
+
+                check (std::isfinite (a) && std::isfinite (b),
+                       at + " at " + std::to_string ((int) target)
+                          + " dB GR: the curve is finite");
+
+                // Monotone in input: more drive is never less reduction.
+                check (b >= a - 0.01,
+                       at + " at " + std::to_string ((int) target)
+                          + " dB GR: more drive is not less reduction, "
+                          + std::to_string (a) + " then " + std::to_string (b));
+
+                // No discontinuity: 1 dB of drive never moves the reduction
+                // by more than 2 dB up here.
+                const auto step = b - a;
+
+                check (step < 2.0,
+                       at + " at " + std::to_string ((int) target)
+                          + " dB GR: no discontinuity, 1 dB of drive moved the "
+                            "reduction by " + std::to_string (step) + " dB");
+
+                // Still a compressor, not a limiter turned inside out.
+                const auto slope = 1.0 / std::max (1.0e-6, 1.0 - step);
+
+                check (slope > 2.0,
+                       at + " at " + std::to_string ((int) target)
+                          + " dB GR: the setting stays above 2:1, got "
+                          + std::to_string (slope));
+
+                check (std::isfinite (slope) && slope < 1000.0,
+                       at + " at " + std::to_string ((int) target)
+                          + " dB GR: the slope stays bounded, got "
+                          + std::to_string (slope));
+
+                // And the depth itself still rises between the two targets.
+                if (previousGr > -1.0e8)
+                    check (a > previousGr,
+                           at + ": 30 dB GR really is deeper than 25, "
+                              + std::to_string (previousGr) + " then "
+                              + std::to_string (a));
+
+                previousGr = a;
+                previousStep = step;
+            }
+
+            (void) previousStep;
+        }
+    }
+}
+
 /** All-buttons is DOCUMENTED-observed only, so this asserts shape and not
     numbers: a standing reduction at silence, a very high effective slope near
     threshold, and a plateau -- a region where the curve flattens or reverses,
@@ -2047,6 +2147,7 @@ int main()
     testMixDoesNotComb();
     testResponse();
     testGainReductionCurve();
+    testCurveAboveTwentyDb();
     testAllButtonsShape();
     testFirstSampleOvershoot();
     testReleaseDetents();

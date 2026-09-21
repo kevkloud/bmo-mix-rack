@@ -134,6 +134,45 @@ changed on 2026-09-21. Do not quietly loosen the test.
 
 ## 2. The GR curve stops behaving at 30 dB
 
+> **RESOLVED on AURORA, 2026-09-21 — it is the input amplifier, and it is
+> deliberate.** Full measurement:
+> `testing-notes/fetcomp-curve-slope-2026-09-21.md`; reproduce with
+> `measure_fetcomp slopeorigin`.
+>
+> The guess below — "the solve or the bias behaviour at extreme drive rather
+> than the divider law itself" — is wrong on both counts, and so is the
+> implication that the divider law might be at fault. **The static law never
+> misbehaves.** Its own slope falls monotonically at every ratio and keeps the
+> four ordered at 30 dB (2.10 < 2.32 < 2.56 < 3.03). The implementation departs
+> from it in drive order: **+0.54 on 4:1, +0.10 on 8:1, +0.03 on 12:1, +0.02 on
+> 20:1**, and the drives those need at 30 dB GR are 48.5 / 41.4 / 38.5 / 35.6 dB
+> over threshold. The setting driven hardest picks up the most slope.
+>
+> **Proved by mutation, not inferred.** Linearising `inputAmp` in `Stages.h`
+> restores both broken properties outright — 4:1 then falls 2.32 → 2.21 → 2.19
+> and the four stay ordered at 30 dB. Reverted; `Stages.h` is unchanged.
+>
+> **Blue breaks first, at 25 dB, and was not in the table below.** Blue's 4:1
+> rises 2.37 → 2.67 at 25 dB and already crosses above 8:1 there. The table
+> below is Black's. That is the second time a Black-only sweep has hidden Blue
+> behaviour on the same day, after the alias floor — treat any single-voicing
+> figure in the record as provisional until re-run, because 11 §3 has always
+> asked for both.
+>
+> **What changed:** 11 §3's slope and ordering properties now read "to 20 dB
+> GR" instead of "at every depth", with the measurement beside them. The other
+> two shape properties are unchanged because they hold, and
+> `testCurveAboveTwentyDb` now asserts them above 20 dB where nothing did —
+> finite, monotone in input, no discontinuity, above 2:1, and 30 dB really
+> deeper than 25, both voicings, all four ratios. 1302 → 1390 checks.
+>
+> **Not settled:** whether Blue's 13 % slope rise at 25 dB is audible. That is
+> an Ableton-pass question. Nothing in BMO FET has been heard.
+
+*What follows is the original statement of the problem, and its table is
+Black's.*
+
+
 **What the pack asks** (11 section 3): local slope **monotonically decreasing**
 with depth, every setting **above 2:1** everywhere, the four settings **strictly
 ordered at every depth**, and the curve well formed at 30 dB GR.
@@ -272,9 +311,9 @@ makes it materially slower, say so with the number.
     cmake --build build-dsp --config Release --parallel
     build-dsp/tools/Release/measure_fetcomp.exe <mode> [blue|black]
 
-Modes are `curve | timing | thd | alias | aliasorigin | slam | allbuttons |
-bench | gen | render`, plus `latency` and `positions`. `gen` and `render` write
-WAVs to `packages/fetcomp-listening/`, which is gitignored.
+Modes are `curve | timing | thd | alias | aliasorigin | slopeorigin | slam |
+allbuttons | bench | gen | render`, plus `latency` and `positions`. `gen` and
+`render` write WAVs to `packages/fetcomp-listening/`, which is gitignored.
 
 **The voicing argument is lower case.** `blue`, not `Blue` — `voicingFrom`
 compares against `"blue"` and anything else silently falls through to black,

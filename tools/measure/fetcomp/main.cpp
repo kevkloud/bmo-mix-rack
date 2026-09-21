@@ -614,6 +614,115 @@ int aliasOrigin (Voicing v)
 }
 
 
+
+/** The static divider law, written out here rather than reached for in the
+    DSP, so the slope diagnostic compares the implementation against the
+    algebra and not against itself. Same code as FetcompDspTests.cpp. */
+double staticCellOutput (double m, double gain, double threshold)
+{
+    if (m <= threshold)
+        return m;
+
+    const auto a = kCellConductance * gain;
+    const auto b = 1.0 - a * threshold;
+    const auto y = (-b + std::sqrt (b * b + 4.0 * a * m)) / (2.0 * a);
+
+    return y <= threshold ? m : y;
+}
+double staticReductionDb (double sourceDb, Ratio ratio)
+{
+    const auto i = (int) ratio;
+    const auto m = std::pow (10.0, sourceDb / 20.0);
+    const auto y = staticCellOutput (m, ratioSidechainGain (i), ratioThresholdLinear (i));
+
+    return dbOf (m / y);
+}
+
+/** Where the slope at 30 dB comes from: the divider law, or the stages.
+
+    `curve` shows 4:1's local slope falling 3.76 / 2.99 / 2.56 / 2.34 / 2.29
+    and then **rising to 2.58** at 30 dB GR, which breaks two of 11 section
+    3's assertions -- the slope is not monotonically decreasing, and 4:1 at
+    2.58 sits above 8:1 at 2.42 so the four are no longer ordered.
+
+    This prints the measured slope beside the slope of the **static divider
+    law alone** -- the algebra of 10 section 5, solved offline with no stages,
+    no detector and no solve. If the law's own slope keeps falling where the
+    measured one rises, whatever adds the slope is outside the law. If the
+    law's slope rises too, the law itself does this at depth and the pack's
+    assertion was never reachable.
+
+    The drive is taken from the law rather than searched for, so both columns
+    are read at the same place. */
+int slopeOrigin (Voicing v)
+{
+    std::printf ("Measured slope against the static divider law's own slope, %s.\n"
+                 "Both at the drive 10 section 5 says reaches that depth, so the\n"
+                 "two columns are read at the same point on the curve.\n\n", nameOf (v));
+
+    std::printf ("%-8s", "GR dB");
+
+    for (int i = 0; i < 4; ++i)
+        std::printf (" %-9s %-9s", i == 0 ? "4:1 meas" : (i == 1 ? "8:1 meas"
+                                  : (i == 2 ? "12:1 meas" : "20:1 meas")),
+                                   "law");
+
+    std::printf ("\n");
+
+    for (const auto target : { 5.0, 10.0, 15.0, 20.0, 25.0, 30.0 })
+    {
+        std::printf ("%-8.0f", target);
+
+        for (int i = 0; i < 4; ++i)
+        {
+            const auto g = std::pow (10.0, target / 20.0);
+            const auto beta = kRatioBeta[(size_t) i];
+            const auto s = 1.0 + (g - 1.0) / beta;
+            const auto driveDb = kRatioThresholdDb[(size_t) i] + 20.0 * std::log10 (s) + target;
+
+            DspCore::Params q;
+            q.ratio = (Ratio) i;
+            q.voicing = v;
+
+            const auto a = deliveredGrDb (q, driveDb - 0.5);
+            const auto b = deliveredGrDb (q, driveDb + 0.5);
+            const auto measured = 1.0 / std::max (1.0e-6, 1.0 - (b - a));
+
+            // The same two points through the static law alone.
+            const auto lawA = staticReductionDb (driveDb - 0.5, (Ratio) i);
+            const auto lawB = staticReductionDb (driveDb + 0.5, (Ratio) i);
+            const auto law = 1.0 / std::max (1.0e-6, 1.0 - (lawB - lawA));
+
+            std::printf (" %-9.2f %-9.2f", measured, law);
+        }
+
+        std::printf ("\n");
+    }
+
+    std::printf ("\nAnd the drives those depths need, in dB over threshold --\n"
+                 "the reason the settings stop being comparable up there:\n\n");
+
+    std::printf ("%-8s %-10s %-10s %-10s %-10s\n", "GR dB", "4:1", "8:1", "12:1", "20:1");
+
+    for (const auto target : { 20.0, 25.0, 30.0 })
+    {
+        std::printf ("%-8.0f", target);
+
+        for (int i = 0; i < 4; ++i)
+        {
+            const auto g = std::pow (10.0, target / 20.0);
+            const auto beta = kRatioBeta[(size_t) i];
+            const auto s = 1.0 + (g - 1.0) / beta;
+
+            std::printf (" %-10.1f", 20.0 * std::log10 (s) + target);
+        }
+
+        std::printf ("\n");
+    }
+
+    return 0;
+}
+
 int slam (Voicing v)
 {
     std::printf ("LF ripple, %s, 20 dB GR at 20:1, release swept over the detents.\n"
@@ -997,6 +1106,7 @@ int main (int argc, char** argv)
     if (mode == "thd")        return thd (v);
     if (mode == "alias")      return alias (v);
     if (mode == "aliasorigin") return aliasOrigin (v);
+    if (mode == "slopeorigin") return slopeOrigin (v);
     if (mode == "slam")       return slam (v);
     if (mode == "allbuttons") return allButtons();
     if (mode == "bench")      return bench (v);

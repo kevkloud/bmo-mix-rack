@@ -14,6 +14,7 @@ by dispatched agents on AURORA, 2026-09-20, under `HANDOFF-groundwork.md`.
 - `12-tempo-and-tail-plumbing.md` — host tempo and tail-length plumbing, processor → rack → module; can land as its own PR first.
 - `13-panel-direction.md` — control hierarchy, layout, readouts, meter, accent. Owns layout and captions.
 - `14-calibration-and-listening.md` — how every CALIBRATE and DECISION value gets settled, and what freezes at ship.
+- `20-name-clearance.md` — name-clearance note for "Dwell": web search plus a USPTO registry search; not legal advice.
 - `HANDOFF-groundwork.md` — the ruleset that produced this pack.
 
 ## Decided (Frosty, 2026-09-20)
@@ -28,7 +29,7 @@ by dispatched agents on AURORA, 2026-09-20, under `HANDOFF-groundwork.md`.
 
 ## Still open before the schema commit
 
-- "Dwell" has not been trademark-searched; do that before the identity row ships.
+- Name clearance (`20`): the USPTO search found no live DWELL mark in audio software or musical instruments (risk low–medium). EU, UK, WIPO and unregistered use are not checked; decide whether that is enough before the identity row ships.
 
 ## Decide during the add-bmo-dwell build (see or hear it first)
 

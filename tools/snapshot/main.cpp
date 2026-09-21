@@ -526,6 +526,20 @@ int main (int argc, char** argv)
     const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), false, 2.0f);
 
     juce::PNGImageFormat png;
+
+    // Truncate first. `createOutputStream` opens an existing file **at the
+    // end**, so re-rendering over a snapshot appended a second PNG instead of
+    // replacing the first -- and every viewer reads the leading image and
+    // ignores the trailing bytes, so the tool reported "wrote" and the file
+    // still showed the previous render. A panel change then looked like it had
+    // done nothing. Found on AURORA, 2026-09-21, when three renders of the
+    // same path came to exactly the sum of their three sizes.
+    //
+    // This bit every module, not just BMO FET, and it bit hardest exactly when
+    // someone was iterating: first render correct, every one after it stale.
+    // Any recorded hash taken from a re-rendered file is suspect.
+    out.deleteFile();
+
     std::unique_ptr<juce::FileOutputStream> stream (out.createOutputStream());
 
     if (stream == nullptr || ! png.writeImageToStream (image, *stream))

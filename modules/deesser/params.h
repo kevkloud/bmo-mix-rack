@@ -150,8 +150,12 @@ inline const ParamSpecs& specs()
         // RANGE, the depth ceiling. 1 dB rather than 0 at the bottom: 01
         // section 4's working point is 2-6 dB, and a floor keeps this a depth
         // control instead of a way to switch the module off without saying so.
-        // 18 at the top sits under the shared meter's 24 dB scale, so the
-        // needle cannot pin in use.
+        // 18 at the top was chosen to sit under the shared needle's fixed
+        // 24 dB scale so it could not pin in use. The panel now scales its bar
+        // to this number instead (DeesserPanel.cpp, kMaxReductionDb), which is
+        // the same relationship read the other way round -- the instrument
+        // follows the parameter rather than the parameter dodging the
+        // instrument. The value is frozen either way.
         S::floatParam (kRange, "Range", 1.0f, 18.0f, 0.1f, 8.0f, F::Decibels),
 
         // SHAPE. Bell is the default: it is the surgical one, and the shelf is

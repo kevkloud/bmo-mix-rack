@@ -16,17 +16,31 @@ namespace
     constexpr int kSwitchHeight = ui::Tokens::switchHeight;
     constexpr int kSwitchGap    = ui::Tokens::switchGap;
 
-    /** The meter and the row under it are the same width, and it is the width
-        three switches and their two gaps want: 226.
+    /** The GR bar's width, which is still the 226 the old IN/GR/OUT row wanted
+        -- three switches and their two gaps.
 
-        modules/AGENTS.md records BMO Opto's IN/GR/OUT row as the one place a
-        switch may be narrower than `switchWidth`, because three of them plus
-        two gaps need 226 px and that panel is 220 wide. It also says to use
-        the full width and delete the exception on a panel that can afford it.
-        This one is 260, so it does. */
-    constexpr int kMeterWidth     = kSwitchWidth * 3 + kSwitchGap * 2;
-    constexpr int kMeterHeight    = 102;
-    constexpr int kMeterButtonGap = 4;      ///< meter face to its IN/GR/OUT row
+        The row is gone (see the panel's class comment) but the number is kept
+        deliberately: it is the width the shape pair and LISTEN already align
+        to, so the bar's well lines up with the switches above and below it
+        rather than introducing a third edge on a 260-px panel.
+
+        **It is a quarter of the height the needle took.** The meter block was
+        102 px of face plus a 4-px gap and a 20-px switch row, 126 in all; the
+        bar is 22 of well and air plus its printed scale. What that bought is
+        not empty plate -- it is where the sibilance strip goes. */
+    constexpr int kMeterWidth = kSwitchWidth * 3 + kSwitchGap * 2;
+    constexpr int kBarRow     = 22 + ui::LevelBar::kScaleRow;
+
+    /** The top of the GR bar, and it is RANGE's ceiling rather than a meter
+        convention.
+
+        `params.h` freezes RANGE at 18 dB, and RANGE is the deepest cut the
+        module can make -- so 18 dB of reduction is the most this meter can
+        ever be asked to show. The shared needle's 24 dB scale left a top
+        quarter that no setting could reach, which is a scale that lies about
+        the instrument. If RANGE's ceiling ever moves, this moves with it; it
+        is not free to drift on its own. */
+    constexpr float kMaxReductionDb = 18.0f;
 
     /** A pair of switches side by side. */
     constexpr int kPairWidth = kSwitchWidth * 2 + kSwitchGap;
@@ -223,10 +237,14 @@ DeesserPanel::DeesserPanel (ui::ModuleContext ctx)
       rangeKnob  (context.params.param (Index::range),  "RANGE",
                   ui::Knob::Style::character, 0.62f, context.def.accent),
       sketch (context.def.accent),
-      meter (context.inputRms, context.rms, context.gainReductionDb,
-             ui::DynamicsMeter::Mode::reduction, context.def.accent,
-             ui::accentTextOn (context.def.accent, ui::tokens().meterFace)),
-      meterInButton ("IN"), meterGrButton ("GR"), meterOutButton ("OUT"),
+      grBar ("GR", ui::LevelBar::Grow::leftward, 0.0f, kMaxReductionDb,
+             [this]
+             {
+                 if (grOverride)
+                     return *grOverride;
+
+                 return context.gainReductionDb ? context.gainReductionDb() : 0.0f;
+             }),
       bellButton ("BELL"), shelfButton ("SHELF"),
       listenButton ("LISTEN")
 {
@@ -240,17 +258,44 @@ DeesserPanel::DeesserPanel (ui::ModuleContext ctx)
     // them or carry a unit that speaks for itself.
     threshKnob.setShowsValue (true);
 
-    // The hot zone -- 0 VU and above -- is the accent stepped off the meter's
-    // own face until it clears 4.5:1 rather than trusted to, which is
-    // OptoPanel::hotColourFor's pattern. The bezel keeps the raw accent and
-    // the stock 0.7 alpha: nothing on this panel depends on telling two bezel
-    // states apart, so there is no reason to touch it.
-    for (auto* b : { &meterInButton, &meterGrButton, &meterOutButton,
-                     &bellButton, &shelfButton })
+    // The printed scale. Positions are amounts of reduction, 0..18 and
+    // positive, because that is what the DSP reports; the text is negative,
+    // because what the meter means is gain. `ScaleMark` keeps the two apart
+    // for exactly this -- deriving the text from the position would print 18
+    // where the meter means -18.
+    //
+    // Hand-placed and opening out toward 0, LTV Comp's GR curve scaled to this
+    // module's shorter range. Per-dB density across the marks runs 0.090,
+    // 0.070, 0.0575, 0.045 -- monotonic toward 0, which is the property to
+    // preserve if one is ever moved. The reason is the same one LTV gives: the
+    // difference between 1 and 3 dB of de-essing is worth seeing and the
+    // difference between 14 and 18 is not, because by then the ess is gone and
+    // the only question left is how much of the consonant went with it.
+    grBar.setScale ({ {  0.0f, 0.00f,   "0" }, {  2.0f, 0.18f,  "-2" },
+                      {  4.0f, 0.32f,  "-4" }, {  8.0f, 0.55f,  "-8" },
+                      { 18.0f, 1.00f, "-18" } });
+
+    // Flat, and in the shared warm token rather than the module's accent.
+    //
+    // Flat for LTV Comp's reason, which applies harder here: a gradient says
+    // "further along is worse", and on a de-esser further along is only
+    // further along -- 12 dB off a shouted ess is the module working, not the
+    // module in trouble.
+    //
+    // Not the accent, though the accent is warm and would have looked well:
+    // the fill would then be the one colour on the panel that also means
+    // "this is BMO Defang", and a bar that fills with the module's identity
+    // reads as a brand animation rather than as a reading. meterGrWarm is the
+    // token LTV Comp's GR bar already uses, so the two modules' reductions
+    // read the same in a rack -- which is the whole argument for a shared
+    // meter and it survives the needle being dropped.
+    grBar.setFlatColour (ui::tokens().meterGrWarm);
+
+    for (auto* b : { &bellButton, &shelfButton })
     {
-        // The shape pair and the meter row are radios over their state rather
-        // than toggles: the click sets it and the state lights the buttons, so
-        // host automation and a click cannot disagree.
+        // The shape pair are radios over their state rather than toggles: the
+        // click sets it and the state lights the buttons, so host automation
+        // and a click cannot disagree.
         b->setClickingTogglesState (false);
         b->setColour (juce::ToggleButton::tickColourId, ui::tokens().switchAlt);
         addAndMakeVisible (b);
@@ -260,17 +305,12 @@ DeesserPanel::DeesserPanel (ui::ModuleContext ctx)
     addAndMakeVisible (listenButton);
 
     for (auto* c : std::initializer_list<juce::Component*> {
-             &sketch, &freqKnob, &qKnob, &threshKnob, &rangeKnob, &meter })
+             &sketch, &freqKnob, &qKnob, &threshKnob, &rangeKnob, &grBar })
         addAndMakeVisible (c);
 
-    meterInButton .onClick = [this] { selectMeterMode (ui::DynamicsMeter::Mode::input); };
-    meterGrButton .onClick = [this] { selectMeterMode (ui::DynamicsMeter::Mode::reduction); };
-    meterOutButton.onClick = [this] { selectMeterMode (ui::DynamicsMeter::Mode::output); };
-
-    // GR is the mode this module is for, so it is where the meter opens and it
-    // is the middle button -- IN and OUT then read left to right as signal
-    // flow either side of it, the order BMO Opto's row already uses.
-    selectMeterMode (ui::DynamicsMeter::Mode::reduction);
+    // One timer for the panel, not one per bar. `ui::LevelBar::refresh` is
+    // driven from outside for that reason.
+    startTimerHz (30);
 
     shapeAttachment = std::make_unique<juce::ParameterAttachment> (
         context.params.param (Index::shape),
@@ -318,13 +358,9 @@ DeesserPanel::~DeesserPanel()
 }
 
 //==============================================================================
-void DeesserPanel::selectMeterMode (ui::DynamicsMeter::Mode mode)
+void DeesserPanel::timerCallback()
 {
-    meter.setMode (mode);
-
-    meterInButton .setToggleState (mode == ui::DynamicsMeter::Mode::input,     juce::dontSendNotification);
-    meterGrButton .setToggleState (mode == ui::DynamicsMeter::Mode::reduction, juce::dontSendNotification);
-    meterOutButton.setToggleState (mode == ui::DynamicsMeter::Mode::output,    juce::dontSendNotification);
+    grBar.refresh();
 }
 
 void DeesserPanel::showShape (int choice)
@@ -357,13 +393,26 @@ void DeesserPanel::refreshSketch()
 
 bool DeesserPanel::setUiState (const juce::String& key, const juce::String& value)
 {
-    if (key == "meter")
+    if (key == "gr")
     {
-        if (value.equalsIgnoreCase ("IN"))  { selectMeterMode (ui::DynamicsMeter::Mode::input);     return true; }
-        if (value.equalsIgnoreCase ("GR"))  { selectMeterMode (ui::DynamicsMeter::Mode::reduction); return true; }
-        if (value.equalsIgnoreCase ("OUT")) { selectMeterMode (ui::DynamicsMeter::Mode::output);    return true; }
+        // containsOnly rather than trusting getFloatValue, which answers 0 for
+        // anything it cannot read -- so "eight" would have parked the bar at
+        // no reduction and rendered a plausible lie.
+        if (value.isEmpty() || ! value.containsOnly ("0123456789.-+"))
+            return false;
 
-        return false;
+        const auto db = value.getFloatValue();
+
+        if (db < 0.0f || db > kMaxReductionDb)
+            return false;
+
+        grOverride = db;
+
+        // Straight to the reading rather than letting the ballistics walk
+        // there: a render captures one frame, and a bar still on its way up
+        // would be a picture of the fall rate.
+        grBar.refresh();
+        return true;
     }
 
     if (key == "listen")
@@ -384,7 +433,7 @@ void DeesserPanel::resized()
     auto area = getLocalBounds().reduced (kPad, 4);
 
     const auto content = kSketchHeight + kPairRow + kPairRow + kSwitchHeight
-                           + (kMeterHeight + kMeterButtonGap + kSwitchHeight) + kSwitchHeight;
+                           + kBarRow + kSwitchHeight;
 
     // Seven divisions for six blocks: a margin above the first and below the
     // last as well as between them, so the spacing stays even if a block's
@@ -433,28 +482,17 @@ void DeesserPanel::resized()
     layOutPair (area.removeFromTop (kSwitchHeight), bellButton, shelfButton);
     area.removeFromTop (gap);
 
-    // The VU over its IN/GR/OUT row, both the same width. GR in the middle
-    // because it is the reading this module is for.
+    // The GR bar, at the width the switch rows above and below it already use,
+    // so the well's ends line up with theirs rather than adding a third edge.
     {
-        auto block = area.removeFromTop (kMeterHeight + kMeterButtonGap + kSwitchHeight);
+        auto block = area.removeFromTop (kBarRow);
         const auto width = juce::jmin (block.getWidth(), kMeterWidth);
 
-        meter.setBounds (block.removeFromTop (kMeterHeight)
-                              .withSizeKeepingCentre (width, kMeterHeight));
-        block.removeFromTop (kMeterButtonGap);
-
-        auto buttons = block.withSizeKeepingCentre (width, kSwitchHeight);
-        const auto buttonWidth = (width - kSwitchGap * 2) / 3;
-
-        meterInButton.setBounds (buttons.removeFromLeft (buttonWidth));
-        buttons.removeFromLeft (kSwitchGap);
-        meterGrButton.setBounds (buttons.removeFromLeft (buttonWidth));
-        buttons.removeFromLeft (kSwitchGap);
-        meterOutButton.setBounds (buttons.removeFromLeft (buttonWidth));
+        grBar.setBounds (block.withSizeKeepingCentre (width, kBarRow));
     }
     area.removeFromTop (gap);
 
-    // LISTEN under the meter: what it auditions is what the meter is reading.
+    // LISTEN under the bar: what it auditions is what the bar is reading.
     listenButton.setBounds (centredRow (area.removeFromTop (kSwitchHeight), kSwitchWidth));
 }
 

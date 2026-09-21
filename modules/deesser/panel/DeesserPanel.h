@@ -1,8 +1,10 @@
 #pragma once
 
 #include "core/product/ModuleDef.h"
+#include "core/ui/LevelBars.h"
 
 #include <array>
+#include <optional>
 
 namespace bmo::deesser
 {
@@ -101,7 +103,7 @@ private:
 
 //==============================================================================
 /** The band sketch, FREQ and Q abreast, THRESH and RANGE under them, the
-    shape pair, the GR meter with its IN/GR/OUT row, and LISTEN at the foot.
+    shape pair, the GR bar, and LISTEN at the foot.
 
     **The picture is at the top because it is what the four knobs are for.**
     Every one of them moves it, so it sits above all four rather than beside
@@ -130,13 +132,30 @@ private:
     input stage to trim and no makeup to give back, because a band cut takes
     under a dB of broadband energy (docs/deesser/10-dsp-spec.md 8).
 
+    **A bar, not a needle, and only the one** -- Frosty, 2026-09-20. The
+    module opened on BMO Opto's `DynamicsMeter` behind an IN/GR/OUT row, and
+    both halves of that were wrong here. The needle is a period instrument
+    that belongs to the module modelling a 1940s one (`core/ui/LevelBars.h`
+    argues this at length for LTV Comp, and this panel is the second caller
+    that moved it into `core/ui`). The row was worse: a de-esser's input and
+    output are *the same reading*, because a band cut takes under a dB of
+    broadband energy -- the same fact three paragraphs up that costs this
+    panel its trim knob. Two of the three modes would have shown the user one
+    number twice and called it two.
+
+    So one bar, captioned GR, reading the only thing this module does to a
+    signal. It scales 0..18 dB rather than the needle's fixed 24, because 18
+    is RANGE's maximum and therefore the most reduction this module can ever
+    produce: the old scale had a top quarter that could not be reached.
+
     **Every switch lights in `switchAlt`**, which is the table in
-    modules/AGENTS.md with no exception taken: the shape pair, the meter row
-    and LISTEN are all "anything else". The module's accent is at hue 3.8
-    degrees and the utility azure at 198.8, nearly 165 degrees apart, so a lit
-    switch cannot be mistaken for the module's own colour. The accent is spent
-    where it belongs -- the knobs, the band sketch and the meter bezel. */
-class DeesserPanel final : public ui::ModulePanel
+    modules/AGENTS.md with no exception taken: the shape pair and LISTEN are
+    both "anything else". The module's accent is at hue 3.8 degrees and the
+    utility azure at 198.8, nearly 165 degrees apart, so a lit switch cannot
+    be mistaken for the module's own colour. The accent is spent where it
+    belongs -- the knobs and the band sketch. */
+class DeesserPanel final : public ui::ModulePanel,
+                           private juce::Timer
 {
 public:
     explicit DeesserPanel (ui::ModuleContext);
@@ -144,7 +163,25 @@ public:
 
     void resized() override;
 
-    /** Accepts `meter=IN|GR|OUT` and `listen=on|off`, and nothing else.
+    /** Accepts `gr=<dB>` and `listen=on|off`, and nothing else.
+
+        `gr` parks the bar at a stated reduction so it can be rendered showing
+        something. It exists for the same reason BMO Opto's `meter` key did:
+        a meter's look cannot be reviewed at rest, and the reading it wants is
+        one no parameter can reach -- while the DSP is a placeholder there is
+        no reduction at all, and once it is real, producing exactly 8 dB on
+        demand would mean finding audio that does. It is refused outside
+        0..18, which is the bar's own range.
+
+        It is a *render* key and nothing else: `setUiState` is called by
+        `tools/snapshot` and by nothing a host runs, so a plugin on a session
+        cannot be talked into showing a reduction it is not making.
+
+        `meter=IN|GR|OUT` was here while the panel carried a mode-switched
+        needle and is **gone**, not kept as a no-op: one bar has no modes, and
+        a key that silently accepted a mode it could not honour would hand
+        back a render of the wrong thing -- the failure `setUiState` refuses
+        unknown keys to avoid (`core/ui/ModulePanel.h`).
 
         `listen` is here because the listen path has no parameter for
         `tools/snapshot` to set, and the panel has to be renderable in both
@@ -154,10 +191,11 @@ public:
     bool setUiState (const juce::String& key, const juce::String& value) override;
 
 private:
-    /** Points the meter at `mode` and lights the one button of the three that
-        says so, so a mode set from the command line lands where a click would
-        have left it. */
-    void selectMeterMode (ui::DynamicsMeter::Mode);
+    /** Pulls a new reading into the bar. 30 Hz, the suite's rate, and the
+        panel owns the timer rather than the bar -- one repaint a frame for
+        one panel, which is the reason `ui::LevelBar::refresh` is driven from
+        outside (`core/ui/LevelBars.h`). */
+    void timerCallback() override;
 
     /** Lights the one shape switch that `choice` names. Called from the click
         handlers and from the parameter, so a setting made by the host and one
@@ -173,9 +211,8 @@ private:
 
     ui::PlainKnob freqKnob, qKnob, threshKnob, rangeKnob;
     BandSketch sketch;
-    ui::DynamicsMeter meter;
+    ui::LevelBar grBar;
 
-    juce::ToggleButton meterInButton, meterGrButton, meterOutButton;
     juce::ToggleButton bellButton, shelfButton;
     HoldButton listenButton;
 
@@ -183,6 +220,9 @@ private:
     std::array<std::unique_ptr<juce::ParameterAttachment>, 4> sketchAttachments;
 
     bool listening = false;
+
+    /** Set only by `ui.gr`; empty in every plugin that ever runs. */
+    std::optional<float> grOverride;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DeesserPanel)
 };

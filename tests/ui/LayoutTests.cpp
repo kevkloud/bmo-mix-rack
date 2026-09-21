@@ -19,7 +19,7 @@
 #include "products/deq/Product.h"
 #include "modules/deq/panel/ResponseView.h"
 #include "modules/deq/panel/Widgets.h"
-#include "modules/vcomp/panel/LevelBars.h"
+#include "core/ui/LevelBars.h"
 #include "modules/vcomp/params.h"
 #include "products/deesser/Product.h"
 #include "modules/deesser/panel/DeesserPanel.h"
@@ -457,7 +457,7 @@ void checkTrimKnobHeights (bmo::ui::ModulePanel& panel, const juce::String& who,
 void checkGateMarkerCarriesItsName (bmo::ui::ModulePanel& panel)
 {
     auto* found = findNamed (panel, "IN");
-    auto* bar = dynamic_cast<bmo::vcomp::LevelBar*> (found);
+    auto* bar = dynamic_cast<bmo::ui::LevelBar*> (found);
 
     if (bar == nullptr)
     {
@@ -966,25 +966,43 @@ void checkDeesserPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
         check (bell->getToggleState(), who + " the parameter lights the shape pair, not the click");
     }
 
-    //== The meter's own row, at the full switch width ========================
+    //== One GR bar, scaled to what the module can actually do ================
+    //
+    // The needle and its IN/GR/OUT row went on 2026-09-20 (Frosty). Two of
+    // those three modes showed the same reading twice on this module, because
+    // a band cut takes under a dB of broadband energy -- so IN and OUT were
+    // one number wearing two captions. What is checked here is what replaced
+    // them, and the part worth protecting is the *scale*: a drift back to the
+    // shared 24 dB would give the bar a top quarter no setting can reach.
     {
-        auto* in  = button ("IN");
-        auto* gr  = button ("GR");
-        auto* out = button ("OUT");
+        bmo::ui::LevelBar* bar = nullptr;
 
-        if (in == nullptr || gr == nullptr || out == nullptr)
+        for (auto* c : panel.getChildren())
+            if (auto* b = dynamic_cast<bmo::ui::LevelBar*> (c))
+                bar = b;
+
+        check (bar != nullptr, who + " has no GR bar");
+
+        if (bar == nullptr)
             return;
 
-        // 260 wide, so this panel can afford the full switch width and drops
-        // the 220-px exception modules/AGENTS.md records for BMO Opto. A drift
-        // back to a narrower switch fails here.
-        for (auto* b : { in, gr, out })
-            checkEquals (b->getWidth(), bmo::ui::Tokens::switchWidth,
-                         who + " " + b->getButtonText() + " is a full-width switch on a 260 px panel");
+        // The old row's three switches and two gaps, kept as the bar's width
+        // so its well lines up with the shape pair above and LISTEN below.
+        checkEquals (bar->getWidth(),
+                     bmo::ui::Tokens::switchWidth * 3 + bmo::ui::Tokens::switchGap * 2,
+                     who + " the GR bar is as wide as the switch rows it sits between");
 
-        check (in->getX() < gr->getX() && gr->getX() < out->getX(),
-               who + " the meter row reads IN, GR, OUT");
-        check (gr->getToggleState(), who + " the meter opens on GR");
+        // 18 dB is RANGE's ceiling in params.h and therefore the deepest cut
+        // the module can make. If that parameter's top ever moves, this fails
+        // -- which is the point of asserting it here rather than in the panel.
+        const auto top = bmo::deesser::specs()[bmo::deesser::Index::range].max;
+        checkNear (top, 18.0, 0.0f, who + " RANGE's ceiling, which the GR bar is scaled to");
+
+        // Nothing switches modes any more, so the render key that did must be
+        // refused rather than quietly accepted -- a render of the wrong thing
+        // is worse than a render that failed.
+        check (! panel.setUiState ("meter", "GR"),
+               who + " should refuse ui.meter now that the bar has no modes");
     }
 
     //== LISTEN is momentary, and it is not a parameter =======================

@@ -334,9 +334,10 @@ Survivor convention throughout, matching `poleFor` in vcomp:
 `p = exp(−1/(τ · f_s,eff))`, `f_s,eff` the **effective** (possibly oversampled)
 rate.
 
-**Knob position is the parameter, and it runs backwards like the hardware**
-(1 = slowest, 7 = fastest; 11 §2 carries the decision and the alternative that
-was weighed). Position `p ∈ [1,7]` is continuous, and the *published* time is
+**Knob position is the parameter, and it runs backwards like the hardware** —
+decided: `p ∈ [1,7]` continuous, 1 = slowest, 7 = fastest, so the host's
+automation lane runs the same way the knob does (11 §2). The *published* time
+is
 
     t_att(p)  = 800·(20/800)^((p−1)/6)  µs   → 800 / 126.5 / 20 µs at p = 1/4/7
     t_rel(p)  = 1100·(50/1100)^((p−1)/6) ms  → 1100 / 234.5 / 50 ms at p = 1/4/7

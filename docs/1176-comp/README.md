@@ -28,7 +28,9 @@ heard yet.
   parameter: 0 / 40 / 60 samples, zero at the default.
 - **No sidechain HPF in v1**; stereo link always on, not a parameter; **`mix`
   ships**, its dry path delay-matched to the oversampler.
-- **Attack and release run backwards like the hardware**, 1–7 with 7 fastest.
+- **Attack and release run backwards like the hardware.** The parameter *is*
+  the knob position, 1–7 continuous with 7 fastest, so the host's automation
+  lane runs the same way the knob does; the DSP maps position to time.
 - **The GR meter is not widened** — 24 dB scale, pins beyond it, BMO Opto
   untouched. The 30 dB DSP target is unchanged.
 - **Accent E `#5489d4`**, the deep faceplate-stripe blue — an **explicit owner
@@ -46,13 +48,11 @@ heard yet.
    states) or full (5.13:1). **Settled on real renders**, both variants in both
    states and both appearances, owner picks; full alpha also has to leave BMO
    Opto byte-identical. 11 §4b, §4d.
-2. **Attack/release parameter form** — knob position 1–7 (recommended) or ms
-   ascending. Units and range are permanent. 11 §2.
-3. **Parameter ranges and reference level.** 30 dB GR needs `input` to +60 dB
+2. **Parameter ranges and reference level.** 30 dB GR needs `input` to +60 dB
    and `output` to ±36 dB; the dBFS↔0 VU alignment is unmeasured with
    everything riding on it. Permanent, before M0.
-4. **Accept all-buttons as shape-fitted** — judged on shape, not numbers.
-5. **Voicing labels and default** are permanent once shipped.
+3. **Accept all-buttons as shape-fitted** — judged on shape, not numbers.
+4. **Voicing labels and default** are permanent once shipped.
 
 ## Known soft spots
 

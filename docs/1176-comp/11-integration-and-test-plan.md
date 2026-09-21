@@ -49,8 +49,8 @@ Solo/metering are not parameters. Smoothing is a one-pole in `DspCore`.
 |---|---|---|---|---|---|---|---|
 | 0 | `input` | float −20…**+60** dB | 0 | linear | dB | 20 ms | yes |
 | 1 | `output` | float **−36…+36** dB | 0 | linear | dB | 20 ms | yes |
-| 2 | `attack` | float **1…7 (knob position)** | 4 | **none** | Plain, value string in µs | target only | yes |
-| 3 | `release` | float **1…7 (knob position)** | 4 | **none** | Plain, value string in ms | target only | yes |
+| 2 | `attack` | float **1…7, knob position** | 4 | **none** | Plain — "4 (126 µs)" | target only | yes |
+| 3 | `release` | float **1…7, knob position** | 4 | **none** | Plain — "4 (234 ms)" | target only | yes |
 | 4 | `ratio` | choice 4:1/8:1/12:1/20:1/All | 4:1 | stepped | — | crossfade 5 ms | yes |
 | 5 | `mix` | float 0…100 % | 100 | linear | % | 20 ms | yes |
 | 6 | `voicing` | choice Blue/Black | **Black** | stepped | — | crossfade 5–10 ms | yes |
@@ -68,44 +68,32 @@ path has a delay-matching requirement (10 §9). `oversampling` exists because
 10 §9 makes the factor user-selectable; it clicks and re-syncs PDC, so it is
 marked not-automatable.
 
-### Attack and release run backwards, and the parameter says so
+### Attack and release are the knob position — decided
 
-Decided: **higher value = faster**, 1–7 with 7 fastest, as the hardware's
-printed knobs do. Two ways to make that permanent were weighed.
+**The parameter *is* the hardware's printed position**, 1–7 continuous with
+7 fastest, mapped to time inside the DSP by 10 §10's law. The reason is
+automation: had the parameter stayed in ms ascending with only the knob drawn
+reversed, the host's lane and the knob would move in opposite directions, and a
+panel cannot fix that because the lane is the parameter. It also costs nothing
+elsewhere — position is linear and the law is exponential in position, so the
+log sweep falls out with no skew at all.
 
-**(a) The parameter is the knob position**, 1–7 continuous, mapped to time
-inside the DSP by 10 §10's law, with the time shown as the value string.
-**(b) The parameter stays in ms ascending** and only the knob is drawn
-reversed.
+The automated value is the position itself, so a host showing a normalised lane
+maps 0 % → position 1 and 100 % → position 7, in the same direction as the knob.
 
-**Recommended: (a).** Four reasons, in the order they matter:
+**This departs from the one house precedent**, LTV Comp's `attack`/`release`,
+which are `logParam` in ms ascending with `ParamFormat::Milliseconds`
+(`modules/vcomp/params.h:147-148`). Taken knowingly: that module models no
+hardware knob and has no direction to honour, this one does.
 
-1. **Automation direction.** Under (b) the host's lane and the knob move in
-   *opposite* directions: dragging the lane up lengthens the attack while the
-   knob turns anticlockwise. A panel cannot fix that — the lane is the
-   parameter. Under (a) up, clockwise, higher number and faster all agree.
-2. **Preset and conversation readability.** 01's practice notes record real
-   settings as positions — "attack 3, release 7". A preset that stores
-   `attack 4` is directly comparable with that; `attack 0.126 ms` is not.
-3. **No skew, and no second definition of the curve.** Position is linear and
-   10 §10's law is exponential in position, so the log sweep falls out for
-   free. (b) needs a log skew *and* a reversed draw, i.e. the same curve
-   expressed twice in two places that can drift apart.
-4. **The reversal belongs in the permanent definition**, not in a panel trick
-   the host cannot see.
+**Value string requirement.** The format is `Plain`, so the displayed value
+must carry **both** — the position and the time it means, e.g. "4 (126 µs)"
+and "4 (234 ms)" — otherwise a host that leans on the raw number shows a bare
+"4.0". Positions print as integers where they land on one.
 
-**What (a) costs, and why this is still an owner tick.** It breaks the house
-convention: LTV Comp's `attack`/`release` are `logParam` in ms ascending with
-`ParamFormat::Milliseconds` (`modules/vcomp/params.h:147-148`), and that is
-the only precedent for a time parameter in this rack. Under (a) the format is
-`Plain` with a custom value string, so a host that ignores value strings shows
-"4.0" rather than "126 µs". Ranges, units and format freeze at first ship, so
-**this is the one remaining confirmation on this item.**
-
-Either way the mapping is 10 §10's: `t_att(p) = 800·(20/800)^((p−1)/6)` µs and
+Mapping, from 10 §10: `t_att(p) = 800·(20/800)^((p−1)/6)` µs and
 `t_rel(p) = 1100·(50/1100)^((p−1)/6)` ms, giving **800 / 126.5 / 20 µs** and
-**1100 / 234.5 / 50 ms** at positions 1 / 4 / 7. Under (b) the same law is
-inverted, `p = 1 + 6·ln(t/t₁)/ln(t₇/t₁)`, to draw the knob.
+**1100 / 234.5 / 50 ms** at positions 1 / 4 / 7.
 
 **Not in v1, and deliberately:** no sidechain HPF, and no stereo-link
 parameter — stereo is **always linked** (10 §4), the same reasoning

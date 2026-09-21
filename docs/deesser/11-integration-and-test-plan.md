@@ -79,24 +79,27 @@ appearances.
 
 **The single copy**: `10-dsp-spec.md` §9 points here rather than restating it,
 and if the two ever differ again this table is the schema and 10 is the
-behaviour. **Six parameters, this order.** GR reports through
-`currentGainReductionDb()` (signed, positive = gain taken away), **never a
-parameter**.
+behaviour. **Five parameters, this order — settled, no owner items left.** GR
+reports through `currentGainReductionDb()` (signed, positive = gain taken
+away), **never a parameter**.
 
 | # | id | caption | range / step | default | skew | units | smooth | kind | auto | permanent once shipped |
 |---|---|---|---|---|---|---|---|---|---|---|
 | 0 | `freq` | Freq | 2000…10000, 0.1 | 6500 | log | Hz | 20 ms, log | continuous | yes | band centre in bell, corner in shelf |
 | 1 | `q` | Q | 0.7…6.0, 0.01 | 2.5 | log | — (Plain) | 20 ms, log | continuous | yes | Q whatever the shape; engine clamps 0.1–40 behind it |
-| 2 | `thresh` | Threshold | −24…+24, 0.1 | 0 | linear | dB | 10 ms | continuous | yes | anchored to `P_ref` (10 §3); re-anchoring moves every saved session |
-| 3 | `range` | Range | 1…18, 0.1 | 8 | linear | dB | 10 ms | continuous | yes | ceiling and floor both freeze |
-| 4 | `adapt` | Adapt | 0…100, 0.1 | 60 | linear | % | 20 ms | continuous | yes | 100 % = fullband reference (κ 1), 0 % = the band's own 500 ms average |
-| 5 | `shape` | Shape | choice: Bell, High Shelf | Bell | stepped | — | 20 ms xfade | stepped | yes | labels and index order freeze; a third shape appends at #6 |
+| 2 | `thresh` | Threshold | −24…+24, 0.1 | 0 | linear | value string "+3.0 dB over" | 10 ms | continuous | yes | anchored to `P_ref` (10 §3); re-anchoring moves every saved session |
+| 3 | `range` | Range | 1…18, 0.1 | 8 | linear | dB | 10 ms | continuous | yes | the 18 dB ceiling and 1 dB floor both freeze |
+| 4 | `shape` | Shape | choice: Bell, High Shelf | Bell | stepped | — | 20 ms xfade | stepped | yes | labels and index order freeze; anything further appends at #5 |
 
 `ParamSpec`: `logParam` for `freq` (`F::Hertz`) and `q` (`F::Plain`),
-`floatParam` for `thresh`/`range` (`F::Decibels`) and `adapt` (`F::Percent`),
-`choiceParam` for `shape`. `freq`'s 0.1 Hz step is DEQ's reason — a host
-carries the value as a 32-bit normalised float, through which a continuous log
-law will not round-trip exactly (`modules/deq/params.h:144-148`).
+`floatParam` for `range` (`F::Decibels`), `choiceParam` for `shape`, and
+**`textParam` for `thresh`** — approved by the owner 2026-09-20, because a bare
+"+3.0 dB" reads as dBFS and invites the threshold-riding this detector exists
+to abolish; the string says **"+3.0 dB over"**, prominence over threshold, and
+`ParamFormat` is `Plain` by construction (`core/state/ParamSpec.h`). `freq`'s
+0.1 Hz step is DEQ's reason — a host carries the value as a 32-bit normalised
+float, through which a continuous log law will not round-trip exactly
+(`modules/deq/params.h:144-148`).
 
 ### 3a. Reconciled against 10 — AURORA, 2026-09-20
 
@@ -106,10 +109,16 @@ threshold on — not dBFS, and the legend must say so; `width` → **`q`** (10 �
 5 are constant-Q, so octaves are a legend, not a parameter); `mode` →
 **`shape`** (DEQ's id and labels); `freq` **1.5–16 → 2–10 kHz** (01 §6 High;
 10 §7); `range` **0–18 def 12 → 1–18 def 8** (01 §4 works at 2–6 dB, and a
-floor keeps this a depth control); **`adapt` added**, 10 §3's κ. Dropped:
-`attack`/`release`, fixed by 10 §6 and appendable later as `logParam` ms
-ascending; and `lookahead`, refused by 10 §1 — latency is 0 everywhere, and
-permanent, so that is the costly deletion to undo.
+floor keeps this a depth control). Dropped: `attack`/`release`, fixed by 10 §6
+and appendable later as `logParam` ms ascending; and `lookahead`, refused by
+10 §1 — latency is 0 everywhere, and permanent, so that is the costly deletion
+to undo.
+
+**Then ADAPT, added and taken out again (owner, 2026-09-20).** 10 §3's κ went
+into this table as a sixth parameter and came back out: the owner likes it and
+wants it *proven* first, so v1 ships κ as **one fixed internal constant**
+(0.6 first pass, CALIBRATE) and the control is potential work, 10 §11. It can
+only ever be appended after `shape`, so nothing here has to be reserved for it.
 
 **Listen is NOT a parameter — decided, and 10 §2 agrees.** Momentary panel state
 on the existing `ModuleContext::setSolo` / `ModuleDsp::setSolo(int)` hook
@@ -129,12 +138,16 @@ none insert.
 unchanged; `range` caps at 18, so the needle cannot pin. The panel owns the
 IN/GR/OUT row `modules/AGENTS.md` requires.
 
-**Owner items, four — all schema now, the name and accent being settled (§§1,
-2).** The `thresh` value string: plain `F::Decibels`, or a `textParam` printing
-"+3.0 dB over". `adapt` continuous vs 10 §10.2's two-position switch — settle
-it first, stepped can never become continuous. The 18 dB cap and 1 dB floor,
-and a lower internal ceiling for the shelf (10 §10.5). `shape` labels and
-index order.
+**No owner items left.** Name and accent are settled (§§1, 2); the `thresh`
+value string, `range` 1–18 default 8, and `shape`'s two labels in that order
+with Bell the default were all approved on 2026-09-20. The schema is frozen the
+day it ships. One engine question survives inside it and is not schema: whether
+the shelf needs a lower internal `range` ceiling than the bell (10 §10.5).
+
+**Potential, needs testing before it is anything:** ADAPT (10 §11) — exposing
+the reference blend κ, appended after `shape`, knob-or-switch and labels
+decided by ears, not here. Also appendable, in the same never-inserted sense:
+attack, release, mix, a stereo-link switch.
 
 ## 4. Panel — band display?
 
@@ -163,8 +176,8 @@ vowel, breath, silence, bright non-vocal bed.
 |---|---|
 | detection | ≥ 3 dB GR on ≥ 95 % of bursts, **both shapes**; vowel/breath ≤ 1 dB; silence 0 |
 | gates | reference under **−55 dBFS** or band under **−60 dBFS** → offset **exactly 0**; across a fade GR never *rises* (the `S` clamp) |
-| level independence | **±1.0 dB** over the span **at `adapt` 0, 60 and 100** — it must cancel at every blend, not just the default |
-| adapt | bright non-vocal bed: at 0, GR ≤ 1 dB once `S` settles (≥ 1.5 s); at 100, characterised (01 §4); monotone between; a burst **over** that bed still triggers at 0 |
+| level independence | **±1.0 dB** over the span at **κ 0, 0.6 and 1**, reached through the internal constant, not a parameter — it must cancel at every blend, so a later ADAPT (10 §11) cannot break it |
+| κ / bed guard | bright non-vocal bed: at κ 0, GR ≤ 1 dB once `S` settles (≥ 1.5 s); at κ 1, characterised (01 §4); monotone between; a burst **over** that bed still triggers at κ 0. **At the shipped κ, the bed figure is recorded, not bounded** — what "good enough" is, is a listening call |
 | curve, depth | 10 §4's curve — flat to `T−3`, ≈ −0.56 dB at `T`, 0.75 dB/dB, clamped at `range` — golden array **±0.25 dB**; ten `thresh` steps, monotone, 2–6 dB **±2 dB** |
 | timing | the **fixed** 0.8 / 30 ms at 01's 63 % definitions, 6 dB depth, **±20 %**; ~90 % applied 2 ms in; no parameter moves them |
 | slow branch, hold | > 150 ms over threshold crossfades to the 120 ms release: a 400 ms sibilant does not chatter (ripple **≤ 1 dB**), a 120 ms burst still releases on 30 ms; an /s/–/t/ cluster 5 ms apart is **one** event, re-trigger 1.5 dB lower while engaged |
@@ -183,13 +196,16 @@ vowel, breath, silence, bright non-vocal bed.
 Which topology a row assumes is **per 10**.
 
 **Plugin/schema — `tests/plugin/DeesserTests.cpp` (JUCE):** golden `Expected[]`
-table — **the six rows of §3, in that order**, with ranges, steps, defaults and
-the `shape` labels written out; `Index::count == specs().size() == 6`; presets
-load; state XML round-trips **carrying no listen state**; rack slot fits 32
-params; entry in `tests/ui/LayoutTests.cpp`.
+table — **the five rows of §3, in that order**, with ranges, steps, defaults,
+the `shape` labels and **`thresh`'s value string at a few values** written out;
+`Index::count == specs().size() == 5`; presets load; state XML round-trips
+**carrying no listen state**; rack slot fits 32 params; entry in
+`tests/ui/LayoutTests.cpp`.
 
 **Manual — `tools/measure/deesser/main.cpp`:** modes `detect | depth | timing |
-adapt | gates | pump | zipper | alias | bench | render | gen`; `detect` also
+kappa | gates | pump | zipper | alias | bench | render | gen`; `kappa` sweeps
+the internal blend so the fixed value can be chosen and later argued about
+(10 §11); `detect` also
 prints a take's **prominence distribution**, which is how `P_ref` gets fitted
 (10 §10.1) before any listening round; WAVs to `packages/deesser-listening/`
 (gitignored). `bench` is Release, 100 × 10 s at 48 kHz/512, beside `measure_deq`
@@ -200,9 +216,11 @@ machine (AURORA / ICE QUEEN) in `testing-notes/`.**
 **Listening pass — NOT YET HEARD.** Gain-matched, machine named: male lead vocal;
 female lead vocal (band an octave higher, 01 §1); an **already-dull** vocal, for
 lisping (01 §4); cymbal bleed, for false triggering; a full mix. Audition the
-listen path on each, every source at **both ends of `adapt`** — whether it has a
-useful middle is 10 §10.2's question and only ears close it — and in both
-shapes, since shelf dulling is the other thing only ears catch.
+listen path on each, in both shapes, since shelf dulling is a thing only ears
+catch. **The one question this pass must answer beyond "does it work":** is one
+fixed κ good enough across all of those sources, or does the module want an
+ADAPT control (10 §11)? Compare the shipped value against both ends through the
+measure tool's `kappa` mode, source by source, and write the answer down.
 
 ## 6. Milestones and definition of done
 
@@ -210,12 +228,16 @@ Panel-first, as `c142f37` did for BMO FET. **M0** identity and accent rows,
 directory, `params.h`, a marked pass-through DSP reporting latency, every
 registration point, schema test green, panel rendering in both appearances.
 **M1** filter, detector, gates, gain computer → detection, gates, static curve,
-depth, level independence **across `adapt`**. **M2** timing → the fixed
+depth, level independence **across κ**. **M2** timing → the fixed
 attack/release, the slow branch, hold, pumping, transparency. **M3** modulation →
 zipper, aliasing, near-Nyquist, **shelf mode**. **M4** listen path, stereo link,
 meter → `latencyForParams` **0 everywhere**. **M5** presets, docs, measure tool,
-§4d's step order. **M6** invariance, robustness, CPU, `P_ref` fitted, listening
-pass.
+§4d's step order. **M6** invariance, robustness, CPU, `P_ref` and **κ** fitted,
+listening pass.
+
+**Potential, after v1 and only on evidence:** ADAPT (10 §11) — appended after
+`shape`, knob-or-switch and labels chosen from the listening pass, never
+inserted. Attack, release, mix and a stereo-link switch sit in the same queue.
 
 **Done** = ctest green in all three CI jobs on both platforms; schema pinned; no
 audio, renders or fonts committed; `AGENTS.md` + `README.md` linked; identity and

@@ -70,13 +70,14 @@ threshold never needs re-riding across a take (01 §2, the reason this detection
 style exists). `P_ref` places 0 dB prominence at typical vocal balance;
 CALIBRATE.
 
-**κ is the ADAPT parameter** — `adapt`, carried to the host as 0–100 % with
-100 % = κ 1, per the house percentage idiom (11 §3). `κ = 1` is classic
-relative detection, band against current fullband level. `κ = 0` is
-self-referential, band against its own recent
-average — the guard against *bright non-vocal material* and *cymbal bleed*
-(02 §4's named failure), since steady brightness raises `S` and stops triggering
-while a short burst still rides above it.
+**κ is internal in v1 — one fixed constant, not a parameter.** `κ = 1` is
+classic relative detection, band against current fullband level. `κ = 0` is
+self-referential, band against its own recent average — the guard against
+*bright non-vocal material* and *cymbal bleed* (02 §4's named failure), since
+steady brightness raises `S` and stops triggering while a short burst still
+rides above it. v1 ships **one middle value, first pass 0.6, CALIBRATE**: it is
+fitted by ear once the DSP exists, and nothing about the schema depends on
+which value wins. Exposing it is §11.
 
 **Floors.** Two absolute gates, both hard-zeroing the offset: reference above
 **−55 dBFS** — what stops noise, room tone and silence producing huge prominence
@@ -189,12 +190,12 @@ wraps. `latencyForParams()` returns 0 always, at every setting.
 
 ## 9. Fixed values to target
 
-**The six user parameters are deliberately not listed here.** `freq`, `q`,
-`thresh`, `range`, `adapt` and `shape` — their ids, captions, ranges, defaults,
-skews, units, smoothing and order — are the **v1 schema table, 11 §3**, which
-is the single authoritative copy; the reasoning behind each figure is §§3–7
-above. Duplicating the table is how the two documents drifted apart in the
-first place.
+**The five user parameters are deliberately not listed here.** `freq`, `q`,
+`thresh`, `range` and `shape` — their ids, captions, ranges, defaults, skews,
+units, smoothing and order — are the **v1 schema table, 11 §3**, which is the
+single authoritative copy; the reasoning behind each figure is §§3–7 above.
+Duplicating the table is how the two documents drifted apart in the first
+place.
 
 What follows is the internal constants only: fixed at first ship, invisible to
 the host, and free to be retuned right up until it.
@@ -202,6 +203,7 @@ the host, and free to be retuned right up until it.
 | Value | Target | Source / confidence |
 |---|---|---|
 | `P_ref` — where 0 prominence-dB sits | typical vocal balance | CALIBRATE |
+| Reference blend `κ` | 0.6 first pass, internal in v1 (§11) | no figure; CALIBRATE by ear |
 | Slope `R` / knee `W` | 4:1 / 6 dB | 01 §2 Medium; CALIBRATE |
 | Attack / fast release τ | 0.8 / 30 ms | 01 §6 Medium |
 | Slow release τ / engage | 120 / 150 ms | 01 §1; CALIBRATE |
@@ -219,12 +221,12 @@ the host, and free to be retuned right up until it.
    does not sit near the top of a typical vocal's prominence distribution the
    module feels broken. Fit it against dry takes, male and female, before any
    listening round.
-2. **ADAPT's ends may not both be useful.** If κ ≈ 0.6 behaves like κ = 1 on
-   vocals and κ = 0 on mixes with no useful middle, ship a two-position switch
-   instead of a continuous percentage; decide before first ship, since a
-   stepped parameter can never later become continuous. Owner-confirm in 11 §3.
+2. **One fixed κ may not suit every source.** The whole bet of v1 is that a
+   middle value is good enough on a solo vocal, a vocal over a bright bed and a
+   full mix alike. If it is not, that is what §11 is for — and it is a
+   listening finding, not a measurement.
 3. **Cymbal bleed is not solved.** No level-domain detector separates a hat from
-   an /s/; ADAPT reduces steady-state false triggering, not coincident hits.
+   an /s/; a lower κ reduces steady-state false triggering, not coincident hits.
    Spectral flatness (01 §5) is the honest fix, deferred — and if added it
    belongs behind the existing parameters, not as a mode.
 4. **Fast release plus narrow Q may still breathe** on reverberant sources at
@@ -237,3 +239,31 @@ the host, and free to be retuned right up until it.
    spec could be wrong at redesign cost; measure it in a DSP test first.
 7. **Fixed attack/release** bets that 01's durations generalise. Appending them
    later is schema-safe; retuning the release around them is not.
+
+## 11. Potential: ADAPT
+
+**Not in v1 — owner's decision, 2026-09-20: the idea is liked, but it has to be
+proven before it earns a control.** κ stays one internal constant (§3) until
+then. What the control would be, in plain words:
+
+- **One end compares the band with the whole signal, right now.** Every sibilant
+  is caught, however the singer is riding the mic — but material that is
+  *constantly* bright, a cymbal-heavy bed or an airy synth, is treated
+  constantly too, and the result dulls.
+- **The other end compares the band with the band's own last half second.** A
+  steady bright programme stops triggering the moment the detector has learned
+  it, so the module leaves bright material alone — but a long or dense run of
+  sibilance teaches the detector that sibilance is normal, and gets
+  under-treated.
+
+**It needs testing before it ships as anything.** The four sources that decide
+it are a solo vocal, a vocal over a bright bed, cymbal bleed, and a full mix;
+the question each one answers is whether one fixed middle κ is already good
+enough, and if not, whether the useful settings are a continuum or two named
+places. **Knob or switch — and what the two ends are called — comes out of that
+listening, not out of this document**; a switch cannot later become a knob.
+
+**Schema consequence.** ADAPT can only ever be **appended after `shape`**,
+never inserted, so shipping v1 without it costs nothing but its absence. The
+DSP is written with κ as a variable regardless (§3), so exposing it later is a
+parameter and a panel control, not a redesign.

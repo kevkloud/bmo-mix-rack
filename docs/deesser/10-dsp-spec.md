@@ -16,16 +16,19 @@ has no split to reconstruct, so reconstruction error is identically zero at
 every depth; 02 rates it most surgical and least dulling, and its one cost,
 modulation noise, is budgetable (§5).
 
-**Modes.** One permanent choice parameter, SHAPE: *bell* or *high shelf*. The
-shelf is the split-band mode without a crossover, from one minimum-phase filter
-that cannot mis-reconstruct. No wideband or crossover mode, and no MIX — on a
-minimum-phase cut that is a shallower cut of nearly the same shape, which RANGE
-already gives.
+**Modes.** One permanent choice parameter, `shape` — DEQ's id and its "Bell" /
+"High Shelf" labels (11 §3): *bell* or *high shelf*. The shelf is the
+split-band mode without a crossover, from one minimum-phase filter that cannot
+mis-reconstruct. No wideband or crossover mode, and no MIX — on a minimum-phase
+cut that is a shallower cut of nearly the same shape, which RANGE already
+gives; if one is ever wanted it appends at the end of the list, never inserts.
 
 **Not done:** STFT/ML detection (02 §5) — block latency breaks the zero-latency
 preference, per-instance FFT or inference breaks "many instances", and 01 §5
 found no citable source for a neural sibilance detector. No lookahead either
-(01 §6 Low-Medium; §6's attack makes it unnecessary).
+(01 §6 Low-Medium; §6's attack makes it unnecessary) — so there is no LOOKAHEAD
+parameter and `latencyForParams()` reads 0 at *every* setting, not merely at
+the default, which is what the test in 11 §5 asserts.
 
 ## 2. Signal flow
 
@@ -38,12 +41,13 @@ dB (§3). **(c) Gain computer**: threshold, soft knee, slope, range → an offse
 ≤ 0 dB (§4). **(d) Smoothing**: in the envelope (§6) and the coefficient glide
 (§5). **(e) Reduction element**: one TPT SVF per channel, gain = the offset.
 **(f) Listen**: momentary, panel-held, never a parameter — it outputs
-`H(x) − x`, the sibilance being removed.
+`H(x) − x`, the sibilance being removed. The hook it rides on and the rule that
+no listen state is ever saved are 11 §3.
 
 ## 3. Detection math
 
 **Band filter.** Second-order constant-Q bandpass, `f0 ∈ [2, 10] kHz` (01 §6,
-High), `Q ∈ [0.7, 6]` default 2.5 — narrow enough to exclude the vowel region,
+High; the `freq` parameter), `Q ∈ [0.7, 6]` default 2.5 (`q`) — narrow enough to exclude the vowel region,
 wide enough to cover male ~3–6 kHz and female ~6–8 kHz concentrations (01 §6,
 Medium) at one setting. Shelf mode detects through a second-order high-pass at
 the same corner, matching what is cut.
@@ -66,8 +70,10 @@ threshold never needs re-riding across a take (01 §2, the reason this detection
 style exists). `P_ref` places 0 dB prominence at typical vocal balance;
 CALIBRATE.
 
-**κ is the ADAPT parameter.** `κ = 1` is classic relative detection, band against
-current fullband level. `κ = 0` is self-referential, band against its own recent
+**κ is the ADAPT parameter** — `adapt`, carried to the host as 0–100 % with
+100 % = κ 1, per the house percentage idiom (11 §3). `κ = 1` is classic
+relative detection, band against current fullband level. `κ = 0` is
+self-referential, band against its own recent
 average — the guard against *bright non-vocal material* and *cymbal bleed*
 (02 §4's named failure), since steady brightness raises `S` and stops triggering
 while a short burst still rides above it.
@@ -92,9 +98,9 @@ engaged, so a /s/–/t/ cluster is one event. All CALIBRATE.
          = over                        over ≥ W/2
     offset_dB = −min( Range, (1 − 1/R) · knee )
 
-`T` = THRESHOLD in prominence-dB; `W` = 6 dB fixed knee (01 §2; a hard corner
-snaps audibly on 60 ms events); `R` = 4:1 fixed internal slope; `Range` =
-RANGE, 1–18 dB. Static curve: flat to `T − 3`, a
+`T` = THRESHOLD in prominence-dB (`thresh`, −24…+24, 0 at typical vocal); `W` =
+6 dB fixed knee (01 §2; a hard corner snaps audibly on 60 ms events); `R` = 4:1
+fixed internal slope; `Range` = RANGE (`range`), 1–18 dB. Static curve: flat to `T − 3`, a
 parabola through `T` at −(1−1/R)·W/8 ≈ −0.56 dB, then 0.75 dB of cut per dB of
 prominence, flattening hard at −Range. The 2–6 dB working point (01 §4) sits in
 the upper knee and lower linear region, the smoothest part.
@@ -143,7 +149,9 @@ chatter. CALIBRATE within 01 §6's 2–60 ms band.
 
 Both ship **fixed, not as parameters**: 01's durations are narrow enough that
 the programme-dependent release covers the spread, and parameter order is
-append-only, so they can be added later.
+append-only, so they can be added later. If they ever are, they append at the
+end of 11 §3's list as `logParam` milliseconds *ascending* — LTV Comp's idiom,
+not BMO FET's knob position, since no printed knob is being modelled here.
 
 ## 7. Sample-rate independence
 
@@ -161,10 +169,11 @@ hosts send anything), and the detector skirt clamps alike. Q clamps to
 `[0.1, 40]` and depth to ≤ 30 dB, so no parameter combination yields a
 non-finite coefficient.
 
-**Smoothing:** `f0` and Q one-pole in the *log* domain (τ = 20 ms); THRESHOLD
-and RANGE in dB (τ = 10 ms); ADAPT linearly (τ = 20 ms). SHAPE crossfades the
-two contributions over 20 ms rather than jumping coefficients. The first set
-after prepare/reset is snapped.
+**Smoothing:** the per-parameter constants are the *smooth* column of 11 §3's
+schema table and are not repeated here. Two rules belong to the DSP rather than
+to the schema: `freq` and `q` glide one-pole in the *log* domain, and `shape`
+crossfades the two contributions rather than jumping coefficients. The first
+set after prepare/reset is snapped.
 
 ## 8. Metering
 
@@ -174,24 +183,32 @@ reduction per the interface, 0…18 dB, inside the shared 24 dB meter. Explicitl
 *not* wideband-equivalent: a 6 dB bell cut at Q 2.5 removes under 1 dB of
 broadband energy, so a wideband meter would read ~0.5 dB exactly when the user
 is doing the 6 dB of work 01 §4 describes, and the published "2–4 dB" rules of
-thumb would read wrong. `latencyForParams()` returns 0 always.
+thumb would read wrong. RANGE caps at 18 dB, so on the shared 24 dB scale the
+needle cannot pin in use; a value forced past the scale clamps rather than
+wraps. `latencyForParams()` returns 0 always, at every setting.
 
 ## 9. Fixed values to target
 
+**The six user parameters are deliberately not listed here.** `freq`, `q`,
+`thresh`, `range`, `adapt` and `shape` — their ids, captions, ranges, defaults,
+skews, units, smoothing and order — are the **v1 schema table, 11 §3**, which
+is the single authoritative copy; the reasoning behind each figure is §§3–7
+above. Duplicating the table is how the two documents drifted apart in the
+first place.
+
+What follows is the internal constants only: fixed at first ship, invisible to
+the host, and free to be retuned right up until it.
+
 | Value | Target | Source / confidence |
 |---|---|---|
-| `f0` / default | 2–10 kHz / 6.5 kHz | 01 §6 High; default CALIBRATE |
-| Q / default | 0.7–6 / 2.5 | 01 §6 High; default CALIBRATE |
-| SHAPE | bell (default), high shelf | 01 §3 High |
-| THRESHOLD / `P_ref` | −24…+24 prominence-dB, 0 at typical vocal | CALIBRATE |
-| RANGE / default | 1–18 dB / 8 dB | 01 §6 Low; CALIBRATE |
+| `P_ref` — where 0 prominence-dB sits | typical vocal balance | CALIBRATE |
 | Slope `R` / knee `W` | 4:1 / 6 dB | 01 §2 Medium; CALIBRATE |
-| ADAPT `κ` default | 0.6 | no figure; CALIBRATE |
 | Attack / fast release τ | 0.8 / 30 ms | 01 §6 Medium |
 | Slow release τ / engage | 120 / 150 ms | 01 §1; CALIBRATE |
-| Slow reference `S` τ | 500 ms | no figure; CALIBRATE |
+| Slow reference `S` τ / clamp | 500 ms / 20 dB below the κ=1 reference | no figure; CALIBRATE |
 | Hold / hysteresis | 5 ms / 1.5 dB | 02 §6; CALIBRATE |
 | Reference HPF / gates | 150 Hz 1st order; −55, −60 dBFS | CALIBRATE |
+| Engine clamps | `f0` ≤ 0.45·Fs, Q 0.1–40, depth ≤ 30 dB | robustness; hosts send anything |
 | Channel link | power-sum, always linked | 01 §3 High |
 | Control interval / latency | 8 / 0 samples | repo; constraint |
 | Working reduction | 2–6 dB (2–4 usual) | 01 §6 Medium; target |
@@ -203,8 +220,9 @@ thumb would read wrong. `latencyForParams()` returns 0 always.
    module feels broken. Fit it against dry takes, male and female, before any
    listening round.
 2. **ADAPT's ends may not both be useful.** If κ ≈ 0.6 behaves like κ = 1 on
-   vocals and κ = 0 on mixes with no useful middle, ship a two-position switch;
-   decide before first ship, the parameter is permanent.
+   vocals and κ = 0 on mixes with no useful middle, ship a two-position switch
+   instead of a continuous percentage; decide before first ship, since a
+   stepped parameter can never later become continuous. Owner-confirm in 11 §3.
 3. **Cymbal bleed is not solved.** No level-domain detector separates a hat from
    an /s/; ADAPT reduces steady-state false triggering, not coincident hits.
    Spectral flatness (01 §5) is the honest fix, deferred — and if added it
@@ -212,7 +230,9 @@ thumb would read wrong. `latencyForParams()` returns 0 always.
 4. **Fast release plus narrow Q may still breathe** on reverberant sources at
    maximum range. Mitigation is a release floor, not a parameter.
 5. **Shelf mode risks dulling** — the one shape that takes down everything above
-   the corner. It may need a lower RANGE ceiling than the bell.
+   the corner. It may need a lower RANGE ceiling than the bell, applied inside
+   the engine: `range` is one parameter whatever the shape, exactly as DEQ
+   caps a shelf's Q behind an unchanged knob.
 6. **The aliasing claim in §5 is reasoned, not measured.** The one place this
    spec could be wrong at redesign cost; measure it in a DSP test first.
 7. **Fixed attack/release** bets that 01's durations generalise. Appending them

@@ -18,14 +18,22 @@ namespace bmo::ui
 class PlainKnob final : public juce::Component
 {
 public:
-    /** Leave `captionColour` alone and the caption is derived from `accent`
-        against the current plate -- `accentTextOn`, so it reads at 4.5:1 and
-        it is the module's own colour.
+    /** Leave `captionColour` alone and the caption is the colour system the
+        knob belongs to, **as it stands and not stepped for contrast** -- the
+        module's accent for a character knob, the shared azure for a utility
+        one.
 
         Until 0.2.2 it defaulted to the shared track azure, which put every
         caption in the suite at 1.95:1 and, worse, put INPUT and DRIVE in blue
         underneath an orange knob. BMO Opto had already worked around both by
-        hardcoding its own hex. Pass a colour here only to override that. */
+        hardcoding its own hex. Pass a colour here only to override that.
+
+        **This said `accentTextOn` and "reads at 4.5:1" until 2026-09-20, and
+        had been wrong since 0.2.3**, when the stepped colour moved to section
+        legends and the raw one stayed here. The cost is in the .cpp beside the
+        code that pays it; it was Frosty's call on a render. The stale promise
+        sent the BMO FET spec pack looking for a fault that was a decision, so
+        it is corrected rather than left as "roughly what happens". */
     PlainKnob (juce::RangedAudioParameter&, const juce::String& caption,
                Knob::Style style = Knob::Style::utility, float faceScale = 0.5f,
                juce::Colour accent = tokens().accent,

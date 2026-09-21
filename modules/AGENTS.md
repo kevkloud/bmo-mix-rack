@@ -164,6 +164,18 @@ them was written by someone who had just been in the code.
    module it is -- BMO Opto -- sets these at runtime instead, but follows
    the same table.
 
+   **BMO FET is the one module that does not, and the last row is the row it
+   breaks.** Its ratio, voicing and oversampling switches are all "anything
+   else", and all of them light in the module's accent. `switchAlt` is the
+   utility azure at hue 198.8 degrees and BMO FET's accent is at 215.2, so a
+   switch obeying this table on that panel would be a second blue nobody could
+   tell from the first. It is the third exception in the suite, after BMO Opto's
+   and LTV Comp's, and the first taken for hue rather than for a greyscale
+   panel; `fetcomp/AGENTS.md` carries the figures. **This is recorded here so
+   that the table is read with its exception rather than against it** -- the
+   render pass of 2026-09-20 re-opened it as a fault because only the module's
+   own file said otherwise.
+
    Do not write a hex in a panel. If you need "the accent, but legible",
    that is `ui::accentInk`; for ink on a filled control it is
    `ui::onAccentOf`, and for ink on some other known ground

@@ -1,8 +1,8 @@
-#include "modules/deq/dsp/Design.h"
+#include "core/dsp/Design.h"
 
 #include <algorithm>
 
-namespace bmo::deq
+namespace bmo::dsp
 {
 
 namespace
@@ -330,4 +330,4 @@ Biquad designMatched (Shape shape, double frequencyHz, double q, double gainDb, 
     return designMatched (shape, frequencyHz, q, gainDb, DesignGrid::make (sampleRate));
 }
 
-} // namespace bmo::deq
+} // namespace bmo::dsp

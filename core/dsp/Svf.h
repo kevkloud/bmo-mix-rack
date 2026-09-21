@@ -1,9 +1,9 @@
 #pragma once
 
-#include "modules/deq/dsp/Biquad.h"
+#include "core/dsp/Biquad.h"
 #include <cmath>
 
-namespace bmo::deq
+namespace bmo::dsp
 {
 
 /** A TPT state-variable filter (Zavalishin, Simper) that can realise *any*
@@ -112,4 +112,4 @@ struct SvfState
     }
 };
 
-} // namespace bmo::deq
+} // namespace bmo::dsp

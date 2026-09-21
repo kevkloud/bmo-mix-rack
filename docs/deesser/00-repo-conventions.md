@@ -55,6 +55,29 @@ narrowband dynamic-EQ cut, and DEQ already is one:
   reuse DEQ's files directly, matching how vcomp/opto each own their own
   detector rather than sharing one.
 
+  **Settled 2026-09-21, and split rather than taken whole — Frosty's call.**
+  Read at source, §2 bars a shared *compressor-detector* library: "each
+  dynamics module owns its own `ReleaseStage`/`Smoother`". That is a rule
+  about detectors, and BMO Defang's detector is duly its own
+  (`modules/deesser/dsp/Detector.h`, adapted from `Dynamics.h`, already
+  divergent — it is fed a power-summed level from both channels).
+
+  Filter *design* is not a detector. It is arithmetic with one right answer,
+  the same category as the `GainComputer` and `Oversampler` already shared in
+  `core/dsp/`, and copying it would have meant two divergent copies of a
+  least-squares zero fit, each needing the same correction twice. So
+  `Biquad.h`, `Prototype.h`, `Design.{h,cpp}` and `Svf.h` **moved to
+  `core/dsp/`** in namespace `bmo::dsp`, on the same second-caller trigger
+  `core/ui/LevelBars.h` had used the day before. DEQ reaches them through
+  `modules/deq/dsp/Filters.h`, so its own diff is four include lines, and its
+  audio and its three renders were proved byte-identical either side of the
+  move.
+
+  One thing the move exposed rather than caused: a module's DSP is a static
+  library built from its own sources and does **not** link `bmo_core`, so
+  shared DSP with a compiled part needs its own library. That is `bmo_dsp`,
+  and `core/CMakeLists.txt` says why.
+
 ## 2. Existing de-essing-like behaviour / listen / spectrum display
 
 - No module currently does de-essing or offers a sidechain "listen/audition"

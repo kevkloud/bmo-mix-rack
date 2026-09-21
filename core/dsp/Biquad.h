@@ -3,7 +3,7 @@
 #include <cmath>
 #include <complex>
 
-namespace bmo::deq
+namespace bmo::dsp
 {
 
 inline constexpr double kPi = 3.14159265358979323846;
@@ -85,4 +85,4 @@ struct Biquad
     }
 };
 
-} // namespace bmo::deq
+} // namespace bmo::dsp

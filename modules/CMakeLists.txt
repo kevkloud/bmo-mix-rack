@@ -9,6 +9,9 @@ function(bmo_add_module name)
 
     add_library(bmo_${name}_dsp STATIC ${ARG_DSP_SOURCES})
     target_include_directories(bmo_${name}_dsp PUBLIC ${BMO_ROOT})
+
+    # The shared filter design, linked rather than re-listed: see core/CMakeLists.txt.
+    target_link_libraries(bmo_${name}_dsp PUBLIC bmo_dsp)
     set_target_properties(bmo_${name}_dsp PROPERTIES POSITION_INDEPENDENT_CODE ON)
     if(NOT BMO_DSP_ONLY)
         target_link_libraries(bmo_${name}_dsp PRIVATE
@@ -67,7 +70,6 @@ bmo_add_module(dim
 
 bmo_add_module(deq
     DSP_SOURCES
-        ${CMAKE_CURRENT_SOURCE_DIR}/deq/dsp/Design.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/deq/dsp/DspCore.cpp
     UI_SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/deq/panel/DeqPanel.cpp

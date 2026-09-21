@@ -25,11 +25,13 @@
 */
 
 #include "modules/fetcomp/dsp/DspCore.h"
+#include "tools/measure/Wav.h"
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -750,6 +752,237 @@ int bench (Voicing v)
     return 0;
 }
 
+
+//==============================================================================
+// `gen` and `render`: the two modes 11 section 3 lists that were missing, and
+// the reason the listening pass had no WAVs to listen to. measure_vcomp is
+// the model; the signal generators below are its, so a BMO FET render and a
+// BMO LTV Comp render of the same source can be heard against each other.
+//
+// WAVs go to packages/fetcomp-listening/ (gitignored). **Nothing here writes
+// into the repo**, and no audio is ever committed -- 11 section 3 is explicit
+// that the regression object is state, not audio.
+//==============================================================================
+
+/** The suite's test voice: a harmonic stack under a plucked envelope, gated
+    into phrases, normalised to -18 dBFS RMS -- the level every measurement in
+    this tool uses as its source. Peaks around -3.6 dBFS, a 14.4 dB crest. */
+std::vector<float> voice (double seconds)
+{
+    const auto samples = (size_t) (seconds * kSampleRate);
+    std::vector<float> out (samples);
+    double sumSquares = 0.0;
+
+    for (size_t i = 0; i < samples; ++i)
+    {
+        const auto t = (double) i / kSampleRate;
+        const auto beat = std::fmod (t, 0.55);
+        const auto envelope = (std::fmod (t, 3.0) < 1.6 ? 1.0 : 0.0)
+                            * (beat < 0.01 ? beat / 0.01 : std::exp (-(beat - 0.01) * 7.0));
+
+        double sum = 0.0;
+
+        for (int h = 1; h <= 120; ++h)
+            sum += std::pow ((double) h, -1.4) * std::sin (2.0 * 2.0 * kPi * 75.0 * (double) h * t);
+
+        out[i] = (float) (envelope * sum);
+        sumSquares += (double) out[i] * out[i];
+    }
+
+    const auto rms = std::sqrt (sumSquares / (double) samples);
+    const auto gain = rms > 0.0 ? std::pow (10.0, -18.0 / 20.0) / rms : 1.0;
+
+    for (auto& v : out)
+        v = (float) (v * gain);
+
+    return out;
+}
+
+/** A hard transient over a sustained bed: what the attack knob is for, and
+    the one signal where positions 1 and 7 should not sound alike. */
+std::vector<float> transients()
+{
+    constexpr double total = 4.0;
+    auto out = sine (60.0, total, std::pow (10.0, -30.0 / 20.0), kSampleRate);
+
+    for (size_t i = 0; i < out.size(); ++i)
+    {
+        const auto t = (double) i / kSampleRate;
+        const auto beat = std::fmod (t, 0.8);
+
+        // A click with almost no rise: 20 us of attack has to be audible on
+        // this or the position law is decorative.
+        const auto hit = beat < 0.0004 ? 1.0 : std::exp (-(beat - 0.0004) * 26.0);
+
+        out[i] = (float) ((double) out[i]
+                            + hit * 0.7 * std::sin (2.0 * kPi * 1800.0 * beat));
+    }
+
+    return out;
+}
+
+/** A sustained low tone that makes the release ripple audible as character
+    rather than as a number -- the listening counterpart of `slam`. */
+std::vector<float> lowTone()
+{
+    return sine (50.0, 4.0, std::pow (10.0, -18.0 / 20.0), kSampleRate);
+}
+
+int gen (int argc, char** argv)
+{
+    const std::string what = argc > 2 ? argv[2] : "";
+    std::string outPath;
+
+    for (int i = 2; i + 1 < argc; ++i)
+        if (std::string (argv[i]) == "--out")
+            outPath = argv[i + 1];
+
+    if (outPath.empty())
+    {
+        std::fprintf (stderr, "gen needs --out file.wav\n");
+        return 1;
+    }
+
+    std::vector<float> signal;
+
+    if      (what == "voice")      signal = voice (6.0);
+    else if (what == "transients") signal = transients();
+    else if (what == "low")        signal = lowTone();
+    else if (what == "sine")       signal = sine (1000.0, 2.0,
+                                                  std::pow (10.0, -18.0 / 20.0), kSampleRate);
+    else
+    {
+        std::fprintf (stderr, "gen <voice|transients|low|sine> --out file.wav\n");
+        return 1;
+    }
+
+    if (! bmo::measure::writeWav (outPath, { signal }, kSampleRate))
+    {
+        std::fprintf (stderr, "could not write %s\n", outPath.c_str());
+        return 1;
+    }
+
+    std::printf ("wrote %s, %zu samples at %.0f Hz\n",
+                 outPath.c_str(), signal.size(), kSampleRate);
+    return 0;
+}
+
+/** Arbitrary WAV in, BMO FET out, every parameter a flag.
+
+    Prints the settings and the delivered reduction alongside writing the
+    file, because 11 section 3 asks that a number and a listen always be of
+    the same render -- a WAV with no figures beside it is how a listening note
+    ends up citing a measurement nobody can reproduce. */
+int renderMode (int argc, char** argv)
+{
+    std::string inPath, outPath;
+
+    const auto flag = [argc, argv] (const char* name, double fallback)
+    {
+        for (int i = 2; i + 1 < argc; ++i)
+            if (std::string (argv[i]) == name)
+                return std::atof (argv[i + 1]);
+
+        return fallback;
+    };
+
+    for (int i = 2; i + 1 < argc; ++i)
+    {
+        const std::string a { argv[i] };
+
+        if (a == "--in")  inPath  = argv[i + 1];
+        if (a == "--out") outPath = argv[i + 1];
+    }
+
+    if (outPath.empty())
+    {
+        std::fprintf (stderr,
+                      "render [--in in.wav] --out out.wav [--input db] [--output db]\n"
+                      "       [--attack 1..7] [--release 1..7] [--ratio 0..4]\n"
+                      "       [--mix pct] [--os 1|2|4] [--voicing blue|black]\n"
+                      "Without --in, the test voice is used.\n");
+        return 1;
+    }
+
+    std::vector<std::vector<float>> channels;
+    auto rate = kSampleRate;
+
+    if (! inPath.empty())
+    {
+        if (! bmo::measure::readWav (inPath, channels, rate))
+        {
+            std::fprintf (stderr, "could not read %s\n", inPath.c_str());
+            return 1;
+        }
+    }
+    else
+    {
+        channels = { voice (6.0) };
+    }
+
+    if (channels.empty() || channels[0].empty())
+    {
+        std::fprintf (stderr, "no samples in the source\n");
+        return 1;
+    }
+
+    auto voicingName = std::string ("black");
+
+    for (int i = 2; i + 1 < argc; ++i)
+        if (std::string (argv[i]) == "--voicing")
+            voicingName = argv[i + 1];
+
+    DspCore::Params p;
+    p.voicing         = voicingFrom (voicingName);
+    p.inputDb         = (float) flag ("--input",   0.0);
+    p.outputDb        = (float) flag ("--output",  0.0);
+    p.attackPosition  = (float) flag ("--attack",  4.0);
+    p.releasePosition = (float) flag ("--release", 4.0);
+    p.mixPercent      = (float) flag ("--mix",   100.0);
+    p.oversampling    = (int)   flag ("--os",      1.0);
+
+    const auto ratioIndex = (int) flag ("--ratio", 0.0);
+    p.ratio = (Ratio) std::clamp (ratioIndex, 0, 4);
+
+    // Mono in, mono out; stereo in, both channels through the shared
+    // detector, which is the whole point of there being no LINK switch.
+    const auto mono = channels.size() == 1;
+    auto left  = channels[0];
+    auto right = mono ? channels[0] : channels[1];
+
+    DspCore core;
+    core.prepare (rate, (int) left.size(), mono ? 1 : 2);
+    core.setParams (p);
+
+    float* data[2] { left.data(), right.data() };
+    core.process (data, mono ? 1 : 2, (int) left.size());
+
+    std::vector<std::vector<float>> out;
+    out.push_back (left);
+
+    if (! mono)
+        out.push_back (right);
+
+    if (! bmo::measure::writeWav (outPath, out, rate))
+    {
+        std::fprintf (stderr, "could not write %s\n", outPath.c_str());
+        return 1;
+    }
+
+    std::printf ("wrote %s\n"
+                 "  voicing %s, ratio index %d, input %.2f dB, output %.2f dB\n"
+                 "  attack position %.2f, release position %.2f, mix %.1f %%, %dx\n"
+                 "  reported reduction at the end of the render: %.2f dB\n"
+                 "  rate %.0f Hz, %zu samples, %zu channel(s)\n",
+                 outPath.c_str(), nameOf (p.voicing), ratioIndex,
+                 (double) p.inputDb, (double) p.outputDb,
+                 (double) p.attackPosition, (double) p.releasePosition,
+                 (double) p.mixPercent, p.oversampling,
+                 (double) core.currentGainReductionDb(),
+                 rate, left.size(), out.size());
+
+    return 0;
+}
 } // namespace
 
 int main (int argc, char** argv)
@@ -767,6 +1000,8 @@ int main (int argc, char** argv)
     if (mode == "slam")       return slam (v);
     if (mode == "allbuttons") return allButtons();
     if (mode == "bench")      return bench (v);
+    if (mode == "gen")        return gen (argc, argv);
+    if (mode == "render")     return renderMode (argc, argv);
 
     std::fprintf (stderr, "usage: measure_fetcomp <latency|positions|curve|timing|thd|alias"
                           "|aliasorigin|slam|allbuttons|bench> [blue|black]\n");

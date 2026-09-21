@@ -162,6 +162,43 @@ itself. `measure_fetcomp curve black` prints both tables.
 
 ## 3. Four required suites are missing from a passing test file
 
+> **RESOLVED on AURORA, 2026-09-21. All four are in, plus `gen` and `render`.**
+> Full write-up: `testing-notes/fetcomp-section3-2026-09-21.md`.
+>
+> `fetcomp_dsp` goes from **863 checks to 1302**, 0 failures, 23.3 s (was ~4 s;
+> the CI ceiling is 10 minutes). Added: `testThdGrid`,
+> `testThdAtTheManualCondition`, `testVoicingThdSplit`, `testIntermodulation`,
+> `testLfRippleAgainstRelease`, `testLevelRange`, `testGoldenState`.
+> `measure_fetcomp` gains `gen` and `render`; WAVs go to
+> `packages/fetcomp-listening/`, which `.gitignore:15` already covers.
+>
+> **The voicing-collapse worry is answered.** Mutating `constantsFor` to return
+> `kBlack` for both voicings now produces **12 failures**. Before this it was
+> silent, which is exactly what this section said.
+>
+> **Three things the measurements settled that the plan had backwards**, each a
+> failing assertion before it was a corrected one:
+>
+> - *"No drive" is not "no reduction."* A 0 dBFS source sits ~16 dB over the
+>   4:1 threshold, so the grid's 0 dB row was measuring a compressed signal.
+>   Every row now gets its own bisected drive.
+> - *THD is not monotone in depth below 20 dB at 50 Hz* — Black runs 1.82 /
+>   1.57 / 1.26 % at 0 / 6 / 12 dB GR, falling, because the figure there is the
+>   envelope's ripple rather than the cell. 11 §3 asks for monotonicity "at 20
+>   and 30 dB" and that holds; the assertion is scoped to it.
+> - *H3 leads H2 at 50 Hz and is supposed to* — −26.8 vs −30.7 dB for Black at
+>   30 dB GR. The control ripples at 2f and puts its product on the third
+>   harmonic. Wanted character; "H2 leads" is scoped to 1 kHz.
+>
+> **And 11 §3's own wording is wrong about one thing.** "`output` must restore
+> unity" does not mean makeup equal to the reduction: `input` drives the cell,
+> so unity needs `reduction − input`, a **cut** of about 19 dB at 4:1, not a
+> boost of 30. An earlier draft of `testLevelRange` failed at every ratio by
+> taking the plan at its word. Both halves of the range are now checked.
+
+*What follows is the original statement of the problem.*
+
+
 `fetcomp_dsp` is green and has eighteen test functions. **Four of 11 section 3's
 required suites are not in the file at all** — grepped, zero hits each:
 
@@ -235,8 +272,9 @@ makes it materially slower, say so with the number.
     cmake --build build-dsp --config Release --parallel
     build-dsp/tools/Release/measure_fetcomp.exe <mode> [blue|black]
 
-Modes are `curve | timing | thd | alias | slam | allbuttons | bench`, plus
-`latency` and `positions`.
+Modes are `curve | timing | thd | alias | aliasorigin | slam | allbuttons |
+bench | gen | render`, plus `latency` and `positions`. `gen` and `render` write
+WAVs to `packages/fetcomp-listening/`, which is gitignored.
 
 **The voicing argument is lower case.** `blue`, not `Blue` — `voicingFrom`
 compares against `"blue"` and anything else silently falls through to black,

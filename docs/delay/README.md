@@ -16,17 +16,23 @@ by dispatched agents on AURORA, 2026-09-20, under `HANDOFF-groundwork.md`.
 - `14-calibration-and-listening.md` — how every CALIBRATE and DECISION value gets settled, and what freezes at ship.
 - `HANDOFF-groundwork.md` — the ruleset that produced this pack.
 
-## Decide before the schema commit (permanent once shipped)
+## Decided (Frosty, 2026-09-20)
 
-1. **SYNC in v1?** Tempo plumbing (`12`) does not exist yet. Recommended: reserve the SYNC and NOTE slots and the note-list order now regardless; ship SYNC when the plumbing lands.
-2. **FREEZE.** Its own button and parameter slot, or the top of THROW's travel? In v1, or slot reserved and shipped disabled?
-3. **Frozen sound values.** Maximum delay 2000 ms (4.0 MB per instance at 192 kHz) or 1000 ms; feedback top of travel at loop gain 1.05 (self-oscillation reachable) or clamped below 1. No measured class figure exists for either — they are our call.
-4. **MIX at 50% sums full dry and full wet with no makeup** (about +3 dB typical, +6 dB worst). Any auto-trim would break the bit-exact dry path. Confirm no auto-gain.
-5. **Identity.** Module id `dwell` or `delay`; and "Dwell" has not been trademark-searched — do that before the identity row ships.
+1. **SYNC** — the SYNC and NOTE slots and the note-list order are reserved in the permanent schema now; the feature ships, enabled, when the tempo plumbing (`12`) lands.
+2. **FREEZE** — its own button and parameter slot (row 17), enabled in v1; not folded into THROW.
+3. **Maximum delay 2000 ms** (4.0 MB per instance at 192 kHz).
+4. **Feedback top of travel is loop gain 1.05**; the ~97–100% self-oscillation zone is accepted and marked on the panel. BUILD depends on it.
+5. **No auto-gain at MIX 50%** — the bit-exact dry path wins (about +3 dB typical, +6 dB worst).
+6. **Module id `dwell`.**
+
+## Still open before the schema commit
+
+- "Dwell" has not been trademark-searched; do that before the identity row ships.
+- The `voicing` choice list in `11` has no counterpart in `10`, which defines only a continuous VOICE — keep it or drop it; it is a permanent slot either way.
 
 ## Decide during the add-bmo-dwell build (see or hear it first)
 
-- VOICE resonance as a ring on HIGH CUT or a fourth knob row; and whether the `voicing` choice list in `11` stays (`10` defines only a continuous VOICE) — that one is schema, settle it with decision 2.
+- VOICE resonance as a ring on HIGH CUT or a fourth knob row.
 - Accent: gold gap (`13`) or the red / magenta candidates (`11`); settle with the de-esser session, which wants a gap too.
 - THROW strictly momentary or modifier-click latch; `throwMode` order (Send open → Throw → Build).
 - Ping-pong on a stereo source: sum to mono (specified) or keep L/R; dual-offset ratio fixed at 2/3.

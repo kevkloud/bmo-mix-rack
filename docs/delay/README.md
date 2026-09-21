@@ -16,6 +16,7 @@ by dispatched agents on AURORA, 2026-09-20, under `HANDOFF-groundwork.md`.
 - `14-calibration-and-listening.md` — how every CALIBRATE and DECISION value gets settled, and what freezes at ship.
 - `20-name-clearance.md` — name-clearance note for "Dwell": web search plus a USPTO registry search; not legal advice.
 - `HANDOFF-groundwork.md` — the ruleset that produced this pack.
+- `HANDOFF-add-bmo-dwell.md` — the prompt that starts the build from this pack.
 
 ## Decided (Frosty, 2026-09-20)
 

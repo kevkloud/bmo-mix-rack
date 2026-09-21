@@ -73,6 +73,35 @@ public:
     void setRestMark (bool b) noexcept { restMark = b; }
     bool hasRestMark() const noexcept  { return restMark; }
 
+    /** Draw this many discrete tick marks around the track instead of the
+        dotted arc and its two end symbols. Zero, the default, is the dotted
+        arc every knob in the suite has always drawn.
+
+        For a knob whose parameter **is** a position rather than an amount.
+        BMO FET's ATTACK and RELEASE are 1..7, seven detents on the hardware,
+        and the value line under them reads "4 (126 us)" -- so the face should
+        say seven places, not a continuum with less at one end and more at the
+        other. The dotted arc and the minus/plus are exactly the wrong promise
+        there, which is why this replaces them rather than adding to them.
+
+        The marks are laid across the same sweep the pointer travels, so the
+        pointer lands on one at every whole position.
+
+        `labelEvery` numbers every nth mark, counting the first: 2 over seven
+        marks prints 1, 3, 5, 7, which is how a detented faceplate is marked --
+        enough to count from without a number against every tooth. 0 draws the
+        marks bare. An odd count with a stride of 2 numbers both ends, which is
+        the arrangement worth having; nothing stops an even one, it just leaves
+        the last mark unnumbered. */
+    void setStepMarks (int count, int labelEvery = 0) noexcept
+    {
+        stepMarks      = juce::jmax (0, count);
+        stepLabelEvery = juce::jmax (0, labelEvery);
+    }
+
+    int getStepMarks() const noexcept      { return stepMarks; }
+    int getStepLabelEvery() const noexcept { return stepLabelEvery; }
+
     /** What the two ends of the dotted track say.
 
         `lessMore` is the suite's minus and plus, and it is right for every
@@ -108,6 +137,8 @@ private:
     bool  restMark = true;
     EndMarks endMarks = EndMarks::lessMore;
     int   detents = 0;
+    int   stepMarks = 0;        ///< see setStepMarks; 0 is the dotted arc
+    int   stepLabelEvery = 0;   ///< number every nth mark; 0 draws them bare
     float faceScale = 1.0f;
     float trackRadius = 0.0f;
 };

@@ -68,6 +68,11 @@ public:
         Forwards to Knob::setEndMarks; see it for why. */
     void setEndMarks (Knob::EndMarks);
 
+    /** Discrete position marks instead of the dotted track and its end
+        symbols, with every nth one numbered. Forwards to Knob::setStepMarks;
+        see it for why. */
+    void setStepMarks (int count, int labelEvery = 0);
+
     /** Re-colours the knob and, unless a caption colour was passed in, its
         caption with it. For a module whose colour depends on its own state --
         BMO Opto runs greyscale in Tele and lavender in Stressed -- rather than
@@ -465,6 +470,32 @@ public:
         hands in 1.4 should get a solid frame, not a failed build. */
     void setBezelAlpha (float alpha) noexcept;
 
+    /** How thick the bezel is stroked, in pixels. 1.5 is what this class has
+        drawn since it existed, and is the default.
+
+        Opt-in for the same reason as `setBezelAlpha`: on BMO FET the bezel is
+        not decoration but the one place the voicing is shown, and once the
+        meter moved to the head of that panel a 1.5 px frame was too slight to
+        carry it. Every other meter in the suite keeps 1.5 and renders byte for
+        byte as it did.
+
+        Clamped, not asserted -- a bezel is decoration elsewhere, and a caller
+        handing in nonsense should get a frame, not a failed build. */
+    void setBezelThickness (float pixels) noexcept;
+
+    /** Whether the bezel is stroked again on top of the needle.
+
+        The needle is drawn last so that it reads before anything else on the
+        face. On a meter whose frame is thin that is right. On one whose frame
+        carries meaning and is thick, the needle crossing it at full sweep cuts
+        the frame in two, and the frame is what the eye is being asked to read
+        -- so the bezel goes back over it. Hardware does the same thing by
+        putting the needle behind the glass and the bezel in front of it.
+
+        False is what this class has always done, and what every meter but BMO
+        FET's still does. */
+    void setBezelInFront (bool) noexcept;
+
     /** One control point on the printed scale: a value in the mode's own unit
         (dB relative to the VU reference, or dB of gain reduction), where it
         sits across the needle's sweep, 0..1, and whether it is numbered.
@@ -511,6 +542,14 @@ private:
         since it existed; see setBezelAlpha for the one module that moves it. */
     static constexpr float kDefaultBezelAlpha = 0.7f;
     float bezelAlpha = kDefaultBezelAlpha;
+
+    /** The width the bezel is stroked at, and whether it is stroked a second
+        time over the needle. Both are what this class has always drawn; see
+        setBezelThickness and setBezelInFront for the one module that moves
+        them. */
+    static constexpr float kDefaultBezelThickness = 1.5f;
+    float bezelThickness = kDefaultBezelThickness;
+    bool  bezelInFront   = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DynamicsMeter)
 };

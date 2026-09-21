@@ -228,7 +228,12 @@ void Ribbon::drawSuggestion (juce::Graphics& g, juce::Rectangle<float> plot,
     // Named, because an unlabelled number under a moving picture is read as
     // part of the picture. The suite's rule about a control row being the only
     // thing that names a mode is the same rule.
-    const auto text = "SIBILANCE ~" + juce::String (hz / 1000.0, 1) + " kHz";
+    //
+    // "BITE" rather than "SIBILANCE" -- Frosty, 2026-09-21. It is the module's
+    // own word: BMO Defang takes the bite out of a recording, and the number
+    // says where that bite is. It is also one syllable against four, which on
+    // a 226-px strip is the difference between a caption and a sentence.
+    const auto text = "BITE ~" + juce::String (hz / 1000.0, 1) + " kHz";
 
     g.setFont (ui::captionFont (9.0f));
     g.setColour (ink);

@@ -47,12 +47,13 @@ namespace
 
     constexpr int kSketchHeight = 104;
 
-    /** The ribbon under it. 44 px of the 51 the needle left behind, which is
+    /** The ribbon under it, plus the strip carrying its suggested frequency.
+        44 px of well: most of the 51 the needle left behind, which is
         where that space was always going -- see the class comment. Shallower
         than the sketch on purpose: the sketch is the thing being set and the
         ribbon is the thing being watched, and a reader should be able to tell
         which is which without reading either. */
-    constexpr int kRibbonHeight = 44;
+    constexpr int kRibbonHeight = 44 + Ribbon::kCaptionRow;
 
     //== The sketch's axes =====================================================
     //

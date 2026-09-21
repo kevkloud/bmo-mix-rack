@@ -91,7 +91,9 @@ void Ribbon::timerCallback()
 void Ribbon::paint (juce::Graphics& g)
 {
     const auto t = ui::panelTokensFor (*this);
-    const auto bounds = getLocalBounds().toFloat();
+    auto area = getLocalBounds().toFloat();
+    const auto captionArea = area.removeFromBottom ((float) kCaptionRow);
+    const auto bounds = area;
 
     // The same recess the sketch above sits in, so the two read as one
     // instrument in two panes rather than as two components.
@@ -185,7 +187,7 @@ void Ribbon::paint (juce::Graphics& g)
                                             1.0f, height * 2.0f));
     }
 
-    drawSuggestion (g, plot, caught, available);
+    drawSuggestion (g, captionArea, caught, available);
 }
 
 void Ribbon::drawSuggestion (juce::Graphics& g, juce::Rectangle<float> plot,
@@ -220,15 +222,17 @@ void Ribbon::drawSuggestion (juce::Graphics& g, juce::Rectangle<float> plot,
 
     // A tenth of a kHz, which is finer than the knob is ever set and coarse
     // enough not to flicker frame to frame. ASCII only, as the licensed faces
-    // require -- so "~" and not an approximation sign.
-    const auto text = "~" + juce::String (hz / 1000.0, 1) + " kHz";
-
-    auto box = plot.reduced (4.0f);
-    box = box.removeFromTop (11.0f).removeFromRight (64.0f);
+    // require -- so "~" and not an approximation sign, and the tilde is doing
+    // real work: this is an estimate from seven filters, not a measurement.
+    //
+    // Named, because an unlabelled number under a moving picture is read as
+    // part of the picture. The suite's rule about a control row being the only
+    // thing that names a mode is the same rule.
+    const auto text = "SIBILANCE ~" + juce::String (hz / 1000.0, 1) + " kHz";
 
     g.setFont (ui::captionFont (9.0f));
     g.setColour (ink);
-    g.drawText (text, box, juce::Justification::centredRight, false);
+    g.drawText (text, plot, juce::Justification::centred, false);
 }
 
 } // namespace bmo::deesser

@@ -60,6 +60,14 @@ public:
         RANGE. */
     void setRangeDb (float rangeDb);
 
+    /** The strip under the well carrying the suggested frequency.
+
+        Reserved rather than drawn inside the well -- `ui::LevelBar::kScaleRow`
+        is the same shape of thing for the same reason. A number floating over
+        a moving picture is read as part of it, and this one is not: the
+        waveform is what happened and the suggestion is what to do about it. */
+    static constexpr int kCaptionRow = 13;
+
     void paint (juce::Graphics&) override;
 
 private:

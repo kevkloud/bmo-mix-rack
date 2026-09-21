@@ -115,6 +115,24 @@ public:
     static constexpr float kHoldMs        = 5.0f;   ///< an /s/-/t/ cluster is one event
     static constexpr float kHysteresisDb  = 1.5f;   ///< threshold drop while engaged
 
+    /** Where 0 dB of prominence sits, so THRESH reads 0 at a typical vocal
+        balance rather than at an arbitrary number. **The one constant here
+        that has no defensible first value**: 10 section 10.1 says it is fitted
+        from a take's measured prominence distribution, and no take has been
+        measured. 0 means "THRESH 0 is whatever this detector happens to call
+        zero", which is a placeholder wearing a number.
+
+        It lived in `Detector.h`'s own defaults until 2026-09-21 and was never
+        set from here, which made this block's claim to hold every calibratable
+        value untrue -- and would have sent the listening pass to the wrong
+        file. CALIBRATE. */
+    static constexpr float kProminenceRefDb = 0.0f;
+
+    /** How far below the fullband reference the brightness memory may fall.
+        Without it the slow term chases a fade-out downward and the detector
+        grows steadily more eager as a phrase ends. CALIBRATE. */
+    static constexpr float kSlowFloorDb = 20.0f;
+
     static constexpr float kRefGateDb  = -55.0f;    ///< reference below this: offset exactly 0
     static constexpr float kBandGateDb = -60.0f;    ///< band below this: offset exactly 0
     static constexpr float kRefHighPassHz = 150.0f; ///< ahead of the reference rectifier
@@ -212,6 +230,8 @@ public:
         pc.kappa         = kKappa;
         pc.refGateDb     = kRefGateDb;
         pc.bandGateDb    = kBandGateDb;
+        pc.referenceDb   = kProminenceRefDb;
+        pc.slowFloorDb   = kSlowFloorDb;
         detector.prepare (pc, rate);
 
         Reduction::Config rc;

@@ -26,7 +26,7 @@ by dispatched agents on AURORA, 2026-09-20, under `HANDOFF-groundwork.md`.
 5. **No auto-gain at MIX 50%** — the bit-exact dry path wins (about +3 dB typical, +6 dB worst).
 6. **Module id `dwell`.**
 7. **VOICE** — one continuous control as `10` defines it; the stepped `voicing` list is dropped.
-8. **In-loop FX** — reserved in the permanent schema now (`fx`, `fxType`, `fxAmount`). The FX switch **expands the module**, the way BMO DEQ's panel differs between its compact rack default and its expanded standalone default; `fxType` and FX AMOUNT live **only on the expanded section**, and with FX off the module is compact and the stage is skipped at zero CPU cost. The FX types are **candidates for testing** — the list and its order stay free until ship, then are append-only forever, so anything that fails listening (`14` §3, L3) comes out first.
+8. **In-loop FX** — reserved in the permanent schema now (`fx`, `fxType`, `fxAmount`). **Tied but not the same** (DECIDED, Frosty 2026-09-20): `fx` (id 17) is the sound, on the main panel; a separate on-panel arrow, never automatable or in presets, opens the expanded section where `fxType` and FX AMOUNT live, and turning `fx` off never closes it. With FX off the stage is skipped at zero CPU cost. The FX types are **candidates for testing** — the list and its order stay free until ship, then are append-only forever, so anything that fails listening (`14` §3, L3) comes out first.
 
 ## Still open before the schema commit
 

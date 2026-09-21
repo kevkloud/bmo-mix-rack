@@ -160,6 +160,13 @@ picks `layoutCompact` or `layoutExpanded` from that (`.cpp:372-380`). The rack
 re-lays out from `RackEditor::slotWidth(slot)` and `refit()`
 (`core/rack/RackEditor.h:96-106`).
 
+**DECIDED (Frosty, 2026-09-20): tied but not the same.** Dwell adds a small
+on-panel arrow, absent from DEQ, that opens and closes the expanded view — the
+panel must be able to request the host's expand flag, a touch point beyond
+the mechanism above. `fx` (id 17, the FX switch below) stays the sound;
+clicking it on from compact opens the view once, then the arrow alone toggles
+it, touching no parameter.
+
 **Consequence for Dwell: the module can only grow sideways.** The mechanism is a
 second *width*; there is no `expandedHeight`. So the FX section is a **right-hand
 column, not extra rows**.

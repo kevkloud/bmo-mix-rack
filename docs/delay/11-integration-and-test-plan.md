@@ -90,13 +90,17 @@ order may change freely until ship and are **append-only forever afterwards**, s
 any candidate that fails 14 §3's listening must be **removed before ship**, never
 left in as a dead index.
 
-**Expanded is not `fx`** — recommended. The repo's expansion is a *view*, not a
-parameter: `ModuleDef::expandedWidth`, a session-only `view` attribute, and
-`ui::ExpandButton` on the host's bar, "never the panel, whose controls all change
-the sound" (`core/product/ModuleDef.h`, `core/AGENTS.md`). Binding width to `fx`
-would put a window resize on an automation lane and in every preset. So: `fx` is
-the sound, `view` is the width, and turning `fx` on may *request* the wide view
-once as a convenience. **Open for Frosty**, since he asked for one switch.
+**Expanded is not `fx`** — **DECIDED (Frosty, 2026-09-20): tied but not the
+same.** `fx` (id 17) is the sound, lives on the compact panel, and lights when
+on. The view stays DEQ's mechanism — `ModuleDef::expandedWidth`, a session-only
+`view` attribute, never a parameter or preset value — but Dwell adds a small
+on-panel arrow to open and close it, so the panel must be able to request the
+host's `ui::ExpandButton` flag: a touch point beyond DEQ's host-bar-only switch
+(`core/product/ModuleDef.h`, `core/AGENTS.md`). The tie: clicking `fx` on while
+compact opens the view once, as a convenience; the arrow then closes it while
+`fx` stays on; turning `fx` off never closes the view. Automation, preset load
+and session recall never resize the module. Rack defaults compact; standalone
+defaults expanded.
 
 **No control is named DWELL** — that is the module. **Permanent at ship**: ids,
 their order, ranges, steps, defaults, and the four choice lists **with their
@@ -211,7 +215,10 @@ bypassed. Reverse's second buffer is allocated in `prepare()` from the fixed
 maximum whether `fx` is on or not — no allocation in `process()` when it turns on.
 State: `fx`/`fxType`/`fxAmount` round-trip in the golden schema and in presets,
 while the **expanded view round-trips in the session only**, separately, and
-differs by default between rack (compact) and standalone (expanded).
+differs by default between rack (compact) and standalone (expanded). Test
+direction: automating, preset-loading or recalling `fx` never resizes the
+module; a user click that turns `fx` on from compact opens the view once; the
+arrow toggles the view alone, touching no parameter and no audio.
 
 ## Open decisions for Frosty
 

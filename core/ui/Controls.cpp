@@ -295,6 +295,24 @@ ConcentricBand::ConcentricBand (juce::RangedAudioParameter& selector, const Para
     ring.setStyle (hasCentre ? Knob::Style::ring : Knob::Style::filter);
     ring.setFaceScale (hasCentre ? 0.529f : 0.35f);
 
+    // The ring carries the module's colour as well as the dial inside it.
+    //
+    // The look and feel draws a ring's selected position as
+    // accentTextOn (knob->getAccent(), ringFace), so a ring left on Knob's
+    // default drew that mark in tokens().accent -- BMO CEQ's pink -- whatever
+    // module it belonged to. Nobody saw it, because BMO CEQ's three gain
+    // bands are the only rings in the suite and BMO CEQ's accent *is* that
+    // pink: the fallback has been right by accident.
+    //
+    // Put right here rather than left to each panel to remember. Every render
+    // in the suite was hashed either side of this line and none of them moved
+    // -- testing-notes/deq-ring-accent-2026-09-21.md -- so it costs a shipped
+    // panel nothing and stops costing the next module anything either. BMO
+    // DEQ's shape dial is not the exception it looked like: with no gain it
+    // is a filter rather than a ring, and a filter never reads the module
+    // accent at all.
+    ring.setAccent (accent);
+
     // The legend is drawn here, not by the slider, so a change of position has
     // to repaint the parent or the marked position goes stale.
     ring.onValueChange = [this] { repaint(); };

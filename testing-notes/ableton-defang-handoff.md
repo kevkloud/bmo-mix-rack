@@ -121,24 +121,54 @@ argument; this pass is the evidence.
 
 ---
 
-## 5. Tools, and what they will not do
+## 5. Tools
 
-    measure_deesser constants              the values in the build, so the
-                                           number being argued about is the
-                                           number running
-    measure_deesser latency                zero at every setting, reported and
-                                           measured by impulse
-    measure_deesser detect [ms] [ms] [x]   gain reduction over time on a
-                                           synthetic ess, with its peak
+WAV in and out is **`tools/measure/Wav.h`** — shared, PCM 16/24/32 and IEEE
+float 32, any channel count, deinterleaved rather than summed. That is the
+file to point a session at for reading or writing audio in a harness; it needs
+no CMake change, only the include. Its own header records that the five older
+harnesses (eq, sat, opto, dim, deq) each still carry a private copy, to be
+deleted as each is next opened for its own reasons. BMO Defang's uses the
+shared one.
 
-`detect` is how three false starts on the render's stimulus were diagnosed,
-and it is genuinely useful for watching the ballistics — but **it does not do
-the thing §10.1 needs.** It runs a synthesised burst and prints reduction; it
-does not take a real take and print its prominence *distribution*, which is
-what fitting `kProminenceRefDb` properly requires. That mode is unwritten. It
-wants a WAV reader (`tools/measure/Wav.h` exists) and an afternoon, and it
-would turn the first question in §2 from a listening judgement into a
-measurement. Worth doing before guessing twice.
+    measure_deesser constants                   the values in the build, so the
+                                                number being argued about is the
+                                                number running
+    measure_deesser latency                     zero at every setting, reported
+                                                and measured by impulse
+    measure_deesser detect <take.wav> [hz] [q]  the prominence distribution of a
+                                                real take, and the
+                                                kProminenceRefDb it suggests
+    measure_deesser detect [burst] [gap] [x]    the same detector on a synthetic
+                                                ess, as reduction over time
+    measure_deesser gen <out.wav> [seconds]     write that synthetic take out
+
+**Fit `kProminenceRefDb` before turning a single knob**, because it is the
+constant every other judgement is made through:
+
+    measure_deesser detect <a-real-vocal.wav>
+
+It prints where that take's prominence actually sits and the offset to apply.
+What it is doing is worth understanding, because the shape of the answer is
+the whole point: **a vocal's prominence distribution is bimodal.** Most of a
+take is vowels, where the band sits far below the reference; the esses are the
+top few per cent and stand 30 dB above them. The suggestion is the 95th
+percentile, so THRESH 0 lands where sibilance starts rather than in the middle
+of the vowels — and the line under it says what fraction of the take would
+then be acted on. **Near five per cent is right. A third means the suggestion
+is wrong or the band is in the wrong place**, and that reading is worth more
+than the number above it.
+
+The last line of the mode runs the real engine over the same file. The tool
+reproduces the detector's front-end rather than sharing it, and that
+cross-check is what makes a drift between the two visible. If the prominence
+says the module should be working and the engine reports nothing, believe the
+engine and fix the tool.
+
+For material, `gen` writes the synthetic take the renders use. It exercises
+the harness and gives two machines an identical file to compare on, but it is
+**not** a substitute for a voice: a synthesised ess is band noise with an
+envelope, and the constants this pass exists to fit are about the other thing.
 
 For the panel rather than the sound:
 

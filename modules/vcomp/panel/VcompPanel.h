@@ -1,7 +1,7 @@
 #pragma once
 
 #include "core/product/ModuleDef.h"
-#include "modules/vcomp/panel/LevelBars.h"
+#include "core/ui/LevelBars.h"
 
 namespace bmo::vcomp
 {
@@ -81,7 +81,7 @@ private:
 
     ui::PlainKnob amount, output;
 
-    LevelBar inBar, grBar, outBar;
+    ui::LevelBar inBar, grBar, outBar;
 
     ui::SwitchButton complexSwitch, arcSwitch;
     ui::PlainKnob attackKnob, releaseKnob, sidechainKnob, lowThruKnob, highThruKnob;

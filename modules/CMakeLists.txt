@@ -79,7 +79,6 @@ bmo_add_module(vcomp
         ${CMAKE_CURRENT_SOURCE_DIR}/vcomp/dsp/DspCore.cpp
     UI_SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/vcomp/panel/VcompPanel.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/vcomp/panel/LevelBars.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/vcomp/Module.cpp)
 
 bmo_add_module(deesser

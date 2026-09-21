@@ -81,6 +81,34 @@ module reports exactly 0.0 at defaults and schema corners; existing schema tests
 green; every panel re-rendered and pixel hashes proven unchanged; `rack_tests`
 and the `independence` job green.
 
+**(b) Mono-in→stereo-out — SHIPPED IN v1, 2026-09-21 on AURORA.** Frosty reversed
+the deferral below. The analysis that follows is kept because it is where the
+requirement came from, but three of its conclusions turned out to be wrong and
+the implementation in `core/product/BusLayouts.h` does not follow them:
+
+- *"The rack is the blocker… if ever done, standalone only."* It is not. The rack
+  widens **once, at its own input, ahead of slot 1**, so no slot ever sees an
+  asymmetric layout and no module widens the one after it. The rack ships this.
+- *"A `ModuleDsp` capability flag defaulting false, so only an opting-in module
+  sees an asymmetric layout."* Not needed, and it would have been the wrong
+  shape. No module sees an asymmetric layout under duplication.
+- *"Bus layout is the whole obstacle"* (10 §8). Channel handling had to change
+  too. The old `processBlock` **cleared** the channels the input did not cover;
+  a stereo buffer with a silent right channel is not a mono signal, it is a
+  hard-left one. Dimension's guard only catches `numChannels < 2`, so it would
+  have imaged that hard-left source — the exact error its own comment records at
+  +1.17 dB. The input is now **duplicated** into the uncovered channels at unity,
+  which is the signal every module already handles when a host feeds both inputs
+  of a stereo instance. Stereo-in→mono-out stays rejected: folding is a mix
+  decision and BMO Util is where a user makes it visibly.
+
+Covered by `tests/plugin/BusTests.cpp` (ctest `bus`): per module and for a full
+rack, absolute per-channel RMS and peak constants captured at `8fed835` *before*
+either processor was touched, so the existing mono→mono and stereo→stereo paths
+are proven bit-unchanged rather than argued to be.
+
+*The original analysis, for the record:*
+
 **(b) Mono-in→stereo-out — wanted, deferred past v1.** Both processors restrict
 buses to mono *or* stereo with no conversion (`SingleModuleProcessor.cpp:70-79`);
 Dimension early-returns on mono. 10 §8 is explicit that the engine already
@@ -144,6 +172,22 @@ two unbuilt modules want the last window. Sign the reverb in now, or approve a
 FET-style exception; relaxing 26.8° is not a third option, since 24° reopens a
 0.4° sliver and 22° two ~4° greens. Reconfirm at merge; verify with
 `Inspect.exe ratio` on a real render.
+
+**Decided 2026-09-21 on AURORA: BMO Linger takes V4 `#e694e0`.** Frosty chose it
+from a proof sheet that drew all four candidates through the real panel rules —
+`faceOf` for knob caps, `accentInk` for captions, `onAccentOf` for switch ink —
+on both plates, rather than from hex. An independent audit of the arithmetic
+above reproduced it: swept at 0.1° over the whole circle, the admissible set is
+the single arc 298.4–309.2°, and V4 sits at its centre.
+
+The reverb therefore spends the window, and **BMO Dwell cannot also be violet**:
+two accents need 2×26.8° and the arc is 10.8° wide, a 16.0° shortfall. That is
+Dwell's call to make, but the pack it will make it from has a defect worth
+naming here. `docs/delay/00-repo-conventions.md` omits BMO Tune RT from its
+accent list, which is why its olive-gold `#b2bb54` reads there as unconditionally
+clean. It is not: it clears every *rack* accent by 33.5° but needs an 11.9°
+exception against Tune RT. The exception is cheap — Tune is not a rack module and
+can never sit beside Dwell — but it should be taken knowingly, not by omission.
 
 ## 4. Parameter layout
 
@@ -314,7 +358,7 @@ The rest, one line each:
 | Bypass | No per-slot enable flag exists (`00` §2, 10 §5), so a removed reverb truncates: assert the wet bus fades over **150 ms** in `reset()` on the envelope slope, and no click into the remaining chain |
 | Sample rate | 44.1–192 kHz. *Must not differ:* per-band T60 ±5%, tap times *in ms* ±0.1 ms, pre-delay ±0.1 ms, density crossing ±10%, latency **exactly 0**. *May differ:* sample values (lines re-primed per rate), modal detail above ~15 kHz, memory (linear in rate) |
 | Block size | 1/16/32/64/**127**/512/2048 **bit-identical** for fixed parameters; if not, something smooths per block instead of per sample — a bug, not a tolerance |
-| Buses | `numChannels` 1 and 2: mono finite and ≤3 dB down by the γ ≥ 0 rule; no mono→stereo layout in v1 (§2b) |
+| Buses | `numChannels` 1 and 2: mono finite and ≤3 dB down by the γ ≥ 0 rule. **Mono→stereo ships in v1** — landed 2026-09-21 on AURORA, `core/product/BusLayouts.h`, covered by `bus_tests`; the reverb sees the mono input duplicated into both channels and is free to decorrelate its tail from it |
 | CPU / memory | 10 §6's budget: `measure_reverb bench`, 60 s noise, 48 kHz/128, **Release**, median of five, on AURORA — **≤1.5% of a core at 48 kHz/128, ≤5% at 192 kHz**, eight slots under 12% and 40%. Memory ≈300 kB / ≈1.2 MB, allocated in `prepare()`, **zero allocation in `process()`**. Measure 10 §8's worst case first (DENSITY 48 taps, 3 diffuser stages, 192 kHz) |
 | Golden STATE | `checkSchema` pins ids, order, ranges, steps, defaults, formats and both choice lists with their index order; pin the **derived** per-type tap tables too, since 10 §8's "failing table is re-seeded, not patched" only works if it is pinned. For a fingerprint, a **hash of a fixed-seed IR** plus scalars — never audio |
 

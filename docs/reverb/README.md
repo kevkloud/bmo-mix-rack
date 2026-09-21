@@ -8,8 +8,8 @@ AURORA, 2026-09-20/21; nothing in it has been built, measured or heard.
 
 Display name **BMO Linger** · module id **`reverb`** · bundle
 **`com.lt3audio.bmolinger`** · presets **`.bmoreverb`** · plugin code **`Brvb`**
-· BMO line. Permanent from first ship. The id and the name differ deliberately,
-as `deesser` is to BMO Defang.
+· accent **`#e694e0`** · BMO line. Permanent from first ship. The id and the name
+differ deliberately, as `deesser` is to BMO Defang.
 
 The thesis: Reference B's sound with Reference A's functionality, and an ER
 section good enough to use alone. Third-party products appear only under neutral
@@ -28,17 +28,22 @@ labels.
 
 ## Open decisions
 
-1. **Accent, and who gets violet.** Only about 298-309 degrees still passes the
-   hue rule, and BMO Dwell wants the same window. Candidates: `#dd93dd`,
-   `#eb8ae9`, `#e8a2e5`, `#e694e0`. One of the two will need an exception.
+1. ~~**Accent, and who gets violet.**~~ **Settled 2026-09-21 on AURORA: Linger
+   takes `#e694e0`** (V4, the window centre), chosen by Frosty from a rendered
+   proof sheet rather than from hex. Linger spends the only admissible arc, so
+   BMO Dwell needs a different hue — see 11 §3 for the arithmetic and for the
+   Tune RT omission in Dwell's own conventions doc.
 2. **Thirty parameters on one module.** Both packs now say 30, one permanent
    order; the count settled when `inhicut` (IN HI-CUT) proved to be the
    difference and was kept, marked "owner confirm" — accept or cut it before
    first ship. Main face takes 7 controls plus a display. Type list append-only:
    Room, Chamber, Hall, Large Hall, Plate, Ambience.
 3. **Three shared-code changes.** Tail-length reporting (every module reports 0
-   today; the rack would sum its slots) is needed in v1. Mono-in to stereo-out
-   is deferred, with a fallback. Host tempo is out of v1 and should land once,
+   today; the rack would sum its slots) is in v1, as decided. **Mono-in to
+   stereo-out is also in v1** — Frosty's call on 2026-09-21, reversing the
+   deferral: it is a bus-contract change in both processors, not a DSP one, and
+   BMO Dimension's mono path cannot be reused for it (Dimension early-returns on
+   a mono bus by design). Host tempo stays out of v1 and should land once,
    byte-identically, with BMO Dwell.
 4. **Era colour is not in v1.** Each type reserves the fields so a later
    voicing switch changes no ordinals.

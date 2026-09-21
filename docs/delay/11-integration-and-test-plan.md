@@ -66,22 +66,21 @@ is added, its whole-sample group delay comes off `D`, keeping the figure 0.
 | 5 | `stereo` | Stereo/Ping-pong/Dual offset | Stereo | xfade |
 | 6 | `lowCut` | 20…1000 Hz, log | 20 | 20 ms |
 | 7 | `highCut` | 1k…20k Hz, log (cap 18 k) | 20000 | 20 ms |
-| 8 | `voicing` | Neutral/Resonant/Band/Comb | Neutral | xfade |
-| 9 | `voice` | 0…100 %, lin (10 §11: `Q = 0.5 + VOICE·5.5`) | 0 | 20 ms |
-| 10 | `modRate` | 0.1…8 Hz, log | 0.6 | 20 ms |
-| 11 | `modDepth` | 0…100 %, lin | 0 | 20 ms |
-| 12 | `drive` | 0…100 %, lin | 0 | 20 ms |
-| 13 | `duck` | 0…24 dB, lin | 4 | 20 ms |
-| 14 | `mix` | 0…100 %, 10 §9's sin/cos hinge at 50 % | 35 | 30 ms |
-| 15 | `throw` | bool, momentary | off | 5–10 ms ramp |
-| 16 | `throwMode` | Send open/Throw/Build | Send open | xfade |
-| 17 | `freeze` | bool, momentary | off | latched, no ramp |
+| 8 | `voice` | 0…100 %, lin (10 §11: `Q = 0.5 + VOICE·5.5`) | 0 | 20 ms |
+| 9 | `modRate` | 0.1…8 Hz, log | 0.6 | 20 ms |
+| 10 | `modDepth` | 0…100 %, lin | 0 | 20 ms |
+| 11 | `drive` | 0…100 %, lin | 0 | 20 ms |
+| 12 | `duck` | 0…24 dB, lin | 4 | 20 ms |
+| 13 | `mix` | 0…100 %, 10 §9's sin/cos hinge at 50 % | 35 | 30 ms |
+| 14 | `throw` | bool, momentary | off | 5–10 ms ramp |
+| 15 | `throwMode` | Send open/Throw/Build | Send open | xfade |
+| 16 | `freeze` | bool, momentary | off | latched, no ramp |
 
 **No control is named DWELL** — that is the module. **Permanent at ship**: ids,
 their order, ranges, steps, defaults, and the four choice lists **with their
 index order**; new parameters append at the end. `sync`/`note`'s slots and
 `note`'s order are permanent now; `sync` ships disabled until 12's tempo
-plumbing lands. `freeze` (row 17) ships enabled in v1, its own slot, never
+plumbing lands. `freeze` (row 16) ships enabled in v1, its own slot, never
 folded into `throwMode`. Module id `dwell` is final (DECIDED, Frosty 2026-09-20).
 
 **MIX law (10 §9 owns it; the earlier linear law here is superseded).**
@@ -96,8 +95,7 @@ automation lane: a sweep must move monotonically in time, a clockwise knob must
 lengthen. Anything appended later sits at the end, out of order, forever, so the
 grid ships complete. The other three lists run least to most intervention, index
 0 being the neutral value a corrupt state lands on: `character` least to most
-coloured; `stereo` least to most divergent; `voicing` Neutral (`voice`
-inert) → Resonant → Band → Comb; `throwMode` **Send open** (default: `throw`
+coloured; `stereo` least to most divergent; `throwMode` **Send open** (default: `throw`
 inert, so a fresh instance is an ordinary delay) → **Throw** (send closed until
 held) → **Build** (holding ramps loop gain toward 10's bounded target, decaying
 on release). 10 owns their meaning; its names win, not its order.
@@ -125,7 +123,7 @@ matching the reported tail. At full travel, 10 min at 48 kHz per character: it
 sustains yet stays bounded — peak under the ceiling, converging within 1 dB,
 DC ≤ −80 dBFS, no NaN, no denormal slowdown.
 
-**d. In-loop filter stability.** Every `voicing` at `voice` 100 and
+**d. In-loop filter stability.** `voice` 100 and
 `feedback` 100, both cuts at both extremes, 60 s at 44.1–192 kHz: bounded by the
 safety clip, no divergence, NaN or DC growth. Since 10 §4's coefficients depend
 only on `f_c/f_s`, the resonant peak must agree across every rate within 1 %.
@@ -181,8 +179,6 @@ allocation in `process()`. `latencyForParams` is **exactly 0** everywhere.
 2. **Accent**: 10 §0 assumes the gold gap (W3); W1 and W2 separate better.
 3. **`throwMode`'s entries and order**, and whether BUILD's target and ramp stay
    10's constants rather than parameters.
-4. **`voicing`'s list has no source in 10**, which defines only the continuous
-   VOICE (`voice`, row 9). Keep it, or ship VOICE alone?
 
 **Blocking unknown**: 01 has no MEASURED figure for a modern clean delay's
 feedback ceiling or maximum time; 10 sets both by decision (1.05, 2000 ms) and

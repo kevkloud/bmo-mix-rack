@@ -58,8 +58,24 @@ guess wearing a measurement's clothes.
 
 ## Status
 
-**The DSP is a placeholder.** The panel, the parameters, the presets and the
-plumbing are real; the compressor is not there yet, so the module currently
-passes audio through with INPUT, OUTPUT and MIX and nothing else.
+**The compressor is real, and nothing about it has been heard.**
+
+`modules/fetcomp/dsp/` is the FET divider law in a feedback loop, solved
+implicitly per sample: the four ratios and all-buttons, a programme-dependent
+release, the cell's own distortion, the two voicings, the transformer and
+amplifier stages, and Off / 2x / 4x oversampling with a delay-matched dry
+path. It measures against every figure the specification derives — the ratio
+sag, the first-sample overshoot table, the release detents, the published THD
+condition — and `testing-notes/fetcomp-dsp-2026-09-21.md` has those numbers,
+taken on AURORA.
+
+What that does **not** mean is that it sounds right. Every constant the spec
+marks CALIBRATE is a first-pass value sitting in one file,
+`dsp/Calibration.h`, and each one is labelled as a guess rather than a fit.
+The two voicings are plausible rather than defensible until a Blue and a Black
+unit are measured on one bench. No listening pass has happened.
+
+The presets still do not set OUTPUT: those makeup figures are solved and
+measured with an ear, which is the next thing this module needs.
 `modules/fetcomp/AGENTS.md` says what is decided and what is still owed, and
 `docs/1176-comp/` is the full specification.

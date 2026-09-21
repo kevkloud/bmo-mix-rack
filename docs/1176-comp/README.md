@@ -38,21 +38,24 @@ heard yet.
   the periwinkle) and both contrast bands (3.80 dark, 3.09 pale). No blue could
   have passed; no test fails. Consequences and the required Accents-row note
   are in 11 §4c.
-- **Voicing shows as a VU border**, Blue = accent, Black = literal black. The
-  meter is reused from BMO Opto (`ui::DynamicsMeter`, already shared).
+- **Voicing shows as a VU border**, Blue = accent, Black = literal black, at
+  **full alpha** — owner's call on renders, 2026-09-20 on AURORA, the pair
+  separating at 5.91:1 measured. The meter is reused from BMO Opto
+  (`ui::DynamicsMeter`, already shared) and Opto's renders are re-proved
+  byte-identical. 11 §4b, §4d; `testing-notes/ui-pass-fetcomp-2026-09-20.md`
+  §2 and §6.
 
 ## Open
 
-1. **The VU border alpha.** The pair is decided — Blue = accent E, Black =
-   literal black — but the bezel alpha is not: stock 0.7 (3.88:1 between the
-   states) or full (5.13:1). **Settled on real renders**, both variants in both
-   states and both appearances, owner picks; full alpha also has to leave BMO
-   Opto byte-identical. 11 §4b, §4d.
-2. **Parameter ranges and reference level.** 30 dB GR needs `input` to +60 dB
+1. **Parameter ranges and reference level.** 30 dB GR needs `input` to +60 dB
    and `output` to ±36 dB; the dBFS↔0 VU alignment is unmeasured with
    everything riding on it. Permanent, before M0.
-3. **Accept all-buttons as shape-fitted** — judged on shape, not numbers.
-4. **Voicing labels and default** are permanent once shipped.
+2. **Accept all-buttons as shape-fitted** — judged on shape, not numbers.
+3. **Voicing labels and default** are permanent once shipped.
+4. **Nothing has been heard.** The DSP is implemented and measured
+   (`testing-notes/fetcomp-dsp-2026-09-21.md`, AURORA); every CALIBRATE
+   constant in `modules/fetcomp/dsp/Calibration.h` is a first-pass value
+   awaiting an ear.
 
 ## Known soft spots
 

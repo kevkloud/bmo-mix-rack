@@ -13,21 +13,44 @@ marked CALIBRATE still needs an ear.
 
 ## The state it is in
 
-**The DSP is a placeholder.** `dsp/DspCore.h` applies INPUT gain, OUTPUT gain
-and the MIX blend, delays by exactly what `latencyForParams` reports, and
-returns a flat zero for gain reduction. There is no detector, no FET cell, no
-divider law, no nonlinearity, and the two voicings sound identical.
+**The compressor is real and measured; nothing about it has been heard.**
+`testing-notes/fetcomp-dsp-2026-09-21.md` (AURORA) has every figure.
 
-Everything around it is real and shipped-shaped: the parameter schema is
-permanent, the panel is the panel, the registration is complete, and the
-factory presets set everything but makeup. The contract the real DSP is written
-against is the class comment on `DspCore`; the parameter contract is
-`DspCore::Params`, which already carries every value `specs()` has.
+`dsp/` is five files and they divide the way the spec does:
 
-**What is not asserted yet, and where it is recorded rather than forgotten:**
+| file | what is in it |
+|---|---|
+| `Calibration.h` | **every** constant `10-dsp-spec.md` marks CALIBRATE, and nothing else |
+| `FetCell.h` | the divider law and the per-sample implicit solve |
+| `Detector.h` | the linear sidechain, the ratio family, the release, all-buttons |
+| `Stages.h` | the static colour: transformer poles, LF core, the two amplifiers |
+| `DspCore.h` | the assembly, the oversampler, the dry path, the crossfades |
+
+**`Calibration.h` is the file to read first and the file an ear changes.**
+Every value in it is a first-pass number chosen from the spec's own tables or
+from the middle of a range the spec states only as a direction, and each says
+so in its own comment. Nothing in it is fitted to a unit, because there is no
+unit. The ones that decide what this sounds like are the cell's
+`lambda`/`q`/`mu` — the character and the whole distance between the two
+voicings — and `kRatioThresholdDb`, which sets where the compressor starts and
+which every drive figure in the spec rides on.
+
+**Three things in the implementation are not what a first reading of the spec
+suggests, and each one was arrived at by measuring the version that was.**
+They are commented at length where they live, because each is a trap that
+looks correct and measures wrong: the release branch condition in
+`Detector.h::ReleaseStage::tick`, the plateau's envelope in
+`Calibration.h::kAllButtonsPlateauEnvelopeMs`, and the algebraic rather than
+`tanh` curve in `Stages.h::SoftStage`.
+
+Everything around the DSP was already real and shipped-shaped: the parameter
+schema is permanent, the panel is the panel, the registration is complete, and
+the factory presets set everything but makeup.
+
+**What is still not asserted, and where it is recorded rather than forgotten:**
 preset level matching (`presets/FactoryPresets.h`, and the closing note in
-`tests/plugin/FetcompTests.cpp`), and everything about gain reduction
-(`tests/dsp/FetcompDspTests.cpp`).
+`tests/plugin/FetcompTests.cpp`) — those makeup figures want an ear, not a
+solver.
 
 ## ATTACK and RELEASE are the knob position, and they run backwards
 
@@ -99,11 +122,18 @@ black 1.94:1 below it — so they separate by luminance rather than by hue, whic
 is the failure the suite has already fixed once on its switch colours. The
 silver pair collapses to 1.42:1 and is refused.
 
-**The bezel alpha is a gate, not a nicety.** Both variants have to be rendered
-in both voicing states and both appearances and the owner picks. `kBezelAlpha`
-in `panel/FetcompPanel.cpp` is the shipped value and the one place to change
-it; `snapshot fetcomp out.png ui.bezel=stock|full` renders the other candidate
-without a rebuild.
+**The bezel alpha was a gate, and it is settled: full alpha, owner's call on
+renders, 2026-09-20 on AURORA.** Both variants were rendered in both voicing
+states and both appearances and Frosty picked full. `kBezelAlpha` in
+`panel/FetcompPanel.cpp` is the shipped value and the one place to change it;
+it now reads `kFullBezelAlpha`, and `snapshot fetcomp out.png ui.bezel=stock`
+still renders the rejected candidate without a rebuild. The pair separates at
+**5.91:1** measured on the shipped render, against the 5.13 the groundwork
+predicted by formula — better than claimed, not worse. BMO Opto was re-proved
+byte-identical at `ab3ff3b77116b7a5` / `878cca7b1a80a551` / `88a7653a82c19ae0`,
+which is what taking the opt-in setter rather than editing `Controls.cpp` was
+for. `testing-notes/ui-pass-fetcomp-2026-09-20.md` sections 2 and 6 are the
+record.
 
 ## What the panel does not have
 

@@ -133,6 +133,44 @@ done — see the checklist's own §D.
 
 ---
 
+## 3a. Carried into this pass: BMO FET's CPU cost
+
+**Not a panel item and not optional.** BMO FET's CPU budget was reset on
+2026-09-21 on AURORA after the first measurement that had a baseline to compare
+against, and Frosty asked for the new figure to be reviewed here rather than
+taken on the bench's word.
+
+The numbers, Release, 48 kHz / 512, stereo, against LTV Comp in the same
+session: **145.5 ns/sample at defaults against LTV Comp's 26.6 — 5.47×** — and
+**993.0 at 4x with all buttons in, 14.11×**. The budget in
+`docs/1176-comp/11-integration-and-test-plan.md` §3 was 2.0× and 3.0×; it now
+reads 6.5× and 17×, set about 20% above what was measured. Almost all of the
+heaviest figure is the oversampler: 4x alone takes the module from 145.5 to
+993.0.
+
+**What this pass has to answer, because the bench cannot.** A ns/sample ratio
+says nothing about whether the thing is usable. In a real session:
+
+- How many instances of BMO FET at **defaults** before the meters in Ableton's
+  CPU display become a problem? Compare against the same count of LTV Comp.
+- The same at **2x**, and at **4x with all buttons in** — the setting that
+  costs 6.8× the default.
+- Does a single instance at 4x cause dropouts at the buffer sizes actually used
+  for tracking, not just for mixing?
+- **Is 4x ever worth it?** If the listening pass cannot tell 4x from 2x, the
+  14× setting is one nobody needs and the answer is a note in the manual, not
+  an optimisation.
+
+Record the answers with the machine named. If the honest answer is that a
+handful of instances is fine and nobody reaches for 4x, the reset budget
+stands. If a single instance is awkward on ICE QUEEN, that is a finding the
+bench could not have produced and the cost has to be looked at properly.
+
+`testing-notes/fetcomp-dsp-2026-09-21.md` has the full figures and the three
+other places the DSP misses the pack.
+
+---
+
 ## 4. Ground rules that have bitten before
 
 - **Levels.** Tracks sit at −18 dBFS RMS / −12 peak. −6 dBFS is a mix-bus

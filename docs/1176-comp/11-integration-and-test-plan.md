@@ -216,11 +216,38 @@ each taking a voicing. WAVs go to `packages/fetcomp-listening/` (gitignored).
 it ran on (AURORA / ICE QUEEN) in `testing-notes/`.**
 
 ### CPU & latency acceptance
-`bench` mode, Release build, 100 × 10 s at 48 kHz/512, ns/sample; run
-`measure_ltvcomp`/`measure_opto` in the same session on the same box for the
-baseline. Budget: ≤ 2.0× LTV Comp per sample at defaults (Off, Black), ≤ 3.0×
-at the heaviest setting (4x, Blue, all-buttons). Latency: **0 at the default**,
+`bench` mode, Release build, 8 × 10 s at 48 kHz/512, ns/sample; run
+`measure_vcomp bench` in the same session on the same box for the baseline —
+its `bench` mode uses this one's loop line for line, so the ratio is about the
+two compressors and not about two harnesses. Latency: **0 at the default**,
 otherwise exactly the shared oversampler's reported delay.
+
+**Budget: ≤ 6.5× LTV Comp per sample at defaults (Off, Black), ≤ 17× at the
+heaviest setting (4x, Blue, all-buttons).**
+
+> **These were 2.0× and 3.0×, and were reset on 2026-09-21 on AURORA after the
+> first measurement that had a baseline to measure against.** The original
+> figures were written before anything had been built and before anyone had
+> costed a per-sample implicit solve through 4x oversampling; measured, this
+> module runs **5.47×** at defaults and **14.11×** at the heaviest, so the old
+> budget was not a target this topology could ever have met.
+>
+> The new ceilings sit about 20% above the measured figures, which is enough to
+> absorb machine-to-machine spread and the 2–3% run-to-run noise while still
+> failing on a real regression. They are **not** an endorsement of the cost.
+>
+> Two things the ratio hides. LTV Comp's own default is `amountPercent = 0`, so
+> the baseline is that module *at rest* — 26.6 ns/sample against 61.9 once it
+> works, and BMO FET's defaults against LTV Comp working is 2.35×. And 4x
+> oversampling alone takes this module from 145.5 to 993.0 ns/sample, which is
+> 6.8× for the factor by itself: almost all of the heaviest figure is the
+> oversampler, not the cell.
+>
+> **Flagged for the Ableton pass.** A ns/sample ratio says nothing about
+> whether a track of these is usable, which is the question that actually
+> matters and the one only a host can answer. See
+> `testing-notes/ableton-pass-handoff-2026-09-17.md`, and
+> `testing-notes/fetcomp-dsp-2026-09-21.md` for the full figures.
 
 ### Listening pass
 A checklist item, not a test: drums (room mic, all-buttons, fast/fast), lead
@@ -320,12 +347,19 @@ sides of the same ground and separate by **luminance**, not hue. Pair 3 is
 refused for the opposite reason — 1.42:1 falling to 1.07:1 is hue alone, the
 failure the suite already fixed once on its switch colours.
 
-**Open: the alpha, and it is settled on real renders, not here.** Two variants
-stay in play — the stock **0.7** (pair separation 3.88:1) and **full alpha**
-(2.65:1 on the face, pair separation 5.13:1). E is the darkest accent in the
-suite and 2.00:1 is thin, so full alpha is tempting; but a colour mock is not a
-render and this is exactly the kind of call `testing-notes/ui-editor-handoff.md`
-§6 says not to make by computing. §4d carries the required step.
+**Settled: full alpha — owner's call on renders, 2026-09-20 on AURORA.** Two
+variants were in play — the stock **0.7** (pair separation 3.88:1) and **full
+alpha** (2.65:1 on the face, pair separation 5.13:1 by formula). E is the
+darkest accent in the suite and 2.00:1 is thin, and a colour mock is not a
+render, so the call went the way `testing-notes/ui-editor-handoff.md` §6 says:
+eight PNGs, both variants in both voicing states and both appearances, reviewed
+on a named machine, owner picks. **Measured on the shipped render the pair
+separates at 5.91:1**, not 5.13 — the formula figure was the low one, so full
+alpha does better than this pack predicted rather than worse. `kBezelAlpha` in
+`FetcompPanel.cpp` now reads `kFullBezelAlpha`, `ui.bezel=stock` still renders
+the rejected candidate, and BMO Opto is re-proved byte-identical at
+`ab3ff3b77116b7a5` / `878cca7b1a80a551` / `88a7653a82c19ae0`.
+`testing-notes/ui-pass-fetcomp-2026-09-20.md` §2 and §6 are the record.
 
 **What each variant touches.** 0.7 alpha is what `ui::DynamicsMeter` already
 draws (`Controls.cpp:951-957`, `accentColour.withAlpha (0.7f)`) and costs
@@ -495,13 +529,14 @@ configure if a build tree already exists.
 5. **Two voicing renders, both appearances**: `voicing=Blue` and
    `voicing=Black`, i.e. four PNGs, hashed. The pair must differ *only* in the
    meter border — diff them and check nothing else moved.
-6. **The border-alpha decision, and it needs renders to make.** Render **both
-   variants** — bezel at 0.7 alpha and at full alpha — in **both voicing
-   states** and **both appearances**: eight PNGs, hashed. Put them side by side
-   with `Inspect.exe sheet`, review on a named machine, and **the owner picks**.
-   Until that happens the module ships nothing: this is a gate, not a nicety.
-   If full alpha wins, re-render **BMO Opto** and prove its hashes are
-   unchanged (§4b).
+6. **The border-alpha decision, and it needed renders to make. Done
+   2026-09-20 on AURORA: full alpha, owner's call.** Both variants — bezel at
+   0.7 and at full alpha — were rendered in both voicing states and both
+   appearances, eight PNGs, hashed, put side by side with `Inspect.exe sheet`,
+   and Frosty picked full. BMO Opto was re-rendered and its three hashes proved
+   unchanged, which §4b requires once full alpha wins. The step is kept here
+   because it is the pattern a future module's gate follows, not because it is
+   still open.
 7. `Inspect.exe ratio` the border against `meterFace` in both appearances, and
    the accent against both plates — E is an out-of-band exception (§4c), so
    record the figures rather than assuming them; `gaps` for the bare-band
@@ -523,8 +558,13 @@ Off-default decision. **M4** all-buttons bias, plateau and transient lag.
 visual pass of §4d, including the **border-alpha gate**: both variants (0.7 and
 full alpha) rendered in both voicing states and both appearances, reviewed on a
 named machine, **owner picks**, with BMO Opto's hashes re-proven if full alpha
-wins. **M6** invariance, robustness, pinned-GR stability, mix/dry-path comb
+wins. *Closed 2026-09-20 on AURORA: full alpha, Opto unchanged.*
+**M6** invariance, robustness, pinned-GR stability, mix/dry-path comb
 checks at every factor, CPU/latency acceptance, listening pass.
+
+**M1–M4 landed 2026-09-20 on AURORA** and are measured rather than heard;
+`testing-notes/fetcomp-dsp-2026-09-21.md` carries the figures and the three
+places the plan above turned out to be unachievable as written.
 
 **Done** = ctest green in all three CI jobs on both platforms; schema table
 pinned; no audio, renders or fonts committed; `AGENTS.md` + `README.md` present

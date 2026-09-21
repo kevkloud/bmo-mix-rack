@@ -13,22 +13,27 @@ Figures computed on **AURORA**.
 `AGENTS.md` + `README.md`, linked from `modules/AGENTS.md`. Per `00` §1 DEQ's
 `Svf.h`/`Dynamics.h` are **copied in**, never included.
 
-Code **`Bdes`** (reserved, `products/AGENTS.md:169`); id **`deesser`**, per the
-FET precedent. Presets are `.bmodeesser` for every name below; only the bundle
-id moves, and it is the lowercased display name with spaces and hyphens
-removed, as every existing row is.
+**Identity — DECIDED, owner 2026-09-20.** Display name **BMO Defang**, bundle
+id **`com.lt3audio.bmodefang`**, module id **`deesser`**, presets
+**`.bmodeesser`**, plugin code **`Bdes`** (reserved,
+`products/AGENTS.md:169`), `ui::bmoLine()`. The owner's line for it: *it takes
+the bite out of your recordings*.
 
-| Display name | Bundle id | Fit, and risk |
-|---|---|---|
-| **1. BMO Ess** | `com.lt3audio.bmoess` | shortest that still says it; sits beside Opto/Util/FET; no clash found |
-| **2. BMO DES** | `com.lt3audio.bmodes` | spends the reserved code in its own name, house short-caps; one letter from BMO DEQ in a plugin list |
-| **3. BMO Sift** | `com.lt3audio.bmosift` | the character pick — selective removal without naming the artefact; no clash found |
+**The module id and the display name differ on purpose.** `deesser` says what
+the module is, to anyone reading the tree, a preset extension or a test name;
+"BMO Defang" is what the plugin is called. That is the FET precedent exactly —
+module id `fetcomp`, display name "BMO FET" — and the bundle id follows the
+display name as every existing row does. A **web name-collision scan on
+2026-09-20 found no audio product called Defang**; the word is in use in
+computer security and by one cloud-tooling company, so this is a collision
+check, not a trademark clearance.
 
-Set aside: BMO De-Ess (hyphen), BMO Tame, BMO Sizzle and BMO Hiss (each names
-the problem rather than the cure, and Hiss reads as a noise reducer), and
-**BMO Sibilance — clashes with an existing commercial product name**.
-**Hyphens: avoid one.** No shipped name has one, so "De-Ess" would be the first
-and its bundle id would strip it silently (`bmodeess`).
+Considered and not chosen: **BMO Ess** (`bmoess`, shortest that still says it),
+**BMO DES** (`bmodes`, house short-caps, but one letter from BMO DEQ in a
+plugin list), **BMO Sift** (`bmosift`), and BMO De-Ess, Tame, Sizzle, Hiss and
+Sibilance — the last clashing with an existing commercial product name.
+**Hyphens: still avoid one.** No shipped display name has one, and Defang needs
+none.
 
 **Registration, from `c142f37`:** the `modules/`, `products/`, `tests/` and
 `tools/` `CMakeLists.txt`; `products/deesser/{Product.h,main.cpp,CMakeLists.txt}`;
@@ -124,11 +129,12 @@ none insert.
 unchanged; `range` caps at 18, so the needle cannot pin. The panel owns the
 IN/GR/OUT row `modules/AGENTS.md` requires.
 
-**Owner items, five.** Display name (§1). The `thresh` value string: plain
-`F::Decibels`, or a `textParam` printing "+3.0 dB over". `adapt` continuous vs
-10 §10.2's two-position switch — settle it first, stepped can never become
-continuous. The 18 dB cap and 1 dB floor, and a lower internal ceiling for the
-shelf (10 §10.5). `shape` labels and index order. The accent is decided (§2).
+**Owner items, four — all schema now, the name and accent being settled (§§1,
+2).** The `thresh` value string: plain `F::Decibels`, or a `textParam` printing
+"+3.0 dB over". `adapt` continuous vs 10 §10.2's two-position switch — settle
+it first, stepped can never become continuous. The 18 dB cap and 1 dB floor,
+and a lower internal ceiling for the shelf (10 §10.5). `shape` labels and
+index order.
 
 ## 4. Panel — band display?
 

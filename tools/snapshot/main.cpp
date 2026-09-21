@@ -25,6 +25,14 @@
 // so a metering panel renders with its meters reading something instead of at
 // rest. Needed for any module whose meters are the thing being reviewed.
 //
+// "stimulus=tone|ess" is what that signal is made of: a 1 kHz tone (the
+// default, and what every metered render used before BMO Defang) or a vowel
+// with sibilance standing over it. A de-esser does nothing to a tone however
+// loud -- its detector asks how far the band stands above the signal, not how
+// loud it is -- so rendering one on "signal=" alone is a picture of a module
+// asleep. Both are sustained and both come from a fixed seed, so a render
+// settles to a steady state and hashes the same twice.
+//
 // "ui.<key>=<value>" sets panel state that has no parameter behind it. BMO
 // Opto takes "ui.meter=IN|GR|OUT", which is the only way to render its VU in
 // anything but OUT, and BMO Defang takes that plus "ui.listen=on|off", which
@@ -284,6 +292,7 @@ int main (int argc, char** argv)
     // the editor does.
     std::vector<std::pair<juce::String, juce::String>> uiState;
     std::optional<float> signalDb;
+    bool sibilant = false;   ///< stimulus=ess; see the capture loop
 
     // `theme=` is read in its own pass, before anything else, because
     // `appearance=` loads the theme as part of choosing the palette. Left in
@@ -357,6 +366,25 @@ int main (int argc, char** argv)
         {
             signalDb = value.getFloatValue();
             continue;
+        }
+
+        // What that signal is made of. "tone" is the 1 kHz sine every metered
+        // render has used since BMO Opto's pass; "ess" is a vowel with
+        // sibilance sitting over it.
+        //
+        // BMO Defang needed the second one and could not be rendered without
+        // it. Its detector is level-independent by design -- it asks how far
+        // the band stands above the signal, not how loud it is -- so a tone,
+        // however loud, is a signal with nothing standing above it and the
+        // module correctly does nothing. Rendered on `signal=` alone the meter
+        // reads zero and the panel is a picture of a de-esser asleep.
+        if (key == "stimulus")
+        {
+            if (value.equalsIgnoreCase ("tone")) { sibilant = false; continue; }
+            if (value.equalsIgnoreCase ("ess"))  { sibilant = true;  continue; }
+
+            std::cerr << "stimulus must be tone or ess, not " << value << '\n';
+            return 2;
         }
 
         // Already applied, above prepareToPlay. Swallowed here so it does not
@@ -483,6 +511,123 @@ int main (int argc, char** argv)
     // ticks happened to leave it -- BMO Opto at crush=60 came back as two
     // images in twelve. The DSP gets ten seconds of the same tone first, with
     // no timers and no sleeping, so the loop below meters a steady state.
+    // The sibilant stimulus: a vowel with bursts of band noise over it.
+    //
+    // **Bursts, and it has to be bursts.** The first version held the noise on
+    // continuously, reasoning that a render captures one frame and therefore
+    // wants a steady state -- which is exactly why the tone gets ten seconds
+    // of preroll. It rendered a meter reading nothing, and the module was
+    // right to read nothing. This detector is level-independent: it measures
+    // how far the band stands above the signal, and one of the things it
+    // stands above is the band's *own* half-second average. Hold the noise on
+    // and that average rises to meet it, the prominence collapses, and the
+    // module declines to act -- which is the guard against cymbal bleed and
+    // constantly-bright material doing its job. Sustained sibilance is not
+    // sibilance.
+    //
+    // So the ess arrives and leaves, as an ess does. The period is counted in
+    // samples rather than read off a clock, so the whole stimulus is
+    // reproducible and a render's hash means something.
+    //
+    // Never a committed audio file: audio does not go in this repository, and
+    // a recording could not be hashed against a render anyway.
+    uint32_t noiseSeed = 0x5EEDu;
+    double xz1 = 0.0, xz2 = 0.0, yz1 = 0.0, yz2 = 0.0;
+    int64_t essSample = 0;
+
+    // Where the picture is taken, in samples: ten seconds of preroll and then
+    // one block per settle tick. Computed here rather than inside the loop so
+    // the stimulus can aim at it.
+    const auto captureSample = (int64_t) ((std::ceil (10.0 * rate / blockSize) + settleTicks)
+                                              * blockSize);
+
+    const auto burstSamples = (int64_t) (0.110 * rate);   // inside the 60-200 ms an ess runs to
+
+    // **Sparse, and aimed at the capture.** Two numbers, both measured rather
+    // than picked, with `measure_deesser detect`:
+    //
+    // The gap has to let the band's half-second average fall back between
+    // esses, or the second ess is no longer prominent against the first. At
+    // 260 ms apart the tool showed 5.5 dB on the first burst, 1.1 dB on the
+    // second and 0.1 dB by the fourth -- the module correctly deciding that
+    // regular sibilance every quarter second is just how this material
+    // sounds. At 1.3 s apart each one lands on a detector that has forgotten
+    // the last.
+    //
+    // And the capture must fall *during* an ess, not between two. The whole
+    // pipeline is deterministic, so rather than choose a period that happens
+    // to land well and hope nobody changes the preroll, the bursts are placed
+    // by counting **backwards from the captured sample**: the last one starts
+    // 24 ms before it, which the same tool showed is where the reduction is
+    // at its fullest.
+    const auto essPeriod = (int64_t) (1.300 * rate);
+    const auto essLead   = (int64_t) (0.024 * rate);
+
+    const auto fillEss = [&]
+    {
+        const auto amplitude = juce::Decibels::decibelsToGain (*signalDb);
+
+        // A 6.5 kHz constant-Q bandpass, RBJ, at the module's default band --
+        // so the noise lands where a de-esser opened at its defaults is
+        // looking. Q 3 is a little narrower than the module's 2.5, which keeps
+        // the energy inside the band rather than skirting it.
+        const auto w = 2.0 * juce::MathConstants<double>::pi * 6500.0 / rate;
+        const auto alpha = std::sin (w) / (2.0 * 3.0);
+        const auto a0 = 1.0 + alpha;
+        const auto b0 = alpha / a0, b2 = -alpha / a0;
+        const auto a1 = -2.0 * std::cos (w) / a0, a2 = (1.0 - alpha) / a0;
+
+        for (int n = 0; n < block.getNumSamples(); ++n)
+        {
+            // The vowel: a fundamental and two harmonics, which is enough to
+            // give the detector's reference something to be a reference for.
+            const auto vowel = 0.62 * std::sin (phase)
+                             + 0.30 * std::sin (2.0 * phase)
+                             + 0.15 * std::sin (4.0 * phase);
+
+            phase += 2.0 * juce::MathConstants<double>::pi * 200.0 / rate;
+
+            noiseSeed = noiseSeed * 1664525u + 1013904223u;
+            const auto white = (double) (int32_t) (noiseSeed >> 8) / 8388608.0 - 1.0;
+
+            // Direct form I: b1 is zero for a bandpass, and the input and
+            // output histories are separate pairs. Sharing one pair between
+            // them is the mistake that turns this into some other filter
+            // entirely, which is a thing a render would not look wrong for.
+            const auto band = b0 * white + b2 * xz2 - a1 * yz1 - a2 * yz2;
+
+            xz2 = xz1; xz1 = white;
+            yz2 = yz1; yz1 = band;
+
+            // Where in the burst cycle we are. A raised cosine on each edge,
+            // because a step edge is broadband: the detector would be reacting
+            // to the click rather than to the noise, and a de-esser that fires
+            // on transients is a de-esser with a different bug.
+            // Counted backwards from the capture, so the last onset is always
+            // essLead before it whatever the preroll happens to be.
+            const auto onset = captureSample - essLead;
+            const auto at = ((essSample - onset) % essPeriod + essPeriod) % essPeriod;
+            ++essSample;
+
+            auto envelope = 0.0;
+
+            if (at < burstSamples)
+            {
+                const auto through = (double) at / (double) burstSamples;
+                const auto edge = 0.12;
+
+                envelope = through < edge        ? 0.5 - 0.5 * std::cos (juce::MathConstants<double>::pi * through / edge)
+                         : through > 1.0 - edge  ? 0.5 - 0.5 * std::cos (juce::MathConstants<double>::pi * (1.0 - through) / edge)
+                                                 : 1.0;
+            }
+
+            const auto v = (float) (amplitude * (vowel + 3.0 * envelope * band));
+
+            for (int ch = 0; ch < block.getNumChannels(); ++ch)
+                block.setSample (ch, n, v);
+        }
+    };
+
     const auto fillTone = [&]
     {
         const auto amplitude = juce::Decibels::decibelsToGain (*signalDb);
@@ -508,7 +653,7 @@ int main (int argc, char** argv)
 
         for (int i = 0; i < prerollBlocks; ++i)
         {
-            fillTone();
+            sibilant ? fillEss() : fillTone();
             processor->processBlock (block, midi);
         }
     }
@@ -517,7 +662,7 @@ int main (int argc, char** argv)
     {
         if (signalDb.has_value())
         {
-            fillTone();
+            sibilant ? fillEss() : fillTone();
             processor->processBlock (block, midi);
         }
 

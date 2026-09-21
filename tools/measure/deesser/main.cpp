@@ -42,6 +42,9 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <cstdint>
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -64,7 +67,7 @@ int measuredDelay (const DspCore::Params& p)
     v[freq]   = p.freqHz;
     v[q]      = p.q;
     v[thresh] = p.threshDb;
-    v[range]  = p.rangeDb;
+    v[(size_t) range]  = p.rangeDb;
     v[shape]  = (float) (p.shape == Shape::highShelf ? highShelf : bell);
 
     dsp.setParams (v, Index::count);
@@ -170,12 +173,121 @@ void printUsage()
 
 } // namespace
 
+/** `detect`: what the detector actually sees, on the same burst stimulus the
+    renderer uses.
+
+    This mode exists because a render could not be debugged from the outside.
+    BMO Defang's first live render came back with the meter at rest, and there
+    was no way to tell from the picture whether the detector was wrong, the
+    meter was unwired, or the stimulus was simply not sibilant enough to act
+    on. It prints the middle of that chain.
+
+    It is also the mode `P_ref` gets fitted with (10 section 10.1): the
+    threshold reads 0 at "typical vocal balance", and typical is a measurement
+    nobody has taken yet.
+*/
+void printDetect (double burstMs, double periodMs, double essGain)
+{
+    DeesserDsp dsp;
+    dsp.prepare (kSampleRate, 512, 2);
+
+    std::vector<float> v;
+    for (const auto& s : specs())
+        v.push_back (s.def);
+
+    dsp.setParams (v.data(), (int) v.size());
+
+    const auto seconds = 4.0;
+    const auto n = (size_t) (seconds * kSampleRate);
+
+    const auto burst  = (int64_t) (burstMs  * 1.0e-3 * kSampleRate);
+    const auto period = (int64_t) (periodMs * 1.0e-3 * kSampleRate);
+
+    // The renderer's stimulus, reproduced: same vowel, same bandpass, same
+    // LCG. If these two ever drift apart, what the tool measures stops being
+    // what the render shows.
+    uint32_t seed = 0x5EEDu;
+    double xz1 = 0.0, xz2 = 0.0, yz1 = 0.0, yz2 = 0.0, phase = 0.0;
+
+    const auto w = 2.0 * 3.14159265358979323846 * 6500.0 / kSampleRate;
+    const auto alpha = std::sin (w) / 6.0;
+    const auto a0 = 1.0 + alpha;
+    const auto b0 = alpha / a0, b2 = -alpha / a0;
+    const auto a1 = -2.0 * std::cos (w) / a0, a2 = (1.0 - alpha) / a0;
+
+    const auto amplitude = std::pow (10.0, -18.0 / 20.0);
+
+    std::vector<float> left (n), right (n);
+
+    for (size_t i = 0; i < n; ++i)
+    {
+        const auto vowel = 0.62 * std::sin (phase) + 0.30 * std::sin (2.0 * phase)
+                         + 0.15 * std::sin (4.0 * phase);
+        phase += 2.0 * 3.14159265358979323846 * 200.0 / kSampleRate;
+
+        seed = seed * 1664525u + 1013904223u;
+        const auto white = (double) (int32_t) (seed >> 8) / 8388608.0 - 1.0;
+        const auto band = b0 * white + b2 * xz2 - a1 * yz1 - a2 * yz2;
+        xz2 = xz1; xz1 = white; yz2 = yz1; yz1 = band;
+
+        const auto at = (int64_t) i % period;
+        auto env = 0.0;
+
+        if (at < burst)
+        {
+            const auto through = (double) at / (double) burst;
+            const auto edge = 0.12;
+            env = through < edge       ? 0.5 - 0.5 * std::cos (3.14159265358979323846 * through / edge)
+                : through > 1.0 - edge ? 0.5 - 0.5 * std::cos (3.14159265358979323846 * (1.0 - through) / edge)
+                                       : 1.0;
+        }
+
+        left[i] = right[i] = (float) (amplitude * (vowel + essGain * env * band));
+    }
+
+    // Block by block, keeping the peak reduction and where it happened.
+    auto peak = 0.0f;
+    size_t peakAt = 0;
+
+    std::printf ("burst %.0f ms, period %.0f ms, ess gain %.1f, signal -18 dBFS\n",
+                 burstMs, periodMs, essGain);
+    std::printf ("  %8s  %10s\n", "time ms", "GR dB");
+
+    for (size_t i = 0; i < n; i += 64)
+    {
+        const auto count = (int) std::min ((size_t) 64, n - i);
+        float* ch[2] { left.data() + i, right.data() + i };
+        dsp.process (ch, 2, count);
+
+        const auto gr = dsp.currentGainReductionDb();
+
+        if (gr > peak) { peak = gr; peakAt = i; }
+
+        // One line every 20 ms over the first second, which is four bursts.
+        if (i < (size_t) kSampleRate && (i % (size_t) (0.02 * kSampleRate)) < 64)
+            std::printf ("  %8.0f  %10.3f\n", 1000.0 * (double) i / kSampleRate, gr);
+    }
+
+    std::printf ("\n  peak %.3f dB at %.0f ms\n", peak, 1000.0 * (double) peakAt / kSampleRate);
+    std::printf ("  RANGE is %.1f dB, so that is %.0f %% of the bar\n",
+                 v[(size_t) range], 100.0 * peak / v[(size_t) range]);
+}
+
 int main (int argc, char** argv)
 {
     const std::string mode = argc > 1 ? argv[1] : "";
 
     if (mode == "latency")   { printLatency();   return 0; }
     if (mode == "constants") { printConstants(); return 0; }
+
+    if (mode == "detect")
+    {
+        const auto arg = [argc, argv] (int i, double fallback)
+        { return argc > i ? std::atof (argv[i]) : fallback; };
+
+        printDetect (arg (2, 110.0), arg (3, 260.0), arg (4, 3.0));
+        return 0;
+    }
 
     printUsage();
     return mode.empty() ? 0 : 2;

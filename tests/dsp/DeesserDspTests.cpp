@@ -27,6 +27,7 @@
 #include <cstdio>
 #include <string>
 #include <vector>
+#include <cstdint>
 
 using namespace bmo::deesser;
 
@@ -87,6 +88,80 @@ std::vector<float> run (bmo::ModuleDsp& dsp, const std::vector<float>& source, i
     return left;
 }
 
+/** A vowel with an ess over it, synthesised, deterministic, never committed.
+
+    A de-esser cannot be tested on a tone. The detector is *level-independent*
+    by design -- it asks how far the band stands above the signal, not how loud
+    it is -- so the stimulus has to have both a signal and a band standing
+    above it, or there is nothing for it to measure. A 7 kHz sine tests only
+    that a bright thing is bright.
+
+    So: three harmonics standing in for a vowel, and a burst of band-limited
+    noise over the middle of it standing in for the /s/. Noise rather than a
+    tone because sibilance *is* noise -- a fricative is turbulence, and an
+    envelope detector reading a tone reads something far steadier than it will
+    ever meet in a vocal.
+
+    **From a fixed-seed LCG, so a run is reproducible** and two runs of the
+    same test compare. The same generator feeds `tools/snapshot`, so what a
+    render shows and what these tests measure are the same event.
+
+    The burst sits from half way to seven tenths of the way through, which is
+    about 80 ms at the default length -- inside the 60-200 ms an ess actually
+    runs to. */
+std::vector<float> essTest (double seconds)
+{
+    const auto n = (size_t) (seconds * kSampleRate);
+    std::vector<float> out (n, 0.0f);
+
+    // The vowel: a low fundamental and two harmonics, which is enough to give
+    // the reference something to be a reference for.
+    for (size_t i = 0; i < n; ++i)
+    {
+        const auto t = (double) i / kSampleRate;
+        out[i] = (float) (0.35 * std::sin (2.0 * kPi * 200.0 * t)
+                        + 0.20 * std::sin (2.0 * kPi * 400.0 * t)
+                        + 0.10 * std::sin (2.0 * kPi * 800.0 * t));
+    }
+
+    // The ess: white noise through the same bandpass the detector listens
+    // through, so the energy lands where the module is looking.
+    const auto coeffs = bmo::dsp::SvfCoeffs::fromBiquad (
+        bmo::deesser::detectorDesign (bmo::deesser::Shape::bell, 6500.0, 3.0, kSampleRate));
+    const auto taps = bmo::dsp::SvfTaps::of (coeffs.g, coeffs.k);
+
+    bmo::dsp::SvfState filter;
+    uint32_t seed = 0x5EEDu;
+
+    const auto first = (size_t) (0.5 * (double) n);
+    const auto last  = (size_t) (0.7 * (double) n);
+
+    for (size_t i = 0; i < n; ++i)
+    {
+        seed = seed * 1664525u + 1013904223u;
+        const auto white = (double) (int32_t) (seed >> 8) / 8388608.0 - 1.0;
+        const auto band  = filter.process (taps, coeffs, white);
+
+        if (i < first || i >= last)
+            continue;
+
+        // A short raised-cosine in and out, so the burst is a fricative and
+        // not a click -- a step edge would be broadband and the detector would
+        // be reacting to the edge rather than to the noise.
+        const auto span = (double) (last - first);
+        const auto at   = (double) (i - first) / span;
+        const auto edge = 0.08;
+
+        auto gain = 1.0;
+        if (at < edge)          gain = 0.5 - 0.5 * std::cos (kPi * at / edge);
+        else if (at > 1.0 - edge) gain = 0.5 - 0.5 * std::cos (kPi * (1.0 - at) / edge);
+
+        out[i] += (float) (1.6 * gain * band);
+    }
+
+    return out;
+}
+
 /** The default parameter array, in Index order and in real units. */
 std::vector<float> defaults()
 {
@@ -99,32 +174,6 @@ std::vector<float> defaults()
 }
 
 //==============================================================================
-void testPlaceholderIsAWire()
-{
-    // The placeholder passes audio untouched, and that is deliberate rather
-    // than unfinished: a placeholder that did something would have to be
-    // undone, and a listening round run against it would be a round against
-    // nothing in particular. **This test is expected to be rewritten, not
-    // deleted, when the DSP lands.**
-    DeesserDsp dsp;
-    dsp.prepare (kSampleRate, 512, 2);
-
-    auto v = defaults();
-    dsp.setParams (v.data(), (int) v.size());
-
-    const auto source = sine (7000.0, 0.25, 0.5);
-    const auto out = run (dsp, source);
-
-    check (out.size() == source.size(), "the placeholder returns as many samples as it was given");
-
-    auto worst = 0.0;
-
-    for (size_t i = 0; i < out.size(); ++i)
-        worst = std::max (worst, (double) std::abs (out[i] - source[i]));
-
-    checkNear (worst, 0.0, 0.0, "the placeholder is bit-identical to its input");
-}
-
 void testLatencyIsZeroEverywhere()
 {
     // **The one figure here that is shipped rather than placeheld.** There is
@@ -231,41 +280,9 @@ void testListenIsMomentary()
     check (dsp.getCore().isListening(), "any non-negative index engages the listen path");
     dsp.setSolo (-1);
 
-    // **Placeholder: audio is untouched in either state.** The real core
-    // outputs the band's contribution while soloed; until it does, the only
-    // honest assertion is that engaging listen does not corrupt the signal.
-    const auto source = sine (7000.0, 0.1, 0.5);
-
-    dsp.setSolo (0);
-    const auto soloed = run (dsp, source);
-    dsp.setSolo (-1);
-
-    auto worst = 0.0;
-
-    for (size_t i = 0; i < soloed.size(); ++i)
-        worst = std::max (worst, (double) std::abs (soloed[i] - source[i]));
-
-    checkNear (worst, 0.0, 0.0, "the placeholder passes audio through while listening too");
-}
-
-void testGainReductionIsZeroForNow()
-{
-    // Signed, positive = gain taken away, and the real core reports the **peak
-    // band reduction** rather than a wideband-equivalent figure -- 10 section 8
-    // has the argument, and 11 section 5's interface row asserts it against
-    // the applied offset once there is one. A flat zero is all the placeholder
-    // can honestly say.
-    DeesserDsp dsp;
-    dsp.prepare (kSampleRate, 512, 2);
-
-    auto v = defaults();
-    v[range] = 18.0f;
-    dsp.setParams (v.data(), (int) v.size());
-
-    run (dsp, sine (7000.0, 0.1, 0.9));
-
-    checkNear (dsp.currentGainReductionDb(), 0.0, 0.0,
-               "the placeholder reports no gain reduction");
+    // What listen *outputs* is tested in testListenOutputsWhatIsBeingRemoved;
+    // what is tested here is the lifecycle, which is the part that must hold
+    // whether or not the DSP is finished.
 }
 
 void testTheScheduleIsFiveParameters()
@@ -513,13 +530,220 @@ void testHysteresisFollowsEngagement()
                "an engaged module drops its threshold by the stated amount");
 }
 
+/** A signal with no sibilance in it comes back **bit-identical**.
+
+    The three tests this replaced asserted the same thing of a placeholder
+    that could not do otherwise. The claim is worth far more now: a de-esser
+    that quietly filters a bass line is a de-esser nobody can leave on a bus,
+    and the band gate plus a flat design are what stop it. Bit-identical, not
+    nearly: at zero depth the matched-Z design is unity, `SvfCoeffs` solves it
+    to m0 = 1, m1 = m2 = 0, and the sample comes back through the structure
+    untouched. */
+void testQuietMaterialIsUntouched()
+{
+    DeesserDsp dsp;
+    dsp.prepare (kSampleRate, 512, 2);
+
+    auto v = defaults();
+    dsp.setParams (v.data(), (int) v.size());
+
+    // 200 Hz, nowhere near the 6.5 kHz band and below the reference
+    // high-pass's corner besides.
+    const auto source = sine (200.0, 0.25, 0.5);
+    const auto out = run (dsp, source);
+
+    check (out.size() == source.size(), "as many samples out as in");
+
+    auto worst = 0.0;
+
+    for (size_t i = 0; i < out.size(); ++i)
+        worst = std::max (worst, (double) std::abs (out[i] - source[i]));
+
+    checkNear (worst, 0.0, 0.0, "a signal with no sibilance is bit-identical");
+    checkNear (dsp.currentGainReductionDb(), 0.0, 0.0,
+               "and the meter agrees that nothing happened");
+}
+
+/** Sibilance is reduced, and the meter reports what the audio got.
+
+    The stimulus is a vowel with a burst of band noise over it, which is the
+    shape of the thing: the detector is level-independent, so a bright burst
+    *relative to* the signal is what moves it. Fixed-seed LCG, never a
+    committed file. */
+void testSibilanceIsReduced()
+{
+    DeesserDsp dsp;
+    dsp.prepare (kSampleRate, 512, 2);
+
+    auto v = defaults();
+    v[range] = 12.0f;
+    dsp.setParams (v.data(), (int) v.size());
+
+    // The meter is polled every block and the **peak** kept. Reading it after
+    // the run instead reads the module at rest: by the end of the buffer the
+    // ess is 120 ms gone and the release has taken the reduction back to
+    // nothing, which is correct behaviour and a useless measurement. The
+    // first version of this test asserted on that figure and read 0.05 dB.
+    const auto source = essTest (0.4);
+    auto left = source, right = source;
+    auto peakGr = 0.0f;
+
+    for (size_t n = 0; n < source.size(); n += 64)
+    {
+        const auto count = (int) std::min ((size_t) 64, source.size() - n);
+        float* ch[2] { left.data() + n, right.data() + n };
+        dsp.process (ch, 2, count);
+        peakGr = std::max (peakGr, dsp.currentGainReductionDb());
+    }
+
+    const auto& out = left;
+
+    // Energy in the band, before and after, over the burst only.
+    const auto from = (size_t) (0.2 * kSampleRate), to = (size_t) (0.3 * kSampleRate);
+
+    auto before = 0.0, after = 0.0;
+
+    for (size_t i = from; i < to && i < out.size(); ++i)
+    {
+        before += (double) source[i] * source[i];
+        after  += (double) out[i] * out[i];
+    }
+
+    check (after < before * 0.9, "the burst comes out quieter than it went in");
+    check (peakGr > 3.0f,
+           "and the meter reports what the audio got, peak "
+               + std::to_string (peakGr) + " dB");
+}
+
+/** RANGE is a ceiling the meter can never exceed, at any setting. */
+void testTheMeterStaysInsideRange()
+{
+    for (const auto range_ : { 1.0f, 8.0f, 18.0f })
+    {
+        DeesserDsp dsp;
+        dsp.prepare (kSampleRate, 512, 2);
+
+        auto v = defaults();
+        v[range] = range_;
+        v[thresh] = -24.0f;     // as eager as the schema allows
+        dsp.setParams (v.data(), (int) v.size());
+
+        run (dsp, essTest (0.5));
+
+        check (dsp.currentGainReductionDb() <= range_ + 1.0e-4f,
+               "the meter never exceeds RANGE at " + std::to_string (range_)
+                   + ", got " + std::to_string (dsp.currentGainReductionDb()));
+    }
+}
+
+/** Listen hands back the band's **contribution**, `H(x) - x` -- the sibilance
+    being taken out -- and not the filtered output, which would be the whole
+    signal with a dip in it. BMO DEQ's band solo is the precedent.
+
+    Clearing it restores **bit-identical** output, which is the half of this
+    that matters in a session: a listen left on must not be a listen printed
+    into a bounce. */
+void testListenOutputsWhatIsBeingRemoved()
+{
+    const auto source = essTest (0.4);
+
+    DeesserDsp wet;
+    wet.prepare (kSampleRate, 512, 2);
+    auto v = defaults();
+    v[range] = 12.0f;
+    wet.setParams (v.data(), (int) v.size());
+    const auto processed = run (wet, source);
+
+    DeesserDsp listen;
+    listen.prepare (kSampleRate, 512, 2);
+    listen.setParams (v.data(), (int) v.size());
+    listen.setSolo (0);
+    const auto soloed = run (listen, source);
+
+    // H(x) - x, sample for sample, against the same core run without listen.
+    auto worst = 0.0;
+
+    for (size_t i = 0; i < soloed.size(); ++i)
+        worst = std::max (worst, (double) std::abs (soloed[i] - (processed[i] - source[i])));
+
+    check (worst < 1.0e-6, "listen outputs H(x) - x, worst error " + std::to_string (worst));
+
+    // It is also not silence -- a null test against zero would pass on a
+    // listen path that was never wired up.
+    auto loudest = 0.0;
+
+    for (const auto s : soloed)
+        loudest = std::max (loudest, (double) std::abs (s));
+
+    check (loudest > 1.0e-4, "and what it hands back is audible");
+}
+
+/** Block size cannot change the output. A host is free to send 1 sample or
+    1024, and the control tick runs on a sample cadence rather than a block
+    boundary precisely so that it does not matter. */
+void testBlockSizeDoesNotChangeTheOutput()
+{
+    const auto source = essTest (0.3);
+
+    const auto runAt = [&source] (int block)
+    {
+        DeesserDsp dsp;
+        dsp.prepare (kSampleRate, 1024, 2);
+
+        auto v = defaults();
+        v[range] = 12.0f;
+        dsp.setParams (v.data(), (int) v.size());
+
+        return run (dsp, source, block);
+    };
+
+    const auto a = runAt (1024);
+    const auto b = runAt (37);      // deliberately not a divisor of anything
+
+    auto worst = 0.0;
+
+    for (size_t i = 0; i < a.size(); ++i)
+        worst = std::max (worst, (double) std::abs (a[i] - b[i]));
+
+    checkNear (worst, 0.0, 0.0, "block size does not change the output");
+}
+
+/** Nothing the module produces is non-finite, at settings a host can reach
+    but a user would not choose. */
+void testItStaysFinite()
+{
+    DeesserDsp dsp;
+    dsp.prepare (kSampleRate, 512, 2);
+
+    auto v = defaults();
+    v[freq]   = 10000.0f;
+    v[q]      = 6.0f;
+    v[thresh] = -24.0f;
+    v[range]  = 18.0f;
+    v[shape]  = (float) highShelf;
+    dsp.setParams (v.data(), (int) v.size());
+
+    const auto out = run (dsp, essTest (0.3));
+
+    auto finite = true;
+
+    for (const auto s : out)
+        finite = finite && std::isfinite (s);
+
+    check (finite, "the output stays finite at the corners of the schema");
+}
+
 int main()
 {
-    testPlaceholderIsAWire();
     testLatencyIsZeroEverywhere();
+    testQuietMaterialIsUntouched();
+    testSibilanceIsReduced();
+    testTheMeterStaysInsideRange();
+    testListenOutputsWhatIsBeingRemoved();
+    testBlockSizeDoesNotChangeTheOutput();
+    testItStaysFinite();
     testAdapterUnpacksInIndexOrder();
     testListenIsMomentary();
-    testGainReductionIsZeroForNow();
     testTheScheduleIsFiveParameters();
 
     testProminenceIsLevelIndependent();

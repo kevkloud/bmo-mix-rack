@@ -229,6 +229,60 @@ offsets the held sound, so M3 logs it. Length is latched at freeze, and TIME and
 modulation are ignored while held
 (DECISION), since a length change tears the loop.
 
+## 11a. In-loop FX
+
+**Position.** One FX stage in the character chain:
+`LOW CUT → HIGH CUT → mode filters → FX → DC blocker → shaper → clip` (§4).
+Before the blocker, so an offset an FX introduces is removed rather than
+compounded; before the shaper and clip, so the clip stays the last thing in the
+loop and §3's bound still ends there. The stage recirculates, so every candidate
+**compounds per repeat** — the point of it, and the risk.
+
+**Bound.** Each candidate is non-expanding, `|F| ≤ 1` at every setting,
+peak-normalised in closed form where it could exceed unity (§11's VOICE rule), so
+§3's `|g| < 1` is unchanged. **FX off skips the stage** — not "amount zero" — so
+the loop is bit-identical to the pre-FX loop at no CPU cost. **FREEZE bypasses FX**
+with every other in-loop stage (§11); an FX that changed the buffer each lap would
+not be a hold. Nothing here reads ahead, so reported latency stays **0** (§0).
+
+**FX AMOUNT**: one continuous control, its meaning per type, zero always inaudible.
+
+Candidates — list and order free until ship (11 §3):
+
+- **Diffuse** — `AllPassChain` (6-stage, `modules/dim/dsp/DspCore.h`, 00 §1),
+  delays 7–37 ms scaled by AMOUNT. Unit magnitude at every ω, so `|F| = 1`
+  exactly; smear accumulates over k passes into a pseudo-reverb. ~12
+  MACs/sample/channel, ≤ 32 kB per channel at 192 kHz.
+- **Crush** — quantise to `b = 16 − AMOUNT·13` bits and sample-and-hold at
+  `f_s/⌈1 + AMOUNT·31⌉`; both ≤ unity, both compounding each lap. **Deliberate
+  aliasing.** The hold's images are made *inside* the loop and meet §4's 18 kHz cap
+  on the *next* lap, so the cap tames them one repeat late instead of preventing
+  them — musical and bounded, and always ahead of the shaper. Crush is therefore
+  **exempt from the −60 dBFS alias floor** (§4), which is measured FX-off; its own
+  acceptance is only that the non-harmonic floor stops growing by repeat 10.
+  Negligible cost and memory.
+- **Octave up / Octave down** — ±12 semitones, two-grain overlap-add, equal-power
+  crossfade, grain 60 ms (CALIBRATE). The grain's read offset is **absorbed into
+  `D`** (the ring is read one grain earlier), so the repeat still lands at T and
+  reported latency stays 0. AMOUNT is the shifted/unshifted blend inside the stage.
+  Pitch compounds as ±12k semitones, so content leaves the band within a few laps —
+  self-limiting, with both cuts in front of it. ~2 reads and a window per sample;
+  ≤ 24 kB per channel at 192 kHz.
+- **Reverse** — a second buffer of one delay length per channel, filled forward
+  while the previous fill is read backward, swapping at the delay period, 5 ms
+  raised-cosine seam (CALIBRATE). `|F| = 1`. **Memory doubles**: +2.0 MB per
+  channel, +4.0 MB per instance at 192 kHz (§10), allocated at `prepare` from the
+  fixed maximum whether FX is on or not.
+- **Pan / Tremolo** — one LFO stepped at the delay period, so each repeat gets its
+  own position or level rather than a wobble inside one; equal-power law, AMOUNT is
+  depth. Chops rather than pans on the mono bus (§8). Negligible cost.
+- **Sweep** — §11's VOICE centre multiplied by `2^(±AMOUNT·k/6)` per repeat (a
+  free-running LFO variant is the alternative), keeping §11's peak normalisation so
+  `|H| ≤ 1` still holds. Negligible cost above VOICE.
+
+**CPU**: target ≤ 1.3× the FX-off loop for any one candidate at 192 kHz, ≤ 1.5×
+heaviest (DECISION; bench per 11 §4k). Only Diffuse and the octaves should measure.
+
 ## 12. Fixed values to target
 
 | Quantity | Value | Trace |
@@ -254,6 +308,15 @@ modulation are ignored while held
 | THROW ramp, BUILD | 5/15 ms; `g_thr = max(g,1.02)`, 400/800 ms | CALIBRATE, §3 cap |
 | VOICE Q, telephone | 0.5–6 peak-normalised; 300 Hz/3.4 kHz at 0.6 | CALIBRATE |
 | FREEZE | loop gain 1.0, all bypassed, whole-sample length, own button/slot | DECIDED (Frosty, 2026-09-20) |
+| FX stage position | after mode filters, before DC blocker; skipped when off, bypassed in FREEZE | DECISION |
+| FX loop bound | `\|F\| ≤ 1` for every candidate, normalised in closed form | DECISION |
+| Diffuse | 6-stage allpass, 7–37 ms × AMOUNT | CALIBRATE; 00 §1 |
+| Crush | 16→3 bits, hold ÷1–32; exempt from the alias floor | CALIBRATE / DECISION |
+| Octave grain | 60 ms, ±12 st, read offset absorbed into `D` | CALIBRATE |
+| Reverse buffer | one delay length extra per channel, 5 ms seam | CALIBRATE |
+| Pan / Sweep | stepped once per repeat; AMOUNT is depth | CALIBRATE |
+| FX AMOUNT default | 35 % | DECISION |
+| FX CPU ceiling | ≤ 1.3× FX-off, ≤ 1.5× heaviest | DECISION |
 
 ## Open decisions for Frosty
 

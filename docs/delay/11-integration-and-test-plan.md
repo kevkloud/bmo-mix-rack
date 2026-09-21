@@ -75,6 +75,28 @@ is added, its whole-sample group delay comes off `D`, keeping the figure 0.
 | 14 | `throw` | bool, momentary | off | 5–10 ms ramp |
 | 15 | `throwMode` | Send open/Throw/Build | Send open | xfade |
 | 16 | `freeze` | bool, momentary | off | latched, no ramp |
+| 17 | `fx` | bool | off | none — the stage is skipped, not faded (10 §11a) |
+| 18 | `fxType` | choice, 7 | Diffuse | xfade |
+| 19 | `fxAmount` | 0…100 %, lin | 35 | 20 ms |
+
+**FX (10 §11a; reserved now, candidates until ship).** `fxType` runs least to most
+intervention, the rule the other three lists already follow: **Diffuse, Sweep,
+Pan/Tremolo, Octave up, Octave down, Reverse, Crush**. **Index 0 is Diffuse, not
+Off** — `fx` owns off, so a corrupt state landing on index 0 gives the gentlest
+type with the stage still gated by a bool that defaults off. (The alternative,
+folding Off into the list as index 0, costs a permanent redundant state and makes
+"is FX on" two questions; rejected.) **These are candidates**: the list and its
+order may change freely until ship and are **append-only forever afterwards**, so
+any candidate that fails 14 §3's listening must be **removed before ship**, never
+left in as a dead index.
+
+**Expanded is not `fx`** — recommended. The repo's expansion is a *view*, not a
+parameter: `ModuleDef::expandedWidth`, a session-only `view` attribute, and
+`ui::ExpandButton` on the host's bar, "never the panel, whose controls all change
+the sound" (`core/product/ModuleDef.h`, `core/AGENTS.md`). Binding width to `fx`
+would put a window resize on an automation lane and in every preset. So: `fx` is
+the sound, `view` is the width, and turning `fx` on may *request* the wide view
+once as a convenience. **Open for Frosty**, since he asked for one switch.
 
 **No control is named DWELL** — that is the module. **Permanent at ship**: ids,
 their order, ranges, steps, defaults, and the four choice lists **with their
@@ -172,6 +194,24 @@ one tail. `bench`, Release, 100 × 10 s at 48 kHz/512 against `measure_ltvcomp`
 on the same box: ≤ 1.5× at defaults, ≤ 3.0× heaviest. The ring is allocated once
 in `prepare()` from the fixed maximum (10 §10: 4.0 MB/instance at 192 kHz); no
 allocation in `process()`. `latencyForParams` is **exactly 0** everywhere.
+
+**l. In-loop FX (10 §11a).** `fx` = off must be **bit-identical** to a build
+without the stage — null the two renders sample for sample, every character, every
+`fxType` index, `fxAmount` at both ends: the stage is skipped, so the type and
+amount cannot leak. Per candidate, at `feedback` 100 and `fxAmount` 100, 60 s at
+44.1–192 kHz: bounded, no divergence, NaN, denormal slowdown or DC growth, as (d).
+`latencyForParams` is 0 for every candidate (the octaves' grain offset comes off
+`D`). Crush is **exempt from (f)'s −60 dBFS floor**; its assertion is that the
+non-harmonic floor is non-increasing from repeat 10 to 32. Toggling `fx` and
+sweeping `fxType` on and off block boundaries: nothing above −60 dBFS on either
+edge. `bench` per candidate against the FX-off loop: ≤ 1.3× any one, ≤ 1.5×
+heaviest, and FX off within noise of the pre-FX build. FREEZE held 60 s with each
+candidate selected: identical to FREEZE with `fx` off, because the stage is
+bypassed. Reverse's second buffer is allocated in `prepare()` from the fixed
+maximum whether `fx` is on or not — no allocation in `process()` when it turns on.
+State: `fx`/`fxType`/`fxAmount` round-trip in the golden schema and in presets,
+while the **expanded view round-trips in the session only**, separately, and
+differs by default between rack (compact) and standalone (expanded).
 
 ## Open decisions for Frosty
 

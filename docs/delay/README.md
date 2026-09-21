@@ -9,8 +9,8 @@ by dispatched agents on AURORA, 2026-09-20, under `HANDOFF-groundwork.md`.
 - `00-repo-conventions.md` — delay-specific repo delta: reusable DSP, no host tempo reaches modules today, tail and latency rules, free accent gaps.
 - `01-reference-behavior.md` — documented behaviour of tape echo, bucket-brigade, early digital and modern delays; target figures with confidence.
 - `02-design-approaches.md` — interpolation, time-change, feedback loop, stereo, ducking and character-modelling survey; neutral shortlist.
-- `10-dsp-spec.md` — the chosen topology: one loop with clean / tape / bucket-brigade modes, no oversampling, zero reported latency, dry-held-to-50% MIX law, THROW / BUILD, VOICE filters, FREEZE. Owns DSP meaning and fixed values.
-- `11-integration-and-test-plan.md` — identity row, registration, the permanent parameter table (ids 0–16) and its order, and how to build the test suites. Owns ids, ranges and choice lists.
+- `10-dsp-spec.md` — the chosen topology: one loop with clean / tape / bucket-brigade modes, no oversampling, zero reported latency, dry-held-to-50% MIX law, THROW / BUILD, VOICE filters, FREEZE, and the in-loop FX stage. Owns DSP meaning and fixed values.
+- `11-integration-and-test-plan.md` — identity row, registration, the permanent parameter table (ids 0–19) and its order, and how to build the test suites. Owns ids, ranges and choice lists.
 - `12-tempo-and-tail-plumbing.md` — host tempo and tail-length plumbing, processor → rack → module; can land as its own PR first.
 - `13-panel-direction.md` — control hierarchy, layout, readouts, meter, accent. Owns layout and captions.
 - `14-calibration-and-listening.md` — how every CALIBRATE and DECISION value gets settled, and what freezes at ship.
@@ -26,6 +26,7 @@ by dispatched agents on AURORA, 2026-09-20, under `HANDOFF-groundwork.md`.
 5. **No auto-gain at MIX 50%** — the bit-exact dry path wins (about +3 dB typical, +6 dB worst).
 6. **Module id `dwell`.**
 7. **VOICE** — one continuous control as `10` defines it; the stepped `voicing` list is dropped.
+8. **In-loop FX** — reserved in the permanent schema now (`fx`, `fxType`, `fxAmount`). The FX switch **expands the module**, the way BMO DEQ's panel differs between its compact rack default and its expanded standalone default; `fxType` and FX AMOUNT live **only on the expanded section**, and with FX off the module is compact and the stage is skipped at zero CPU cost. The FX types are **candidates for testing** — the list and its order stay free until ship, then are append-only forever, so anything that fails listening (`14` §3, L3) comes out first.
 
 ## Still open before the schema commit
 

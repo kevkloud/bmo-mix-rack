@@ -135,6 +135,52 @@ Dark plate `#2e2e32`, pale `#efefef`. Shipped accents run 5.87–7.19:1 dark and
 that was a *light* gold; darkened into the band the objection lapses. Render
 panel and rack, both appearances, THROW lit, before allocating.
 
+## 6a. The FX section, and how expansion works here
+
+**How BMO DEQ does it — read this first.** A module declares a second *width*:
+`ModuleDef::expandedWidth` (`core/product/ModuleDef.h:46`, with
+`isExpandable()` at `:67` and `widthFor(bool)` at `:71`); DEQ sets 320 / 600 in
+`modules/deq/Module.cpp:16-17`. The state is **not a parameter and not panel
+state**: it is a product/host-level flag —
+`SingleModuleProcessor::expanded` (`core/product/SingleModuleProcessor.h:67-90`,
+defaulting to expanded, so **standalone opens wide**) and `RackProcessor`'s
+per-slot `expanded` (`core/rack/RackProcessor.h:100-107`, `.cpp:90-100`,
+forced compact for a new slot at `.cpp:143`, so **a rack opens compact**). It is
+saved with the session as a `view` attribute on the module's PARAMS element,
+written by `getStateInformation` only and **never by `captureState`**, so it is
+absent from presets (`core/product/SingleModuleProcessor.cpp:138-165`;
+`core/AGENTS.md:38-46`). In the rack it rides on the module's carried state, so it
+follows the module through chain edits. The switch is `ui::ExpandButton`
+(`core/ui/ExpandButton.h:9-20`) on the host's bar — the standalone header
+(`core/product/ProductEditor.cpp:18`) or the rack slot bar
+(`core/rack/RackEditor.cpp:22`, `toggleSlotView`) — **never on the panel**. The
+panel is told nothing: `DeqPanel::isShowingExpanded()` is
+`width >= def.expandedWidth` (`modules/deq/panel/DeqPanel.cpp:152-154`) and it
+picks `layoutCompact` or `layoutExpanded` from that (`.cpp:372-380`). The rack
+re-lays out from `RackEditor::slotWidth(slot)` and `refit()`
+(`core/rack/RackEditor.h:96-106`).
+
+**Consequence for Dwell: the module can only grow sideways.** The mechanism is a
+second *width*; there is no `expandedHeight`. So the FX section is a **right-hand
+column, not extra rows**.
+
+- **Compact 280** (§2, the rack default) keeps the eight rows exactly as drawn and
+  adds **FX** as one `ui::SwitchButton` at the right end of row 4, beside the
+  CHARACTER trio — a switch, so it reads as a state, not a knob. Lit in the accent.
+- **Expanded 460** (280 + 180, a multiple of 20 as DEQ's two widths are; the
+  standalone default) keeps rows 1–8 at their compact geometry and re-centres the
+  180 px gained into an FX column running beside rows 5–8, under its own rule and
+  legend **FX**: a vertical list of seven `ui::SwitchButton` cells for `fxType`
+  (70 px each, the row maximum does not apply down a column), then one secondary
+  64 px knob, **FX AMOUNT**, under them.
+- **Caption per type.** `Percent` is the readout throughout, with the caption line
+  naming what the percent moves: `AMOUNT (smear)` Diffuse, `(bits)` Crush,
+  `(blend)` either octave, `(seam)` Reverse, `(depth)` Pan, `(sweep)` Sweep. One
+  format, seven captions — all free later (§7).
+- With FX off the column greys (`setKnobEnabled`) rather than vanishing, so the
+  width never changes underneath a user; the DSP stage is skipped regardless
+  (10 §11a).
+
 ## 7. Permanent once shipped
 
 Permanent: plugin code, module id, bundle id, preset extension, accent (the

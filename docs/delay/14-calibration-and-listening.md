@@ -30,6 +30,12 @@ M = measure (§2), L = listen (§3), F = Frosty's call.
 | Mix law, `w = sin(πm)` / `d = cos(π(m−0.5))`, dry unity ≤50% | M7: dry bit-exact to 50%; sum stated on the panel |
 | FREEZE, gain 1.0, all stages bypassed, whole-sample length | M3: no drift over 60 s; DC at the latch logged |
 | THROW modes, Send open / Throw / Build, performance gate | M8, L2: Send open bit-exact; each mode measured |
+| Diffuse spread, 7–37 ms × AMOUNT, repeat smear | M6, L3: blurs without ringing; `\|F\| = 1` measured |
+| Crush bits / hold, 16→3, ÷1–32, lo-fi repeats | M5, L3: floor non-increasing repeat 10→32 |
+| Octave grain, 60 ms, shift artefacts | M1, L3: no flam; offset absorbed, latency 0 |
+| Reverse seam, 5 ms, repeat boundary | M8, L3: no click; no level step at the swap |
+| Pan / Sweep depth, per repeat, motion | L3: moves per repeat, not a wobble |
+| FX AMOUNT default, 35 %, arrival point | L3, F: audible but not the loudest thing |
 
 Open decision 1 in 10's closing list (ping-pong routing) is Frosty's alone. Do not settle it by ear.
 
@@ -70,6 +76,13 @@ source**, key beside the audio, audio outside the repository, 32-bit float.
   duplicates is the round's noise floor; a smaller separation decides nothing (the
   Opto lesson). One control pair per source, first.
 - **L2 gesture**: glide, crossfade, throw, build; moving material only.
+- **L3 FX candidates** (10 §11a): each candidate heard **against FX off** at
+  `fxAmount` mid and max, on **vocal throws, drums and a sustained pad**, one
+  candidate per pair, blind and level-matched as L1. Pass is "earns its index":
+  it beats or ties Off on at least one source and harms none. **Record pass or
+  fail per candidate, with the machine name**, in the round's verdict file.
+  **A candidate that fails is removed from `fxType` before ship** — the list is
+  append-only afterwards, so a dead index is permanent (11 §3). L3 runs after L1.
 - **Sources**, all four every round: vocal throws, drums, a sustained pad, a mono
   guitar. Ping-pong and dual-offset also on the mono bus.
 - **The winner**: one bold line per pair, the listener comments, the session writes

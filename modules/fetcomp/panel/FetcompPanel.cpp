@@ -457,11 +457,6 @@ void FetcompPanel::paintPanel (juce::Graphics& g)
     if (ratio4Button.getBounds().isEmpty() || ratioAllButton.getBounds().isEmpty())
         return;
 
-    // The raw accent at the 0.55 the dotted tracks use, which is what BMO
-    // Dimension's bracket takes: the mark belongs to the controls it gathers
-    // rather than reading as a rule across the panel.
-    g.setColour (context.def.accent.withAlpha (0.55f));
-
     const auto spineX = (float) ratio4Button.getX() - kBracketGap - kBracketWeight;
 
     // **A tick into the middle of every button, not just the ends.**
@@ -482,13 +477,28 @@ void FetcompPanel::paintPanel (juce::Graphics& g)
     const auto top  = centreOf (wired[0]);
     const auto foot = centreOf (wired[4]);
 
+    // **Gathered into one list and filled once, because the ink is
+    // translucent.**
+    //
+    // The bracket is the raw accent at the 0.55 alpha the dotted tracks use.
+    // Filled as six separate rectangles it was six separate composites, so
+    // every place a tick crossed the spine got the colour laid down twice --
+    // 0.55 over 0.55 is an effective 0.80 -- and the join read as a darker
+    // knuckle on what is meant to be one continuous line. `RectangleList`
+    // keeps its contents disjoint as they are added, so the union is painted
+    // exactly once and the bus is one weight end to end.
+    juce::RectangleList<float> bus;
+
     // The spine spans first tick to last, so it begins and ends on a tick
     // rather than overshooting into bare plate at either end.
-    g.fillRect (juce::Rectangle<float> (spineX, top, kBracketWeight, foot - top));
+    bus.add ({ spineX, top, kBracketWeight, foot - top });
 
     for (const auto* b : wired)
-        g.fillRect (juce::Rectangle<float> (spineX, centreOf (b) - kBracketWeight * 0.5f,
-                                            kBracketEnd, kBracketWeight));
+        bus.add ({ spineX, centreOf (b) - kBracketWeight * 0.5f,
+                   kBracketEnd, kBracketWeight });
+
+    g.setColour (context.def.accent.withAlpha (0.55f));
+    g.fillRectList (bus);
 }
 
 //==============================================================================

@@ -410,19 +410,29 @@ ops/sample on its own.
 **Acceptance budget** — proposed, since none is documented (`00` §3) and the only
 comparable figure is BMO Tune RT at 0.934 % median, 48 kHz/128: **≤1.5 % of one
 core at 48 kHz/128 and ≤5 % at 192 kHz, per instance**, so eight slots stay under
-12 % and 40 %. Measure via `tools/measure/rvb/main.cpp`, do not infer.
+12 % and 40 %. Measure via `tools/measure/reverb/main.cpp`, do not infer.
 
 **Memory** (float32): ER 0.25 s × 2 ch, pre-delay 0.25 s × 2 ch, FDN Σ ≈ 0.7 s
 with modulation headroom, diffuser and allpasses ≈ 0.1 s — ≈1.55 s
 mono-equivalent → **≈300 kB at 48 kHz, ≈1.2 MB at 192 kHz** per instance, ≈10 MB
 for a full rack at 192 kHz. Allocated in `prepare()` from `sampleRate`.
 
-**Parameters: 29**, inside one slot's 32 host params with no overflow state,
-unlike DEQ. Type, Size, Pre-delay, ER Pre-delay Link, Decay, Decay Shape, Attack,
-Diffusion, 2 damping knees, 2 damping ratios, 2 EQ knees, 2 EQ gains, ER Mode, ER
-Density, ER Shape, ER Spread, ER High Cut, ER Variation, Mod Depth, Mod Rate,
-Width, In High Cut, ER Level, Reverb Level, Mix, Output. Era fields are constants,
-not parameters (§1).
+**Parameters: 30**, inside one slot's 32 host params with no overflow state,
+unlike DEQ, leaving two spare lanes. The permanent order is `11`'s schema table,
+and this is the same list: Type, Size, Pre-delay, ER Pre-delay Link, Decay, Decay
+Shape, Attack, Diffusion, 2 damping knees, 2 damping ratios, 2 EQ knees, 2 EQ
+gains, ER Mode, ER Density, ER Shape, ER Spread, ER High Cut, ER Variation, Mod
+Depth, Mod Rate, Width, In High Cut, ER Level, Reverb Level, Mix, Output. Era
+fields are constants, not parameters (§1).
+
+*This said 29 while listing 30.* The odd one is **In High Cut**: §2 introduces it
+inside the *Input* sentence beside an explicitly fixed 20 Hz high-pass, §6's CPU
+line bundles it into "input conditioning and EQ", and §7 gives it no range row
+though every other control has one — so the body read as 29 plus a constant. It
+is kept as a parameter (§2 gives it a 2–20 kHz user range, and it is the only way
+to darken what feeds both generators independently of the Reverb EQ), marked
+**owner confirm** in `11` §4. Dropping it before first ship is free; after that it
+is permanent.
 
 ## 7. Fixed values to target
 

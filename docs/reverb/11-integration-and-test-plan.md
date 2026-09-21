@@ -20,45 +20,36 @@ stacked on unmerged work.
 
 ## 1. Drop-in
 
-`modules/<id>/`: `params.h`; `dsp/DspCore.h` (JUCE-free), `dsp/ErGenerator.h`,
+**Identity — DECIDED by the owner, 2026-09-21. Permanent.** Display name **BMO
+Linger**; bundle id **`com.lt3audio.bmolinger`**; module id **`reverb`**
+(`modules/reverb/`, `products/reverb/`); presets **`.bmoreverb`**; plugin code
+**`Brvb`** (reserved at `products/AGENTS.md:149`, spent here); BMO line,
+`ui::bmoLine()`. Bundle id from the display name, preset extension from the
+module id, per the existing rows.
+
+**The id and the display name differ deliberately**, as `deesser` is to "BMO
+Defang" and `fetcomp` to "BMO FET" (and `eq` to "BMO CEQ"). `ModuleDef::id` lives
+in state files and rack presets and never changes, so it stays plain and
+descriptive; the name on the panel is free to be evocative. Do not "tidy" the id
+to match the name later — that would break every saved session.
+
+*For the record:* BMO Linger, Foyer, Afterglow, Haunt and the working title
+"B Verb" were considered. A name-collision scan (not a trademark opinion)
+returned Linger and Foyer clear, Afterglow adjacent and crowded, and Haunt a
+direct clash with a currently-sold hardware reverb/delay pedal. "B Verb" was set
+aside because it echoes Reference A's own product name one letter apart, which is
+what the no-third-party-names rule exists to prevent. No brands are named here,
+per that rule.
+
+`modules/reverb/`: `params.h`; `dsp/DspCore.h` (JUCE-free), `dsp/ErGenerator.h`,
 `dsp/TapTables.h`, `dsp/Fdn.h`, `dsp/Absorbent.h`, `dsp/ReverbDsp.h`
 (`ModuleDsp` adapter, unpacks the flat `float*` in `Index` order);
 `panel/ReverbPanel.{h,cpp}`; `presets/FactoryPresets.h`; `Module.{h,cpp}`;
 `AGENTS.md` + `README.md`, linked from `modules/AGENTS.md`.
 
-**Module id.** Descriptive, as `deesser` is to BMO Defang. **Recommend `reverb`**
-(preset `.bmoreverb`); `verb` (`.bmoverb`) reads as slang in a `<PARAMS>` dump;
-`rvb` (`.bmorvb`) is what 10 §6 assumes when it writes `tools/measure/rvb/` —
-**owner confirm**, and both packs must spell it the same before the first build.
-Plugin code `Brvb` is reserved.
-
-**Name-collision scan, returned.** *Linger* is **clear** (song titles only) and
-*Foyer* is clear; *Afterglow* is adjacent and crowded, with a hardware
-chorus/reverb pedal and several soundware products already carrying it; *Haunt*
-is a **direct clash** with a currently-sold hardware reverb/delay pedal and is
-dropped. No brands named, per the repo rule.
-
-| Display name | Bundle id | Status |
-|---|---|---|
-| **BMO Linger** | `com.lt3audio.bmolinger` | **Preferred; scan clear; awaiting the owner's lock** |
-| BMO Foyer | `com.lt3audio.bmofoyer` | Clear. Small-room reading; undersells a 20 s hall |
-| BMO Afterglow | `com.lt3audio.bmoafterglow` | Scan crowded — not recommended |
-| ~~BMO Haunt~~ | — | **Dropped: direct clash** |
-| *B Verb* (working title) | `com.lt3audio.bmobverb` | Brand echo — below |
-
-**"B Verb" deliberately echoes Reference A's product name**, one letter apart,
-for the reverb built on Reference A. The repo rule: third-party and hardware
-product names appear nowhere in code, docs or UI strings; references live in
-prose only (`products/AGENTS.md`, LTV Comp). A near-homophone of the emulated
-product is what that rule exists to prevent — not a literal break, so it is the
-owner's call, recorded the way BMO FET recorded its accent. Note the asymmetry: a
-**display name** can be renamed later (BMO EQ → BMO CEQ) for one
-`PresetInfo::legacy` hop; **module id, plugin code and bundle id freeze at first
-ship.**
-
 **Registration (from `86095a5`):** `modules/CMakeLists.txt`;
 `modules/AGENTS.md`; `products/rack/Registry.cpp`; `products/rack/CMakeLists.txt`;
-`products/CMakeLists.txt`; `products/<id>/{Product.h,main.cpp,CMakeLists.txt}`;
+`products/CMakeLists.txt`; `products/reverb/{Product.h,main.cpp,CMakeLists.txt}`;
 identity **and accent** rows in `products/AGENTS.md` *before the first build*;
 `tests/CMakeLists.txt`; `tests/plugin/RackTests.cpp` (count N→N+1);
 `tests/ui/LayoutTests.cpp`; `tools/CMakeLists.txt`; `tools/snapshot/main.cpp`
@@ -188,20 +179,31 @@ crossfade, **L** log skew.
 | 22 | `moddepth` | MOD DEPTH | 0.1…0.8 ms | *per 10* | ms | |
 | 23 | `modrate` | MOD RATE | 0.1…1.2 Hz | *per 10* | Hz | L |
 | 24 | `width` | WIDTH | 0…200 % | 100 | % | |
-| 25 | `inhicut` | IN HI-CUT | 2…20 kHz | *per 10* | Hz/kHz | L |
+| 25 | `inhicut` | IN HI-CUT | 2…20 kHz | *per 10* | Hz/kHz | L, **owner confirm** |
 | 26 | `erlevel` | ER | −40…0 dB | −6 | dB, `Off` at −40 | |
 | 27 | `verblevel` | REVERB | −40…0 dB | −6 | as `erlevel` | |
 | 28 | `mix` | MIX | 0…100 % | 100 | % | |
 | 29 | `output` | OUTPUT | −24…0 dB | 0 | dB | |
 
-**Count, honestly: 30 — the rack's biggest panel.** It still fits a slot's **32
-host lanes**, so none of DEQ's `SlotOverflow` machinery is needed, but only **two
-lanes remain**, and a later Freeze, ducking or `syncon`/`syncdiv` would exhaust
-them. Say so in `AGENTS.md`. **Owner confirm:** 10 §6 states "Parameters: 29"
-while its own enumeration lists 30 — reconcile before the order freezes, because
-the discrepancy is exactly the spare-lane count. There is **no `voicing`
-parameter**: 10 §1 keeps the era block as per-type constants, promotable in v2
-without touching type ordinals or state layout.
+**Count: 30 — the rack's biggest panel, and both packs now say 30.** It fits a
+slot's **32 host lanes**, so none of DEQ's `SlotOverflow` machinery is needed, but
+only **two lanes remain**, and a later Freeze, ducking or `syncon`/`syncdiv` would
+exhaust them. Say so in `AGENTS.md`. There is **no `voicing` parameter**: 10 §1
+keeps the era block as per-type constants, promotable in v2 without touching type
+ordinals or state layout.
+
+**The parameter that explained 29 vs 30 is `inhicut` (IN HI-CUT), and it stays —
+marked "owner confirm".** 10 §6 stated 29 while enumerating 30. On 10's own
+evidence the odd one out is the input high-cut: it appears only inside §2's
+*Input* sentence, beside an explicitly **fixed** 20 Hz high-pass; §6's CPU line
+bundles it into "input conditioning and EQ"; and §7's fixed-values table gives
+every other user control a range row but gives it none. So 10's body reads as
+29 parameters plus an internal constant, while its own list reads 30. Kept as a
+parameter, because §2 gives it a user range (2–20 kHz) that a constant would not
+need, and because it is the only way to darken what feeds **both** generators
+independently of the Reverb EQ shelves — a real control, not a miscount. If the
+owner would rather it were a constant, deleting index 25 before the first ship is
+free and returns a third spare lane; after that it is permanent.
 
 **Main face vs expanded** — DEQ's precedent (`ModuleDef::expandedWidth`, 320/600,
 switched on the host bar). *Main face:* the ER/tail display, TYPE, SIZE,
@@ -240,7 +242,7 @@ fixed-seed noise burst and a sweep, since modulation makes the IR time-varying)
 through `DspCore` into a `std::vector<float>`; assert on numbers. **No audio ever
 committed** — twice a tool has written WAVs into the tree; read
 `git status --short` before every `git add`. `measure_*` may write to the
-gitignored `packages/<id>-listening/`. Every ER item below runs with `verblevel`
+gitignored `packages/reverb-listening/`. Every ER item below runs with `verblevel`
 at −40.
 
 - **T60.** Schroeder backward integration `EDC(t)=∫ₜ^∞h²`; fit −5…−35 dB (T30×2)
@@ -313,7 +315,7 @@ The rest, one line each:
 | Sample rate | 44.1–192 kHz. *Must not differ:* per-band T60 ±5%, tap times *in ms* ±0.1 ms, pre-delay ±0.1 ms, density crossing ±10%, latency **exactly 0**. *May differ:* sample values (lines re-primed per rate), modal detail above ~15 kHz, memory (linear in rate) |
 | Block size | 1/16/32/64/**127**/512/2048 **bit-identical** for fixed parameters; if not, something smooths per block instead of per sample — a bug, not a tolerance |
 | Buses | `numChannels` 1 and 2: mono finite and ≤3 dB down by the γ ≥ 0 rule; no mono→stereo layout in v1 (§2b) |
-| CPU / memory | 10 §6's budget: `measure_<id> bench`, 60 s noise, 48 kHz/128, **Release**, median of five, on AURORA — **≤1.5% of a core at 48 kHz/128, ≤5% at 192 kHz**, eight slots under 12% and 40%. Memory ≈300 kB / ≈1.2 MB, allocated in `prepare()`, **zero allocation in `process()`**. Measure 10 §8's worst case first (DENSITY 48 taps, 3 diffuser stages, 192 kHz) |
+| CPU / memory | 10 §6's budget: `measure_reverb bench`, 60 s noise, 48 kHz/128, **Release**, median of five, on AURORA — **≤1.5% of a core at 48 kHz/128, ≤5% at 192 kHz**, eight slots under 12% and 40%. Memory ≈300 kB / ≈1.2 MB, allocated in `prepare()`, **zero allocation in `process()`**. Measure 10 §8's worst case first (DENSITY 48 taps, 3 diffuser stages, 192 kHz) |
 | Golden STATE | `checkSchema` pins ids, order, ranges, steps, defaults, formats and both choice lists with their index order; pin the **derived** per-type tap tables too, since 10 §8's "failing table is re-seeded, not patched" only works if it is pinned. For a fingerprint, a **hash of a fixed-seed IR** plus scalars — never audio |
 
 **Where they live.** *JUCE-free DSP* (`tests/dsp/ReverbDspTests.cpp`,
@@ -325,7 +327,7 @@ state XML round-trip, `getLatencySamples()==0` at every rate,
 `getTailLengthSeconds()` ≥ measured, the accepted-layout table; `RackTests.cpp`
 takes the count. *UI* (`LayoutTests.cpp`): `checkReverbPanel`, the
 sketch-vs-table first-tap assertion, `--dump`. *Manual*
-`tools/measure/<id>/main.cpp`: `ir t60 er density mono sweep bench` — every figure
+`tools/measure/reverb/main.cpp`: `ir t60 er density mono sweep bench` — every figure
 quoted in `testing-notes/`, plus the CALIBRATE runs.
 
 Every result names the machine — **AURORA** — plus configuration and host.
@@ -359,13 +361,14 @@ all of the above summed, at VARIATION 0 and 6.
 **Done** = every milestone's exit test green in all three CI jobs on both
 platforms, each after a build that exited 0; no audio, renders or fonts
 committed; `AGENTS.md` + `README.md` present and linked; identity row, accent and
-name permanent with the collision scan recorded; `measure_<id>` registered;
+name permanent with the collision scan recorded; `measure_reverb` registered;
 figures written up naming AURORA; the listening checklist heard; branch from
 Kevin's `origin/main`, stacked on nothing unmerged.
 
-**Blocking unknown:** none. **Owner confirm, before the first build:** the name
-lock on BMO Linger; the accent; the module id (`reverb` here vs `rvb` in 10 §6);
-the parameter count (30 enumerated vs "29" stated in 10 §6); `feed`'s caption —
-10's **Diffusion** (Reference A's word) or **TAIL FEED** as proposed here, since
-"diffusion" means density everywhere else in the suite; whether ER SHAPE and ER
-SPREAD grey out in Taps mode or sit inert; the MIX law and its default.
+**Blocking unknown:** none. **Decided:** the name, the module id and the
+30-parameter count (§1, §4). **Owner confirm, before the first build:** the
+accent; whether `inhicut` ships as a parameter or becomes a constant (§4);
+`feed`'s caption — 10's **Diffusion** (Reference A's word) or **TAIL FEED** as
+proposed here, since "diffusion" means density everywhere else in the suite;
+whether ER SHAPE and ER SPREAD grey out in Taps mode or sit inert; the MIX law
+and its default.

@@ -196,8 +196,9 @@ control domain, where the hardware's gate RC is. An exponential decay of `c`
 gives `GR(t) = 20·log₁₀(1 + k·c₀·e^(−t/τ))`, which starts slow and accelerates
 and whose 63 % *in dB* depends on depth — A2's "hangs, then lets go" recovery,
 for free. So the detent table is calibrated at a stated reference depth (10 dB
-GR, **CALIBRATE**). Seven log-spaced detents, **1 = slowest, 7 = fastest**:
-`τ_rel(k) = 1100·(50/1100)^((k−1)/6)` ms → 1100, 657, 393, 234, 140, 84, 50 ms.
+GR, **CALIBRATE**). Knob positions 1–7 run **backwards like the hardware**,
+1 = slowest and 7 = fastest, per §10's law: 1100, 657, 393, 234, 140, 84,
+50 ms at the whole positions.
 
 ## 7. Nonlinearity and antialiasing
 
@@ -305,9 +306,19 @@ Against the alternatives this spec previously weighed:
   −54 dB under far harder drive than THD < 0.5 % implies.
 
 **Which blocks move.** Base rate: parameter smoothing, INPUT/OUTPUT gains,
-meters, the Mix dry path (delay-matched to the reported latency, as
-`modules/eq/dsp/DspCore.h` does). Oversampled: input transformer, FET cell,
-sidechain and solve, output stage and transformer, ADAA shapers.
+meters, the Mix dry path. Oversampled: input transformer, FET cell, sidechain
+and solve, output stage and transformer, ADAA shapers.
+
+**The Mix dry path must be delay-matched, and MIX ships in v1.** The wet path
+carries the oversampler's round trip — **0 / 40 / 60** samples at Off / 2x / 4x
+— so the dry path takes a plain delay line of exactly that length, sized from
+`Oversampler::kMaxLatency` and re-primed when the factor changes. Undelayed, a
+partial blend combs (two copies of the same signal 40 or 60 samples apart, a
+~1.2 kHz-spaced notch pattern at 48 kHz) and `mix = 0` stops nulling, which is
+also how `bypass` is proven. `modules/eq/dsp/DspCore.h` carries the dry ring
+for exactly this reason, and the EQ review records what going without costs:
+switching the factor resets the stages without clearing the ring, so it clicks
+and misaligns for up to 70 samples. Clear the ring on a factor change.
 
 **Consequences.** The switch clicks and re-syncs host delay compensation, so it
 is a setup control, not an automation target; and a rack sums its slots'
@@ -323,12 +334,25 @@ Survivor convention throughout, matching `poleFor` in vcomp:
 `p = exp(−1/(τ · f_s,eff))`, `f_s,eff` the **effective** (possibly oversampled)
 rate.
 
-- Release: §6's reference-depth definition ⇒ `τ` fitted at 10 dB GR.
+**Knob position is the parameter, and it runs backwards like the hardware**
+(1 = slowest, 7 = fastest; 11 §2 carries the decision and the alternative that
+was weighed). Position `p ∈ [1,7]` is continuous, and the *published* time is
+
+    t_att(p)  = 800·(20/800)^((p−1)/6)  µs   → 800 / 126.5 / 20 µs at p = 1/4/7
+    t_rel(p)  = 1100·(50/1100)^((p−1)/6) ms  → 1100 / 234.5 / 50 ms at p = 1/4/7
+
+Both are exponential in `p`, so a *linear* position sweep is already the log
+time sweep the knob wants and no parameter skew is needed. The inverse, for
+tests and for reading a figure off A2, is
+`p = 1 + 6·ln(t/t₁) / ln(t₇/t₁)`.
+
+`t_att` is A2's **100 % recovery** figure and `t_rel` its **63 %** one, so the
+two feed the coefficient rules differently:
+
+- Release: `τ_rel = t_rel(p)` directly, fitted at §6's 10 dB reference depth.
 - Attack: A2's *100 %* definition ⇒ a one-pole never arrives, so
-  `τ_att = t_100/N`, `N = 5` (99.3 %); `N` is CALIBRATE, 4.6 (99 %) the common
-  alternative. Detents, 1 = slowest:
-  `t_att(k) = 800·(20/800)^((k−1)/6)` µs → 800, 433, 234, 126, 68, 37, 20 µs,
-  so `τ_att` spans 160 µs to 4 µs.
+  `τ_att = t_att(p)/N`, `N = 5` (99.3 %); `N` is CALIBRATE, 4.6 (99 %) the
+  common alternative. `τ_att` therefore spans 160 µs to 4 µs.
 - **Sub-sample attacks are not a limit.** 4 µs is 0.18 samples at 44.1 kHz, but
   `α` still separates all seven detents (0.12 … 0.995 at 48 kHz) and §4's solve
   is exact at `α = 1`. Tests assert monotonicity and §12's first-sample
@@ -345,8 +369,8 @@ rate.
 
 | Quantity | Target | Confidence |
 |---|---|---|
-| Attack | 20–800 µs, 7 detents, 1 = slowest | A2, DOCUMENTED; `N` **CALIBRATE** |
-| Release | 50–1100 ms, 7 detents, at 10 dB GR | A2 (63 %), DOCUMENTED; depth **CALIBRATE** |
+| Attack | 20–800 µs over knob positions 7→1 | A2, DOCUMENTED; `N` **CALIBRATE** |
+| Release | 50–1100 ms over positions 7→1, at 10 dB GR | A2 (63 %), DOCUMENTED; depth **CALIBRATE** |
 | Slow-branch scales | `τ_c = 1.5τ`, `τ_s = 10τ` | A2 + vcomp, **CALIBRATE** |
 | Ratios (`β_R`) | 4.11 / 11.23 / 18.60 / 33.51 | derived §5, **CALIBRATE** |
 | Ratio sag | 4:1 → 3.0 at 10 dB GR; 20:1 → 12.3; both → ~2 by 30 dB | derived; unverified |
@@ -481,11 +505,15 @@ Nothing hard-clips before the output stage: the divider law is bounded by
 construction and §7's shapers are soft, so a slammed signal degrades into the
 stage models rather than into a clip.
 
-**Metering.** `ui::DynamicsMeter`'s reduction scale runs 0..24 dB (`kGrRangeDb`,
-`core/ui/Controls.h`), which pins before the design target. `modules/AGENTS.md`
-says the scale is still Opto's and that a module wanting different units is the
-point at which to lift `ScalePoint` into the caller. **This is that module**: it
-needs 0..30 dB at least, 0..40 to match `G_max`. See 11 §4.
+**Metering — decided: the shared meter is not touched.**
+`ui::DynamicsMeter`'s reduction scale runs 0..24 dB (`kGrRangeDb`,
+`core/ui/Controls.h`) and the needle simply **pins** beyond that. 24 dB is
+enough to read by; past it the meter says "a lot" and the number is what
+matters. So `kGrRangeDb` stays as it is, no `ScalePoint` lifting, and BMO Opto
+is untouched. The DSP target is unchanged: the loop is still designed and
+tested to 30 dB, and `currentGainReductionDb()` still reports the **true**
+figure past the pin — the clamp is a drawing limit, not a measurement one.
+11 §3 tests exactly that.
 
 ## 13. Open questions and risks
 

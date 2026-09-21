@@ -49,33 +49,69 @@ Solo/metering are not parameters. Smoothing is a one-pole in `DspCore`.
 |---|---|---|---|---|---|---|---|
 | 0 | `input` | float −20…**+60** dB | 0 | linear | dB | 20 ms | yes |
 | 1 | `output` | float **−36…+36** dB | 0 | linear | dB | 20 ms | yes |
-| 2 | `attack` | log 0.02…0.8 ms | 0.2 | log | ms | target only | yes |
-| 3 | `release` | log 50…1100 ms | 400 | log | ms | target only | yes |
+| 2 | `attack` | float **1…7 (knob position)** | 4 | **none** | Plain, value string in µs | target only | yes |
+| 3 | `release` | float **1…7 (knob position)** | 4 | **none** | Plain, value string in ms | target only | yes |
 | 4 | `ratio` | choice 4:1/8:1/12:1/20:1/All | 4:1 | stepped | — | crossfade 5 ms | yes |
 | 5 | `mix` | float 0…100 % | 100 | linear | % | 20 ms | yes |
 | 6 | `voicing` | choice Blue/Black | **Black** | stepped | — | crossfade 5–10 ms | yes |
 | 7 | `oversampling` | choice Off/2x/4x | Off | stepped | — | none | **no** |
 
-**The two ranges in bold are changes, and they are why.** 10 §12 shows the
-originally proposed +45 dB input is about 5 dB short of reaching 30 dB GR at
-4:1 from a −18 dBFS source, and ±24 dB of output cannot restore 30 dB of
-reduction. Both are permanent at first ship. **Owner confirmation item.**
+**The two gain ranges in bold are changes.** 10 §12 shows the originally
+proposed +45 dB input is about 5 dB short of reaching 30 dB GR at 4:1 from a
+−18 dBFS source, and ±24 dB of output cannot restore 30 dB of reduction. Both
+are permanent at first ship. **Owner confirmation item.**
 
 `voicing` id, order, choice labels and default are equally permanent. Black is
-the default because the owner wants the sound to lean that way; the labels
-"Blue"/"Black" are proposed, not settled. **Owner confirmation item.**
+the default; the labels "Blue"/"Black" are proposed, not settled. **Owner
+confirmation item.** `mix` **ships in v1** — decided, not conditional; its dry
+path has a delay-matching requirement (10 §9). `oversampling` exists because
+10 §9 makes the factor user-selectable; it clicks and re-syncs PDC, so it is
+marked not-automatable.
 
-The panel may print the hardware's reversed 1–7 captions for attack and
-release, but the **parameters stay in ms ascending** — captions are free, ids
-are not. `oversampling` exists because 10 §9 makes the factor user-selectable;
-it clicks and re-syncs PDC, so it is marked not-automatable.
+### Attack and release run backwards, and the parameter says so
+
+Decided: **higher value = faster**, 1–7 with 7 fastest, as the hardware's
+printed knobs do. Two ways to make that permanent were weighed.
+
+**(a) The parameter is the knob position**, 1–7 continuous, mapped to time
+inside the DSP by 10 §10's law, with the time shown as the value string.
+**(b) The parameter stays in ms ascending** and only the knob is drawn
+reversed.
+
+**Recommended: (a).** Four reasons, in the order they matter:
+
+1. **Automation direction.** Under (b) the host's lane and the knob move in
+   *opposite* directions: dragging the lane up lengthens the attack while the
+   knob turns anticlockwise. A panel cannot fix that — the lane is the
+   parameter. Under (a) up, clockwise, higher number and faster all agree.
+2. **Preset and conversation readability.** 01's practice notes record real
+   settings as positions — "attack 3, release 7". A preset that stores
+   `attack 4` is directly comparable with that; `attack 0.126 ms` is not.
+3. **No skew, and no second definition of the curve.** Position is linear and
+   10 §10's law is exponential in position, so the log sweep falls out for
+   free. (b) needs a log skew *and* a reversed draw, i.e. the same curve
+   expressed twice in two places that can drift apart.
+4. **The reversal belongs in the permanent definition**, not in a panel trick
+   the host cannot see.
+
+**What (a) costs, and why this is still an owner tick.** It breaks the house
+convention: LTV Comp's `attack`/`release` are `logParam` in ms ascending with
+`ParamFormat::Milliseconds` (`modules/vcomp/params.h:147-148`), and that is
+the only precedent for a time parameter in this rack. Under (a) the format is
+`Plain` with a custom value string, so a host that ignores value strings shows
+"4.0" rather than "126 µs". Ranges, units and format freeze at first ship, so
+**this is the one remaining confirmation on this item.**
+
+Either way the mapping is 10 §10's: `t_att(p) = 800·(20/800)^((p−1)/6)` µs and
+`t_rel(p) = 1100·(50/1100)^((p−1)/6)` ms, giving **800 / 126.5 / 20 µs** and
+**1100 / 234.5 / 50 ms** at positions 1 / 4 / 7. Under (b) the same law is
+inverted, `p = 1 + 6·ln(t/t₁)/ln(t₇/t₁)`, to draw the knob.
 
 **Not in v1, and deliberately:** no sidechain HPF, and no stereo-link
 parameter — stereo is **always linked** (10 §4), the same reasoning
 `modules/vcomp` records for having no LINK switch. Either could be appended
 later at the end of `specs()` with a default that leaves old sessions
-unchanged; neither can be inserted mid-list. `mix` is justified by rack use
-rather than by the hardware and is the one extra still open (README).
+unchanged; neither can be inserted mid-list.
 
 ## 3. Test suites
 
@@ -97,15 +133,18 @@ Runs against `DspCore`, seconds, CI `dsp` job. Model on `VcompDspTests.cpp`.
   All-buttons is DOCUMENTED-observed only: assert shape, not numbers — 1–2 dB
   standing GR at silence, effective slope above 12:1 near threshold, and a
   plateau (a region where the curve flattens or reverses).
-- **Timing, and the slam step.** Attack = step −30→0 dBFS. At the fastest
-  detents the settled value arrives within one sample, so the assertion is
-  10 §12's **first-sample overshoot**: ≤ 0.05 dB at detent 7 with oversampling
-  Off at 44.1 and 48 kHz, the seven detents strictly monotone, and the whole
-  table within ±0.1 dB at 48 kHz for a step to 20 dB of steady-state GR at
-  20:1. Repeat at 2x and 4x and assert the answer moves by under 0.05 dB —
-  oversampling must not change the timing. Release = "63 % recovery" measured
-  **at the reference depth 10 dB GR** (10 §6); endpoints 50 ms and 1100 ms,
-  ±10 %, plus monotonicity.
+- **Timing, at knob positions 1, 4 and 7.** Assert the mapping as well as the
+  behaviour, because the position→time law is the permanent definition:
+  **attack 800 / 126.5 / 20 µs** and **release 1100 / 234.5 / 50 ms** at
+  positions 1 / 4 / 7, and **higher position = faster** at every pair (the test
+  that fails if the direction is ever "corrected"). Attack = step −30→0 dBFS;
+  at the fast end the settled value arrives within one sample, so the assertion
+  there is 10 §12's **first-sample overshoot**: ≤ 0.05 dB at position 7 with
+  oversampling Off at 44.1 and 48 kHz, the seven whole positions strictly
+  monotone, and the table within ±0.1 dB at 48 kHz for a step to 20 dB of
+  steady-state GR at 20:1. Repeat at 2x and 4x and assert the answer moves by
+  under 0.05 dB — oversampling must not change the timing. Release = "63 %
+  recovery" measured **at the reference depth 10 dB GR** (10 §6), ±10 %.
 - **Program-dependent release.** Same release setting, short burst vs sustained
   heavy GR must recover at measurably different rates (≥ 1.5×). A naive
   two-branch implementation must fail this — see `testArcIsProgrammeDependent`.
@@ -147,12 +186,24 @@ Runs against `DspCore`, seconds, CI `dsp` job. Model on `VcompDspTests.cpp`.
   (GR before and after the switch within 0.1 dB).
 - **Stereo link.** Not a parameter: a hard-panned burst ducks both channels
   equally and both report one shared reduction.
+- **Mix and the dry path, at every oversampling setting.** `mix` ships in v1,
+  so this is a shipping requirement, not a nicety (10 §9). At Off, 2x and 4x:
+  `mix` = 0 nulls against the input to −120 dB; `bypass` nulls to −120 dB; and
+  **`mix` = 50 does not comb** — sweep a sine 100 Hz–18 kHz and assert the
+  blended magnitude stays within ±0.5 dB of the mean, since an unmatched dry
+  path 40 or 60 samples adrift puts notches every ~1.2 kHz at 48 kHz. Also
+  assert the delay measured by cross-correlation equals the reported latency
+  (`testDryPathIsDelayMatched`), and that changing the factor while running
+  neither clicks above −80 dB nor leaves the ring misaligned.
+- **GR metering past the pin.** `ui::DynamicsMeter` keeps its 0..24 dB
+  reduction scale and is **not** modified (10 §12). Drive the core to 25, 30
+  and 40 dB of reduction and assert the needle fraction **clamps at 1.0** — no
+  wrap, no overshoot artefact, no NaN — while `currentGainReductionDb()` still
+  reports the true figure. The clamp is a drawing limit, not a measurement one.
 - **Null / regression, no audio ever committed.** Golden **state**, not golden
   audio: compact numeric tables inside the test file — per-voicing GR-curve dB
   arrays, per-voicing THD tables, control-state samples at fixed offsets,
-  per-block RMS/peak quantised to 1e-4. Plus `bypass` nulls to −120 dB and
-  `mix` = 0 nulls against a delay-matched dry path at every factor
-  (`testDryPathIsDelayMatched`).
+  per-block RMS/peak quantised to 1e-4.
 - **Invariance & robustness.** Curves/times hold across sample rates; block
   sizes 1/32/64/512/1023 give identical output to −120 dB; per-sample automation
   ramps produce no zipper (nothing above −80 dB); silence in → exact zeros; no
@@ -223,15 +274,15 @@ example (`OptoPanel.h:90` holds the instance, constructed at
   so `tools/snapshot` can render IN and GR, not only OUT — and it **refuses**
   an unknown key rather than ignoring it. Record:
   `testing-notes/ui-pass-opto-2026-09-17.md`.
-- **Needs widening.** `kGrRangeDb = 24` pins before this module's 30 dB design
-  target (10 §12). `modules/AGENTS.md:215-217` names exactly this situation:
-  "the scale is still Opto's … a module wanting different units is the point at
-  which to lift `ScalePoint` out into the caller — not before." **This is that
-  module.** Widening `kGrRangeDb` in place would rescale BMO Opto's meter too,
-  so the change is to take the range (and ideally the scale table) as a
-  constructor argument, defaulting to today's values, and leave Opto's render
-  byte-identical. `ui_layout_tests` and Opto's snapshot hashes are what prove
-  that.
+- **Decided: the range is not widened.** `kGrRangeDb = 24` pins before this
+  module's 30 dB design target, and that is accepted — 24 dB is plenty to read
+  by, and past it the needle says "a lot" while the readout says the number.
+  So no `kGrRangeDb` change, no `ScalePoint` lifting, no constructor argument,
+  and **BMO Opto's render must stay byte-identical**. The DSP target is
+  untouched: the loop is still designed and tested to 30 dB and
+  `currentGainReductionDb()` still reports the true figure past the pin (§3
+  tests it). `modules/AGENTS.md:215-217` says to lift `ScalePoint` out only
+  when a module wants different *units* — this one does not.
 
 ### 4b. The voicing border
 
@@ -273,22 +324,28 @@ viewer only has to tell two states apart:
 | **4** | white-ish `#f2f2f5` | 5.07 | 2.54 / 1.92 | works, but weakens as the bezel is strengthened |
 | **5** | no border at all | — | 2.00 / 2.65 | reads as absence |
 
-**Choosing E inverted the answer.** With the lighter candidate C, pair 4 was
-the strong one and pair 1 the compromise; with E it is the other way round,
-because E's bezel sits **lighter** than the meter face (2.00:1 above it) while
-black's sits **darker** (1.94:1 below it). The two states therefore land on
-opposite sides of the same ground, which is the strongest kind of pair there
-is, and it separates by luminance rather than by hue. **Pair 3 must still be
-refused** — 1.42:1 falling to 1.07:1 is two states differing by hue alone, the
+**Decided: pair 1** — Blue = accent E, Black = **literal black**. Choosing E
+inverted the earlier answer: with the lighter candidate C pair 4 was the strong
+one, but E's bezel sits **lighter** than the meter face (2.00:1 above it) while
+black's sits **darker** (1.94:1 below it), so the two states land on opposite
+sides of the same ground and separate by **luminance**, not hue. Pair 3 is
+refused for the opposite reason — 1.42:1 falling to 1.07:1 is hue alone, the
 failure the suite already fixed once on its switch colours.
 
-**Consider drawing this module's bezel at full alpha, or a little thicker.**
-E is the darkest accent in the suite and 2.00:1 on the face is thin; full alpha
-buys 2.65:1 and takes the pair to 5.13:1 at no cost to anything else. That is a
-per-module deviation from `Controls.cpp`'s 0.7 and should be taken deliberately
-or not at all. Mocked both ways.
+**Open: the alpha, and it is settled on real renders, not here.** Two variants
+stay in play — the stock **0.7** (pair separation 3.88:1) and **full alpha**
+(2.65:1 on the face, pair separation 5.13:1). E is the darkest accent in the
+suite and 2.00:1 is thin, so full alpha is tempting; but a colour mock is not a
+render and this is exactly the kind of call `testing-notes/ui-editor-handoff.md`
+§6 says not to make by computing. §4d carries the required step.
 
-Owner decision: the pair, and the alpha.
+**What each variant touches.** 0.7 alpha is what `ui::DynamicsMeter` already
+draws (`Controls.cpp:951-957`, `accentColour.withAlpha (0.7f)`) and costs
+nothing. Full alpha is a change to shared code, so it must arrive as an
+opt-in — a bezel-opacity (and optionally width) argument or setter on
+`DynamicsMeter`, **defaulting to 0.7** — and **BMO Opto's render must stay
+byte-identical**, proven by re-rendering Opto and comparing pixel hashes, not
+by inspection. Do not edit the literal in `Controls.cpp`.
 
 Opto's `hotColourFor` (`OptoPanel.cpp:156-165`) is the repo's own pattern here:
 step a colour off the face until it clears its target rather than trusting that
@@ -450,10 +507,18 @@ configure if a build tree already exists.
 5. **Two voicing renders, both appearances**: `voicing=Blue` and
    `voicing=Black`, i.e. four PNGs, hashed. The pair must differ *only* in the
    meter border — diff them and check nothing else moved.
-6. `Inspect.exe ratio` the border against `meterFace` in both appearances, and
-   the accent against both plates; `gaps` for the bare-band ranking;
-   `ui_layout_tests --dump` for the boxes.
-7. Record hashes, ratios and the largest bare band in
+6. **The border-alpha decision, and it needs renders to make.** Render **both
+   variants** — bezel at 0.7 alpha and at full alpha — in **both voicing
+   states** and **both appearances**: eight PNGs, hashed. Put them side by side
+   with `Inspect.exe sheet`, review on a named machine, and **the owner picks**.
+   Until that happens the module ships nothing: this is a gate, not a nicety.
+   If full alpha wins, re-render **BMO Opto** and prove its hashes are
+   unchanged (§4b).
+7. `Inspect.exe ratio` the border against `meterFace` in both appearances, and
+   the accent against both plates — E is an out-of-band exception (§4c), so
+   record the figures rather than assuming them; `gaps` for the bare-band
+   ranking; `ui_layout_tests --dump` for the boxes.
+8. Record hashes, ratios, the chosen alpha and the largest bare band in
    `testing-notes/ui-pass-fetcomp-<date>.md`, naming the machine.
 
 ## 5. Milestones and definition of done
@@ -466,11 +531,15 @@ registration points (including `tools/snapshot`), schema test green.
 first-sample-overshoot tests. **M3** FET nonlinearity, the two voicings and
 oversampling → THD/IMD/alias/slam suites + `latencyForParams`, and the
 Off-default decision. **M4** all-buttons bias, plateau and transient lag.
-**M5** panel (meter range widened, voicing border), presets, snapshots,
-`AGENTS.md` + `README.md`, measure tool. **M6** invariance, robustness,
-pinned-GR stability, CPU/latency acceptance, listening pass.
+**M5** panel and presets, `AGENTS.md` + `README.md`, measure tool — and the
+visual pass of §4d, including the **border-alpha gate**: both variants (0.7 and
+full alpha) rendered in both voicing states and both appearances, reviewed on a
+named machine, **owner picks**, with BMO Opto's hashes re-proven if full alpha
+wins. **M6** invariance, robustness, pinned-GR stability, mix/dry-path comb
+checks at every factor, CPU/latency acceptance, listening pass.
 
 **Done** = ctest green in all three CI jobs on both platforms; schema table
 pinned; no audio, renders or fonts committed; `AGENTS.md` + `README.md` present
-and linked; identity row and accent permanent; measure tool registered; CPU and
+and linked; identity row and accent permanent; the border alpha picked on
+renders and recorded; BMO Opto unchanged; measure tool registered; CPU and
 latency inside budget and recorded in `testing-notes/` with the machine named.

@@ -26,32 +26,33 @@ heard yet.
   topology, gain-matched, identical latency.
 - **Oversampling** reuses the shared `Oversampler.h` behind an Off/2x/4x
   parameter: 0 / 40 / 60 samples, zero at the default.
-- **No sidechain HPF in v1.** Stereo link is always on, not a parameter.
-- **Look.** Accent **E `#5489d4`**, the deep faceplate-stripe blue — an
-  **explicit owner exception**, missing the hue rule (16.4° from the utility
-  azure, 20.9° from the periwinkle) and both contrast bands (3.80 dark against
-  5.87–7.19; 3.09 pale against 1.64–2.00). No blue could have passed. No test
-  fails; consequences and the required Accents-row note are in 11 §4c. Voicing
-  shows as a border on the VU meter, reused from BMO Opto
-  (`ui::DynamicsMeter`, already shared).
+- **No sidechain HPF in v1**; stereo link always on, not a parameter; **`mix`
+  ships**, its dry path delay-matched to the oversampler.
+- **Attack and release run backwards like the hardware**, 1–7 with 7 fastest.
+- **The GR meter is not widened** — 24 dB scale, pins beyond it, BMO Opto
+  untouched. The 30 dB DSP target is unchanged.
+- **Accent E `#5489d4`**, the deep faceplate-stripe blue — an **explicit owner
+  exception**, missing the hue rule (16.4° from the utility azure, 20.9° from
+  the periwinkle) and both contrast bands (3.80 dark, 3.09 pale). No blue could
+  have passed; no test fails. Consequences and the required Accents-row note
+  are in 11 §4c.
+- **Voicing shows as a VU border**, Blue = accent, Black = literal black. The
+  meter is reused from BMO Opto (`ui::DynamicsMeter`, already shared).
 
 ## Open
 
-1. **Which VU border pair shows the voicing.** With E the Blue bezel sits
-   *lighter* than the meter face and literal black sits *darker*, so **pair 1**
-   separates best (3.88:1, or 5.13 at full alpha) and is the recommendation.
-   Pair 3 (silver) must be refused — 1.42:1, hue alone. Also: whether this
-   module draws its bezel at full alpha rather than `Controls.cpp`'s 0.7.
-   11 §4b.
-2. **Parameter ranges and reference level.** 30 dB GR needs `input` to +60 dB
+1. **The VU border alpha.** The pair is decided — Blue = accent E, Black =
+   literal black — but the bezel alpha is not: stock 0.7 (3.88:1 between the
+   states) or full (5.13:1). **Settled on real renders**, both variants in both
+   states and both appearances, owner picks; full alpha also has to leave BMO
+   Opto byte-identical. 11 §4b, §4d.
+2. **Attack/release parameter form** — knob position 1–7 (recommended) or ms
+   ascending. Units and range are permanent. 11 §2.
+3. **Parameter ranges and reference level.** 30 dB GR needs `input` to +60 dB
    and `output` to ±36 dB; the dBFS↔0 VU alignment is unmeasured with
    everything riding on it. Permanent, before M0.
-3. **The GR meter must widen** past 24 dB without changing BMO Opto's.
-4. **`mix` in v1, yes or no** — justified by rack use, not by the hardware.
-5. **Do attack and release run "backwards"** (1–7, 7 = fastest)? Captions only;
-   the parameters stay in ms ascending.
-6. **Accept all-buttons as shape-fitted** — judged on shape, not numbers.
-7. **Voicing labels and default** are permanent once shipped.
+4. **Accept all-buttons as shape-fitted** — judged on shape, not numbers.
+5. **Voicing labels and default** are permanent once shipped.
 
 ## Known soft spots
 

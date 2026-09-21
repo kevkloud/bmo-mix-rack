@@ -59,9 +59,11 @@ if [[ ${1:-} == --snapshots ]]; then
 
     mkdir -p snapshots
 
-    for module in eq sat util opto dim deq vcomp; do
+    # By the name `snapshot` takes, which is the product's id rather than the
+    # module's: BMO Defang is `deesser`.
+    for module in eq sat util opto dim deq vcomp deesser; do
         "$snapshot" "$module" "snapshots/$module.png"
     done
 
-    "$snapshot" rack snapshots/rack.png chain=util,eq,sat,opto,dim,deq,vcomp
+    "$snapshot" rack snapshots/rack.png chain=util,eq,sat,opto,dim,deq,vcomp,deesser
 fi

@@ -1,7 +1,7 @@
 // Renders a product's editor to a PNG without a display, so a layout change
 // can be reviewed in a pull request rather than described in one.
 //
-//   snapshot <eq|sat|util|opto|dim|deq|ltvcomp|rack> out.png [width height] [param=value ...]
+//   snapshot <eq|sat|util|opto|dim|deq|ltvcomp|deesser|rack> out.png [width height] [param=value ...]
 //
 // For the rack, "chain=util,eq,sat,opto" sets the modules and "N.id=value"
 // sets a parameter of the module in slot N (1-based), e.g. 2.mid_gain=4.
@@ -27,8 +27,12 @@
 //
 // "ui.<key>=<value>" sets panel state that has no parameter behind it. BMO
 // Opto takes "ui.meter=IN|GR|OUT", which is the only way to render its VU in
-// anything but OUT. Offered to every panel; refused by all of them is fatal.
+// anything but OUT, and BMO Defang takes that plus "ui.listen=on|off", which
+// is the only way to render its momentary listen switch engaged -- it is held
+// by a mouse button and has no parameter behind it, by decision. Offered to
+// every panel; refused by all of them is fatal.
 
+#include "products/deesser/Product.h"
 #include "products/deq/Product.h"
 #include "products/dim/Product.h"
 #include "products/eq/Product.h"
@@ -59,6 +63,7 @@ namespace
         if (product == "dim")  return createDim();
         if (product == "deq")  return createDeq();
         if (product == "ltvcomp") return createVcomp();
+        if (product == "deesser") return createDeesser();
         if (product == "rack") return createRack();
         return nullptr;
     }
@@ -217,7 +222,7 @@ int main (int argc, char** argv)
 
     if (argc < 3)
     {
-        std::cerr << "usage: snapshot <eq|sat|util|opto|dim|deq|ltvcomp|rack> out.png [width height] [param=value ...]\n";
+        std::cerr << "usage: snapshot <eq|sat|util|opto|dim|deq|ltvcomp|deesser|rack> out.png [width height] [param=value ...]\n";
         return 2;
     }
 

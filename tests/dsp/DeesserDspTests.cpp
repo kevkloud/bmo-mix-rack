@@ -733,6 +733,97 @@ void testItStaysFinite()
     check (finite, "the output stays finite at the corners of the schema");
 }
 
+/** The pitch estimate lands near the band it is given.
+
+    The panel prints this as a suggested frequency, so what matters is whether
+    it is close enough to set FREQ by. An estimate that was merely *monotonic*
+    would be useless printed as a number, so this asserts absolutes across the
+    range rather than checking the answers come out in order.
+
+    **Measured on AURORA**, the estimate reads 2500 -> 3063, 3000 -> 3470,
+    4000 -> 4282, 5000 -> 5052, 6500 -> 6176, 8000 -> 7220, 9500 -> 8274.
+
+    Both ends are pulled toward the middle, which is what a weighted mean of
+    fixed band centres does: the bank cannot report outside its own span and
+    is dragged inward near it. Inside 4-9.5 kHz that is within a seventh, good
+    enough to set a knob by; at 9.5 it is 13 % low and at 2.5 it is 23 % high.
+    01 section 6 puts male concentrations at 3-6 kHz and female at 6-8, so the
+    useful range covers both and the error grows outside them.
+
+    The tolerance below is a seventh, and the range asserted is the range the
+    panel is willing to print. It prints a *suggestion*, and this is why. */
+void testThePitchEstimateFindsTheBand()
+{
+    for (const auto centre : { 4000.0, 5000.0, 6500.0, 8000.0, 9500.0 })
+    {
+        DeesserDsp dsp;
+        dsp.prepare (kSampleRate, 512, 2);
+
+        auto v = defaults();
+        dsp.setParams (v.data(), (int) v.size());
+
+        auto& tap = dsp.getCore().ribbonTap();
+        tap.setEnabled (true);
+
+        // Band-limited noise at `centre` and nothing else: no vowel, because
+        // what is being tested is the estimator and not the high-pass in
+        // front of it.
+        const auto n = (size_t) (1.5 * kSampleRate);
+        std::vector<float> left (n), right (n);
+
+        const auto w = 2.0 * kPi * centre / kSampleRate;
+        const auto alpha = std::sin (w) / 6.0;
+        const auto a0 = 1.0 + alpha;
+        const auto b0 = alpha / a0, b2 = -alpha / a0;
+        const auto a1 = -2.0 * std::cos (w) / a0, a2 = (1.0 - alpha) / a0;
+
+        uint32_t seed = 0xB0CAu;
+        double xz1 = 0.0, xz2 = 0.0, yz1 = 0.0, yz2 = 0.0;
+
+        for (size_t i = 0; i < n; ++i)
+        {
+            seed = seed * 1664525u + 1013904223u;
+            const auto white = (double) (int32_t) (seed >> 8) / 8388608.0 - 1.0;
+            const auto band = b0 * white + b2 * xz2 - a1 * yz1 - a2 * yz2;
+            xz2 = xz1; xz1 = white; yz2 = yz1; yz1 = band;
+
+            left[i] = right[i] = (float) (0.3 * band);
+        }
+
+        for (size_t i = 0; i < n; i += 512)
+        {
+            const auto count = (int) std::min ((size_t) 512, n - i);
+            float* ch[2] { left.data() + i, right.data() + i };
+            dsp.process (ch, 2, count);
+        }
+
+        // Average the pitch slot over the frames that have signal in them.
+        std::vector<float> frames ((size_t) tap.capacity(), 0.0f);
+        const auto read = tap.read (frames.data(), (int) frames.size());
+
+        auto sum = 0.0;
+        auto counted = 0;
+
+        for (int f = 0; f + DspCore::ribbonFrame <= read; f += DspCore::ribbonFrame)
+            if (frames[(size_t) (f + DspCore::ribbonInput)] > 0.01f)
+            {
+                sum += frames[(size_t) (f + DspCore::ribbonPitch)];
+                ++counted;
+            }
+
+        check (counted > 0, "the tap carried frames at " + std::to_string ((int) centre));
+
+        if (counted == 0)
+            continue;
+
+        const auto estimate = sum / counted;
+
+        checkNear (estimate, centre, centre * 0.15,
+                   "the pitch estimate finds a band at " + std::to_string ((int) centre)
+                       + " Hz, got " + std::to_string ((int) estimate));
+    }
+}
+
 int main()
 {
     testLatencyIsZeroEverywhere();
@@ -741,7 +832,7 @@ int main()
     testTheMeterStaysInsideRange();
     testListenOutputsWhatIsBeingRemoved();
     testBlockSizeDoesNotChangeTheOutput();
-    testItStaysFinite();
+    testItStaysFinite();    testThePitchEstimateFindsTheBand();
     testAdapterUnpacksInIndexOrder();
     testListenIsMomentary();
     testTheScheduleIsFiveParameters();

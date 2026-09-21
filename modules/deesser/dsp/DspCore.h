@@ -131,6 +131,34 @@ public:
         modulation behaviour changes with the sample rate (10 section 7). */
     static constexpr int kControlInterval = 8;
 
+
+    /** Where the high-frequency energy actually sits, in Hz, estimated with a
+        handful of filters rather than a transform.
+
+        **Five bandpasses, log-spaced across the range sibilance lives in, and
+        the energy-weighted centroid of their centres.** The weighting is done
+        on log frequency and exponentiated back, because that is how the ear
+        hears an interval and how FREQ's own knob is laid out -- an arithmetic
+        mean over log-spaced bands would sit high by construction.
+
+        **What this replaced, and why.** The first version was cheaper still:
+        the mean square of the signal's first difference over its own mean
+        square inverts to an RMS-average frequency, two multiply-accumulates a
+        sample and no filters at all. It was measured against band noise and
+        read **+57 % at 2.5 kHz, +43 % at 3, +28 % at 4, +20 % at 5** and still
+        about a tenth high where sibilance actually lives. An RMS average
+        weights the top of a spectrum, and the high-pass in front of it shaped
+        the bottom of every band it was asked about. A number printed on a
+        panel as a suggestion has to be better than the knob it is suggesting
+        for, and that one would have sent a user 600 Hz wrong.
+
+        Five biquads on one channel is still nothing beside the 4096-point
+        transform 11 section 4 refused -- and they only run while an editor is
+        open, because the whole estimate is gated on the ribbon's tap.
+
+        It remains an estimate of a noise band's middle, and the panel prints
+        it as a suggestion. */
+    static constexpr int kPitchBands = 7;
     //== The ribbon's tap =======================================================
     //
     /** What the panel's sibilance ribbon draws, and the reason this module has
@@ -164,7 +192,7 @@ public:
     static constexpr int kRibbonHz = 400;
 
     /** One frame, in the order the tap carries them. */
-    enum RibbonSlot { ribbonInput = 0, ribbonBand, ribbonReduction, ribbonProminence, ribbonFrame };
+    enum RibbonSlot { ribbonInput = 0, ribbonBand, ribbonReduction, ribbonPitch, ribbonFrame };
 
     //==========================================================================
 
@@ -203,6 +231,24 @@ public:
         ribbonWindow = std::max (1, (int) std::lround (rate / (double) kRibbonHz));
         ribbon.prepare (ribbonFrame * kRibbonHz * 4);
 
+        // 1.5 to 16 kHz in equal ratios. The span is deliberately wider than
+        // FREQ's own 2-10 kHz, because a weighted mean of fixed centres can
+        // never report outside them and is pulled inward near the ends: a
+        // bank that stopped where the knob does read 9.5 kHz as 7.7. Every
+        // frequency the knob can reach now sits in the interior. Q 1.4, so
+        // the seven overlap rather than leaving gaps a band could hide in.
+        for (int b = 0; b < kPitchBands; ++b)
+        {
+            pitchCentres[(size_t) b] = 1500.0 * std::pow (16000.0 / 1500.0,
+                                                          (double) b / (kPitchBands - 1));
+
+            const auto centre = std::min (pitchCentres[(size_t) b], 0.45 * rate);
+            pitchCoeffs[(size_t) b] = dsp::SvfCoeffs::fromBiquad (
+                detectorDesign (Shape::bell, centre, 1.4, rate));
+            pitchTaps[(size_t) b] = dsp::SvfTaps::of (pitchCoeffs[(size_t) b].g,
+                                                     pitchCoeffs[(size_t) b].k);
+        }
+
         refCoeffs = dsp::SvfCoeffs::fromBiquad (
             detectorDesign (Shape::highShelf, kRefHighPassHz, 0.707, rate));
         refTaps = dsp::SvfTaps::of (refCoeffs.g, refCoeffs.k);
@@ -230,7 +276,10 @@ public:
 
         ribbonCountdown = 0;
         ribbonInputPeak = ribbonBandPeak = ribbonReductionPeak = 0.0f;
-        ribbonProminencePeak = -1000.0f;
+        pitchEnergy.fill (0.0);
+
+        for (auto& s : pitchState)
+            s.reset();
         reportedDb.store (0.0f, std::memory_order_relaxed);
     }
 
@@ -345,26 +394,51 @@ public:
             {
                 const auto input = (float) std::abs (channels[0][n]);
 
-                ribbonInputPeak      = std::max (ribbonInputPeak, input);
-                ribbonBandPeak       = std::max (ribbonBandPeak, (float) detector.bandEnvelope());
-                ribbonReductionPeak  = std::max (ribbonReductionPeak, (float) applied);
-                ribbonProminencePeak = std::max (ribbonProminencePeak, (float) prominence);
+                ribbonInputPeak     = std::max (ribbonInputPeak, input);
+                ribbonBandPeak      = std::max (ribbonBandPeak, (float) detector.bandEnvelope());
+                ribbonReductionPeak = std::max (ribbonReductionPeak, (float) applied);
+
+                // The pitch bank, channel 0 only: this is a suggestion about
+                // where to put a band, not a measurement that has to survive a
+                // decorrelated pair.
+                for (int b = 0; b < kPitchBands; ++b)
+                {
+                    const auto y = pitchState[(size_t) b].process (pitchTaps[(size_t) b],
+                                                                  pitchCoeffs[(size_t) b],
+                                                                  (double) channels[0][n]);
+                    pitchEnergy[(size_t) b] += y * y;
+                }
 
                 if (--ribbonCountdown <= 0)
                 {
                     ribbonCountdown = ribbonWindow;
 
+                    // The centroid, weighted on log frequency and exponentiated
+                    // back: an arithmetic mean over log-spaced bands would sit
+                    // high by construction.
+                    auto pitchHz = 0.0;
+                    auto weight = 0.0, logSum = 0.0;
+
+                    for (int b = 0; b < kPitchBands; ++b)
+                    {
+                        weight += pitchEnergy[(size_t) b];
+                        logSum += pitchEnergy[(size_t) b] * std::log (pitchCentres[(size_t) b]);
+                    }
+
+                    if (weight > 1.0e-18)
+                        pitchHz = std::exp (logSum / weight);
+
                     const float frame[ribbonFrame]
                     {
                         ribbonInputPeak, ribbonBandPeak,
-                        ribbonReductionPeak, ribbonProminencePeak
+                        ribbonReductionPeak, (float) pitchHz
                     };
 
                     const float* one[] { frame };
                     ribbon.write (one, 1, ribbonFrame);
 
                     ribbonInputPeak = ribbonBandPeak = ribbonReductionPeak = 0.0f;
-                    ribbonProminencePeak = -1000.0f;
+                    pitchEnergy.fill (0.0);
                 }
             }
 
@@ -478,7 +552,14 @@ private:
     AnalyserTap ribbon;
     int  ribbonCountdown = 0, ribbonWindow = 0;
     float ribbonInputPeak = 0.0f, ribbonBandPeak = 0.0f;
-    float ribbonReductionPeak = 0.0f, ribbonProminencePeak = -1000.0f;
+    float ribbonReductionPeak = 0.0f;
+
+    /** The pitch estimator: five bandpasses on channel 0, their centres, and
+        the energy each has gathered this frame. */
+    std::array<dsp::SvfCoeffs, kPitchBands> pitchCoeffs {};
+    std::array<dsp::SvfTaps, kPitchBands>   pitchTaps {};
+    std::array<dsp::SvfState, kPitchBands>  pitchState {};
+    std::array<double, kPitchBands> pitchCentres {}, pitchEnergy {};
 
     /** An atomic store on the panel's side and a relaxed load on the audio
         thread's: no allocation and no lock, which is the whole of the

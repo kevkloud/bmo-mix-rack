@@ -65,6 +65,11 @@ public:
 private:
     void timerCallback() override;
 
+    /** The suggested frequency, in the corner. Takes the ink so the caller's
+        one resolution of the azure against the well is not done twice. */
+    void drawSuggestion (juce::Graphics&, juce::Rectangle<float> plot,
+                         juce::Colour ink, int available);
+
     juce::Colour accent;
     AnalyserTap* source = nullptr;
     float range = 8.0f;

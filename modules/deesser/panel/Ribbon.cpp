@@ -1,5 +1,6 @@
 #include "modules/deesser/panel/Ribbon.h"
 
+#include "core/ui/Fonts.h"
 #include "core/ui/Tokens.h"
 
 #include <algorithm>
@@ -13,17 +14,22 @@ namespace
     /** How much of the past the ribbon shows.
 
         Three seconds is about a phrase. Shorter and an ess scrolls off before
-        the eye has found it; longer and the esses crowd together into a texture
-        that says "this take is sibilant" without saying which word. */
+        the eye has found it; longer and the esses crowd into a texture that
+        says "this take is sibilant" without saying which word. */
     constexpr double kSeconds = 3.0;
 
-    /** The floor of the envelope's scale. Below this everything is drawn at
-        the centre line, which is what silence should look like.
+    /** The floor of the envelope's scale. Below this everything is drawn flat
+        on the centre line, which is what silence should look like.
 
-        -60 dBFS rather than -inf: a log scale needs a bottom, and this one is
-        the band gate's neighbour, so a passage too quiet for the detector to
-        act on is also too quiet to draw. */
+        -60 dBFS rather than -inf: a log scale needs a bottom, and this is the
+        band gate's neighbour, so a passage too quiet for the detector to act
+        on is also too quiet to draw. */
     constexpr float kFloorDb = -60.0f;
+
+    /** How far back the *unhighlighted* waveform sits. It is context -- what
+        was playing -- and the highlight is the point, so the two are separated
+        by weight as well as by hue. See the note where it is used. */
+    constexpr float kQuietAlpha = 0.45f;
 
     float normalised (float linear) noexcept
     {
@@ -105,81 +111,124 @@ void Ribbon::paint (juce::Graphics& g)
         return;
 
     const auto wanted = (int) (kSeconds * DspCore::kRibbonHz) * DspCore::ribbonFrame;
-    const auto count = source->read (frames.data(),
-                                     std::min (wanted, (int) frames.size()));
-
-    const auto available = count / DspCore::ribbonFrame;
+    const auto read = source->read (frames.data(), std::min (wanted, (int) frames.size()));
+    const auto available = read / DspCore::ribbonFrame;
 
     if (available <= 0)
         return;
 
-    // Newest at the right, which is the direction every scrolling meter in
-    // every DAW moves, and the direction the eye expects time to run.
-    const auto width = plot.getWidth();
-    const auto perFrame = width / (float) (kSeconds * DspCore::kRibbonHz);
+    // The two inks the waveform is drawn between. The signal is the module's
+    // own accent; what it is acting on is the utility azure, which sits about
+    // 165 degrees away in hue and is the one colour in the suite guaranteed
+    // clear of every module's accent (core/ui/Tokens.h). Both are resolved
+    // against the well rather than used raw, because the well is pale in one
+    // appearance and dark in the other.
+    const auto quiet  = ui::accentInk (accent, t.well);
+    const auto caught = ui::accentInk (ui::tokens().utilGain, t.well);
+
+    // **A pixel column at a time, not three filled paths.**
+    //
+    // Frosty, 2026-09-21: rather than hang the reduction over the waveform,
+    // recolour the stretch of waveform being acted on. It is a better picture
+    // -- the notch said "something is happening somewhere up there", and the
+    // recolour says "*this* is the bit being caught" -- but it cannot be a
+    // path, because the colour now changes *along* the shape rather than
+    // between shapes. Drawing by column also puts every frame's peak on
+    // screen, so an ess onset cannot fall between two vertices and vanish.
+    const auto columns = juce::jmax (1, (int) plot.getWidth());
+    const auto perColumn = juce::jmax (1.0f, (float) available / (float) columns);
     const auto half = plot.getHeight() * 0.5f;
 
-    // The newest frame sits on the right edge and everything older steps back
-    // from it. Written this way round rather than from the left, because the
-    // number of frames available grows until the tap fills and a left-anchored
-    // drawing would slide the whole picture while it did.
-    const auto xFor = [&plot, perFrame, available] (int frame)
+    for (int c = 0; c < columns; ++c)
     {
-        return plot.getRight() - perFrame * (float) (available - 1 - frame);
-    };
+        const auto first = (int) ((float) c * perColumn);
+        const auto last = juce::jmin (available, (int) ((float) (c + 1) * perColumn));
 
-    // The envelope first, as a silhouette about the centre.
-    juce::Path envelope;
-    envelope.startNewSubPath (xFor (0), centre);
+        if (first >= last)
+            continue;
 
-    for (int i = 0; i < available; ++i)
-        envelope.lineTo (xFor (i), centre - half * normalised (frames[(size_t) (i * DspCore::ribbonFrame + DspCore::ribbonInput)]));
+        auto input = 0.0f, reduction = 0.0f;
 
-    for (int i = available - 1; i >= 0; --i)
-        envelope.lineTo (xFor (i), centre + half * normalised (frames[(size_t) (i * DspCore::ribbonFrame + DspCore::ribbonInput)]));
+        for (int f = first; f < last; ++f)
+        {
+            const auto at = (size_t) (f * DspCore::ribbonFrame);
+            input     = std::max (input, frames[at + DspCore::ribbonInput]);
+            reduction = std::max (reduction, frames[at + DspCore::ribbonReduction]);
+        }
 
-    envelope.closeSubPath();
+        const auto height = half * normalised (input);
 
-    g.setColour (ui::tokens().meterQuiet.withAlpha (0.55f));
-    g.fillPath (envelope);
+        if (height <= 0.0f)
+            continue;
 
-    // The band inside it, in the sketch's ink so the two panes are visibly
-    // about the same band.
-    const auto ink = ui::accentInk (accent, t.well);
+        // **The recolour is proportional, not a switch.** A hard change of
+        // colour at some threshold would draw an edge where the DSP has a
+        // slope, and the eye would read the edge of the highlight as the edge
+        // of the event. Blending by depth lets the colour say how hard as well
+        // as where, which is what the separate reduction layer used to say.
+        const auto amount = juce::jlimit (0.0f, 1.0f, reduction / std::max (range, 1.0f));
 
-    juce::Path bandPath;
-    bandPath.startNewSubPath (xFor (0), centre);
-
-    for (int i = 0; i < available; ++i)
-        bandPath.lineTo (xFor (i), centre - half * normalised (frames[(size_t) (i * DspCore::ribbonFrame + DspCore::ribbonBand)]));
-
-    for (int i = available - 1; i >= 0; --i)
-        bandPath.lineTo (xFor (i), centre + half * normalised (frames[(size_t) (i * DspCore::ribbonFrame + DspCore::ribbonBand)]));
-
-    bandPath.closeSubPath();
-
-    g.setColour (ink.withAlpha (0.85f));
-    g.fillPath (bandPath);
-
-    // And the reduction, hanging from the top on RANGE's scale -- the same
-    // number the bar below is drawn against, so a full notch here and a full
-    // bar there mean the same thing.
-    const auto ceiling = std::max (range, 1.0f);
-
-    juce::Path cut;
-    cut.startNewSubPath (xFor (0), plot.getY());
-
-    for (int i = 0; i < available; ++i)
-    {
-        const auto db = frames[(size_t) (i * DspCore::ribbonFrame + DspCore::ribbonReduction)];
-        cut.lineTo (xFor (i), plot.getY() + plot.getHeight() * juce::jlimit (0.0f, 1.0f, db / ceiling));
+        // **The highlight brightens as well as changes hue**, and it has to.
+        // Resolved against the same well, the accent and the azure land 1.5
+        // L* apart and 1.04:1 -- which is separation by hue alone, the exact
+        // failure the suite already fixed once on its switch colours and
+        // refused once on LTV Comp's bezel pair. Two inks a reader has to tell
+        // apart must differ in lightness.
+        //
+        // Carrying it on the alpha rather than stepping the colour keeps that
+        // true in both appearances without a second derivation: the quiet part
+        // sits back into whatever the well is, pale or dark, and the caught
+        // part comes forward off it.
+        g.setColour (quiet.withAlpha (kQuietAlpha)
+                          .interpolatedWith (caught.withAlpha (1.0f), amount));
+        g.fillRect (juce::Rectangle<float> (plot.getX() + (float) c, centre - height,
+                                            1.0f, height * 2.0f));
     }
 
-    cut.lineTo (xFor (available - 1), plot.getY());
-    cut.closeSubPath();
+    drawSuggestion (g, plot, caught, available);
+}
 
-    g.setColour (ui::tokens().meterGrWarm.withAlpha (0.75f));
-    g.fillPath (cut);
+void Ribbon::drawSuggestion (juce::Graphics& g, juce::Rectangle<float> plot,
+                             juce::Colour ink, int available)
+{
+    // Weighted by how hard the module was working, and **only over the frames
+    // it was working on**. Frames where it did nothing carry an estimate of
+    // the vowel, and averaging those in would drag the number toward the mids
+    // every time somebody stopped saying esses.
+    auto weight = 0.0, sum = 0.0;
+
+    for (int f = 0; f < available; ++f)
+    {
+        const auto at = (size_t) (f * DspCore::ribbonFrame);
+        const auto reduction = (double) frames[at + DspCore::ribbonReduction];
+        const auto hz = (double) frames[at + DspCore::ribbonPitch];
+
+        if (reduction <= 0.01 || hz <= 0.0)
+            continue;
+
+        weight += reduction;
+        sum += reduction * std::log (hz);
+    }
+
+    // Nothing caught in the last three seconds, so nothing to suggest. The
+    // corner stays empty rather than holding the last number: a stale figure
+    // under a quiet passage reads as a live one.
+    if (weight <= 0.0)
+        return;
+
+    const auto hz = std::exp (sum / weight);
+
+    // A tenth of a kHz, which is finer than the knob is ever set and coarse
+    // enough not to flicker frame to frame. ASCII only, as the licensed faces
+    // require -- so "~" and not an approximation sign.
+    const auto text = "~" + juce::String (hz / 1000.0, 1) + " kHz";
+
+    auto box = plot.reduced (4.0f);
+    box = box.removeFromTop (11.0f).removeFromRight (64.0f);
+
+    g.setFont (ui::captionFont (9.0f));
+    g.setColour (ink);
+    g.drawText (text, box, juce::Justification::centredRight, false);
 }
 
 } // namespace bmo::deesser

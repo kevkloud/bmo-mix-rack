@@ -2,6 +2,7 @@
 #include "modules/deq/Module.h"
 #include "modules/dim/Module.h"
 #include "modules/eq/Module.h"
+#include "modules/fetcomp/Module.h"
 #include "modules/opto/Module.h"
 #include "modules/sat/Module.h"
 #include "modules/util/Module.h"
@@ -20,6 +21,7 @@ const std::vector<const ModuleDef*>& registry()
         &dim::module(),
         &deq::module(),
         &vcomp::module(),
+        &fetcomp::module(),
     };
 
     return defs;

@@ -82,6 +82,13 @@ bmo_add_module(vcomp
         ${CMAKE_CURRENT_SOURCE_DIR}/vcomp/panel/LevelBars.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/vcomp/Module.cpp)
 
+bmo_add_module(fetcomp
+    DSP_SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/fetcomp/dsp/DspCore.cpp
+    UI_SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/fetcomp/panel/FetcompPanel.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/fetcomp/Module.cpp)
+
 endif()
 
 # BMO Tune RT. The same two targets as a rack module -- bmo_tune_dsp for the

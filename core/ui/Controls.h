@@ -439,6 +439,24 @@ public:
         constructed: a needle meter needs a dark one whatever the mode. */
     void setColours (juce::Colour accent, juce::Colour hot) noexcept;
 
+    /** How opaque the bezel is drawn, 0..1. **Opt-in, and it defaults to the
+        0.7 this has always drawn at**, so every module that does not call it
+        renders byte for byte as it did.
+
+        BMO FET is why. It shows its voicing as the bezel -- accent blue for
+        Blue, literal black for Black -- and the two states have to be told
+        apart against `meterFace` #464649, which is the same colour in both
+        appearances. Measured off real renders on AURORA, the pair separates by
+        3.88:1 at the stock 0.7 and by 5.91:1 at full alpha
+        (docs/1176-comp/11-integration-and-test-plan.md 4b predicts 3.88 and
+        5.13; the second was the pessimistic one). Which of those ships is a
+        call taken on renders, so both had to be renderable, and the 0.7
+        literal in `paint` could not simply move.
+
+        Clamped rather than asserted: a bezel is decoration, and a caller that
+        hands in 1.4 should get a solid frame, not a failed build. */
+    void setBezelAlpha (float alpha) noexcept;
+
     /** One control point on the printed scale: a value in the mode's own unit
         (dB relative to the VU reference, or dB of gain reduction), where it
         sits across the needle's sweep, 0..1, and whether it is numbered.
@@ -480,6 +498,11 @@ private:
     static constexpr float kVuReference = -18.0f;
     static constexpr float kGrRangeDb   = 24.0f;
     juce::Colour accentColour, hotColour;
+
+    /** The alpha the bezel is stroked at. 0.7 is what this class has drawn at
+        since it existed; see setBezelAlpha for the one module that moves it. */
+    static constexpr float kDefaultBezelAlpha = 0.7f;
+    float bezelAlpha = kDefaultBezelAlpha;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DynamicsMeter)
 };

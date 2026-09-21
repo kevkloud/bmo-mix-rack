@@ -19,6 +19,7 @@ Permanent. Allocate here before the first build of anything new.
 | BMO Dimension | `dim` | `Bdim` | `com.lt3audio.bmodimension` | `.bmodim` |
 | BMO Mix Rack | -- | `Brck` | `com.lt3audio.bmomixrack` | `.bmorack` |
 | BMO DEQ | `deq` | `Bpar` | `com.lt3audio.bmodeq` | `.bmodeq` |
+| BMO FET | `fetcomp` | `Bfet` | `com.lt3audio.bmofet` | `.bmofetcomp` |
 | BMO Tune RT -- **not in the rack** | `tune` | `Btun` | `com.lt3audio.bmotunert` | `.bmotune` |
 | LTV Comp -- **not a BMO product** | `ltvcomp` | `Ltvc` | `com.lt3audio.ltvcomp` | `.ltvcomp` (reads `.bmovcomp`) |
 
@@ -144,7 +145,27 @@ rack opens it compact and standalone opens it full; the switch between them
 is on the host's bar, not on the panel (`ModuleDef::expandedWidth`,
 `ui::ExpandButton`). See `modules/deq/AGENTS.md`.
 
-Reserved for later products (not built, do not reuse): `Bfet` FET comp,
+**BMO FET** is the 1176-style FET compressor, and the row above is its
+identity. `Bfet` was reserved here as "FET comp" and is spent on it; the bundle
+id and the preset extension follow the existing rows -- bundle from the display
+name, extension from the module id, which is `fetcomp` rather than `fet` so
+that the id says what the module is rather than which transistor is in it.
+
+It has **no threshold knob**, because the hardware family it is modelled on has
+none: INPUT is how hard the programme arrives at the cell and therefore how
+much reduction there is, and OUTPUT is hand-set makeup. The ratio is four
+positions plus **all-buttons**, which is every button pushed in at once and a
+different curve rather than a steeper one. **ATTACK and RELEASE are the knob
+position, 1 to 7 with 7 fastest**, not milliseconds, so a host's automation
+lane runs the same way the knob does -- a deliberate departure from LTV Comp's
+ascending millisecond pair, which models no hardware knob and has no direction
+to honour. Two voicings, **Blue** and **Black** (default Black), shown as the
+border around the VU and nowhere else. MIX ships, its dry path delay-matched to
+the oversampler. Stereo is always linked and there is no sidechain filter, both
+of which could be appended later and neither of which can be inserted. See
+`modules/fetcomp/AGENTS.md` and `docs/1176-comp/`.
+
+Reserved for later products (not built, do not reuse):
 `Bdyn` dynamics, `Bdes` de-esser, `Bovr` overdrive,
 `Bcmp` compressor, `Bdly` delay, `Brvb` reverb.
 
@@ -280,6 +301,43 @@ there are distinguishable ones.
 | BMO DEQ | `#5ecfc0` teal | 172.0° | **7.19** | 1.64 |
 | BMO Tune RT (not in the rack) | `#b6e35d` lime | 80.1° | **9.10** | **1.29** |
 | LTV Comp -- **unsigned, and on the LTV ground** | `#a2a8ff` periwinkle | 236.1° | 6.17 | 1.91 |
+| BMO FET -- **an owner-approved exception to both rules below** | `#5489d4` deep blue | 215.2° | **3.80** | **3.09** |
+
+**BMO FET's blue breaks the hue rule and both contrast bands, knowingly.** It
+is 16.4° from the utility azure and 20.9° from the periwinkle, against a table
+whose worst shipped separation is the teal's 26.8° -- itself recorded below as
+a known objection -- and whose best is the lavender's 64.4°. It measures 3.80:1
+on the dark plate against a shipped band of 5.87-7.19, and 3.09:1 on the pale
+one against 1.64-2.00; it is the only accent in the suite that is *too dark* on
+the dark plate and *too heavy* on the pale one.
+
+**No blue could have passed.** The blue band is bracketed by the azure at
+198.8° and the periwinkle at 236.1°, a gap of 37.3°, so the best any blue can
+reach is about 18.6° to each side -- worse than the teal. Reaching further,
+the 236.1°-271.6° gap has a midpoint near 254° that is 17.8° from each side and
+also fails. Six candidates were drawn on both plates in a colour mock on
+AURORA; the one that passed everything, `#e694e0` at 304.4°, was refused for
+not being blue. Frosty took `#5489d4` after reviewing that mock, as an explicit
+exception.
+
+What it costs, so that none of it is rediscovered as new: the knob cap reads
+3.80:1 on the dark plate with its pointer at 3.97:1 on top, both outside the
+stated ranges, so the cap reads as a dark disc rather than as the module's
+colour there; on the pale plate `faceOf` washes it to `#a9c4e9` at 1.55:1, just
+under the 1.64 floor. **Rendered, the dark cap is better than that figure
+suggests** — it reads as a solid mid-blue against `#2e2e32` and is plainly the
+module's colour, not a dark disc; 3.80:1 is low for *text* and is a cap. Accent-coloured *small text* is kept off it -- legends
+and captions take `text1`/`text2` -- because `accentTextOn` has to step E
+further than any shipped accent and the result reads as a different blue from
+the arcs beside it. The active switch needs no special case: `onAccentOf` sees
+E's relative luminance at 0.245, above its 0.18 pivot, and darkens, giving a
+near-black label at 5.91:1 on the fill. **No test fails** -- there is no
+contrast or palette assertion anywhere in `tests/` -- so the exception costs
+nothing in CI and needs no suppression, which also means the render pass is the
+only thing that will catch a problem. The figures were computed by the WCAG
+formula on AURORA and confirmed against real renders with
+`tools/inspect/Inspect.exe ratio`; the candidate table and the reasoning are
+`docs/1176-comp/11-integration-and-test-plan.md` §4c.
 
 **The lime was picked outside this table**, while Tune was still its own
 repository, and its two figures are computed by the WCAG formula on AURORA

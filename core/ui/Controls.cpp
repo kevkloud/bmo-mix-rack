@@ -722,6 +722,17 @@ void DynamicsMeter::setColours (juce::Colour accent, juce::Colour hot) noexcept
     repaint();
 }
 
+void DynamicsMeter::setBezelAlpha (float alpha) noexcept
+{
+    const auto clamped = juce::jlimit (0.0f, 1.0f, alpha);
+
+    if (clamped == bezelAlpha)
+        return;
+
+    bezelAlpha = clamped;
+    repaint();
+}
+
 void DynamicsMeter::timerCallback()
 {
     float level = 0.0f;
@@ -953,7 +964,10 @@ void DynamicsMeter::paint (juce::Graphics& g)
     // everything that has to be read.
     g.setColour (t.meterFace);
     g.fillRoundedRectangle (bounds, 4.0f);
-    g.setColour (accentColour.withAlpha (0.7f));
+    // 0.7 unless a module asked for something else -- see setBezelAlpha. The
+    // literal moved into a member rather than out of this line, so a meter
+    // nobody has spoken to strokes exactly the colour it always did.
+    g.setColour (accentColour.withAlpha (bezelAlpha));
     g.drawRoundedRectangle (bounds.reduced (0.75f), 4.0f, 1.5f);
 
     // Scale ticks and numbers. Split into two paths so the 0 VU and above

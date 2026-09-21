@@ -23,6 +23,8 @@
 #include "modules/vcomp/params.h"
 #include "products/dim/Product.h"
 #include "products/eq/Product.h"
+#include "products/fetcomp/Product.h"
+#include "modules/fetcomp/params.h"
 #include "products/opto/Product.h"
 #include "products/vcomp/Product.h"
 #include "products/sat/Product.h"
@@ -282,6 +284,168 @@ void checkOversamplingRow (bmo::ui::ModulePanel& panel, const juce::String& who,
             row[i]->onClick();
 
         checkEquals (lit(), 0, who + " " + names[i] + " clicked again is Off");
+    }
+}
+
+/** BMO FET's switch blocks.
+
+    Three rows of switches over three choice parameters -- the ratio buttons,
+    the voicing pair and the oversampling pair -- and none of them toggles: a
+    click sets the parameter and the parameter lights the buttons. That loop is
+    invisible to a render at Init, which is exactly how the Saturator's
+    oversampling row could have been dead for a release without anyone seeing
+    it, so it is walked here.
+
+    The geometry is pinned to the suite's own switch size and gap rather than
+    to this panel's numbers. This panel is 260 wide, which is what lets its
+    IN/GR/OUT row use the full `switchWidth` and drop the 220-px exception
+    modules/AGENTS.md records for BMO Opto -- so that row is held to the full
+    width here, and a drift back to a narrower switch fails. */
+void checkFetcompSwitches (bmo::ui::ModulePanel& panel, const juce::String& who)
+{
+    auto& params = panel.getContext().params;
+
+    const auto button = [&panel, &who] (const char* name) -> juce::Button*
+    {
+        auto* b = dynamic_cast<juce::Button*> (findNamed (panel, name));
+
+        if (b == nullptr)
+            check (false, who + " has no " + name + " switch");
+
+        return b;
+    };
+
+    //== The ratio block: five buttons, one lit, and every one reachable =======
+    {
+        const char* names[5] { "4:1", "8:1", "12:1", "20:1", "ALL" };
+        juce::Button* row[5] {};
+
+        for (int i = 0; i < 5; ++i)
+        {
+            row[i] = button (names[i]);
+
+            if (row[i] == nullptr)
+                return;
+        }
+
+        for (int i = 0; i < 5; ++i)
+        {
+            checkEquals (row[i]->getWidth(),  bmo::ui::Tokens::switchWidth,
+                         who + " " + names[i] + " width");
+            checkEquals (row[i]->getHeight(), bmo::ui::Tokens::switchHeight,
+                         who + " " + names[i] + " height");
+        }
+
+        // Two rows of two and then ALL: the four ratios pair off and the fifth
+        // position sits apart, because it is a different curve rather than a
+        // steeper one.
+        checkEquals (row[0]->getY(), row[1]->getY(), who + " 8:1 sits beside 4:1");
+        checkEquals (row[2]->getY(), row[3]->getY(), who + " 20:1 sits beside 12:1");
+        check (row[4]->getY() > row[2]->getY(), who + " ALL sits under the four ratios");
+        checkEquals (row[1]->getX() - row[0]->getRight(), bmo::ui::Tokens::switchGap,
+                     who + " gap between 4:1 and 8:1");
+
+        const auto lit = [&row]
+        {
+            auto count = 0, which = -1;
+
+            for (int i = 0; i < 5; ++i)
+                if (row[i]->getToggleState()) { ++count; which = i; }
+
+            return count == 1 ? which : -1;
+        };
+
+        checkEquals (lit(), 0, who + " ratio at Init is 4:1");
+
+        // Every position, including the one the default already is: clicking a
+        // lit ratio is a no-op, not a way out of it, because unlike
+        // oversampling there is no Off here.
+        for (int i = 0; i < 5; ++i)
+        {
+            if (row[i]->onClick != nullptr)
+                row[i]->onClick();
+
+            checkEquals (lit(), i, who + " " + names[i] + " lit alone after a click");
+            checkEquals (juce::roundToInt (params.getReal (bmo::fetcomp::Index::ratio)), i,
+                         who + " clicking " + names[i] + " sets the ratio parameter");
+        }
+
+        params.setReal (bmo::fetcomp::Index::ratio, 0.0f);
+        checkEquals (lit(), 0, who + " the parameter lights the ratio buttons, not the click");
+    }
+
+    //== The voicing pair: both states named, both reachable ==================
+    {
+        auto* blue  = button ("BLUE");
+        auto* black = button ("BLACK");
+
+        if (blue == nullptr || black == nullptr)
+            return;
+
+        checkEquals (blue->getY(), black->getY(), who + " BLACK sits beside BLUE");
+        checkEquals (black->getX() - blue->getRight(), bmo::ui::Tokens::switchGap,
+                     who + " gap between BLUE and BLACK");
+
+        // Black is the default, and it is permanent.
+        check (! blue->getToggleState() && black->getToggleState(),
+               who + " voicing at Init is Black");
+
+        if (blue->onClick != nullptr)
+            blue->onClick();
+
+        check (blue->getToggleState() && ! black->getToggleState(),
+               who + " clicking BLUE selects it");
+        checkEquals (juce::roundToInt (params.getReal (bmo::fetcomp::Index::voicing)),
+                     (int) bmo::fetcomp::blue, who + " BLUE sets the voicing parameter");
+
+        params.setReal (bmo::fetcomp::Index::voicing, (float) bmo::fetcomp::black);
+        check (black->getToggleState(), who + " the parameter lights the voicing pair");
+    }
+
+    //== Oversampling: Off is the position with no switch =====================
+    {
+        auto* os2 = button ("2x");
+        auto* os4 = button ("4x");
+
+        if (os2 == nullptr || os4 == nullptr)
+            return;
+
+        checkEquals (os2->getY(), os4->getY(), who + " 4x sits beside 2x");
+        check (! os2->getToggleState() && ! os4->getToggleState(),
+               who + " oversampling at Init is Off, so neither switch is lit");
+
+        if (os2->onClick != nullptr) os2->onClick();
+        check (os2->getToggleState() && ! os4->getToggleState(), who + " 2x lit alone after a click");
+
+        if (os2->onClick != nullptr) os2->onClick();
+        check (! os2->getToggleState() && ! os4->getToggleState(),
+               who + " clicking the lit switch reaches Off");
+
+        if (os4->onClick != nullptr) os4->onClick();
+        check (! os2->getToggleState() && os4->getToggleState(), who + " 4x lit alone after a click");
+
+        params.setReal (bmo::fetcomp::Index::oversampling, (float) bmo::fetcomp::osOff);
+    }
+
+    //== The meter's own row, at the full switch width ========================
+    {
+        auto* in  = button ("IN");
+        auto* gr  = button ("GR");
+        auto* out = button ("OUT");
+
+        if (in == nullptr || gr == nullptr || out == nullptr)
+            return;
+
+        for (auto* b : { in, gr, out })
+            checkEquals (b->getWidth(), bmo::ui::Tokens::switchWidth,
+                         who + " " + b->getButtonText() + " is a full-width switch on a 260 px panel");
+
+        // GR in the middle, IN and OUT reading left to right as signal flow
+        // either side of it -- and GR is where the meter opens, because it is
+        // the reading this module is for.
+        check (in->getX() < gr->getX() && gr->getX() < out->getX(),
+               who + " the meter row reads IN, GR, OUT");
+        check (gr->getToggleState(), who + " the meter opens on GR");
     }
 }
 
@@ -1049,6 +1213,7 @@ int main (int argc, char** argv)
         { "opto", +[] () -> std::unique_ptr<juce::AudioProcessor> { return createOpto(); } },
         { "dim",  +[] () -> std::unique_ptr<juce::AudioProcessor> { return createDim(); } },
         { "ltvcomp", +[] () -> std::unique_ptr<juce::AudioProcessor> { return createVcomp(); } },
+        { "fetcomp", +[] () -> std::unique_ptr<juce::AudioProcessor> { return createFetcomp(); } },
 
         // BMO DEQ twice, once per width: standalone opens it full, and the
         // compact one is what a rack shows. Both are the same panel laid out
@@ -1134,6 +1299,22 @@ int main (int argc, char** argv)
         checkTrimKnobHeights (panel, "ltvcomp",
                               { "ATTACK", "RELEASE", "DETECT", "LOW", "HIGH" });
         checkGateMarkerCarriesItsName (panel);
+    });
+
+    // BMO FET: three rows of switches over three choice parameters, none of
+    // which toggles, plus the meter row at the full switch width. Its own
+    // panel, because this one moves parameters.
+    withPanel (named ("fetcomp"), [] (bmo::ui::ModulePanel& panel)
+    {
+        checkFetcompSwitches (panel, "fetcomp");
+
+        // It takes neither shared section -- one compressor, one section, so
+        // no rules, the same argument BMO Opto and LTV Comp make.
+        check (panel.getRules().empty(),
+               "fetcomp should have no section rules, has "
+                   + juce::String ((int) panel.getRules().size()));
+        check (findNamed (panel, "ATTACK") != nullptr && findNamed (panel, "RELEASE") != nullptr,
+               "fetcomp has its ATTACK and RELEASE knobs");
     });
 
     // BMO DEQ takes the output section at both widths, so its OUTPUT knob and

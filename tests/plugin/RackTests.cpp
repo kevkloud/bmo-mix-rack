@@ -63,6 +63,11 @@ namespace
                     "diffuse", "rate", "depth", "rotation", "asymmetry" } },
         { "ltvcomp", { "amount", "gate", "output", "complex", "attack", "release",
                      "arc", "sidechain", "low_thru", "high_thru" } },
+        // BMO FET. ATTACK and RELEASE are knob positions, 1..7 with 7 fastest,
+        // not milliseconds -- see modules/fetcomp/params.h. The order is the
+        // table in docs/1176-comp/11-integration-and-test-plan.md section 2.
+        { "fetcomp", { "input", "output", "attack", "release", "ratio", "mix",
+                       "voicing", "oversampling" } },
     };
 
     std::vector<juce::String> chainIds (RackProcessor& rack)
@@ -202,7 +207,7 @@ int main()
         auto rack = createRack();
         const auto& registry = rack->getRegistry();
 
-        check (registry.size() == 7, "the registry holds util, eq, sat, opto, dim, deq and vcomp");
+        check (registry.size() == 8, "the registry holds util, eq, sat, opto, dim, deq, vcomp and fetcomp");
 
         // A bank is a module's host lanes, so it stops at 32 even if the
         // module does not. Past that, its golden schema test pins the order.

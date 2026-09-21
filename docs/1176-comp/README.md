@@ -2,8 +2,9 @@
 
 Spec, theory, math and test direction for a 1176-style FET compressor module.
 No implementation code lives here; the dev team writes it from this pack.
-Assembled on AURORA, 2026-09-20; nothing in it has been built, measured or
-heard yet.
+Assembled on AURORA, 2026-09-20. The module has since been built and measured
+on AURORA, but **nothing in it has been heard yet** — see the live handoffs
+and the measurements below.
 
 ## Index
 
@@ -12,6 +13,20 @@ heard yet.
 - [02-modeling-approaches.md](02-modeling-approaches.md) — four modelling approaches, with CPU, latency and aliasing trade-offs.
 - [10-dsp-spec.md](10-dsp-spec.md) — topology, the divider-law loop and its quadratic solve, ratio sag, release, nonlinearity, voicings, oversampling, heavy gain reduction, targets.
 - [11-integration-and-test-plan.md](11-integration-and-test-plan.md) — layout, parameters, test suites, panel and visual verification, milestones M0–M6.
+
+### Live handoffs
+
+The pack above is the spec and does not change as the module is built. These
+two are working documents and do change; each carries a dated update block when
+it goes stale.
+
+- [HANDOFF-dsp-fixes.md](HANDOFF-dsp-fixes.md) — the four things the DSP still owes: the alias floor and the test that lets it pass, the GR curve above 25 dB, four missing test suites, and the CPU budget that is settled rather than owed.
+- [HANDOFF-render-pass.md](HANDOFF-render-pass.md) — the look: what has been rendered and measured, what is decided and must not be reopened, and the six-step visual pass.
+
+### Measurements
+
+- `testing-notes/fetcomp-dsp-2026-09-21.md` — the DSP measured on AURORA: attack, release, programme dependence, THD, ripple, latency, the GR curve and the alias floor.
+- `testing-notes/ui-pass-fetcomp-2026-09-20.md` — the visual pass: render hashes, contrast ratios, layout gaps.
 
 ## Decided
 

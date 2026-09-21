@@ -1,23 +1,30 @@
 # Handoff: BMO FET, the four things the DSP still owes
 
 For a fresh session that owns `modules/fetcomp/dsp`. Written on AURORA,
-2026-09-21, by the session that owned the panel. **The panel is finished and
-pushed; the DSP is not committed.** Nothing here is about the look.
+2026-09-21, by the session that owned the panel, and updated later the same day
+once the DSP was committed. Nothing here is about the look; that is
+`HANDOFF-render-pass.md`.
 
 ## Where things stand
 
-- Branch `frosty-add-bmo-fetcomp`, **pushed** to `origin`
-  (`kevkloud/bmo-mix-rack`) at `c0fc24a`, eight commits. No pull request is
-  open, and **CI has never seen this branch**: `.github/workflows/build.yml`
-  fires on pushes to `main`, on tags and on `pull_request`, not on a branch
-  push. Opening the PR is what runs it, and that is Frosty's to do.
-- Verified on AURORA before the push, in `build/`: build exit 0 with no error
-  lines, `ctest` exit 0, **18/18**.
-- **Uncommitted, and the whole of your job:** `modules/fetcomp/dsp/DspCore.h`
-  plus the untracked `Calibration.h`, `Detector.h`, `FetCell.h`, `Stages.h`;
-  `tests/dsp/FetcompDspTests.cpp`; `tools/measure/fetcomp/main.cpp`. They build
-  and pass. Another session wrote them on 2026-09-20 and ended without
-  committing or writing up.
+- Branch `frosty-add-bmo-fetcomp`, pushed to `origin` (`kevkloud/bmo-mix-rack`)
+  at `80e6221`, fifteen commits, 0 behind `origin/main`. **PR #22 is open**
+  into `main` and CI has run against it. (This section previously read
+  `c0fc24a`, eight commits, no PR, "CI has never seen this branch" — all four
+  of those are now out of date.)
+- PR #19's head `c4bea4a` is an ancestor of this branch, so #22 contains the
+  groundwork pack outright. #19 has deliberately been left open; closing it is
+  Frosty's call.
+- **The DSP is committed**, in `80e6221`: `modules/fetcomp/dsp/DspCore.h` with
+  `Calibration.h`, `Detector.h`, `FetCell.h` and `Stages.h` beside it, plus
+  `tests/dsp/FetcompDspTests.cpp` and `tools/measure/fetcomp/main.cpp`. Another
+  session wrote them on 2026-09-20 and ended without committing or writing up.
+  They are no longer at risk, and **committing them is no longer your job** —
+  the four items below are.
+- Verified on AURORA immediately before that commit, in `build-dsp` with
+  `BMO_DSP_ONLY=ON` (Release): build exit 0 with no error lines, ctest
+  **16/16**, the seventeenth being the disabled hardtune target. The full Debug
+  tree was green at 18/18 before the push.
 - The measurement is `testing-notes/fetcomp-dsp-2026-09-21.md` — a fresh one,
   because the note that session was to have written never existed and four
   documents cited it. Read it before you touch anything.
@@ -40,20 +47,40 @@ well-built DSP. Four things are wrong with it and none of them is its character.
 4x. Off beats its target by 13 dB. 2x misses at 44.1, 48 and 88.2 kHz. **4x
 misses at every rate**, best -84.7.
 
-**The lead, and it is a strong one.** Oversampling is buying **1.9 dB** here.
-The same shared `core/dsp/Oversampler.h` under the Saturator is held to a
-different standard by that module's own test, in
+**The lead, and it is a weaker one than it looks.** Oversampling is buying
+**1.9 dB** here. The same shared `core/dsp/Oversampler.h` under the Saturator
+is held to a different standard by that module's own test, in
 `tests/dsp/SatDspTests.cpp`: *"2x oversampling drops folded images by at least
 15 dB"*.
 
 15 dB there, 1.9 dB here, same oversampler. So the floor this module is hitting
 is **almost certainly not the aliasing the oversampler exists to remove**.
-Before optimising anything, find out what it *is*. The obvious suspect is that
-oversampling the cell does nothing for a gain signal computed and applied at
-base rate — a control modulating the audio at base rate puts sidebands exactly
-where this measurement looks, and no amount of upsampling the nonlinearity
-touches them. Check where the detector, the solve and the gain application sit
-relative to the oversampled section.
+Before optimising anything, find out what it *is*.
+
+> **Two hypotheses are already spent. Do not re-read the code for them**
+> (AURORA, 2026-09-21).
+>
+> - *"The gain is computed and applied at base rate."* **It is not.**
+>   `processFrame` is called once per oversampled sub-sample from the `j` loop
+>   in `DspCore::process`, and the detector, the implicit solve, attack,
+>   release, the clamp and the gain multiply all live inside it. The whole
+>   loop is closed at the oversampled rate.
+> - *"The time constants are derived from the base rate, so the envelope runs
+>   factor-times fast at 4x and its extra ripple offsets the folding you
+>   removed."* **It is not that either.** `applyFactor` prepares every stage at
+>   `rate * currentFactor` and calls `updateCoefficients`, which is documented
+>   as deriving everything from the **effective** rate.
+>
+> Also worth holding lightly: the Saturator is a memoryless waveshaper and this
+> is a closed loop with `std::abs` and `std::max` inside it, so 15 dB may never
+> have been the right yardstick. Treat the comparison as a reason to look, not
+> as a target.
+>
+> What this leaves is a measurement job rather than a reading job. The bin
+> under test is `0.4375 * fs`, which is where the tone's third harmonic folds
+> — so the useful first questions are what the control signal's own spectrum
+> looks like against the audio path's, and what the floor does per factor with
+> the loop frozen. Measure before theorising again.
 
 **The test is not protecting this.** `testAliasFloor` asserts Off at or under
 -60, and then only that 2x and 4x are **within 0.5 dB of Off** — not -80, not

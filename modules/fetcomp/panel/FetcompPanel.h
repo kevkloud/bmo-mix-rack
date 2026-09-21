@@ -61,6 +61,13 @@ public:
     bool setUiState (const juce::String& key, const juce::String& value) override;
 
 private:
+    /** Draws the bracket that gathers the four ratios and leads down to ALL.
+
+        ALL is every button pushed in at once, which is the one thing about
+        this panel a reader cannot get from the labels: "ALL" beside four
+        ratios reads as a fifth ratio. The bracket says it is made of them. */
+    void paintPanel (juce::Graphics&) override;
+
     /** Points the meter at `mode` and lights the one button of the three that
         says so, so a mode set from the command line lands where a click would
         have left it. */
@@ -95,6 +102,11 @@ private:
     std::unique_ptr<juce::ParameterAttachment> ratioAttachment, voicingAttachment, osAttachment;
 
     int lastVoicing = -1;
+
+    /** Whether ATTACK and RELEASE share the drive column or take the panel's
+        full width. See setUiState's `time` key -- an open layout question,
+        rendered both ways. */
+    bool timeKnobsInColumn = true;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FetcompPanel)
 };

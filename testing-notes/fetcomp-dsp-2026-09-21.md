@@ -43,6 +43,28 @@ measurement of the code as it stands**, not a recovery of those numbers.
 
 ## 2. What does not conform
 
+> **Correction, AURORA, 2026-09-21 (same day).** The table below and the
+> paragraph after it are **Black only**, though §3 asks for both voicings, and
+> the summary drawn from them is wrong in a way that matters.
+>
+> Blue at **Off and 30 dB GR** runs about **−63 dB** at every rate — roughly
+> 10 dB worse than anything in the "−72.4 to −84.0" range below, which
+> reproduces exactly for Black and only for Black. So "Off beating −60 by
+> 12 dB" is **−62.9 dB, beating it by 2.9**, at Blue / 44.1 kHz / 30 dB GR.
+>
+> The conclusion still stands — Off passes and the default does not move — but
+> on a third of the stated margin, and 10 §9 hangs that decision on this
+> number. Re-run `measure_fetcomp alias` for **both** voicings if the Blue
+> constants in `Calibration.h` are ever recalibrated.
+>
+> The cause of the floor was also not what this section assumed. It is not
+> "whatever sets this floor, it is not the aliasing the oversampler exists to
+> fix" in the sense of something unexplained: it is the detector's rectifier
+> aliasing *inside* the oversampled domain, measured and written up in
+> `testing-notes/fetcomp-alias-origin-2026-09-21.md`. The −80/−90 targets were
+> changed to −70 as a result, and `testAliasFloor` was rewritten to pin the
+> mechanism. Full grids for both voicings are in that note.
+
 **The alias floor misses its targets at both oversampled factors.** §3 wants
 −60 dB at Off, **−80 at 2x** and **−90 at 4x**.
 

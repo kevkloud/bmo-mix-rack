@@ -1130,13 +1130,21 @@ void testReductionPastThePin()
     rectifier, which is not bandlimited, and no factor removes it because
     there is always a higher harmonic to take the bin.
 
-    **The pack's -80 at 2x and -90 at 4x (10 section 9, 11 section 3) are
-    deliberately not asserted here.** They assume a decaying skirt; the
-    measured skirt is flat within 2.8 dB from the third harmonic to the
-    nineteenth, so no oversampling factor reaches them. Changing those
-    targets is the owner's call and has not been made. This is a stated gap,
-    not a quiet loosening -- if the targets stand, the fix is to bandlimit
-    the rectifier and this test grows the numbers back. */
+    **The pack's 2x and 4x targets were -80 and -90, and were changed to -70
+    on 2026-09-21 against this measurement** (10 section 9, 11 section 3).
+    They assumed a decaying skirt; the measured skirt is flat within 2.8 dB
+    from the third harmonic to the nineteenth, so no oversampling factor
+    reaches them and only bandlimiting the rectifier ever could -- a change to
+    what the attack overshoot table and the THD figures come from. -70 is a
+    bound with 2.4 dB over the worst corner in the grid (-72.4, Blue at 48 kHz
+    and 4x), not a threshold fitted to today's number.
+
+    The tight target is **Off, on Blue**: -62.9 dB at 44.1 kHz and 30 dB GR
+    against -60. Black is flat in depth and never worse than -72.4, which is
+    why the first sweep -- Black only, though section 3 asks for both voicings
+    -- read this as a comfortable 12 dB. It is 2.9 dB. If the Blue constants
+    in Calibration.h are ever recalibrated, re-run `measure_fetcomp alias`
+    for both voicings before trusting the default. */
 void testAliasFloor()
 {
     // fs/512, which is 32 bins of the 16384-sample window, so the fundamental
@@ -1196,6 +1204,20 @@ void testAliasFloor()
         check (plainFloorDb[0] <= -60.0,
                who + ": the alias floor at Off is at or under -60 dB, got "
                    + std::to_string (plainFloorDb[0]));
+
+        // 11 section 3's oversampled target, changed from -80/-90 to -70 on
+        // 2026-09-21 against measurement. The worst corner over the whole grid
+        // is -72.4 dB (Blue, 48 kHz, 4x), so this carries 2.4 dB of margin and
+        // is a bound rather than a fit -- a harsher rectifier or a broken
+        // oversampler still fails it. The grid itself is the measure tool's
+        // job; this pins the one rate and depth the suite runs.
+        check (plainFloorDb[1] <= -70.0,
+               who + ": the alias floor at 2x is at or under -70 dB, got "
+                   + std::to_string (plainFloorDb[1]));
+
+        check (plainFloorDb[2] <= -70.0,
+               who + ": the alias floor at 4x is at or under -70 dB, got "
+                   + std::to_string (plainFloorDb[2]));
 
         // The detuned tone must put the third harmonic in the bin at Off,
         // otherwise the two assertions below are vacuous.

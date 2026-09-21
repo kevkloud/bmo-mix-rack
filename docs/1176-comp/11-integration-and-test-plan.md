@@ -155,12 +155,56 @@ Runs against `DspCore`, seconds, CI `dsp` job. Model on `VcompDspTests.cpp`.
   This is wanted character; the test exists to bound it, and to catch the day
   it stops being ripple and starts being a bug.
 - **Aliasing floor.** Separate aliases from harmonics by construction: a tone
-  whose harmonics land above Nyquist and fold onto bins no harmonic can occupy
-  (48 kHz: 9 kHz tone, image at 21 kHz — `SatDspTests::testOversampling`).
-  Per sample rate 44.1/48/88.2/96/192, per factor, **and at 10/20/30 dB GR with
-  the fastest attack and release**, both voicings. Targets: −60 dB at Off,
-  −80 dB at 2x, −90 dB at 4x. Off missing its target at M3 is what moves the
-  default to 2x (10 §9).
+  whose harmonics land above Nyquist and fold onto bins no harmonic of the tone
+  *at base rate* can occupy (48 kHz: 9 kHz tone, image at 21 kHz —
+  `SatDspTests::testOversampling`). Per sample rate 44.1/48/88.2/96/192, per
+  factor, **and at 10/20/30 dB GR with the fastest attack and release**, both
+  voicings. Targets: **−60 dB at Off, −70 dB at 2x and at 4x.** Off missing its
+  target at M3 is what moves the default to 2x (10 §9).
+
+  **The 2x and 4x targets were −80 and −90, and were changed on 2026-09-21
+  against measurement** (`testing-notes/fetcomp-alias-origin-2026-09-21.md`,
+  AURORA). Those numbers assumed the floor was folded harmonic content that an
+  oversampler removes, and that each factor would therefore buy roughly what it
+  buys the Saturator. It is not, and it does not. Measured: −73.1 / −75.0 /
+  −77.0 across Off / 2x / 4x at 48 kHz.
+
+  The image bin is *not* a bin no harmonic can occupy once oversampling is on,
+  which is the flaw in the old construction. Harmonics fold **inside** the
+  oversampled domain too, and those landing below base Nyquist sit in the
+  decimation filter's passband where nothing can reach them. At 2x the
+  thirteenth harmonic lands there; at 4x the nineteenth. The filter is working
+  — it removes the third harmonic by 46 dB at 2x — but the detector's
+  rectifier is not bandlimited, so there is always a higher harmonic to take
+  the bin, and its skirt is **flat within 2.8 dB from k=3 to k=19**. Each
+  factor swaps one harmonic for another at nearly the same level; 8x would find
+  one at about −74.
+
+  So −80 and −90 are not reachable by oversampling at all, and a test asserting
+  them could only ever be satisfied by bandlimiting the rectifier — which is a
+  character change, not a fix, and would put the attack overshoot table and the
+  THD figures at risk. **−70 at 2x and 4x is a bound with 2.4 dB of margin over
+  the worst corner measured, not a threshold fitted to it**: it still fails if
+  the rectifier is made harsher or the oversampler is broken. That worst corner
+  is −72.4 dB, Blue at 48 kHz and 4x, at 20 and at 30 dB GR. What the suite
+  actually pins is the *mechanism* — that 2x removes the third harmonic and 4x
+  removes the thirteenth, each by at least 30 dB, which a dead oversampler
+  fails and the old "within 0.5 dB of Off" assertion did not.
+
+  **The Off target is the tight one, and it is tight on Blue.** Worst corner
+  −62.9 dB (Blue, 44.1 kHz, 30 dB GR) against −60. Black is flat in depth and
+  never worse than −72.4, which is why a Black-only sweep read this as a
+  comfortable 12 dB. **Any recalibration of the Blue constants must re-run this
+  sweep**, because 2.9 dB is what the default-Off decision in 10 §9 is standing
+  on.
+
+  Note also that **oversampling is not uniformly worth ~2 dB**: on Blue at
+  30 dB GR it is worth nearly 12 (−63.0 → −74.8 at 48 kHz), because at that
+  depth the rectifier's low-order harmonics grow and those *are* removable.
+  The flat skirt dominates only once they are gone.
+
+  **None of this has been heard.** Whether the residual is audible at all is
+  an Ableton-pass question, not a bench one.
 - **Pinned-GR stability.** 60 s at 25–30 dB of sustained reduction, fastest
   attack and release, all-buttons and 20:1: no drift in reported GR (settled
   value stable to 0.01 dB over the last 30 s), no denormal slowdown, no NaN or

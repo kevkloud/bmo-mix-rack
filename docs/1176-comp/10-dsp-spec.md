@@ -328,6 +328,38 @@ at Off, the default moves to 2x before ship — CEQ's precedent
 timing: an earlier draft said it changed attack resolution, and §12 shows it
 does not.
 
+**Settled, 2026-09-21 on AURORA: Off holds and the default does not move — but
+by 2.9 dB, not the 12 the first write-up claimed.** The worst corner over the
+whole grid is **−62.9 dB** (Blue, 44.1 kHz, 30 dB GR) against the −60
+condition. The earlier figure came from a sweep that covered Black only;
+`11 §3` asks for both voicings, and Blue's 30 dB GR column at Off sits about
+10 dB worse than anything Black produces. Grids in
+`testing-notes/fetcomp-alias-origin-2026-09-21.md`.
+
+The decision is unchanged and Off ships. But it is close enough that **it must
+be re-measured if the Blue constants are recalibrated** — every CALIBRATE value
+in `Calibration.h` is a first-pass number awaiting an ear, and 2.9 dB is not
+much to spend.
+
+What the same measurement settled about the factors is that **2x and 4x buy
+about 2 dB at moderate depth, not the 15 dB this section's reasoning implicitly
+assumed** from the Saturator's precedent. The floor there is not folded
+harmonic content the oversampler can remove; it is the detector's rectifier
+aliasing *inside* the oversampled domain, landing below base Nyquist in the
+decimation filter's passband. §7 has the mechanism.
+
+**The exception is Blue at extreme depth, where they earn their keep:** at
+30 dB GR, 48 kHz, Off → 2x is −63.0 → −74.8, nearly 12 dB. That is the
+mechanism, not a contradiction of it — driven that hard the rectifier's
+*low-order* harmonics grow, and those are what the decimation filter removes.
+The flat skirt only dominates once they are gone.
+
+So the honest description of the control is: **2x and 4x clean up the static
+shapers and the low-order harmonics, and on Blue at 30 dB GR that is worth
+about 12 dB; at moderate depth they lower the alias floor by about 2 dB and
+should not be reached for expecting more.** 11 §3's targets moved from −80/−90
+to −70 as a result. None of it has been heard; that is the Ableton pass.
+
 ## 10. Coefficient derivation
 
 Survivor convention throughout, matching `poleFor` in vcomp:
@@ -481,8 +513,29 @@ products are also low, and on HF tones the envelope is nearly constant with
 `ε` ~10⁻⁴. What remains is the fast-attack transient — broadband and brief. So
 the control keeps its band-limit (envelope poles plus §10's ≈3 µs rectifier
 pole) and, where oversampling is on, that band-limit runs at the oversampled
-rate so its corner can sit above 20 kHz without folding. M3's alias sweep at
-10/20/30 dB GR with the fastest attack and release decides whether Off holds.
+rate so its corner can sit above 20 kHz without folding.
+
+**Measured, 2026-09-21 on AURORA, and it sets the alias floor** — see
+`testing-notes/fetcomp-alias-origin-2026-09-21.md`. The band-limit above is
+real but it is not a band-*stop*: the detector's rectifier, with its `abs`,
+`max` and clamp, still emits a harmonic series whose skirt is **flat within
+2.8 dB from the third harmonic to the nineteenth**. Oversampling runs that
+series at a higher rate, so it folds *inside* the oversampled domain, and the
+products landing below base Nyquist are in the decimation filter's passband and
+cannot be removed. At 2x the thirteenth harmonic lands in the measured image
+bin; at 4x the nineteenth. Each factor therefore swaps one harmonic for
+another at nearly the same level and buys about 2 dB, not the 15 dB the same
+`Oversampler.h` buys the Saturator — which is a memoryless waveshaper with no
+rectifier in a loop, and is not the right comparison.
+
+The floor this leaves is about **−75 dB**, some 13 dB better than the −60 the
+default is judged on. **Off therefore holds**, which is what M3's sweep was
+there to decide. The consequence taken is that 11 §3's 2x and 4x targets moved
+from −80/−90 to −70 (measurement, not fitting: about 5 dB of margin), and that
+the suite pins the mechanism rather than a level. **Lowering the floor further
+would mean bandlimiting the rectifier**, which is a change to the thing the
+attack overshoot table and the THD figures come from — a character decision,
+not a defect fix, and it has not been heard either way.
 
 **Level handling.** Drive above threshold for a given depth, from §5's law
 (`s = 1 + (g − 1)/β_R`, `g = 10^(GR/20)`, drive = `20·log₁₀ s + GR`):

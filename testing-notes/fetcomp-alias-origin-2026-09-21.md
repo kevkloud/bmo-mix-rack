@@ -143,3 +143,81 @@ back into the test.
 `build-dsp`, `BMO_DSP_ONLY=ON`, Release, on AURORA: build exit 0 with no error
 lines, `ctest` **16/16** (the seventeenth is the disabled hardtune target).
 `fetcomp_dsp_tests` alone: **859 checks, 0 failures**.
+
+---
+
+# Addendum, same day: the full grid, and a correction to the record
+
+The tables above answer *why* the floor is where it is. Running the pack's
+whole grid afterwards — `measure_fetcomp alias` for both voicings, five rates,
+three factors, three depths, on AURORA — turned up two things the record did
+not have.
+
+## 1. The earlier sweep was Black only
+
+`testing-notes/fetcomp-dsp-2026-09-21.md` §2 gives the Off floor as a
+"measured range" of **−72.4 to −84.0** and concludes *"Off beating −60 by 12 dB
+is why the default stays Off"*. Black's grid reproduces those bounds exactly.
+Blue's does not, and `11 §3` requires **both voicings**.
+
+## 2. Blue at 30 dB GR with oversampling Off is 10 dB worse than anything in that range
+
+**Blue**, dB relative to the tone:
+
+| rate | factor | 10 dB GR | 20 dB GR | 30 dB GR |
+|---|---|---|---|---|
+| 44100 | Off | −72.5 | −71.9 | **−62.9** |
+| 44100 | 2x | −74.2 | −73.7 | −74.1 |
+| 44100 | 4x | −74.3 | −73.4 | −73.0 |
+| 48000 | Off | −73.3 | −72.6 | **−63.0** |
+| 48000 | 2x | −74.9 | −74.3 | −74.8 |
+| 48000 | 4x | −73.5 | −72.4 | −72.4 |
+| 88200 | Off | −80.0 | −78.0 | **−63.9** |
+| 88200 | 2x | −79.3 | −78.2 | −78.3 |
+| 88200 | 4x | −77.6 | −76.0 | −75.6 |
+| 96000 | Off | −81.2 | −78.9 | **−64.1** |
+| 96000 | 2x | −79.6 | −78.4 | −78.3 |
+| 96000 | 4x | −78.3 | −76.5 | −76.2 |
+| 192000 | Off | −84.4 | −78.9 | **−66.3** |
+| 192000 | 2x | −85.6 | −82.8 | −82.8 |
+| 192000 | 4x | −85.0 | −81.8 | −82.8 |
+
+**Black**, for comparison — flat in depth, which is why the earlier summary
+read as one clean range:
+
+| rate | factor | 10 dB GR | 20 dB GR | 30 dB GR |
+|---|---|---|---|---|
+| 44100 | Off | −72.4 | −72.8 | −72.7 |
+| 48000 | Off | −73.1 | −73.6 | −73.2 |
+| 88200 | Off | −79.1 | −80.1 | −75.8 |
+| 96000 | Off | −80.1 | −81.2 | −76.1 |
+| 192000 | Off | −84.0 | −82.2 | −75.4 |
+| 48000 | 2x | −75.0 | −74.6 | −75.4 |
+| 48000 | 4x | −77.0 | −76.3 | −77.0 |
+| 192000 | 2x | −85.5 | −83.2 | −84.2 |
+| 192000 | 4x | −84.7 | −82.3 | −83.9 |
+
+## What this changes
+
+**The default-Off decision still holds, but on a third of the margin the record
+claims.** Worst corner over both voicings at Off is **−62.9 dB** (Blue, 44.1 kHz,
+30 dB GR), which clears `10 §9`'s −60 condition by **2.9 dB, not 12**. Nothing
+about the decision changes — Off passes — but it is much closer than
+"comfortably" and should be re-checked if the Blue constants are ever
+recalibrated, since every CALIBRATE value in `Calibration.h` is still a
+first-pass number awaiting an ear.
+
+**At 30 dB GR on Blue, oversampling earns its keep.** −63.0 → −74.8 at 48 kHz
+is nearly 12 dB, the opposite of the ~2 dB it buys at 20 dB GR. That is
+consistent with the mechanism rather than a contradiction of it: driven that
+hard the rectifier's *low-order* harmonics grow, and those are exactly what the
+decimation filter removes. The flat skirt only dominates once the low harmonics
+are gone. So the honest statement about 2x/4x is narrower than "they do
+nothing" — they do little at moderate depth and a lot on Blue at extreme depth.
+
+**Worst case over the whole grid, both voicings:** Off −62.9, 2x −73.7 (Blue,
+44.1 kHz, 20 dB GR), 4x −72.4 (Blue, 48 kHz, 20 and 30 dB GR). The −70 dB
+target adopted for 2x and 4x therefore carries **2.4 dB of margin at its worst
+corner**, not the 5 dB a first pass over Black alone suggested.
+
+Nothing here has been heard.

@@ -12,18 +12,17 @@ adapter, unpacks the flat `float*` in `Index` order);
 `panel/FetcompPanel.{h,cpp}`; `presets/FactoryPresets.h`; `Module.{h,cpp}`;
 `AGENTS.md` (why) + `README.md` (human-facing), linked from `modules/AGENTS.md`.
 
-**Identity — decided.** BMO line. Display name **BMO FET**, module id
-`fetcomp`, plugin code **`Bfet`**, which `products/AGENTS.md:147` already
-reserves as "FET comp" and which this module now spends. Following the existing
-rows (`products/AGENTS.md:13-23`) — bundle id from the display name, preset
-extension from the module id — that gives bundle id `com.lt3audio.bmofet` and
-presets `.bmofetcomp`, with `ui::bmoLine()`. No hardware branding anywhere;
-prose says "1176-style"/FET only.
+**Identity — decided and confirmed.** BMO line. Display name **BMO FET**,
+module id `fetcomp`, plugin code **`Bfet`** (reserved as "FET comp" at
+`products/AGENTS.md:147`, spent here), bundle id **`com.lt3audio.bmofet`**,
+presets **`.bmofetcomp`**, `ui::bmoLine()`. That follows the existing rows
+(`products/AGENTS.md:13-23`): bundle id from the display name, preset extension
+from the module id. No hardware branding anywhere; prose says "1176-style"/FET
+only.
 
-Two things remain blockers for the first build: the **accent colour** (§4), and
-confirming the display name is "BMO FET" and not "BMO FET Comp" — the bundle id
-derives from it and is permanent. The identity row is written on the build
-branch `frosty-add-bmo-fetcomp`, not here: this pack lives on
+The **accent colour** (§4c) is the one identity item still open, and it blocks
+the first build. The identity row is written on the build branch
+`frosty-add-bmo-fetcomp`, not here: this pack lives on
 `frosty-fetcomp-groundwork` and does not touch `products/AGENTS.md`.
 
 **Registration touch points**: `modules/CMakeLists.txt` (`bmo_add_module`);
@@ -257,22 +256,44 @@ plate ("the most contrast available by going darker, all the way to black, is
 1.29:1"). Drawing the border *outside* the meter instead only moves the problem
 — the dark plate is `#2e2e32`, darker still.
 
-Two ways out, an owner decision:
-1. **Keep the semantics, drop the literal black.** Blue = the module's accent;
-   "Black" = a light neutral, for which `tokens().neutral` `#ababab` is the
-   precedent Opto's own bezel already uses. Measured here by the WCAG formula
-   on AURORA against `#464649`: `#ababab` **4.10:1**, and a candidate blue
-   `#8cb2f0` **4.36:1** — both in family with what ships, and both legible in
-   either appearance. The switch then reads as blue vs grey, with the state
-   named in text.
-2. **Accept a black border that only works on the pale plate** and specify a
-   substitute for the dark one. This breaks the repo's standing rule that a
-   change measured in one appearance has not been checked.
+A **colour mock of five border treatments was reviewed on AURORA**, drawn with
+the real token values and the 0.7 alpha, on both plates, and redrawn once the
+accent was settled on **E** (§4c).
 
-Opto's `hotColourFor` (`OptoPanel.cpp:156-165`) is the repo's own pattern for
-this: step a colour off the face until it clears 4.5:1 rather than trusting
-that it does. Whatever is chosen, derive it that way and **measure it with
-`Inspect.exe ratio` on a real render** — the figures above were computed by
+With E as the Blue state the bezel blends to `#5075aa`, **2.00:1** on the face
+(2.65:1 if drawn at full alpha) — dim in isolation. What decides whether a pair
+works is not that figure but the **border-against-border** ratio, since the
+viewer only has to tell two states apart:
+
+| pair | "Black" state | on face | E vs it, at 0.7 / 1.0 alpha | verdict |
+|---|---|---|---|---|
+| **1** | literal black `#000000` | 1.94 | **3.88 / 5.13** | **strongest** — see below |
+| **2** | neutral dark grey `#3a3a3e` | 1.13 | 2.27 / 3.00 | the grey is invisible, so this is really pair 5 |
+| **3** | neutral silver `#ababab` (Opto's today) | 2.84 | **1.42 / 1.07** | collapses — hue alone; refuse |
+| **4** | white-ish `#f2f2f5` | 5.07 | 2.54 / 1.92 | works, but weakens as the bezel is strengthened |
+| **5** | no border at all | — | 2.00 / 2.65 | reads as absence |
+
+**Choosing E inverted the answer.** With the lighter candidate C, pair 4 was
+the strong one and pair 1 the compromise; with E it is the other way round,
+because E's bezel sits **lighter** than the meter face (2.00:1 above it) while
+black's sits **darker** (1.94:1 below it). The two states therefore land on
+opposite sides of the same ground, which is the strongest kind of pair there
+is, and it separates by luminance rather than by hue. **Pair 3 must still be
+refused** — 1.42:1 falling to 1.07:1 is two states differing by hue alone, the
+failure the suite already fixed once on its switch colours.
+
+**Consider drawing this module's bezel at full alpha, or a little thicker.**
+E is the darkest accent in the suite and 2.00:1 on the face is thin; full alpha
+buys 2.65:1 and takes the pair to 5.13:1 at no cost to anything else. That is a
+per-module deviation from `Controls.cpp`'s 0.7 and should be taken deliberately
+or not at all. Mocked both ways.
+
+Owner decision: the pair, and the alpha.
+
+Opto's `hotColourFor` (`OptoPanel.cpp:156-165`) is the repo's own pattern here:
+step a colour off the face until it clears its target rather than trusting that
+it does. Whatever is chosen, derive it that way and **measure it with
+`Inspect.exe ratio` on a real render** — every figure above was computed by
 formula, not read off pixels.
 
 ### 4c. The accent colour
@@ -288,24 +309,82 @@ available as one — it is the utility-knob colour and appears on *every* panel,
 "which is exactly what makes it the hue everything else has to stay away from."
 
 **No true blue passes the separation rule.** The blue band is bracketed by the
-azure at 198.8° and the periwinkle at 236.1°, a gap of 37.3°. The best blue
-sits in the middle of it, ~217°, **18.4° from the azure and 18.9° from the
-periwinkle** — worse than the teal's 26.8°, which the table already records as
-its worst case and a known objection. Reaching further, 236.1°–271.6° is 35.5°
-wide and its midpoint ~254° (indigo) is 17.8° from each side: also fails.
+azure at 198.8° and the periwinkle at 236.1°, a gap of 37.3°, so the best any
+blue can do is ~18.6° to each side — worse than the teal's 26.8°, which the
+table already records as its worst case and a known objection. Reaching
+further, 236.1°–271.6° is 35.5° wide and its midpoint ~254° (indigo) is 17.8°
+from each side: also fails.
 
-A concrete candidate, if blue is taken anyway as a deliberate exception the way
-the lime was: **`#8cb2f0`**, hue 217.2°, **6.27:1** on `#2e2e32` and **1.88:1**
-on `#efefef` — both inside the shipped bands (dark 5.87–7.19, pale 1.64–2.00).
-Computed by the WCAG formula on AURORA; confirm with `Inspect.exe ratio`.
+Six candidates **A–F** were drawn on both plates in the AURORA colour mock,
+spanning the gap plus a deep "faceplate stripe" blue and a rule-passing control.
+Shipped bands for the pass column: dark 5.87–7.19, pale 1.64–2.00.
 
-The nearest *passing* hue is **~304°** (violet-magenta), 32.2° clear on both
-sides in the widest unclaimed gap — but it is not blue. Red near 4° has 27.9°
-of hue headroom and should still be refused: it lands 2.3° from BMO Opto's
-engaged-red state colour `#e0685a`.
+| | hex | hue | Δ azure | Δ periwinkle | dark | pale | verdict |
+|---|---|---|---|---|---|---|---|
+| **A** | `#96c7f2` | 208.0° | 9.2° | 28.1° | 7.56 | 1.55 | fails both |
+| **B** | `#92bdf2` | 213.1° | 14.3° | 23.0° | 6.94 | 1.69 | contrast passes, hue fails |
+| **C** | `#8cb2f0` | 217.2° | **18.4°** | **18.9°** | 6.27 | 1.87 | contrast passes; the best a blue can do on hue |
+| **D** | `#899ef0` | 227.8° | 29.0° | 8.3° | 5.29 | 2.22 | fails both |
+| **E** | `#5489d4` | 215.2° | 16.4° | 20.9° | 3.80 | 3.09 | the deep stripe blue; far outside both bands |
+| **F** | `#e694e0` | 304.4° | — | — | 6.23 | 1.89 | **passes everything — and is violet** |
 
-So: blue is available only as an explicitly accepted exception, on the record,
-with the numbers above. **Owner decision, and permanent.**
+**Chosen: E `#5489d4`** — the deep faceplate-stripe blue. Taken by the owner
+after reviewing the mock, as an **explicit, approved exception**, knowingly
+breaking both rules:
+
+- **Hue separation.** 16.4° from the utility azure and 20.9° from the
+  periwinkle, against a table whose worst shipped figure is the teal's 26.8°
+  (itself recorded there as a known objection) and whose best is the lavender's
+  64.4°. No blue could have passed — the azure-to-periwinkle gap is only 37.3°
+  wide — so this is a rule the module cannot satisfy rather than one it declined
+  to try. `F` `#e694e0` at 304.4° was the passing alternative and was refused
+  for not being blue.
+- **Contrast bands.** 3.80:1 on the dark plate against a shipped band of
+  5.87–7.19, and 3.09:1 on the pale plate against 1.64–2.00. E is the only
+  accent in the suite that is *too dark* on the dark plate and *too heavy* on
+  the pale one.
+
+**Consequences the devs handle, and do not relitigate.**
+
+1. **The knob cap is where it actually bites.** `ui::faceOf` returns the raw
+   accent on the dark plate, and `Tokens.h` states the shipped caps run
+   5.87–6.84:1 against the plate with the pointer at 6.13–7.14:1 on top. E
+   gives **3.80:1** cap-on-plate and **3.97:1** for `pointer` `#2b2b2e` on the
+   cap. Both are outside the stated range, and the cap will read as a dark disc
+   rather than as the module's colour. On the pale plate `faceOf` washes E half
+   to `knobTint`, giving `#aac4ea` at 1.55:1 — just under the 1.64 floor, so
+   faint rather than heavy. Expect the dark plate to be the one that needs a
+   render pass.
+2. **Accent-coloured text is already handled, and will not look like E.**
+   `ui::accentTextOn` (default `minRatio` 4.5) steps the accent away from its
+   ground — lighter on the dark plate, darker on the pale one. E starts further
+   from 4.5:1 than any shipped accent (3.80 dark, 3.09 pale), so it is stepped
+   further, and captions drawn this way will read as a noticeably different
+   blue from the arcs beside them. **Keep E off small text.** Use it for the
+   knob indicator arcs, value/GR indicators, the active-switch fill and the VU
+   border; let legends and captions take `text1`/`text2`. That is already the
+   suite's convention — `modules/AGENTS.md` says of the meter that "the face,
+   the needle, the ticks and the scale are **not** yours", only the bezel and
+   the hot zone are — so this is following the house rule, not inventing one.
+3. **The active switch is fine as-is.** `ui::onAccentOf` sees E's relative
+   luminance at 0.245 (above its 0.18 pivot) and darkens, giving a near-black
+   label at **5.91:1** on the E fill. No special case needed; do not hand-pick a
+   light label.
+4. **No test fails.** There is no contrast, palette or accent assertion
+   anywhere in `tests/` — enforcement is the runtime steppers above plus manual
+   `Inspect.exe ratio`. So the exception costs nothing in CI and needs no
+   suppression; it is a documentation duty only. What it does mean is that
+   **the render pass is the only thing that will catch a problem**, so §4d's
+   both-appearances rule matters more here than usual.
+5. **The Accents-table row must carry the exception note.** When the row lands
+   on `frosty-add-bmo-fetcomp`, record alongside the hex: the two separations,
+   the two out-of-band contrast figures, that the owner took it knowingly, and
+   that the hue was unreachable for any blue. The lime's row is the precedent
+   for how that is written — the objection is recorded so nobody raises it again
+   as a new finding.
+
+Every figure here is formula-derived on AURORA; confirm with `Inspect.exe
+ratio` on a real render.
 
 ### 4d. The tools, and the order to use them in
 

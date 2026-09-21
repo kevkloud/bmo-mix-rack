@@ -36,6 +36,16 @@ own tests could not see. What belongs *here* is anything every module shares.
   measurement harness caught that no test had: a band split that silently
   stopped compressing above 10.8 kHz, and a clipped caption that ui_layout
   never saw because the module was missing from its product list.
+- [`reverb/AGENTS.md`](reverb/AGENTS.md) -- BMO Linger, the reverb. Panel and
+  schema so far; the DSP is a marked placeholder. **Thirty parameters against a
+  slot's thirty-two lanes**, so a thirty-first has to be argued rather than
+  added; why eight of the defaults are Room's per-type constants *by
+  definition* rather than merely the values the knobs open at; why appending a
+  type is safe for sessions and lossy for recorded automation; why ER Mode's
+  Blend holds an index it has not yet earned; and why the ER/tail display's
+  time axis is logarithmic over 1 ms to 30 s rather than the fixed window the
+  pack proposed. Also the one header in a `dsp/` folder that a panel is allowed
+  to include, and why it has to stay JUCE-free.
 - [`tune/AGENTS.md`](tune/AGENTS.md) -- BMO Tune RT. **A product of this
   repository, not a rack module**: nothing of it is in the rack's registry or
   on its link line, and `-DBMO_BUILD_TUNE=OFF` / `-DBMO_BUILD_RACK=OFF` keep

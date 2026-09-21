@@ -30,7 +30,29 @@ enum class ParamFormat
     Pan,         ///< "L 50", "C", "R 50"
     Hertz,       ///< "850 Hz", "2.10 kHz"
     Milliseconds,///< "5.0 ms", "120 ms"
-    Ratio        ///< "3.0:1"
+    Ratio,       ///< "3.0:1"
+
+    //== Added on top of the shared textParam/textFn hunk, for BMO Linger ======
+    //
+    // Everything else in this file is byte-identical with `c142f37` and
+    // `86095a5` -- the BMO FET and BMO Defang branches -- so that whichever of
+    // the three lands first the others reproduce the hunk rather than stack on
+    // it. **These two rows are BMO Linger's own addition and are in neither of
+    // those branches**, so the byte-identical claim covers the file as it
+    // stood before this block, not as it stands now.
+    //
+    // Appended rather than inserted, for the habit a permanent parameter list
+    // teaches: nothing serialises a ParamFormat today, and nothing should have
+    // to care whether that stays true.
+    //
+    // Neither is expressible as a `textParam`. A textParam prints itself but
+    // is Plain by construction, so it reports no unit to the host and takes no
+    // typed-entry parser -- right for BMO FET's "4 (126 us)", wrong for a
+    // plain quantity in seconds or metres, where a host's automation lane
+    // should say "s" and "m" the way it already says "dB" and "Hz".
+
+    Seconds,     ///< "1.80 s", "12.0 s" -- BMO Linger's DECAY, 0.1..20 s
+    Metres       ///< "12.0 m" -- BMO Linger's SIZE, a room dimension, 0.5..80 m
 };
 
 struct ParamSpec
@@ -49,6 +71,26 @@ struct ParamSpec
         (rangeFor, core/state/Parameters.h), so the two cannot disagree. */
     bool         logarithmic = false;
 
+    /** The value string, for a parameter whose number does not say what it
+        means on its own. Null for every parameter that has ever shipped, so
+        `format` still decides for all of them.
+
+        BMO FET's ATTACK and RELEASE are why. Their parameter *is* the knob
+        position, 1..7, so the format is Plain and a host leaning on the raw
+        number would print a bare "4" -- which says nothing about the time it
+        selects. The displayed value has to carry both, "4 (126 us)", and that
+        string is arithmetic on the position rather than a unit appended to it.
+
+        A plain function pointer, not a std::function: a ParamSpec is copied
+        into the lambdas that build a JUCE parameter (core/state/Parameters.h)
+        and into the rack's slot parameters, and it is captured by value in
+        static spec lists, so it stays cheap to copy and free of allocation.
+
+        It is read by `text()` below, which is the one place a value becomes a
+        string -- so the panel, the host's automation lane and a rack slot all
+        print the same words. */
+    std::string (*textFn) (float) = nullptr;
+
     static ParamSpec floatParam (const char* id, const char* name, float min, float max,
                                  float step, float def, ParamFormat format = ParamFormat::Plain)
     {
@@ -63,6 +105,17 @@ struct ParamSpec
     {
         auto s = floatParam (id, name, min, max, step, def, format);
         s.logarithmic = min > 0.0f;
+        return s;
+    }
+
+    /** A continuous parameter that prints itself. See `textFn`. The format is
+        Plain by construction: a parameter that needs its own string has no
+        unit the table of formats already knows. */
+    static ParamSpec textParam (const char* id, const char* name, float min, float max,
+                                float step, float def, std::string (*text) (float))
+    {
+        auto s = floatParam (id, name, min, max, step, def, ParamFormat::Plain);
+        s.textFn = text;
         return s;
     }
 
@@ -95,6 +148,8 @@ struct ParamSpec
             case ParamFormat::Percent:      return "%";
             case ParamFormat::Hertz:        return "Hz";
             case ParamFormat::Milliseconds: return "ms";
+            case ParamFormat::Seconds:      return "s";    // BMO Linger
+            case ParamFormat::Metres:       return "m";    // BMO Linger
             case ParamFormat::Pan:          return "";
             case ParamFormat::Ratio:        return "";
             case ParamFormat::Plain:        return "";
@@ -140,6 +195,11 @@ struct ParamSpec
     std::string text (float real) const
     {
         char buf[64];
+
+        // A parameter that prints itself does so before anything else. Only a
+        // continuous one ever sets this -- a choice already has its names.
+        if (textFn != nullptr && kind == ParamKind::Float)
+            return textFn (real);
 
         switch (kind)
         {
@@ -187,6 +247,21 @@ struct ParamSpec
 
             case ParamFormat::Ratio:
                 std::snprintf (buf, sizeof (buf), "%.1f:1", (double) real);
+                return buf;
+
+            // BMO Linger. Two decimals under ten seconds and one above it, so
+            // DECAY reads "1.80 s" where a tenth is the JND-ish step and
+            // "12.0 s" where it is not -- the same thinning Milliseconds and
+            // Hertz already do at a decade boundary, rather than a new habit.
+            case ParamFormat::Seconds:
+                std::snprintf (buf, sizeof (buf), real < 10.0f ? "%.2f s" : "%.1f s", (double) real);
+                return buf;
+
+            // BMO Linger. One decimal the whole way: SIZE is a room dimension
+            // and 0.1 m is already finer than anyone hears across a 0.5-80 m
+            // travel, so "0.5 m" and "80.0 m" both read as lengths.
+            case ParamFormat::Metres:
+                std::snprintf (buf, sizeof (buf), "%.1f m", (double) real);
                 return buf;
 
             case ParamFormat::Plain:

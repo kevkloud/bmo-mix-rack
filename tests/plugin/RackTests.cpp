@@ -63,6 +63,19 @@ namespace
                     "diffuse", "rate", "depth", "rotation", "asymmetry" } },
         { "ltvcomp", { "amount", "gate", "output", "complex", "attack", "release",
                      "arc", "sidechain", "low_thru", "high_thru" } },
+        // BMO Linger. **Thirty parameters against a slot's thirty-two lanes**,
+        // so the whole schema gets a lane and none of BMO DEQ's SlotOverflow
+        // machinery is needed -- but only two lanes are left over, which is
+        // what modules/reverb/AGENTS.md says a thirty-first control would have
+        // to be argued against. The order is the table in
+        // docs/reverb/11-integration-and-test-plan.md section 4.
+        { "reverb", { "type", "size", "predelay", "prelink", "decay", "decayshape",
+                      "attack", "feed",
+                      "damplofreq", "damplo", "damphifreq", "damphi",
+                      "eqlofreq", "eqlo", "eqhifreq", "eqhi",
+                      "ermode", "erdensity", "ershape", "erspread", "erhicut",
+                      "ervariation", "moddepth", "modrate", "width", "inhicut",
+                      "erlevel", "verblevel", "mix", "output" } },
     };
 
     std::vector<juce::String> chainIds (RackProcessor& rack)
@@ -202,7 +215,8 @@ int main()
         auto rack = createRack();
         const auto& registry = rack->getRegistry();
 
-        check (registry.size() == 7, "the registry holds util, eq, sat, opto, dim, deq and vcomp");
+        check (registry.size() == 8,
+               "the registry holds util, eq, sat, opto, dim, deq, vcomp and reverb");
 
         // A bank is a module's host lanes, so it stops at 32 even if the
         // module does not. Past that, its golden schema test pins the order.

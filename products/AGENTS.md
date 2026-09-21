@@ -19,6 +19,7 @@ Permanent. Allocate here before the first build of anything new.
 | BMO Dimension | `dim` | `Bdim` | `com.lt3audio.bmodimension` | `.bmodim` |
 | BMO Mix Rack | -- | `Brck` | `com.lt3audio.bmomixrack` | `.bmorack` |
 | BMO DEQ | `deq` | `Bpar` | `com.lt3audio.bmodeq` | `.bmodeq` |
+| BMO Linger | `reverb` | `Brvb` | `com.lt3audio.bmolinger` | `.bmoreverb` |
 | BMO Tune RT -- **not in the rack** | `tune` | `Btun` | `com.lt3audio.bmotunert` | `.bmotune` |
 | LTV Comp -- **not a BMO product** | `ltvcomp` | `Ltvc` | `com.lt3audio.ltvcomp` | `.ltvcomp` (reads `.bmovcomp`) |
 
@@ -146,7 +147,34 @@ is on the host's bar, not on the panel (`ModuleDef::expandedWidth`,
 
 Reserved for later products (not built, do not reuse): `Bfet` FET comp,
 `Bdyn` dynamics, `Bdes` de-esser, `Bovr` overdrive,
-`Bcmp` compressor, `Bdly` delay, `Brvb` reverb.
+`Bcmp` compressor, `Bdly` delay.
+
+**`Brvb` has been spent**, on BMO Linger, 2026-09-21 -- its row is in the table
+above.
+
+**BMO Linger** is the reverb: an 8-line FDN with per-line absorbent filters
+behind an image-source early-reflection generator, and the **second module in
+the suite with two widths** -- 300 compact, which a rack opens it at, and 700
+full, which standalone opens it at. The switch is on the host's bar, not on the
+panel, exactly as BMO DEQ's is.
+
+The module id is `reverb` and the display name is not, deliberately and
+permanently: the id lives in state files and rack presets and can never change,
+so it stays plain and descriptive, while the name on the panel is free to be
+evocative. `deesser`/"BMO Defang" and `fetcomp`/"BMO FET" are the same
+arrangement, and `eq`/"BMO CEQ" is the one that proves the point -- do not tidy
+one to match the other later.
+
+It carries the biggest schema in the rack, **thirty parameters**, which fits a
+slot's 32 host lanes with two to spare, so it needs none of BMO DEQ's
+`SlotOverflow` machinery. Two is all there is, though, and
+`modules/reverb/AGENTS.md` is where a thirty-first control has to be argued.
+
+Five names were considered. A collision scan -- not a trademark opinion --
+returned Linger and Foyer clear, Afterglow adjacent and crowded, and Haunt a
+direct clash with a currently-sold hardware reverb pedal. The working title
+"B Verb" was set aside because it echoes a reference product's own name one
+letter apart, which is what the no-third-party-names rule exists to prevent.
 
 ## BMO EQ and BMO DEQ — settle BMO EQ's name
 
@@ -278,8 +306,29 @@ there are distinguishable ones.
 | BMO Dimension | `#d4a4ff` | 271.6° | 6.80 | 1.73 |
 | *(not an accent)* utility azure `#4fb8e8` | | 198.8° | 6.02 | -- |
 | BMO DEQ | `#5ecfc0` teal | 172.0° | **7.19** | 1.64 |
+| BMO Linger | `#e694e0` mauve-orchid | 304.4° | 6.23 | 1.89 |
 | BMO Tune RT (not in the rack) | `#b6e35d` lime | 80.1° | **9.10** | **1.29** |
 | LTV Comp -- **unsigned, and on the LTV ground** | `#a2a8ff` periwinkle | 236.1° | 6.17 | 1.91 |
+
+**BMO Linger's mauve spends the last window, and the table is now full.**
+Swept at 0.1° over the whole circle against the taken hues and the 26.8° bar --
+the worst separation this table has ever accepted, BMO DEQ's -- the admissible
+set was the single arc **298.4°–309.2°**, 10.8° wide. `#e694e0` sits at its
+centre: 32.8° from BMO Dimension's lavender and 31.6° from BMO CEQ's pink, with
+contrast inside the shipped bands at both plates (5.87–7.19 dark, 1.64–2.00
+pale). Four candidates were drawn through the real panel rules -- `faceOf` for
+caps, `accentInk` for captions, `onAccentOf` for switch ink -- on both plates,
+and Frosty chose from those renders rather than from hex, 2026-09-21.
+
+**The consequence, stated so it is not discovered later: BMO Dwell cannot also
+be violet.** Two accents in that arc would need 2 × 26.8° and the arc is 10.8°
+wide, a 16.0° shortfall. Dwell's own groundwork pack points at this window and
+will have to take a stated exception somewhere instead -- and note that
+`docs/delay/00-repo-conventions.md` omits BMO Tune RT from its accent list, so
+the olive-gold it reads as unconditionally clean in fact needs an 11.9°
+exception against Tune. That exception is cheap, since Tune is not a rack
+module and can never sit beside Dwell, but it should be taken knowingly rather
+than by omission.
 
 **The lime was picked outside this table**, while Tune was still its own
 repository, and its two figures are computed by the WCAG formula on AURORA

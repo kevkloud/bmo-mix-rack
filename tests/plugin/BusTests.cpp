@@ -304,6 +304,17 @@ const Golden kDefaults[]
       -18.0000001899, 0.237879320979,
       -18.0000001899, 0.237879320979, -17.9999997391, 0.239933893085,
       -18.0000001899, 0.237879320979, -18.0000001899, 0.237879320979 },
+    // BMO Linger. **A wire, and that is the whole of what this row says
+    // today**: its DSP is a marked placeholder, so the numbers are the
+    // unaltered input and they are LTV Comp's, BMO DEQ's and the wire's alike.
+    // They will move when the engine lands, and the row is here so that the
+    // commit which moves them has to say so rather than quietly adding one.
+    // The rack rows below are unchanged by its arrival, which is the check
+    // that the pass-through really does pass through.
+    { "reverb",
+      -18.0000001899, 0.237879320979,
+      -18.0000001899, 0.237879320979, -17.9999997391, 0.239933893085,
+      -18.0000001899, 0.237879320979, -18.0000001899, 0.237879320979 },
     { "rack",
       -17.0575148299, 0.416103243828,
       -17.2499761789, 0.401356935501, -16.6898183011, 0.4070700109,
@@ -344,6 +355,13 @@ const Golden kSwept[]
       -7.16919915094, 0.988553106785,
       -10.8123103775, 0.853308975697, -9.8115626611, 0.988553166389,
       -7.16919915094, 0.988553106785, -7.16919915094, 0.988553106785 },
+    // Identical to its defaults row, and it should be: at 0.63 of normalised
+    // every one of BMO Linger's thirty parameters is somewhere else, and a
+    // placeholder does not care. This is the row that will move furthest.
+    { "reverb",
+      -18.0000001899, 0.237879320979,
+      -18.0000001899, 0.237879320979, -17.9999997391, 0.239933893085,
+      -18.0000001899, 0.237879320979, -18.0000001899, 0.237879320979 },
     { "rack",
       -12.7330962497, 0.988554358482,
       -12.4040392101, 0.988554239273, -12.3487493999, 0.988553583622,

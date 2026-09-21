@@ -102,6 +102,13 @@ bmo_add_tool(rack_tests plugin/RackTests.cpp ${BMO_ROOT}/products/rack/Registry.
 target_link_libraries(rack_tests PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp)
 add_test(NAME rack COMMAND rack_tests)
 
+# Bus layouts, across every product at once: the accepted-layout table, and the
+# golden renders that prove mono-in/stereo-out cost the existing layouts
+# nothing. Linked like rack_tests because it walks the registry.
+bmo_add_tool(bus_tests plugin/BusTests.cpp ${BMO_ROOT}/products/rack/Registry.cpp)
+target_link_libraries(bus_tests PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp)
+add_test(NAME bus COMMAND bus_tests)
+
 # Layout assertions on the real panels. JUCE, not bmo_add_dsp_tool: no
 # rendering happens, but Tokens.h includes juce_gui_basics, so a UI assertion
 # cannot run in the DSP-only job whatever docs/ui-workflow-brief.md §4 says.

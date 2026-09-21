@@ -1,4 +1,5 @@
 #include "SingleModuleProcessor.h"
+#include "BusLayouts.h"
 #include "ProductEditor.h"
 
 namespace bmo
@@ -69,13 +70,9 @@ void SingleModuleProcessor::releaseResources()
 
 bool SingleModuleProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
-    const auto& out = layouts.getMainOutputChannelSet();
-
-    if (out != juce::AudioChannelSet::mono() && out != juce::AudioChannelSet::stereo())
-        return false;
-
-    // Mono or stereo, but no conversion between them.
-    return layouts.getMainInputChannelSet() == out;
+    // Mono, stereo, or mono in and stereo out. See core/product/BusLayouts.h,
+    // which the rack answers from as well.
+    return buses::isSupported (layouts);
 }
 
 void SingleModuleProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
@@ -88,8 +85,9 @@ void SingleModuleProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
     const auto numIn      = getTotalNumInputChannels();
     const auto numOut     = getTotalNumOutputChannels();
 
-    for (int ch = numIn; ch < numOut; ++ch)
-        buffer.clear (ch, 0, numSamples);
+    // Mono in, stereo out: the module is given the input in both channels, not
+    // one channel and silence. BusLayouts.h says why at length.
+    buses::spreadInputAcrossOutputs (buffer, numIn, numOut);
 
     engine.process (buffer.getArrayOfWritePointers(), numOut, numSamples);
 }

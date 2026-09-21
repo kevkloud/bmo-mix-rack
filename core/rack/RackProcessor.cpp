@@ -1,5 +1,6 @@
 #include "RackProcessor.h"
 #include "RackEditor.h"
+#include "core/product/BusLayouts.h"
 
 namespace bmo
 {
@@ -445,12 +446,12 @@ void RackProcessor::releaseResources()
 
 bool RackProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
-    const auto& out = layouts.getMainOutputChannelSet();
-
-    if (out != juce::AudioChannelSet::mono() && out != juce::AudioChannelSet::stereo())
-        return false;
-
-    return layouts.getMainInputChannelSet() == out;
+    // The same contract a standalone module states -- see
+    // core/product/BusLayouts.h. The rack can hold this one because the
+    // widening happens once, at its input, ahead of slot 1: every slot still
+    // sees the same channel count as every other, and no module has to know
+    // that the instance is fed from a single channel.
+    return buses::isSupported (layouts);
 }
 
 void RackProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
@@ -461,8 +462,9 @@ void RackProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
     const auto numIn      = getTotalNumInputChannels();
     const auto numOut     = getTotalNumOutputChannels();
 
-    for (int ch = numIn; ch < numOut; ++ch)
-        buffer.clear (ch, 0, numSamples);
+    // Mono in, stereo out: the chain is given the input in both channels, not
+    // one channel and silence. BusLayouts.h says why at length.
+    buses::spreadInputAcrossOutputs (buffer, numIn, numOut);
 
     const juce::ScopedTryLock lock (chainLock);
 

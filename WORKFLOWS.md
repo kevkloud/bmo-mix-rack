@@ -205,6 +205,28 @@ test file. No two of them meet, and none of them meets the UI pass.
 switches keep it that way — but its *panel* is drawn with the same shared UI
 code, so Tune's UI work belongs in the UI pass, not in `bmo-tune-work`.
 
+### A shared `core/ui` fix merges before the modules that would copy it
+
+`frosty-ring-takes-module-accent` gives `ui::ConcentricBand`'s ring the
+module's accent, which the constructor had been giving only to the dial inside
+it. **Merge it before the new modules** — BMO FET, BMO Dwell, BMO Defang, BMO
+Linger, the de-esser, the delay and the reverb — and before any further UI
+pass.
+
+The reason is not a file conflict; it is that the bug is invisible until a
+module that is not pink puts a selector ring on a panel, and every one of
+those branches is a chance to build around it instead of on the fix. BMO Dwell
+already did: it carries a `ConcentricBand::setAccent` of its own and its VOICE
+ring calls it, because the constructor could not be trusted. With this merged
+first, that opt-in becomes a belt-and-braces call on a ring that is already the
+right colour, and no later module has to learn the lesson again.
+
+It is safe to put first. Every panel in the suite was rendered dark and light
+either side of the change and all eighteen pairs hash identical — BMO CEQ's
+rings were already pink because its accent *is* the pink, and nothing else in
+the suite draws a ring. `testing-notes/deq-ring-accent-2026-09-21.md` has the
+hashes and the measurements.
+
 ---
 
 ## The commands, per workflow

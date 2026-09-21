@@ -124,6 +124,16 @@ bmo_add_tool(ui_layout_tests ui/LayoutTests.cpp ${BMO_ROOT}/products/rack/Regist
 target_link_libraries(ui_layout_tests PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp bmo_reverb)
 add_test(NAME ui_layout COMMAND ui_layout_tests)
 
+# The render loop's own plumbing. Links no module and instantiates no panel: it
+# asserts that writing a PNG over an existing one replaces it, after a period
+# where `snapshot` appended instead and every render reviewed was the previous
+# one. Cheap enough to always run -- it writes three small images to temp.
+bmo_add_tool(snapshot_io_tests tools/SnapshotIoTests.cpp)
+# Links no module, so unlike its neighbours it inherits no include path from
+# one: it needs the root spelled out to reach tools/snapshot/PngOut.h.
+target_include_directories(snapshot_io_tests PRIVATE ${BMO_ROOT})
+add_test(NAME snapshot_io COMMAND snapshot_io_tests)
+
 endif()
 
 # Tune's real panel, laid out with no display. Its layout is asserted here

@@ -40,6 +40,7 @@
 #include "products/rack/Product.h"
 
 #include "core/ui/ModulePanel.h"
+#include "tools/snapshot/PngOut.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <iostream>
@@ -526,10 +527,10 @@ int main (int argc, char** argv)
 
     const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), false, 2.0f);
 
-    juce::PNGImageFormat png;
-    std::unique_ptr<juce::FileOutputStream> stream (out.createOutputStream());
-
-    if (stream == nullptr || ! png.writeImageToStream (image, *stream))
+    // PngOut.h, not an inline createOutputStream: writing over an existing
+    // render used to append rather than replace, and tests/tools/SnapshotIoTests
+    // now holds that line. See the header for what it cost.
+    if (! bmo::snapshot::writePng (out, image))
     {
         std::cerr << "could not write " << out.getFullPathName() << '\n';
         return 1;

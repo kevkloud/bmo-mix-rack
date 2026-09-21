@@ -57,9 +57,10 @@ cascade, `I` the interpolator, `κ` the shaper's incremental gain. All are ≤ 1
 construction (TPT filters, peak-normalised per §11; interpolators unity-or-less at
 every phase; a tanh-family shaper), so the bound is **|g| < 1**.
 
-FEEDBACK maps to `g = 1.05·fb^1.6` (DECISION): the exponent puts resolution in the
-2–8-repeat region, `g = 1` lands at ~97%, full travel gives 1.05 — deliberate
-self-oscillation (01: above ~100% regeneration recirculates without decay). Above
+FEEDBACK maps to `g = 1.05·fb^1.6` (DECIDED, Frosty 2026-09-20): the exponent puts
+resolution in the 2–8-repeat region, `g = 1` lands at ~97%, full travel gives 1.05 —
+deliberate self-oscillation, the ~97–100% zone accepted and marked on the panel
+(13 §4) (01: above ~100% regeneration recirculates without decay). Above
 unity a **safety clip** bounds the loop: fixed tanh, ceiling 1.0 (0 dBFS), active
 regardless of DRIVE. Its describing-function gain `G(A)` falls monotonically from 1,
 so oscillation settles where `g·|H|·G(A) = 1` — a limit cycle just under the
@@ -130,6 +131,9 @@ thirty-second; **dotted ×1.5**, **triplet ×2/3**. BPM clamped [20, 999].
 - Transport stopped: freeze BPM; audio flows, the loop decays, never mute or flush.
 - Mapped time over the §10 maximum: halve until it fits.
 
+SYNC and NOTE hold permanent schema slots now, note-list order included; SYNC
+itself ships disabled until this plumbing lands (DECIDED, Frosty 2026-09-20).
+
 ## 8. Stereo
 
 Per-channel rings, fixed `std::array<Line,2>` (the `eq` pattern, 00 §5); `u` the
@@ -156,7 +160,7 @@ Below 50% the dry is multiplied by exactly 1.0 — **bit-exact, not merely unity
 gain** — and MIX moves the wet alone; above it the wet holds full while the dry
 fades to a wet-only end stop. At 50% the output is dry unity **plus** wet unity:
 sparse displaced repeats sum around +3 dB, coincident in-phase content up to +6 dB.
-No makeup or auto-gain (DECISION): any trim would multiply the dry and break the
+No makeup or auto-gain (DECIDED, Frosty 2026-09-20): any trim would multiply the dry and break the
 guarantee, and the safety clip is in-loop only, so the output is never clipped for
 the user. Latency is 0 and nothing is oversampled, so **no dry ring is needed**.
 
@@ -177,7 +181,7 @@ the way back. TIME is not smoothed — §2 owns it.
 
 ## 10. Maximum time and memory
 
-Maximum delay **2000 ms** (DECISION; 01 has no measured class figure — chained BBD
+Maximum delay **2000 ms** (DECIDED, Frosty 2026-09-20; 01 has no measured class figure — chained BBD
 reaches ~1.5 s, and 2 s covers a quarter note at 30 BPM). BBD caps at 1500 ms. At
 192 kHz: 2.0 s × 192 000 = 384 000 samples/channel, rounded up to 524 288 × 4 bytes
 = **2.0 MB per channel, 4.0 MB per instance** (+ ~4 KB of state); 0.5 MB per channel
@@ -213,7 +217,9 @@ replacing the one-poles.
 bit-exact below 50% MIX the image already reads as wide wet over centred dry; if
 added later, a wet-only mid/side trim after the loop tap.
 
-**FREEZE**: send closed, loop gain exactly 1.0, **every in-loop stage bypassed** —
+**FREEZE**: own button, own parameter slot (11 §3 row 17), shipped enabled in v1 —
+not folded into THROW's travel/`throwMode` (DECIDED, Frosty 2026-09-20). Send
+closed, loop gain exactly 1.0, **every in-loop stage bypassed** —
 filters, shaper, DC blocker, clip. The loop is then a bit-exact circulating buffer,
 stable indefinitely and cheaper than running; anything less erodes the held sound.
 **The latched length rounds to a whole sample so the interpolator is bypassed too** —
@@ -230,7 +236,7 @@ modulation are ignored while held
 | Interpolators | 32-tap sinc (clean) / 4-point Hermite | 02; 00 §1 |
 | Glide τ / rate cap | 120 ms / 0.25 | CALIBRATE, 01 glide |
 | Clean crossfade | 20 ms raised cosine | CALIBRATE, 00 §1 |
-| Feedback law | `g = 1.05·fb^1.6`, unity at fb ≈ 97% | DECISION; 01 |
+| Feedback law | `g = 1.05·fb^1.6`, unity at fb ≈ 97% | DECIDED (Frosty, 2026-09-20); 01 |
 | Safety clip, DC | tanh at 1.0 always on; 10 Hz blocker | 02 |
 | LOW/HIGH CUT | 20 Hz–1 kHz / 1–20 kHz, cap 18 kHz | CALIBRATE |
 | Tape LP / head bump | 4.5 kHz / +2 dB at 55 Hz | CALIBRATE / 01 |
@@ -242,20 +248,13 @@ modulation are ignored while held
 | Duck range, detector | 0–24 dB (4 dB); 5/180 ms, −30 dBFS, W 20 | 01 / CALIBRATE |
 | Dotted / triplet | ×1.5 / ×2/3 | 01 |
 | Dual-offset ratio | 2/3 | CALIBRATE |
-| Max delay / latency | 2000 ms (BBD 1500) / 0 | DECISION / 00 §4 |
-| Mix law | `w = sin(πm)`, `d = cos(π(m−0.5))` | DECISION |
-| Dry bit-exact region | m ≤ 0.5, gain exactly 1.0 | DECISION |
+| Max delay / latency | 2000 ms (BBD 1500) / 0 | DECIDED (Frosty, 2026-09-20) / 00 §4 |
+| Mix law | `w = sin(πm)`, `d = cos(π(m−0.5))` | DECIDED (Frosty, 2026-09-20) |
+| Dry bit-exact region | m ≤ 0.5, gain exactly 1.0 | DECIDED (Frosty, 2026-09-20) |
 | THROW ramp, BUILD | 5/15 ms; `g_thr = max(g,1.02)`, 400/800 ms | CALIBRATE, §3 cap |
 | VOICE Q, telephone | 0.5–6 peak-normalised; 300 Hz/3.4 kHz at 0.6 | CALIBRATE |
-| FREEZE | loop gain 1.0, all bypassed, whole-sample length | DECISION |
+| FREEZE | loop gain 1.0, all bypassed, whole-sample length, own button/slot | DECIDED (Frosty, 2026-09-20) |
 
 ## Open decisions for Frosty
 
-1. MIX 50% sums dry + wet with no makeup (up to +6 dB) — confirm no auto-gain, since
-   any trim breaks the bit-exact dry path.
-2. Max delay 2000 ms (4.0 MB/instance at 192 kHz), or 1000 ms to halve rack memory?
-3. THROW, VOICE and FREEZE are three additions to the control set — FREEZE on its
-   own button, or the top of THROW's travel?
-4. Tempo plumbing is new across processor, rack and `ModuleDsp` (00 §2) — SYNC in
-   v1, or TIME-only until it lands?
-5. Ping-pong on a stereo source: sum to mono (specified), or keep L/R?
+1. Ping-pong on a stereo source: sum to mono (specified), or keep L/R?

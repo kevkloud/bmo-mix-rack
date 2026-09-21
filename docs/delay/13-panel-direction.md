@@ -8,9 +8,9 @@ labelled DWELL. The creative controls arrive with a matching amendment to 10.
 
 ## 1. Control hierarchy
 
-- **Performance:** THROW, and FREEZE if it ships — two wide lit buttons on
-  their own row under the primary trio. Reachable without hunting, lit from
-  across the room.
+- **Performance:** THROW and FREEZE — two wide lit buttons on their own row
+  under the primary trio, both shipped enabled in v1 (DECIDED, Frosty
+  2026-09-20). Reachable without hunting, lit from across the room.
 - **Primary (largest faces):** TIME/NOTE, FEEDBACK, MIX. Time, how long it
   lasts, how much you hear.
 - **Secondary (two trios):** DRIVE, MOD RATE, MOD DEPTH; then LOW CUT, HIGH
@@ -29,6 +29,8 @@ labelled DWELL. The creative controls arrive with a matching amendment to 10.
   reads **TIME** off, **NOTE** on. Readout `1 ms` … `2000 ms` (ms throughout,
   never seconds) vs `1/8D`, `1/4T`, `1/1`. SYNC on with no valid host tempo
   (10 §7): the note name stays, drawn in `text2`, so the fallback is visible.
+  SYNC's slot is permanent now; the switch ships disabled until 12's tempo
+  plumbing lands (DECIDED, Frosty 2026-09-20).
 
 ## 2. Layout
 
@@ -78,8 +80,8 @@ is panel behaviour over that one bool.
   the self-oscillation stretch and falls back on release. The knob does not
   move (the parameter stays authoritative); the ramp shows as a travelling
   highlight on its track.
-- **FREEZE is a candidate.** Allocate its slot now — order is permanent —
-  even if the button ships disabled.
+- **FREEZE ships enabled in v1**, its own button and slot, never folded into
+  THROW's travel (DECIDED, Frosty 2026-09-20); order is permanent.
 
 ## 4. Captions and readouts
 
@@ -96,9 +98,9 @@ are the readout, exactly as 11 §3 fixes them: dotted `D`, triplet `T`, no space
 one plain percent across the travel, and 50% is the natural default — full wet
 added, dry intact.
 
-**FEEDBACK past unity** (0–100%, g = 1 at ≈97%, 10 §3): keep the unit. Draw the
-97–100% stretch in the meter "hot" colour with a numbered tick at the onset.
-Colour and a tick, not a word.
+**FEEDBACK past unity** (0–100%, g = 1 at ≈97%, 10 §3, DECIDED Frosty 2026-09-20):
+keep the unit. Draw the 97–100% stretch in the meter "hot" colour with a numbered
+tick at the onset. Colour and a tick, not a word.
 
 ## 5. Visual feedback
 
@@ -149,7 +151,6 @@ from the accent.
 
 ## 8. Open decisions
 
-1. FREEZE in v1, or a reserved slot with the button shipped disabled?
-2. VOICE as a concentric ring on HIGH CUT, or a fourth knob row (100 px + rule)?
-3. Accent `#b2bb54` — or does the de-esser get first refusal on the gold gap?
-4. Does THROW latch on modifier-click, or stay strictly momentary?
+1. VOICE as a concentric ring on HIGH CUT, or a fourth knob row (100 px + rule)?
+2. Accent `#b2bb54` — or does the de-esser get first refusal on the gold gap?
+3. Does THROW latch on modifier-click, or stay strictly momentary?

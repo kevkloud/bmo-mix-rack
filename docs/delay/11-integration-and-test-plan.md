@@ -79,7 +79,10 @@ is added, its whole-sample group delay comes off `D`, keeping the figure 0.
 
 **No control is named DWELL** — that is the module. **Permanent at ship**: ids,
 their order, ranges, steps, defaults, and the four choice lists **with their
-index order**; new parameters append at the end.
+index order**; new parameters append at the end. `sync`/`note`'s slots and
+`note`'s order are permanent now; `sync` ships disabled until 12's tempo
+plumbing lands. `freeze` (row 17) ships enabled in v1, its own slot, never
+folded into `throwMode`. Module id `dwell` is final (DECIDED, Frosty 2026-09-20).
 
 **MIX law (10 §9 owns it; the earlier linear law here is superseded).**
 `wet = sin(π·MIX)` for MIX ≤ 50 %, else 1; `dry = 1` for MIX ≤ 50 %, else
@@ -176,12 +179,9 @@ allocation in `process()`. `latencyForParams` is **exactly 0** everywhere.
 
 1. **Trademark-search "Dwell"** — blocks the permanent identity row.
 2. **Accent**: 10 §0 assumes the gold gap (W3); W1 and W2 separate better.
-3. **FREEZE/HOLD** in v1 as `freeze` after `throwMode`, or left out? Appending
-   later is safe; inserting is not.
-4. **Module id `dwell` vs `delay`** — freezes the preset extension.
-5. **`throwMode`'s entries and order**, and whether BUILD's target and ramp stay
+3. **`throwMode`'s entries and order**, and whether BUILD's target and ramp stay
    10's constants rather than parameters.
-6. **`voicing`'s list has no source in 10**, which defines only the continuous
+4. **`voicing`'s list has no source in 10**, which defines only the continuous
    VOICE (`voice`, row 9). Keep it, or ship VOICE alone?
 
 **Blocking unknown**: 01 has no MEASURED figure for a modern clean delay's

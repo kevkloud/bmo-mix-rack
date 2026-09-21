@@ -24,14 +24,14 @@ M = measure (§2), L = listen (§3), F = Frosty's call.
 | THROW ramp, 5 / 15 ms, gate edges | M8, L2: catches one word; no click |
 | BUILD, 1.02, 400/800 ms, held-throw swell | M3, L2: swells inside a bar; no step |
 | Dual-offset, 2/3, L/R spread | F, shown L1: he names one; recorded as a decision |
-| Feedback law, `1.05·fb^1.6`, repeats, self-oscillation | M3, F: 2–8 repeats over ≥30% travel; onset ≈97%; bounded above unity |
+| Feedback law, `1.05·fb^1.6`, repeats, self-oscillation | M3 — DECIDED (Frosty, 2026-09-20): 2–8 repeats over ≥30% travel; onset ≈97%; bounded above unity |
 | Alias floor, ≤ −60 dBFS, shaper quality | M5: met, or halfband added and re-measured |
-| Max delay, 2000 ms (BBD 1500), memory vs reach | F: fixed before allocation is written |
+| Max delay, 2000 ms (BBD 1500), memory vs reach | DECIDED (Frosty, 2026-09-20): fixed before allocation is written |
 | Mix law, `w = sin(πm)` / `d = cos(π(m−0.5))`, dry unity ≤50% | M7: dry bit-exact to 50%; sum stated on the panel |
 | FREEZE, gain 1.0, all stages bypassed, whole-sample length | M3: no drift over 60 s; DC at the latch logged |
 | THROW modes, Send open / Throw / Build, performance gate | M8, L2: Send open bit-exact; each mode measured |
 
-Open decisions 3–5 in 10's closing list are Frosty's alone. Do not settle them by ear.
+Open decision 1 in 10's closing list (ping-pong routing) is Frosty's alone. Do not settle it by ear.
 
 ## 2. Measurements
 
@@ -80,8 +80,8 @@ source**, key beside the audio, audio outside the repository, 32-bit float.
 
 ## 4. Order
 
-On paper, before any DSP: identity row, accent, max delay, mix law and dry region,
-feedback shape, whether SYNC ships in v1.
+On paper, before any DSP: identity row, accent. Max delay, mix law/dry region,
+feedback shape and SYNC's shipped-disabled status are DECIDED (Frosty, 2026-09-20).
 
 M7 and M8 then gate everything: a click or a leaking dry path corrupts every later
 round. Then M1, M3, M5 in order — the interpolator fixes the repeat tone the filters

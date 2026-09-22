@@ -19,8 +19,11 @@
 #include "products/deq/Product.h"
 #include "modules/deq/panel/ResponseView.h"
 #include "modules/deq/panel/Widgets.h"
-#include "modules/vcomp/panel/LevelBars.h"
+#include "core/ui/LevelBars.h"
 #include "modules/vcomp/params.h"
+#include "products/deesser/Product.h"
+#include "modules/deesser/panel/DeesserPanel.h"
+#include "modules/deesser/params.h"
 #include "products/dim/Product.h"
 #include "products/eq/Product.h"
 #include "products/opto/Product.h"
@@ -67,7 +70,8 @@ void checkEquals (int actual, int expected, const juce::String& what)
 
 /** The same, for a figure a panel computes rather than places.
     Everything here is pixels, which are integers, except a drawn picture's own
-    arithmetic -- BMO Linger's ER/tail display is the first of those. */
+    arithmetic -- BMO Defang's band sketch was the first of those and BMO
+    Linger's ER/tail display is the second. */
 void checkNear (double actual, double expected, double tolerance, const juce::String& what)
 {
     if (! (std::abs (actual - expected) <= tolerance))
@@ -488,7 +492,7 @@ void checkTrimKnobHeights (bmo::ui::ModulePanel& panel, const juce::String& who,
 void checkGateMarkerCarriesItsName (bmo::ui::ModulePanel& panel)
 {
     auto* found = findNamed (panel, "IN");
-    auto* bar = dynamic_cast<bmo::vcomp::LevelBar*> (found);
+    auto* bar = dynamic_cast<bmo::ui::LevelBar*> (found);
 
     if (bar == nullptr)
     {
@@ -966,6 +970,217 @@ void checkScale (const std::vector<bmo::ui::DynamicsMeter::ScalePoint>& scale,
                        + " floor -- measure it before printing both");
 
         previousInked = &p;
+    }
+}
+
+/** BMO Defang's panel: the shape pair, the meter row, the band sketch and the
+    momentary LISTEN switch.
+
+    Two of these are invisible to a render at Init and so invisible to every
+    other check here. The shape pair is a radio over a choice parameter and
+    nothing toggles -- the Saturator's oversampling row could have been dead
+    for a release the same way. **LISTEN is worse**: it has no parameter at
+    all, so there is no value to read back afterwards, and the call to the
+    engine is the whole of the behaviour. Intercepting it is the only way to
+    assert on it, which is the same shape `checkDeqBandToggle` uses for the
+    band solo this module's listen path is modelled on. */
+void checkDeesserPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
+{
+    auto& params = panel.getContext().params;
+
+    const auto button = [&panel, &who] (const char* name) -> juce::Button*
+    {
+        auto* b = dynamic_cast<juce::Button*> (findNamed (panel, name));
+
+        if (b == nullptr)
+            check (false, who + " has no " + name + " switch");
+
+        return b;
+    };
+
+    //== The shape pair: both states named, both reachable ====================
+    {
+        auto* bell  = button ("BELL");
+        auto* shelf = button ("SHELF");
+
+        if (bell == nullptr || shelf == nullptr)
+            return;
+
+        checkEquals (bell->getY(), shelf->getY(), who + " SHELF sits beside BELL");
+        checkEquals (shelf->getX() - bell->getRight(), bmo::ui::Tokens::switchGap,
+                     who + " gap between BELL and SHELF");
+
+        for (auto* b : { bell, shelf })
+        {
+            checkEquals (b->getWidth(),  bmo::ui::Tokens::switchWidth,
+                         who + " " + b->getButtonText() + " width");
+            checkEquals (b->getHeight(), bmo::ui::Tokens::switchHeight,
+                         who + " " + b->getButtonText() + " height");
+        }
+
+        // Bell is the default, and the index order is permanent.
+        check (bell->getToggleState() && ! shelf->getToggleState(),
+               who + " shape at Init is Bell");
+
+        if (shelf->onClick != nullptr)
+            shelf->onClick();
+
+        check (shelf->getToggleState() && ! bell->getToggleState(),
+               who + " clicking SHELF selects it");
+        checkEquals (juce::roundToInt (params.getReal (bmo::deesser::Index::shape)),
+                     (int) bmo::deesser::highShelf, who + " SHELF sets the shape parameter");
+
+        params.setReal (bmo::deesser::Index::shape, (float) bmo::deesser::bell);
+        check (bell->getToggleState(), who + " the parameter lights the shape pair, not the click");
+    }
+
+    //== One GR bar, scaled to what the module can actually do ================
+    //
+    // The needle and its IN/GR/OUT row went on 2026-09-20 (Frosty). Two of
+    // those three modes showed the same reading twice on this module, because
+    // a band cut takes under a dB of broadband energy -- so IN and OUT were
+    // one number wearing two captions. What is checked here is what replaced
+    // them, and the part worth protecting is the *scale*: a drift back to the
+    // shared 24 dB would give the bar a top quarter no setting can reach.
+    {
+        bmo::ui::LevelBar* bar = nullptr;
+
+        for (auto* c : panel.getChildren())
+            if (auto* b = dynamic_cast<bmo::ui::LevelBar*> (c))
+                bar = b;
+
+        check (bar != nullptr, who + " has no GR bar");
+
+        if (bar == nullptr)
+            return;
+
+        // The old row's three switches and two gaps, kept as the bar's width
+        // so its well lines up with the shape pair above and LISTEN below.
+        checkEquals (bar->getWidth(),
+                     bmo::ui::Tokens::switchWidth * 3 + bmo::ui::Tokens::switchGap * 2,
+                     who + " the GR bar is as wide as the switch rows it sits between");
+
+        // 18 dB is RANGE's ceiling in params.h and therefore the deepest cut
+        // the module can make. If that parameter's top ever moves, this fails
+        // -- which is the point of asserting it here rather than in the panel.
+        const auto top = bmo::deesser::specs()[bmo::deesser::Index::range].max;
+        checkNear (top, 18.0, 0.0f, who + " RANGE's ceiling, which the GR bar is scaled to");
+
+        // Nothing switches modes any more, so the render key that did must be
+        // refused rather than quietly accepted -- a render of the wrong thing
+        // is worse than a render that failed.
+        check (! panel.setUiState ("meter", "GR"),
+               who + " should refuse ui.meter now that the bar has no modes");
+    }
+
+    //== LISTEN is momentary, and it is not a parameter =======================
+    {
+        auto* listen = dynamic_cast<bmo::deesser::HoldButton*> (findNamed (panel, "LISTEN"));
+
+        check (listen != nullptr, who + " has no LISTEN switch");
+
+        if (listen == nullptr)
+            return;
+
+        check (bmo::indexOfParam (bmo::deesser::specs(), "listen") < 0,
+               who + " listen must not be a parameter");
+        check (! listen->getClickingTogglesState(),
+               who + " LISTEN must not latch -- it is held, not toggled");
+        check (listen->onHeld != nullptr, who + " LISTEN is not wired to anything");
+
+        std::vector<int> soloCalls;
+        auto& ctx = const_cast<bmo::ui::ModuleContext&> (panel.getContext());
+        const auto realSolo = ctx.setSolo;
+
+        ctx.setSolo = [&soloCalls, realSolo] (int b)
+        {
+            soloCalls.push_back (b);
+            if (realSolo) realSolo (b);
+        };
+
+        // Pressing and releasing, through the same callback a mouse drives.
+        listen->onHeld (true);
+        check (soloCalls.size() == 1 && soloCalls.back() == 0,
+               who + " holding LISTEN should solo the band, got "
+                   + (soloCalls.empty() ? juce::String ("no call") : juce::String (soloCalls.back())));
+        check (listen->getToggleState(), who + " LISTEN should light while held");
+
+        listen->onHeld (false);
+        check (soloCalls.size() == 2 && soloCalls.back() == -1,
+               who + " releasing LISTEN should clear the solo with -1");
+        check (! listen->getToggleState(), who + " LISTEN should go dark on release");
+
+        // And the render path, which is the only way tools/snapshot can reach
+        // it: same code, so a rendered LISTEN and a held one cannot diverge.
+        check (panel.setUiState ("listen", "on"), who + " should accept ui.listen=on");
+        check (soloCalls.size() == 3 && soloCalls.back() == 0,
+               who + " ui.listen=on should solo the band");
+        check (panel.setUiState ("listen", "off"), who + " should accept ui.listen=off");
+        check (soloCalls.size() == 4 && soloCalls.back() == -1,
+               who + " ui.listen=off should clear the solo");
+
+        check (! panel.setUiState ("listen", "maybe"),
+               who + " should refuse a listen value it does not understand");
+
+        ctx.setSolo = realSolo;
+    }
+
+    //== The band sketch draws the band it is given ===========================
+    //
+    // It has no parameter of its own and paints itself, so nothing else here
+    // would notice if it stopped following the knobs -- the same blind spot
+    // BMO DEQ's gain-reduction bar fell through. `responseDbAt` is arithmetic,
+    // not drawing, so this needs no render.
+    {
+        bmo::deesser::BandSketch* sketch = nullptr;
+
+        for (auto* child : panel.getChildren())
+            if (auto* s = dynamic_cast<bmo::deesser::BandSketch*> (child))
+                sketch = s;
+
+        check (sketch != nullptr, who + " has no band sketch");
+
+        if (sketch == nullptr)
+            return;
+
+        params.setReal (bmo::deesser::Index::shape, (float) bmo::deesser::bell);
+        params.setReal (bmo::deesser::Index::freq, 6500.0f);
+        params.setReal (bmo::deesser::Index::q, 2.5f);
+        params.setReal (bmo::deesser::Index::range, 8.0f);
+
+        // A bell is its full depth at the centre and unity well away from it.
+        checkNear (sketch->responseDbAt (6500.0f), -8.0, 0.1,
+                    who + " the sketch's bell is RANGE deep at FREQ");
+        checkNear (sketch->responseDbAt (200.0f), 0.0, 0.3,
+                    who + " the sketch's bell is unity far below the band");
+        checkNear (sketch->responseDbAt (19000.0f), 0.0, 0.5,
+                    who + " the sketch's bell is unity far above the band");
+
+        // RANGE is the depth, and moving it moves the picture.
+        params.setReal (bmo::deesser::Index::range, 16.0f);
+        checkNear (sketch->responseDbAt (6500.0f), -16.0, 0.1,
+                    who + " the sketch follows RANGE");
+
+        // FREQ is where it sits.
+        params.setReal (bmo::deesser::Index::freq, 3000.0f);
+        checkNear (sketch->responseDbAt (3000.0f), -16.0, 0.1,
+                    who + " the sketch follows FREQ");
+        check (sketch->responseDbAt (6500.0f) > -8.0f,
+               who + " the sketch's old centre should be shallower once FREQ has moved");
+
+        // A shelf is unity below its corner and its full depth above it, which
+        // is the one shape that takes everything above the corner down.
+        params.setReal (bmo::deesser::Index::shape, (float) bmo::deesser::highShelf);
+        params.setReal (bmo::deesser::Index::freq, 6500.0f);
+        params.setReal (bmo::deesser::Index::range, 8.0f);
+
+        checkNear (sketch->responseDbAt (1000.0f), 0.0, 0.5,
+                    who + " the sketch's shelf is unity below its corner");
+        checkNear (sketch->responseDbAt (20000.0f), -8.0, 1.0,
+                    who + " the sketch's shelf reaches RANGE above its corner");
+
+        params.setReal (bmo::deesser::Index::shape, (float) bmo::deesser::bell);
+        params.setReal (bmo::deesser::Index::range, 8.0f);
     }
 }
 
@@ -2797,6 +3012,7 @@ int main (int argc, char** argv)
         { "opto", +[] () -> std::unique_ptr<juce::AudioProcessor> { return createOpto(); } },
         { "dim",  +[] () -> std::unique_ptr<juce::AudioProcessor> { return createDim(); } },
         { "ltvcomp", +[] () -> std::unique_ptr<juce::AudioProcessor> { return createVcomp(); } },
+        { "deesser", +[] () -> std::unique_ptr<juce::AudioProcessor> { return createDeesser(); } },
 
         // BMO DEQ twice, once per width: standalone opens it full, and the
         // compact one is what a rack shows. Both are the same panel laid out
@@ -2909,6 +3125,23 @@ int main (int argc, char** argv)
         checkTrimKnobHeights (panel, "ltvcomp",
                               { "ATTACK", "RELEASE", "DETECT", "LOW", "HIGH" });
         checkGateMarkerCarriesItsName (panel);
+    });
+
+    // BMO Defang: a shape pair and a meter row over choice state, a band
+    // sketch that no other check can see, and LISTEN -- momentary, with no
+    // parameter behind it. Its own panel, because this one moves parameters.
+    withPanel (named ("deesser"), [] (bmo::ui::ModulePanel& panel)
+    {
+        checkEquals (panel.getWidth(), 260, "deesser panel width");
+        checkDeesserPanel (panel, "deesser");
+
+        // It takes neither shared section -- one de-esser, one section, so no
+        // rules, the same argument BMO Opto and LTV Comp make. It also has no
+        // trim knob to put in one: a band cut takes under a dB of broadband
+        // energy, so there is no makeup to give back.
+        check (panel.getRules().empty(),
+               "deesser should have no section rules, has "
+                   + juce::String ((int) panel.getRules().size()));
     });
 
     // BMO DEQ takes the output section at both widths, so its OUTPUT knob and

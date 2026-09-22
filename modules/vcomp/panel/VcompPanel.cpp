@@ -21,14 +21,14 @@ namespace
     constexpr int kSwitchHeight = ui::Tokens::switchHeight;
     constexpr int kSwitchGap    = ui::Tokens::switchGap;
 
-    constexpr int kBarRow   = 22 + LevelBar::kScaleRow;   ///< the bar, its air, and its printed scale
+    constexpr int kBarRow   = 22 + ui::LevelBar::kScaleRow;   ///< the bar, its air, and its printed scale
     constexpr int kBarGap   = 2;
 
     // The IN bar is kTagRow taller than the other two, because it is the one
     // carrying the gate and its flag needs somewhere to stand. It absorbs the
-    // difference inside itself -- see LevelBar::wellBounds -- so all three
+    // difference inside itself -- see ui::LevelBar::wellBounds -- so all three
     // wells stay evenly spaced and the block still reads as one instrument.
-    constexpr int kMeterBlock = kBarRow * 3 + kBarGap * 2 + LevelBar::kTagRow;
+    constexpr int kMeterBlock = kBarRow * 3 + kBarGap * 2 + ui::LevelBar::kTagRow;
 
     // The five detector knobs are trim knobs -- ui::ModulePanel::styleTrimKnob
     // sizes and captions them -- in two rows of three and two.
@@ -89,11 +89,11 @@ VcompPanel::VcompPanel (ui::ModuleContext ctx)
               ui::Knob::Style::character, 0.62f, context.def.accent),
       output (context.params.param (Index::output), "MAKEUP",
               ui::Knob::Style::character, 0.62f, context.def.accent),
-      inBar  ("IN",  LevelBar::Grow::rightward, kGateOffDb, 0.0f,
+      inBar  ("IN",  ui::LevelBar::Grow::rightward, kGateOffDb, 0.0f,
               [this] { return context.inputPeak ? meterDb (context.inputPeak()) : kGateOffDb; }),
-      grBar  ("GR",  LevelBar::Grow::leftward, 0.0f, kMaxReductionDb,
+      grBar  ("GR",  ui::LevelBar::Grow::leftward, 0.0f, kMaxReductionDb,
               [this] { return context.gainReductionDb ? context.gainReductionDb() : 0.0f; }),
-      outBar ("OUT", LevelBar::Grow::rightward, kGateOffDb, 0.0f,
+      outBar ("OUT", ui::LevelBar::Grow::rightward, kGateOffDb, 0.0f,
               [this] { return context.peak ? meterDb (context.peak()) : kGateOffDb; }),
       // COMPLEX is neither a bypass, a mono nor a polarity, so it takes
       // switchAlt -- the table in modules/AGENTS.md, not a free choice.
@@ -141,7 +141,7 @@ VcompPanel::VcompPanel (ui::ModuleContext ctx)
     // Per-dB density across the marks runs 0.0094, 0.022, 0.027, 0.027, 0.033,
     // 0.037 -- monotonic toward 0, which is the property to preserve if one is
     // ever moved.
-    const std::vector<LevelBar::ScaleMark> levelScale {
+    const std::vector<ui::LevelBar::ScaleMark> levelScale {
         { -60.0f, 0.00f, "-60" }, { -24.0f, 0.34f, "-24" }, { -18.0f, 0.47f, "-18" },
         { -12.0f, 0.63f, "-12" }, {  -6.0f, 0.79f,  "-6" }, {  -3.0f, 0.89f,  "-3" },
         {   0.0f, 1.00f,   "0" },
@@ -170,7 +170,7 @@ VcompPanel::VcompPanel (ui::ModuleContext ctx)
     // was the first attempt and it never showed red at all: the top 3 dB spent
     // themselves finishing a blend, so a bar reading -2 was still amber. Red
     // reaching -3 gives it the whole -3..0 to be red in.
-    const std::vector<LevelBar::ZoneStop> zones {
+    const std::vector<ui::LevelBar::ZoneStop> zones {
         { -60.0f, ui::tokens().meterQuiet },
         { -12.0f, ui::tokens().meterQuiet },
         {  -6.0f, ui::tokens().meterHigh  },
@@ -361,7 +361,7 @@ void VcompPanel::resized()
     {
         auto block = area.removeFromTop (kMeterBlock);
 
-        inBar.setBounds (block.removeFromTop (kBarRow + LevelBar::kTagRow));
+        inBar.setBounds (block.removeFromTop (kBarRow + ui::LevelBar::kTagRow));
         block.removeFromTop (kBarGap);
         grBar.setBounds (block.removeFromTop (kBarRow));
         block.removeFromTop (kBarGap);

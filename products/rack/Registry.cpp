@@ -1,4 +1,5 @@
 #include "Registry.h"
+#include "modules/deesser/Module.h"
 #include "modules/deq/Module.h"
 #include "modules/dim/Module.h"
 #include "modules/eq/Module.h"
@@ -21,6 +22,7 @@ const std::vector<const ModuleDef*>& registry()
         &dim::module(),
         &deq::module(),
         &vcomp::module(),
+        &deesser::module(),
         &reverb::module(),
     };
 

@@ -63,6 +63,12 @@ namespace
                     "diffuse", "rate", "depth", "rotation", "asymmetry" } },
         { "ltvcomp", { "amount", "gate", "output", "complex", "attack", "release",
                      "arc", "sidechain", "low_thru", "high_thru" } },
+        // BMO Defang. Five parameters and no more: attack, release, mix,
+        // lookahead, oversampling and a stereo-link switch were all considered
+        // and left out, and ADAPT's blend is an internal constant -- see
+        // modules/deesser/params.h. The order is the table in
+        // docs/deesser/11-integration-and-test-plan.md section 3.
+        { "deesser", { "freq", "q", "thresh", "range", "shape" } },
         // BMO Linger. **Thirty parameters against a slot's thirty-two lanes**,
         // so the whole schema gets a lane, none of BMO DEQ's SlotOverflow
         // machinery is needed, and two are left over. It was thirty with two
@@ -225,8 +231,8 @@ int main()
         auto rack = createRack();
         const auto& registry = rack->getRegistry();
 
-        check (registry.size() == 8,
-               "the registry holds util, eq, sat, opto, dim, deq, vcomp and reverb");
+        check (registry.size() == 9,
+               "the registry holds util, eq, sat, opto, dim, deq, vcomp, deesser and reverb");
 
         // A bank is a module's host lanes, so it stops at 32 even if the
         // module does not. Past that, its golden schema test pins the order.
@@ -278,8 +284,10 @@ int main()
             { "dim", false }, { "ltvcomp", false },
             // BMO DEQ's is post-EQ; BMO Linger's is at the point the Reverb EQ
             // acts on, and shows the dry input until there is a reverb under
-            // it (modules/reverb/dsp/DspCore.h, `eqAnalyser`).
-            { "deq", true }, { "reverb", true },
+            // it (modules/reverb/dsp/DspCore.h, `eqAnalyser`); BMO Defang's is
+            // the sibilance ribbon's, four floats a frame, enabled only while
+            // its panel is open (modules/deesser/dsp/DeesserDsp.h).
+            { "deq", true }, { "reverb", true }, { "deesser", true },
         };
 
         check ((int) std::size (kTaps) == (int) rack->getRegistry().size(),

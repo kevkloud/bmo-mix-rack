@@ -304,21 +304,32 @@ const Golden kDefaults[]
       -18.0000001899, 0.237879320979,
       -18.0000001899, 0.237879320979, -17.9999997391, 0.239933893085,
       -18.0000001899, 0.237879320979, -18.0000001899, 0.237879320979 },
+    // BMO Defang, captured on AURORA on 2026-09-22 when it merged into this
+    // branch. Not from 8fed835: the module did not exist then, so its row is
+    // the only way the widened layouts can be pinned for it at all.
+    { "deesser",
+      -18.0078987379, 0.237040400505,
+      -18.0000001899, 0.237879320979, -17.9999997391, 0.239933893085,
+      -18.0078987379, 0.237040400505, -18.0078987379, 0.237040400505 },
     // BMO Linger. **A wire, and that is the whole of what this row says
     // today**: its DSP is a marked placeholder, so the numbers are the
     // unaltered input and they are LTV Comp's, BMO DEQ's and the wire's alike.
     // They will move when the engine lands, and the row is here so that the
     // commit which moves them has to say so rather than quietly adding one.
-    // The rack rows below are unchanged by its arrival, which is the check
-    // that the pass-through really does pass through.
+    // The rack rows below are unchanged by *its* arrival, which is the check
+    // that the pass-through really does pass through. They did move when BMO
+    // Defang joined the registry, because the rack walks every registered
+    // module and the chain is a module longer; every other row above is
+    // byte-identical to 8fed835, which is what says the move is the new
+    // module and nothing else.
     { "reverb",
       -18.0000001899, 0.237879320979,
       -18.0000001899, 0.237879320979, -17.9999997391, 0.239933893085,
       -18.0000001899, 0.237879320979, -18.0000001899, 0.237879320979 },
     { "rack",
-      -17.0575148299, 0.416103243828,
-      -17.2499761789, 0.401356935501, -16.6898183011, 0.4070700109,
-      -17.0575148299, 0.416103243828, -17.0575148299, 0.416103243828 },
+      -17.4712562736, 0.361956000328,
+      -17.5538728123, 0.361777067184, -16.9709734739, 0.381855756044,
+      -17.4712562736, 0.361956000328, -17.4712562736, 0.361956000328 },
 };
 
 // BMO DEQ's swept row is loud on purpose and is not a fault: 0.63 turns all 24
@@ -355,6 +366,10 @@ const Golden kSwept[]
       -7.16919915094, 0.988553106785,
       -10.8123103775, 0.853308975697, -9.8115626611, 0.988553166389,
       -7.16919915094, 0.988553106785, -7.16919915094, 0.988553106785 },
+    { "deesser",
+      -18.1231178049, 0.234146103263,
+      -18.0548834769, 0.236055493355, -18.0545154892, 0.239385798573,
+      -18.1231178049, 0.234146103263, -18.1231178049, 0.234146103263 },
     // Identical to its defaults row, and it should be: at 0.63 of normalised
     // every one of BMO Linger's thirty parameters is somewhere else, and a
     // placeholder does not care. This is the row that will move furthest.
@@ -363,9 +378,9 @@ const Golden kSwept[]
       -18.0000001899, 0.237879320979, -17.9999997391, 0.239933893085,
       -18.0000001899, 0.237879320979, -18.0000001899, 0.237879320979 },
     { "rack",
-      -12.7330962497, 0.988554358482,
-      -12.4040392101, 0.988554239273, -12.3487493999, 0.988553583622,
-      -12.9247844558, 0.988554060459, -12.8553170515, 0.988554179668 },
+      -12.3127888787, 1.16622579098,
+      -12.0186864023, 1.15730452538, -11.9707022298, 1.15666925907,
+      -12.5249302605, 1.1564707756, -12.4651240329, 1.15827572346 },
 };
 
 const Golden* goldenFor (const Golden* table, size_t n, const char* id)

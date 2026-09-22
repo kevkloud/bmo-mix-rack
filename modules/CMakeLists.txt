@@ -9,6 +9,9 @@ function(bmo_add_module name)
 
     add_library(bmo_${name}_dsp STATIC ${ARG_DSP_SOURCES})
     target_include_directories(bmo_${name}_dsp PUBLIC ${BMO_ROOT})
+
+    # The shared filter design, linked rather than re-listed: see core/CMakeLists.txt.
+    target_link_libraries(bmo_${name}_dsp PUBLIC bmo_dsp)
     set_target_properties(bmo_${name}_dsp PROPERTIES POSITION_INDEPENDENT_CODE ON)
     if(NOT BMO_DSP_ONLY)
         target_link_libraries(bmo_${name}_dsp PRIVATE
@@ -67,7 +70,6 @@ bmo_add_module(dim
 
 bmo_add_module(deq
     DSP_SOURCES
-        ${CMAKE_CURRENT_SOURCE_DIR}/deq/dsp/Design.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/deq/dsp/DspCore.cpp
     UI_SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/deq/panel/DeqPanel.cpp
@@ -79,22 +81,26 @@ bmo_add_module(vcomp
         ${CMAKE_CURRENT_SOURCE_DIR}/vcomp/dsp/DspCore.cpp
     UI_SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/vcomp/panel/VcompPanel.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/vcomp/panel/LevelBars.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/vcomp/Module.cpp)
+
+bmo_add_module(deesser
+    DSP_SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/deesser/dsp/DspCore.cpp
+    UI_SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/deesser/panel/DeesserPanel.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/deesser/panel/Ribbon.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/deesser/Module.cpp)
 
 # BMO Linger is the third caller of the shared matched-Z filter design, after
 # BMO DEQ -- which still carries its own copy under modules/deq/dsp -- and BMO
-# Defang, which is where the five files moved to core/dsp. Every target already
-# reaches those headers through the root include path, so `core/dsp/Design.cpp`
-# is the only one of them that needs a build rule.
-#
-# It goes in DSP_SOURCES and not in bmo_core: `bmo_reverb_dsp` is a plain
-# static library that does not link bmo_core, and the JUCE-free DSP tests and
-# the measurement tools link that. In bmo_core it would also be absent from
-# every BMO_DSP_ONLY configure, which is the CI job the EQ's own tests run in.
+# Defang, which is where the five files moved to core/dsp. It does not list
+# `core/dsp/Design.cpp` here: `bmo_add_module` links every module's DSP target
+# against the `bmo_dsp` static library above, which is where that file is
+# compiled exactly once. Listing it as a source as well would compile it into
+# bmo_reverb_dsp and into every product carrying the module, and duplicate the
+# symbols bmo_dsp already provides.
 bmo_add_module(reverb
     DSP_SOURCES
-        ${BMO_ROOT}/core/dsp/Design.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/reverb/dsp/DspCore.cpp
     UI_SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/reverb/panel/ReverbPanel.cpp

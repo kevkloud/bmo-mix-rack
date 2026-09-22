@@ -66,10 +66,10 @@ if [[ ${1:-} == --snapshots ]]; then
     mkdir -p snapshots
 
     # By the name `snapshot` takes, which is the module's id rather than the
-    # product's display name: BMO Linger is `reverb`.
-    for module in eq sat util opto dim deq vcomp reverb; do
+    # product's display name: BMO Defang is `deesser`, BMO Linger is `reverb`.
+    for module in eq sat util opto dim deq vcomp deesser reverb; do
         "$snapshot" "$module" "snapshots/$module.png"
     done
 
-    "$snapshot" rack snapshots/rack.png chain=util,eq,sat,opto,dim,deq,vcomp,reverb
+    "$snapshot" rack snapshots/rack.png chain=util,eq,sat,opto,dim,deq,vcomp,deesser,reverb
 fi

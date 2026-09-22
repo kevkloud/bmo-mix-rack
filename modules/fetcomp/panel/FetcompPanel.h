@@ -91,6 +91,21 @@ private:
         -- see the class comment. */
     juce::Colour bezelFor (int voicingChoice) const;
 
+    /** Re-apply the module accent after the appearance changes.
+
+        The accent is stored in each knob rather than read at paint time, so
+        an appearance switch has to push the new one out. `ProductEditor`
+        polls the theme and repaints; this catches that repaint and updates
+        what the repaint is about to draw with. Without it the panel renders
+        correctly at whichever appearance it was constructed in and keeps that
+        accent for ever, which a snapshot would never show -- the tool
+        constructs the editor after setting the appearance. */
+    void applyAccent();
+
+    /** The appearance the accent above was last applied for. */
+    bool accentIsDark = false;
+
+
     ui::PlainKnob inputKnob, outputKnob, attackKnob, releaseKnob, mixKnob;
     ui::DynamicsMeter meter;
 

@@ -44,6 +44,30 @@ namespace
         both ends of the sweep. */
     constexpr int kAttackReleaseLabelEvery = 2;
 
+    /** BMO FET's accent on the dark plate.
+
+        The identity colour is `#5489d4`, and it stays that on the pale plate
+        where it was chosen and measured. On the dark plate it is lifted to
+        this, same hue, because `#5489d4` was picked against `#efefef` and
+        misses the dark plate badly: a cap on it reads 3.80:1 against the
+        suite's 5.87-6.84 band, and the pointer on the cap 3.97:1 against
+        6.13-7.14. At `#8fb4e6` those become 6.34:1 and 6.61:1, both mid-band,
+        and the caption goes 3.80:1 to 6.34:1 with them.
+
+        **This is the mechanism the suite already has, pointing the other way.**
+        `accentTextOn` darkens the four suite accents hard for the pale plate
+        because they were chosen to clear 7:1 on the dark one raw (Tokens.cpp,
+        "The accents need no dark variant at all"). BMO FET's blue is the
+        opposite case -- it works on the pale plate and fails on the dark -- so
+        it takes a dark variant instead of a pale one.
+
+        **Everything the module tints takes it together.** Lifting only the
+        knobs would put two blues 1.58:1 apart on one panel, which is the same
+        clash that ruled out lighting the switches in `switchAlt`. Measured on
+        AURORA, 2026-09-21; owner's call on renders the same day. */
+    constexpr juce::uint32 kDarkPlateAccent = 0xff8fb4e6;
+
+
     /** The caption size ATTACK and RELEASE are set at, against the suite's 15.
 
         They share the drive column, so each has 74 px rather than 120, and
@@ -168,6 +192,13 @@ namespace
     /** How far the stacked captions come up toward their own faces, in design
         px. See the call site: it is a grouping fix, not a tidy-up. */
     constexpr int kDriveCaptionLift = 6;
+
+    /** The module accent for the appearance now showing. See
+        kDarkPlateAccent. */
+    juce::Colour accentFor (juce::Colour identity) noexcept
+    {
+        return ui::isDarkMode() ? juce::Colour (kDarkPlateAccent) : identity;
+    }
 }
 
 FetcompPanel::FetcompPanel (ui::ModuleContext ctx)
@@ -178,17 +209,17 @@ FetcompPanel::FetcompPanel (ui::ModuleContext ctx)
       // wears, which is also what keeps it from reading as a fifth headline
       // control.
       inputKnob   (context.params.param (Index::input),   "INPUT",
-                   ui::Knob::Style::character, 0.62f, context.def.accent),
+                   ui::Knob::Style::character, 0.62f, accentFor (context.def.accent)),
       outputKnob  (context.params.param (Index::output),  "OUTPUT",
-                   ui::Knob::Style::character, 0.62f, context.def.accent),
+                   ui::Knob::Style::character, 0.62f, accentFor (context.def.accent)),
       attackKnob  (context.params.param (Index::attack),  "ATTACK",
-                   ui::Knob::Style::character, kTimeFaceScale, context.def.accent),
+                   ui::Knob::Style::character, kTimeFaceScale, accentFor (context.def.accent)),
       releaseKnob (context.params.param (Index::release), "RELEASE",
-                   ui::Knob::Style::character, kTimeFaceScale, context.def.accent),
+                   ui::Knob::Style::character, kTimeFaceScale, accentFor (context.def.accent)),
       mixKnob     (context.params.param (Index::mix),     "MIX"),
       meter (context.inputRms, context.rms, context.gainReductionDb,
-             ui::DynamicsMeter::Mode::reduction, context.def.accent,
-             ui::accentTextOn (context.def.accent, ui::tokens().meterFace)),
+             ui::DynamicsMeter::Mode::reduction, accentFor (context.def.accent),
+             ui::accentTextOn (accentFor (context.def.accent), ui::tokens().meterFace)),
       meterInButton ("IN"), meterGrButton ("GR"), meterOutButton ("OUT"),
       ratio4Button ("4:1"), ratio8Button ("8:1"), ratio12Button ("12:1"),
       ratio20Button ("20:1"), ratioAllButton ("ALL"),
@@ -274,9 +305,30 @@ FetcompPanel::FetcompPanel (ui::ModuleContext ctx)
         // toggle over a switch: the click sets the parameter and the parameter
         // lights the buttons, so host automation and a click cannot disagree.
         b->setClickingTogglesState (false);
-        b->setColour (juce::ToggleButton::tickColourId, context.def.accent);
+        b->setColour (juce::ToggleButton::tickColourId, accentFor (context.def.accent));
         addAndMakeVisible (b);
     }
+
+    // The initialiser list above already used accentFor, so record which
+    // appearance that was for: paintPanel re-applies only on a change.
+    accentIsDark = ui::isDarkMode();
+
+    // **MIX is monochrome: white on the dark plate, black on the pale one.**
+    //
+    // It used to wear the suite's utility azure, the same one every INPUT and
+    // OUTPUT outside this module wears. That was fine while the module accent
+    // was #5489d4, which the azure cleared by 1.58:1. Against the lifted dark
+    // accent it is 1.05:1 -- the same lightness -- so the two blues separated
+    // by hue alone and MIX stopped reading as a different kind of control.
+    // Owner's call on renders, AURORA 2026-09-21: take the blue off it
+    // entirely rather than hunt for a third one that clears both.
+    //
+    // setUtilityTint carries the cap, the dotted track and the caption
+    // together, and the pointer follows on its own: `pointer` is near-black on
+    // the dark plate and white on the pale one, which is exactly backwards
+    // from the cap here and therefore right.
+    mixKnob.setUtilityTint (ui::isDarkMode() ? juce::Colours::white
+                                             : juce::Colours::black);
 
     for (auto* c : std::initializer_list<juce::Component*> {
              &inputKnob, &outputKnob, &attackKnob, &releaseKnob, &mixKnob, &meter })
@@ -368,7 +420,7 @@ void FetcompPanel::showRatio (int choice)
 
 juce::Colour FetcompPanel::bezelFor (int voicingChoice) const
 {
-    return voicingChoice == blue ? context.def.accent : juce::Colours::black;
+    return voicingChoice == blue ? accentFor (context.def.accent) : juce::Colours::black;
 }
 
 void FetcompPanel::showVoicing (int choice)
@@ -385,7 +437,7 @@ void FetcompPanel::showVoicing (int choice)
     // states, so the meter's warning colour does not change meaning when the
     // voicing does.
     meter.setColours (bezelFor (choice),
-                      ui::accentTextOn (context.def.accent, ui::tokens().meterFace));
+                      ui::accentTextOn (accentFor (context.def.accent), ui::tokens().meterFace));
 }
 
 void FetcompPanel::showOversampling (int choice)
@@ -451,8 +503,41 @@ bool FetcompPanel::setUiState (const juce::String& key, const juce::String& valu
 }
 
 //==============================================================================
+void FetcompPanel::applyAccent()
+{
+    accentIsDark = ui::isDarkMode();
+
+    const auto accent = accentFor (context.def.accent);
+
+    for (auto* k : { &inputKnob, &outputKnob, &attackKnob, &releaseKnob })
+        k->setAccent (accent);
+
+    // MIX goes with it: white on the dark plate, black on the pale one. See
+    // the constructor for why it is monochrome rather than the suite azure.
+    mixKnob.setUtilityTint (accentIsDark ? juce::Colours::white
+                                         : juce::Colours::black);
+
+    for (auto* b : { &meterInButton, &meterGrButton, &meterOutButton,
+                     &ratio4Button, &ratio8Button, &ratio12Button, &ratio20Button,
+                     &ratioAllButton, &voicingBlueButton, &voicingBlackButton,
+                     &os2xButton, &os4xButton })
+        b->setColour (juce::ToggleButton::tickColourId, accent);
+
+    // The bezel is the voicing's, not the accent's, but Blue's bezel *is* the
+    // accent -- so it moves with it, and Black's stays black.
+    meter.setColours (bezelFor (lastVoicing),
+                      ui::accentTextOn (accent, ui::tokens().meterFace));
+}
+
 void FetcompPanel::paintPanel (juce::Graphics& g)
 {
+    // The appearance can change under an open editor: ProductEditor polls the
+    // theme and repaints, and this is that repaint. Done before the early
+    // return below, because the accent is the panel's whether or not the
+    // ratio bracket has been laid out yet.
+    if (ui::isDarkMode() != accentIsDark)
+        applyAccent();
+
     // Nothing to gather until resized() has run.
     if (ratio4Button.getBounds().isEmpty() || ratioAllButton.getBounds().isEmpty())
         return;
@@ -497,7 +582,7 @@ void FetcompPanel::paintPanel (juce::Graphics& g)
         bus.add ({ spineX, centreOf (b) - kBracketWeight * 0.5f,
                    kBracketEnd, kBracketWeight });
 
-    g.setColour (context.def.accent.withAlpha (0.55f));
+    g.setColour (accentFor (context.def.accent).withAlpha (0.55f));
     g.fillRectList (bus);
 }
 

@@ -62,6 +62,13 @@ by dispatched agents on AURORA, 2026-09-20, under `HANDOFF-groundwork.md`.
 14. **"Dwell" ships on the USPTO search alone** — EU, UK, WIPO and unregistered
     use unchecked, risk accepted.
 
+15. **The lane gets its own LEVEL** (2026-09-21): `-24…+24 dB`, default 0,
+    matching the suite's other level controls. `laneGain` sets the lane's tail,
+    not its loudness; without a level the thrown word's volume against the main
+    delay would be fixed, which defeats the point of an emphasis path.
+16. **The accent is the orchid `#f094e6`** (2026-09-21), measured 6.49:1 dark
+    and 1.81:1 pale off a render. It spends the last wide hue arc in the rack.
+
 **Blocking, found 2026-09-21:** `10` §3's stability premise is wrong for tape.
 The +2 dB head bump puts unity at FEEDBACK 84 %, not 97 %, and a freeze parked
 at the detent tilts into a 55 Hz boom. Bucket-brigade's compander is unchecked.

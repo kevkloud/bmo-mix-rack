@@ -122,12 +122,24 @@ at 29.5 degrees; `13` §6's warning that an orchid "may read as EQ in a rack"
 was put to Frosty with renders before he chose. `products/AGENTS.md` carries
 the allocation row.
 
+**The lane gets its own LEVEL** (Frosty, 2026-09-21). Two delays now sum into
+one wet path, and `laneGain` sets the lane's *tail*, not its *loudness* — so
+without this the thrown word's volume relative to the main delay would be fixed
+by construction, which is wrong for a feature whose whole job is emphasis.
+
+`-24…+24 dB, default 0, step 0.01`, matching every other level in the suite
+(`modules/eq` Output, `modules/opto` Level, `modules/vcomp` Output) rather than
+inventing a range. Default 0 dB is unity against the main delay's wet: the lane
+is the same loudness until asked otherwise, and since SEND ships off the module
+is silent at defaults either way.
+
+One interaction to hold in mind when it is built: the lane can self-oscillate
+in the build region, and +24 dB on top of that is a lot. The safety clip
+governs it, as it governs the main loop, but the test that proves the clip
+bounds the lane should be run at the top of LEVEL's travel, not at unity.
+
 ## Still open
 
-- Whether the lane needs its own **level** control to balance against the main
-  delay. `laneGain` sets its tail, not its loudness, so as drafted the lane's
-  volume relative to the main delay is fixed -- which seems wrong for a feature
-  whose job is emphasis.
 - The lane's **build ceiling**: the main loop caps at 1.05 by Decided item 4.
   Does the lane's build region cap there too, or higher because a violent build
   is the point?

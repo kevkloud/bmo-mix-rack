@@ -10,7 +10,7 @@ by dispatched agents on AURORA, 2026-09-20, under `HANDOFF-groundwork.md`.
 - `01-reference-behavior.md` — documented behaviour of tape echo, bucket-brigade, early digital and modern delays; target figures with confidence.
 - `02-design-approaches.md` — interpolation, time-change, feedback loop, stereo, ducking and character-modelling survey; neutral shortlist.
 - `10-dsp-spec.md` — the chosen topology: **one engine instantiated twice** (the main delay and the lane) with clean / tape / bucket-brigade modes, no oversampling, zero reported latency, dry-held-to-50% MIX law, the lane's SEND / HOLD / CHOP gates and its bipolar tail, and an in-loop FX stage per engine. Owns DSP meaning and fixed values. §11 was rewritten on 2026-09-22 (THROW, BUILD, FREEZE and VOICE are gone) and §11.3 again on 2026-09-23 (the voicing is shared; LINK is gone).
-- `11-integration-and-test-plan.md` — identity row, registration, the permanent parameter table (**26 rows, ids 0–25**, cut back 2026-09-23) and its order, and how to build the test suites. Owns ids, ranges and choice lists.
+- `11-integration-and-test-plan.md` — identity row, registration, the permanent parameter table (**27 rows, ids 0–26**, cut back and then extended with `lane_note` on 2026-09-23) and its order, and how to build the test suites. Owns ids, ranges and choice lists.
 - `12-tempo-and-tail-plumbing.md` — host tempo and tail-length plumbing, processor → rack → module; can land as its own PR first.
 - `13-panel-direction.md` — **SUPERSEDED by `15` and by the panel as built**; kept for its account of DEQ's expansion mechanism, its caption and readout conventions, and its permanent-at-ship list. Its layout, performance buttons and accent recommendation are history; the specific wrongs are marked in place (2026-09-22).
 - `14-calibration-and-listening.md` — how every CALIBRATE and DECISION value gets settled, and what freezes at ship.
@@ -21,7 +21,7 @@ by dispatched agents on AURORA, 2026-09-20, under `HANDOFF-groundwork.md`.
 
 ## Decided (Frosty, 2026-09-20)
 
-1. **SYNC** — the SYNC and NOTE slots and the note-list order are reserved in the permanent schema now; the feature ships, enabled, when the tempo plumbing (`12`) lands.
+1. **SYNC** — the SYNC and NOTE slots and the note-list order are reserved in the permanent schema now; the feature ships, enabled, when the tempo plumbing (`12`) lands. *(Items 31–33 add `lane_note` beside them, on the same switch.)*
 2. **FREEZE** — its own button and parameter slot (row 16), enabled in v1; not folded into THROW.
 3. **Maximum delay 2000 ms** (4.0 MB per instance at 192 kHz).
 4. **Feedback top of travel is loop gain 1.05**; the ~97–100% self-oscillation zone is accepted and marked on the panel. BUILD depends on it.
@@ -74,8 +74,8 @@ by dispatched agents on AURORA, 2026-09-20, under `HANDOFF-groundwork.md`.
 ## Decided (Frosty, 2026-09-21, second pass) — the table is settled
 
 17. ~~**The schema is 33 parameters**, ids 0–32, with id 32 outside the rack's
-    lanes.~~ **SUPERSEDED by item 28: it is 26, ids 0–25, and nothing sits
-    outside the lanes.** The full table is in `15-lane-redesign.md` and in `11`
+    lanes.~~ **SUPERSEDED by items 28 and 31: it is 27, ids 0–26, and nothing
+    sits outside the lanes.** The full table is in `15-lane-redesign.md` and in `11`
     §3.
 18. **VOICE and lane VOICE are cut.** LO CUT and HI CUT are already continuous
     sweeps; VOICE only added resonance on top. Cutting it also retires the
@@ -118,9 +118,10 @@ by dispatched agents on AURORA, 2026-09-20, under `HANDOFF-groundwork.md`.
 25. ~~**`fx_link` is added at id 32** and is **off-lane on purpose** — *"leave
     this separate fx link off a lane in case it needs to be cut later"* — the
     one Dwell parameter that is not rack-automatable.~~ **AMENDED by item 28**:
-    `fx_link` stays, at **id 25**, and is an **ordinary on-lane parameter** —
-    at 26 rows there is no overflow to sit in. It still ties the lane's FX trio
-    (22–24) to the main's (17–19), default on.
+    `fx_link` stays, now at **id 26**, and is an **ordinary on-lane parameter** —
+    there is no overflow for it to sit in. It moved again to **id 26** when
+    `lane_note` was added (item 31), and still ties the lane's FX trio (23–25)
+    to the main's (17–19), default on.
 26. **Sweep is cut**, leaving `fx_type` at **three** — Diffuse, Pan/Tremolo,
     Crush. **It was cut because VOICE was cut**: Sweep moved VOICE's resonant
     centre per repeat, and replacing that with a band-pass of its own inside the
@@ -133,8 +134,9 @@ by dispatched agents on AURORA, 2026-09-20, under `HANDOFF-groundwork.md`.
 
 ## Decided (Frosty, 2026-09-23) — the module is pulled back
 
-28. **The lane shares the main delay's voicing instead of mirroring it, and the
-    schema is 26, ids 0–25.** `link`, `lane_character`, `lane_stereo`,
+28. **The lane shares the main delay's voicing instead of mirroring it**, and
+    the schema fell to 26 before item 31 took it to **27, ids 0–26**. `link`,
+    `lane_character`, `lane_stereo`,
     `lane_low_cut`, `lane_high_cut`, `lane_mod_rate` and `lane_mod_depth` are
     **deleted** — seven rows — and everything after them renumbers with no
     holes. `character`, `stereo`, the cuts, the modulation and `drive` govern
@@ -145,8 +147,8 @@ by dispatched agents on AURORA, 2026-09-20, under `HANDOFF-groundwork.md`.
     fit a budget rather than on merit** — VOICE, lane DRIVE and Sweep all went
     that way. That is one module doing two modules' work. Frosty reeled it in
     rather than splitting it.
-29. **`fx_link` is on-lane and nothing is seeded.** At 26 rows every parameter
-    is rack-automatable again and Dwell uses no `SlotOverflow`. With LINK gone
+29. **`fx_link` is on-lane and nothing is seeded.** Every parameter is
+    rack-automatable again and Dwell uses no `SlotOverflow`. With LINK gone
     there is nothing to seed, and `fx_link` needs no gesture — it overwrites
     nothing, so the lane's FX values are still there when the tie releases.
 30. **Stage 2 builds one reusable delay engine instantiated twice**, not a
@@ -156,6 +158,23 @@ by dispatched agents on AURORA, 2026-09-20, under `HANDOFF-groundwork.md`.
     **in series**, so a separate throw module would catch the main delay's
     output rather than the dry signal, losing the parallel-from-dry topology
     the lane exists for.
+31. **`lane_note` is added at id 22**, the same sixteen divisions, **default
+    index 6, "1/8"**, shipping disabled with SYNC and NOTE. The schema is **27,
+    ids 0–26** — `lane_fx`, `lane_fx_type`, `lane_fx_amount` and `fx_link` shift
+    up one to 23, 24, 25 and 26 — with **five rack lanes spare**. **Why**: the
+    lane had its own TIME and no division, so the moment `12` lands the main
+    delay would lock to the grid while the lane free-ran in milliseconds and
+    drifted against it, which is exactly what the lane's rhythm cannot survive.
+32. **There is ONE sync switch (id 1) and it governs BOTH engines.** The module
+    is either on the grid or it is not; each engine then picks its own division.
+    A separate `lane_sync` was rejected: wanting the main synced while the lane
+    free-runs is a strange thing to want, and turning SYNC off for the module
+    and setting both times in milliseconds gets it.
+33. **The millisecond and note defaults agree at 120 BPM, by design.** `time`
+    375 ms ↔ `note` 1/8D, `lane_time` 250 ms ↔ `lane_note` 1/8. So **enabling
+    SYNC at 120 BPM changes nothing audible** — the silent-toggle property
+    `modules/vcomp`'s COMPLEX was built around, and the reason `lane_note`
+    defaults to 1/8 rather than copying the main's 1/8D.
 
 ## Still open after that pass
 

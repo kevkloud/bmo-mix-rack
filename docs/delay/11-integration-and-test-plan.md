@@ -59,8 +59,9 @@ is added, its whole-sample group delay comes off `D`, keeping the figure 0.
 
 ## 3. Parameters
 
-`specs()` order = `enum Index` order; all automatable. **Twenty-six parameters,
-ids 0–25** (DECIDED, Frosty 2026-09-23; `15`, README Decided item 28). The ids
+`specs()` order = `enum Index` order; all automatable. **Twenty-seven
+parameters, ids 0–26** (DECIDED, Frosty 2026-09-23; `15`, README Decided items
+28 and 31). The ids
 below are the **string ids** as `modules/dwell/params.h` declares them; `enum
 Index` carries the same rows in the same order in camel case. The golden tables
 in `tests/plugin/DwellTests.cpp` and `tests/dsp/DwellDspTests.cpp` pin it, and
@@ -81,11 +82,12 @@ main's by `fx_link`.
 `RackProcessor::kParamsPerSlot` = **32** host automation lanes, and anything past
 that would fall to `SlotOverflow` — still working in the panel, the DSP, presets
 and saved state, still automatable standalone, but with **no host lane in a
-rack**. At 26 rows **Dwell uses none of that**: the whole table is inside the
-grid with room to spare. The constraint is still the one that shaped this module
-— it is why the 2026-09-21 table cut controls to fit, which is the pressure
-Frosty removed by pulling the lane's voicing back (`15`) — but Dwell no longer
-spends a single row outside the lanes.
+rack**. At 27 rows **Dwell uses none of that**: the whole table is inside the
+grid with **five lanes spare**. The constraint is still the one that shaped this
+module — it is why the 2026-09-21 table cut controls to fit, which is the
+pressure Frosty removed by pulling the lane's voicing back (`15`) — but Dwell no
+longer spends a single row outside the lanes, and the spare five are what let
+`lane_note` be added on merit rather than argued against a budget.
 
 | # | id | Range / units / law | Default | Smoothing |
 |---|---|---|---|---|
@@ -111,19 +113,42 @@ spends a single row outside the lanes.
 | 19 | `fx_amount` | 0…100 %, lin, step 0.1 | 35 | 20 ms |
 | 20 | `lane_level` | −24…+24 dB, lin, step 0.01 | 0 | 20 ms |
 | 21 | `lane_time` | 1…2000 ms, log, step 0.01 | 250 | 10 §2's law; not smoothed |
-| 22 | `lane_fx` | bool — the lane's own FX stage | off | none — skipped, not faded |
-| 23 | `lane_fx_type` | choice, 3, the same list as `fx_type` | Diffuse | xfade |
-| 24 | `lane_fx_amount` | 0…100 %, lin, step 0.1 | 35 | 20 ms |
-| 25 | `fx_link` | bool — the lane's FX trio (22–24) follows the main's (17–19) | **on** | none — a flag; nothing is seeded (10 §11.3) |
+| 22 | `lane_note` | choice, 16, the same list as `note` | `1/8` (index 6; ships disabled) | as `lane_time` |
+| 23 | `lane_fx` | bool — the lane's own FX stage | off | none — skipped, not faded |
+| 24 | `lane_fx_type` | choice, 3, the same list as `fx_type` | Diffuse | xfade |
+| 25 | `lane_fx_amount` | 0…100 %, lin, step 0.1 | 35 | 20 ms |
+| 26 | `fx_link` | bool — the lane's FX trio (23–25) follows the main's (17–19) | **on** | none — a flag; nothing is seeded (10 §11.3) |
 
-**The lane is ids 13–16 and 20–25**, and 10 §11 owns every one of their
+**The lane is ids 13–16 and 20–26**, and 10 §11 owns every one of their
 meanings. Two rows exist because no other row could carry them: `lane_gain` is
 the lane's **tail**, `lane_level` its **loudness**, and one cannot set the other
 (`15`). **Lane DRIVE is deliberately absent**; `drive` (10) now drives both
 engines, so there is nothing to append.
 
-**One tie remains, and it is the one worth a parameter.** `fx_link` (25) ties
-the lane's FX trio (22–24) to the main's (17–19), default on. FX is the part of
+**`lane_note` (22) is the lane's half of SYNC, and there is only one SYNC.**
+`sync` (1) **governs both engines**: the module is either on the grid or it is
+not, and each engine then picks its own division — `note` (2) for the main,
+`lane_note` (22) for the lane (DECIDED, Frosty 2026-09-23). A separate
+`lane_sync` was considered and rejected: **wanting the main synced while the
+lane free-runs is a strange thing to want**, and anyone who does turns SYNC off
+for the module and sets both times in milliseconds. Without this row the lane
+would have no division at all, so the moment `12`'s plumbing lands the main
+delay would lock to the grid while the lane kept free-running in milliseconds
+and **drifted against it** — a quarter underneath while throws land on a dotted
+eighth is exactly the lane's rhythmic point, and it cannot survive one engine
+following the tempo and the other ignoring it. `lane_note` **ships disabled
+alongside SYNC and NOTE**, since `12` does not exist yet.
+
+**The millisecond and note defaults agree at 120 BPM, and that is designed.**
+`time` 375 ms against `note` 1/8D, which is 375 ms at 120; `lane_time` 250 ms
+against `lane_note` 1/8, which is 250 ms at 120. **Enabling SYNC at 120 BPM is
+therefore silent** — the same property `modules/vcomp`'s COMPLEX was built
+around, and the reason `lane_note` defaults to **1/8 rather than to the main's
+1/8D**: matching the main's division would have broken the agreement with
+`lane_time`'s own default and made the toggle audible.
+
+**One tie remains, and it is the one worth a parameter.** `fx_link` (26) ties
+the lane's FX trio (23–25) to the main's (17–19), default on. FX is the part of
 the lane's voice that stayed its own, because **a thrown word can be crushed
 against a clean main delay** — a second set of cuts and modulation could not
 earn its rows the same way, and those went (see above). **Nothing is seeded when
@@ -183,8 +208,10 @@ their order, ranges, steps, defaults, and the choice lists **with their index
 order**; new parameters append at the end. Three lists are frozen now — `note`,
 `character`, `stereo` — and `fx_type` is free only until ship. The lane reuses
 all four rather than declaring its own: two lists that have to stay identical
-are two lists that can drift apart. `sync`/`note`'s slots and `note`'s order are
-permanent now; `sync` ships disabled until 12's tempo plumbing lands. Module id
+are two lists that can drift apart, and `lane_note` reusing `note`'s sixteen is
+the clearest case of it. `sync`/`note`/`lane_note`'s slots and `note`'s order
+are permanent now; **all three ship disabled** until 12's tempo plumbing lands,
+on the one `kSyncIsEnabled` switch. Module id
 `dwell` is final (DECIDED, Frosty 2026-09-20). **Nothing has shipped**, which is
 the only reason the 2026-09-21 table could delete VOICE, renumber everything
 after it, rename three rows, re-type a fourth and shorten a choice list, and the
@@ -202,7 +229,9 @@ governs them together and MIX 0 still silences both.
 1/8D, 1/4, 1/2T, 1/4D, 1/2, 1/1T, 1/2D, 1/1` — because the index *is* the
 automation lane: a sweep must move monotonically in time, a clockwise knob must
 lengthen. Anything appended later sits at the end, out of order, forever, so the
-grid ships complete. The other three lists run least to most intervention, index
+grid ships complete. **`lane_note` reads the same sixteen at the same indices**,
+so `note` = 8 and `lane_note` = 6 are 1/8D and 1/8 on both engines and always
+will be. The other three lists run least to most intervention, index
 0 being the neutral value a corrupt state lands on: `character` least to most
 coloured; `stereo` least to most divergent; `fx_type` least to most
 intervention. 10 owns their meaning; its names win, not its order.
@@ -299,7 +328,7 @@ what is compared is the cascade's magnitude at the corners.)
    10 §3's `P_c` is doing its job: without the normalisation the detent is not
    unity on tape, and this fails.
 7. **`fx_link`, and the shared voicing it is the exception to.** With `fx_link`
-   on, two renders in which the lane's FX trio (22–24) is set to opposite
+   on, two renders in which the lane's FX trio (23–25) is set to opposite
    extremes must null bit-exactly — the lane's stage reads the main's three, so
    its own values cannot leak. Turning it off must make them reach the audio,
    which is the case the parameter exists for: **a lane crushed against a clean
@@ -329,10 +358,22 @@ gap; wet envelope isolated by nulling a `duck` = 0 render. Attack and release
 within 10 §6 ±20 %, depth tracking `duck` ±0.5 dB, `duck` = 0 bit-exact, dry
 muted gives no ducking.
 
-**h. Tempo sync.** Synthetic transport, BPM {20…999} × all 16 notes, timed by
-(a): `60000/BPM × multiplier` within ±0.1 ms, halving past the maximum per 10
-§7, never wrapping. Ramp 120→140 and jump 120→60: no click above −60 dBFS.
-Transport stopped: BPM frozen, tail still decaying.
+**h. Tempo sync, both engines.** Synthetic transport, BPM {20…999} × all 16
+notes, timed by (a): `60000/BPM × multiplier` within ±0.1 ms, halving past the
+maximum per 10 §7, never wrapping. **Run over `note` and `lane_note`
+independently, and over both at once**: with one `sync` governing both engines
+(10 §11.7), the failure to catch is one engine following the grid while the
+other free-runs — assert the lane's measured repeat period tracks `lane_note`
+and not `note`, and that neither engine is still reading its millisecond time
+while `sync` is on. Ramp 120→140 and jump 120→60: no click above −60 dBFS on
+**either** engine. Transport stopped: BPM frozen, both tails still decaying.
+
+**The silent-toggle property is its own assertion**: at **120 BPM with the
+defaults** — `time` 375 ms / `note` 1/8D, `lane_time` 250 ms / `lane_note` 1/8 —
+toggling `sync` must change **nothing audible** on either engine. Assert the
+measured periods before and after the toggle agree within (a)'s 0.05-sample
+tolerance, and that the toggle itself gives nothing above −60 dBFS. This test
+fails if anyone ever "tidies" `lane_note`'s default to match the main's 1/8D.
 
 **i. Mix law.** The dry null is **bit-exact, sample for sample** — not
 a −120 dB figure — at MIX 0, 25 and 50 % with the wet path silenced, at every
@@ -446,7 +487,7 @@ leaving three FX types, and **`g_max` is a CALIBRATE value** settled by ear in
 **On 2026-09-23 he settled the shape of the module**, which closed the LINK
 questions by removing LINK: the lane **shares** the main delay's voicing, seven
 rows are deleted, the schema is **26**, `fx_link` is an ordinary on-lane
-parameter at id 25, and stage 2 builds **one reusable engine instantiated
+parameter at id 26, and stage 2 builds **one reusable engine instantiated
 twice** (10 §11.1). The reasoning is in `15`: controls were being cut to fit 32
 lanes rather than on merit, which is a sign the module was doing two modules'
 work.

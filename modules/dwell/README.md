@@ -27,7 +27,7 @@ full in `docs/delay/10-dsp-spec.md`.
 ## What is here
 
 ```
-params.h                 ids 0-25, permanent; the four choice lists
+params.h                 ids 0-26, permanent; the four choice lists
 dsp/
   DspCore.h/.cpp           parameters in real units; one engine, held twice
   DwellDsp.h               the ModuleDsp adapter, and the zero-latency rule
@@ -58,9 +58,10 @@ installs them over whatever is in this machine's VST3 folder.
 
 ## The three things worth knowing before you change anything
 
-- **The schema is permanent, and it is twenty-six rows, ids 0–25.** They all fit
-  inside a rack slot's 32 host automation lanes, so **every parameter is
-  automatable everywhere** and nothing uses `SlotOverflow`. Ids, their order and
+- **The schema is permanent, and it is twenty-seven rows, ids 0–26.** They all
+  fit inside a rack slot's 32 host automation lanes with five spare, so **every
+  parameter is automatable everywhere** and nothing uses `SlotOverflow`. Ids,
+  their order and
   the index order of the four choice lists are frozen from the first release.
   `fx_type` is the one list still free, and only until ship — three types now,
   Sweep having gone with VOICE. There is **no VOICE, no THROW MODE, no FREEZE
@@ -70,6 +71,8 @@ installs them over whatever is in this machine's VST3 folder.
 - **Latency is 0 and the delay time is not latency.** `latencyForParams`
   returns 0 at every setting and always will; see `dsp/DwellDsp.h` for why
   reporting TIME would be wrong rather than merely conservative.
-- **SYNC and NOTE ship disabled.** The slots and NOTE's order are permanent
-  now; the feature waits for the tempo plumbing in `docs/delay/12`, which is
-  its own pull request.
+- **SYNC, NOTE and LANE NOTE ship disabled.** The slots and NOTE's order are
+  permanent now; the feature waits for the tempo plumbing in `docs/delay/12`,
+  which is its own pull request. **One SYNC governs both engines** and each has
+  its own division — and the two defaults are chosen so that enabling SYNC at
+  120 BPM is inaudible (`docs/delay/10` §11.7).

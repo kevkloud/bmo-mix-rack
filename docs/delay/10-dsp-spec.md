@@ -219,8 +219,11 @@ thirty-second; **dotted ×1.5**, **triplet ×2/3**. BPM clamped [20, 999].
 - Transport stopped: freeze BPM; audio flows, the loop decays, never mute or flush.
 - Mapped time over the §10 maximum: halve until it fits.
 
-SYNC and NOTE hold permanent schema slots now, note-list order included; SYNC
-itself ships disabled until this plumbing lands (DECIDED, Frosty 2026-09-20).
+SYNC, NOTE and **LANE NOTE** hold permanent schema slots now, note-list order
+included; all three ship disabled until this plumbing lands (DECIDED, Frosty
+2026-09-20 and 2026-09-23). **One SYNC governs both engines and each picks its
+own division from the same sixteen** — §11.7 owns that, including why there is
+no `lane_sync` and why the defaults are silent at 120 BPM.
 
 ## 8. Stereo
 
@@ -254,7 +257,7 @@ the user. Latency is 0 and nothing is oversampled, so **no dry ring is needed**.
 
 **Those two figures are written for one wet engine** and §11 adds a second: with
 the lane running at LEVEL 0 the 50 % case is dry unity plus *two* wet unities,
-roughly +4.8 dB typical and +9.5 dB worst (§11.7). And while the output is still
+roughly +4.8 dB typical and +9.5 dB worst (§11.8). And while the output is still
 never clipped, the lane at the top of LEVEL's travel can legitimately put about
 +24 dBFS on the wet bus, which no path in Dwell could before (§11.6).
 
@@ -412,7 +415,7 @@ where the character's filters depend on TIME, as bucket-brigade's do:
   ~10 dB/s, a violent swell. Whatever is heard, it is a *starting* gain and not
   a bound — §11.6's clip is the bound, at every value in that range.
 
-### 11.3 What the lane shares, and FX LINK (id 25)
+### 11.3 What the lane shares, and FX LINK (id 26)
 
 **The lane shares the main delay's voicing rather than mirroring it** (DECIDED,
 Frosty 2026-09-23). `character` (4), `stereo` (5), `low_cut` (6), `high_cut`
@@ -422,10 +425,11 @@ it. There is **no LINK parameter and no voicing mirror** — the seven `lane_*`
 voicing rows that used to exist are deleted, not defaulted-on.
 
 What the lane still has of its own is what makes it a lane rather than a copy:
-**TIME (21), LEVEL (20), the bipolar tail (14), SEND (13), HOLD (15), CHOP (16)
-and its own FX stage (22–24)**. Those are the controls a thrown word needs to
-sit differently from the repeats it lands in — a different time, a different
-loudness, a different tail, and an effect of its own.
+**TIME (21), NOTE (22), LEVEL (20), the bipolar tail (14), SEND (13), HOLD (15),
+CHOP (16) and its own FX stage (23–25)**. Those are the controls a thrown word
+needs to sit differently from the repeats it lands in — a different time in
+either unit, a different loudness, a different tail, and an effect of its own.
+`lane_note` is the lane's half of SYNC and is §11.7's subject.
 
 Three exceptions to "both engines", each for its own reason:
 
@@ -436,7 +440,7 @@ Three exceptions to "both engines", each for its own reason:
   (§11.2), which is a different control with a different law and a detent.
 - **MIX (12) governs both**, since both sum into the wet bus before it (§11.1).
 
-**FX LINK (id 25, default on) ties the lane's FX trio (22–24) to the main's
+**FX LINK (id 26, default on) ties the lane's FX trio (23–25) to the main's
 (17–19).** It is the one tie left, and the lane's FX is the one part of its
 voicing that stayed independent: **a thrown word can be crushed against a clean
 main delay**, which is worth a parameter where a second set of cuts and
@@ -595,7 +599,44 @@ the lane's as `T_lane·ceil(60 / −20·log10(min(g_lane, 0.97)))` when
 lane contributes nothing. `11` §4j's assertion — the reported tail is never
 below the measured time to −60 dBFS — then still holds (DECISION, derived here).
 
-### 11.7 What the second engine changes elsewhere in this document
+### 11.7 The lane and tempo: one SYNC, two divisions
+
+**There is one `sync` (id 1) and it governs both engines** (DECIDED, Frosty
+2026-09-23). The module is either on the grid or it is not; each engine then
+picks its own division — `note` (2) for the main delay, **`lane_note` (22) for
+the lane**, both reading §7's sixteen values at the same indices. When `sync` is
+off both engines run from their millisecond times, `time` and `lane_time`; when
+it is on both run from their divisions, mapped by §7 and re-targeted through
+§2's time-change law exactly as a knob move would be.
+
+**Why the lane needs a division at all.** Without one, the moment `12`'s
+plumbing lands the main delay locks to the grid while the lane keeps
+free-running in milliseconds — and **drifts against it**. The lane's rhythmic
+point is a quarter running underneath while throws land on a dotted eighth;
+that cannot survive one engine following the tempo and the other ignoring it.
+The gap existed because the lane was given its own TIME and nothing else
+temporal.
+
+**Why one SYNC rather than a `lane_sync`.** Wanting the main synced while the
+lane free-runs is a strange thing to want, and it is still reachable: turn SYNC
+off for the module and set both times in milliseconds. A second switch would
+buy that one case at the cost of a second mode to reason about in every tempo
+test and every preset.
+
+**The defaults agree at 120 BPM, and that is designed, not luck.** `time` is
+375 ms and `note` is 1/8D, which is 375 ms at 120 BPM; `lane_time` is 250 ms and
+`lane_note` is 1/8, which is 250 ms at 120. **Enabling SYNC at 120 BPM
+therefore changes nothing audible** on either engine — the silent-toggle
+property `modules/vcomp`'s COMPLEX was built around. It is also why `lane_note`
+defaults to **1/8 and not to the main's 1/8D**: matching the main would look
+tidier and would break the agreement with `lane_time`'s own default, making the
+toggle audible. `11` §4h asserts both halves.
+
+**`lane_note` ships disabled** with `sync` and `note`, on the one
+`kSyncIsEnabled` switch, until `12`'s plumbing lands. Nothing about the schema
+moves when it does.
+
+### 11.8 What the second engine changes elsewhere in this document
 
 Named here so they are not found by surprise; §§9 and 10 carry the corrections
 in place.
@@ -623,7 +664,7 @@ the lane's is `lane_fx`/`lane_fx_type`/`lane_fx_amount`, and everything in this
 section applies to each independently. **The two stages share no state** — no
 allpass buffer, no LFO phase, no sample-and-hold counter, no quantiser state —
 so neither can disturb the other's buffers, and "FX off is bit-identical to the
-loop without the stage" is asserted **per path** (`11` §4l). **`fx_link` (id 25)
+loop without the stage" is asserted **per path** (`11` §4l). **`fx_link` (id 26)
 ties the two stages' parameter *values* and never their state** (§11.3): even
 with both stages set identically they run from separate buffers, and that is
 what keeps the claim above true at every setting of the flag. The same holds of
@@ -726,8 +767,10 @@ why 11 §4k's heaviest-case budget is marked for re-measurement.
 | Pan / Tremolo | stepped once per repeat; AMOUNT is depth | CALIBRATE |
 | FX types | Diffuse, Pan/Tremolo, Crush — **three**; Sweep cut because VOICE was | DECIDED (Frosty, 2026-09-22) |
 | Voicing | **Shared**: `character`, `stereo`, the cuts, the modulation and `drive` govern both engines; DUCK is main-only | DECIDED (Frosty, 2026-09-23) |
-| Lane's own | TIME, LEVEL, `lane_gain`, SEND, HOLD, CHOP, its FX trio | DECIDED (Frosty, 2026-09-23) |
-| FX LINK | id 25, default on, ties the lane's FX trio to the main's; no seeding | DECIDED (Frosty, 2026-09-23) |
+| Lane's own | TIME, NOTE, LEVEL, `lane_gain`, SEND, HOLD, CHOP, its FX trio | DECIDED (Frosty, 2026-09-23) |
+| SYNC | **one switch (id 1) for both engines**; `note` (2) and `lane_note` (22) are the two divisions; no `lane_sync` | DECIDED (Frosty, 2026-09-23); §11.7 |
+| Silent SYNC toggle | 375 ms ↔ 1/8D and 250 ms ↔ 1/8 both hold at 120 BPM, so enabling SYNC there is inaudible | DECIDED (Frosty, 2026-09-23); §11.7 |
+| FX LINK | id 26, default on, ties the lane's FX trio to the main's; no seeding | DECIDED (Frosty, 2026-09-23) |
 | Engine structure | **one reusable engine instantiated twice**, so the module can be split later | DECIDED (Frosty, 2026-09-23); §11.1 |
 | FX AMOUNT default | 35 % | DECISION |
 | FX CPU ceiling | ≤ 1.3× FX-off, ≤ 1.5× heaviest | DECISION |

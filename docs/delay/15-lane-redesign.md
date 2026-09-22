@@ -76,10 +76,12 @@ He reeled it in rather than split it. **The lane now shares the main delay's
 voicing**: one CHARACTER, one STEREO, one pair of cuts, one modulation, one
 DRIVE, governing both engines. **Seven parameters are deleted** — `link`,
 `lane_character`, `lane_stereo`, `lane_low_cut`, `lane_high_cut`,
-`lane_mod_rate`, `lane_mod_depth` — and **the schema is 26, ids 0–25**,
-renumbered with no holes. At 26 the whole table is inside a rack slot's lanes
-with room to spare, **`fx_link` is an ordinary on-lane parameter**, and nothing
-is outside the grid any more. The pressure that was cutting controls is gone.
+`lane_mod_rate`, `lane_mod_depth` — and the schema fell to 26, renumbered with
+no holes; `lane_note` was then added on the same day, so **it is 27, ids 0–26**.
+The whole table is inside a rack slot's lanes with **five spare**, **`fx_link`
+is an ordinary on-lane parameter**, and nothing is outside the grid any more.
+The pressure that was cutting controls is gone — and the first thing that
+happened afterwards was a parameter being **added** on merit.
 
 **Splitting into two modules was considered and deferred, and the reason it was
 not chosen is worth recording**: two modules in a rack run **in series**, so a
@@ -94,7 +96,7 @@ instantiated twice**, precisely so the split stays cheap if Frosty wants it.
 
 ## The schema
 
-**Settled at 26 parameters, ids 0–25 — see "THE PARAMETER TABLE" below**, which
+**Settled at 27 parameters, ids 0–26 — see "THE PARAMETER TABLE" below**, which
 is authoritative. The ids are renumbered from the stage 1 checkpoint, which is
 permitted because nothing has shipped.
 
@@ -169,15 +171,15 @@ candidates cheapest first. Add to it:
   went with LINK; `fx_link` needs none, because the lane's FX values are never
   overwritten while the tie is on.
 
-## THE PARAMETER TABLE — settled 2026-09-21, amended 2026-09-22, cut back 2026-09-23, 26 parameters
+## THE PARAMETER TABLE — settled 2026-09-21, amended 2026-09-22, cut back and then extended 2026-09-23, 27 parameters
 
 The rack gives each slot **32 host automation lanes** (`RackProcessor.h`,
 `kParamsPerSlot`). Past that, `SlotOverflow` keeps a parameter working in the
 panel, the DSP, presets and saved state, but it gets no host lane and **cannot
 be automated in a rack**. **That limit is the constraint that shaped this
-module** — it is what the 2026-09-21 cuts were fighting — but at 26 rows
+module** — it is what the 2026-09-21 cuts were fighting — but at 27 rows
 **Dwell uses no overflow at all**: every parameter is rack-automatable, with
-six lanes to spare.
+**five lanes to spare**.
 
 Ids are renumbered from the stage 1 checkpoint, which is permitted because
 nothing has shipped. Carrying holes where the deleted rows were would be worse.
@@ -206,14 +208,29 @@ nothing has shipped. Carrying holes where the deleted rows were would be worse.
 | 19 | `fx_amount` | 0…100 % | 35 |
 | 20 | `lane_level` | −24…+24 dB | 0 |
 | 21 | `lane_time` | 1…2000 ms, log | 250 |
-| 22 | `lane_fx` | bool | off |
-| 23 | `lane_fx_type` | choice, 3 | Diffuse |
-| 24 | `lane_fx_amount` | 0…100 % | 35 |
-| 25 | `fx_link` | bool — ties the FX trio 22–24 to 17–19 | on |
+| 22 | `lane_note` | choice, 16, the same list as `note` | 1/8 (ships disabled) |
+| 23 | `lane_fx` | bool | off |
+| 24 | `lane_fx_type` | choice, 3 | Diffuse |
+| 25 | `lane_fx_amount` | 0…100 % | 35 |
+| 26 | `fx_link` | bool — ties the FX trio 23–25 to 17–19 | on |
 
 Rows 4–10 — CHARACTER, STEREO, the two cuts, the two modulation controls and
 DRIVE — **govern both engines** from 2026-09-23. DUCK (11) is main-engine only;
 MIX (12) governs both because both sum into the wet before it.
+
+**`lane_note` (22) was added on 2026-09-23** and takes the count to 27, ids
+0–26, with **five rack lanes spare**. The lane had its own TIME and no division,
+so the moment `12`'s plumbing landed the main delay would lock to the grid while
+the lane free-ran in milliseconds and **drifted against it** — which destroys
+the lane's rhythmic point, a quarter underneath while throws land on a dotted
+eighth. **There is one `sync` (1) and it governs both engines**; each picks its
+own division. A separate `lane_sync` was rejected: wanting the main synced while
+the lane free-runs is a strange thing to want, and turning SYNC off for the
+module gets it. **The defaults agree at 120 BPM** — 375 ms ↔ 1/8D, 250 ms ↔ 1/8
+— so enabling SYNC there changes nothing audible, the silent-toggle property
+`modules/vcomp`'s COMPLEX was built around, and the reason `lane_note` defaults
+to 1/8 rather than copying the main's 1/8D. It **ships disabled** with SYNC and
+NOTE. `10` §11.7 owns all of this.
 
 ### What was cut, and why
 
@@ -243,14 +260,16 @@ MIX (12) governs both because both sum into the wet before it.
   append. Saturation being slow and cumulative, a thrown word decaying over a
   second or two was always the path with least to work with; it now gets the
   main's setting, which is more than it had.
-- **SYNC and NOTE are kept** even though they ship disabled.
+- **SYNC and NOTE are kept** even though they ship disabled, and **LANE NOTE
+  joins them** (2026-09-23) on the same disabled switch — see the note under the
+  table.
 - **Both FX buttons are kept.** Using "amount at 0" as the bypass was considered
   and rejected: it loses the one-click A/B that makes an effect stage usable,
   and Crush's bit depth does not naturally read zero as a no-op.
-- **`fx_link` (id 25) is added rather than cut**, tying the lane's FX trio to
+- **`fx_link` (id 26) is added rather than cut**, tying the lane's FX trio to
   the main's. Added off-lane on 2026-09-22 — *"leave this separate fx link off a
   lane in case it needs to be cut later"* (Frosty) — it is **an ordinary on-lane
-  parameter from 2026-09-23**, because at 26 rows there is no overflow to sit
+  parameter from 2026-09-23**, because at 27 rows there is no overflow to sit
   in. FX is the one part of the lane's voice that stayed its own: a thrown word
   can be crushed against a clean main delay, which a second set of cuts and
   modulation could not justify in the same way.
@@ -311,6 +330,7 @@ time, 1.10 about 6 s, 1.3 a violent swell, and the safety clip bounds every one
 of them. **Sweep is cut.**
 
 **Settled on 2026-09-23**: the lane **shares** the main delay's voicing, `link`
-and the six lane voicing rows are deleted, the schema is **26 with nothing
+and the six lane voicing rows are deleted, **`lane_note` is added** with one
+SYNC governing both engines (`10` §11.7), the schema is **27 with nothing
 outside the rack's lanes**, and the DSP is **one engine instantiated twice**
 (`10` §11.1).

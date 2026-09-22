@@ -9,7 +9,7 @@
     the three choice lists in their frozen index order, and the mapping from
     spec index to named value in DwellDsp::setParams.
 
-    **The table settled at twenty-six on 2026-09-22: two engines, one
+    **The table settled at twenty-seven on 2026-09-22: two engines, one
     voicing.** The lane runs the main delay's character, stereo, cuts,
     modulation and drive rather than mirroring them, which deleted `link` and
     six `lane_` rows and renumbered everything after them.
@@ -102,33 +102,34 @@ const Row kSchema[]
     { 17, "fx",         0.0f,    1.0f,     0.0f,  0 },
     { 18, "fx_type",    0.0f,    2.0f,     0.0f,  3 },
     { 19, "fx_amount",  0.0f,  100.0f,    35.0f,  0 },
-    // The lane, ids 20-24: what it declares for itself once it runs the main
+    // The lane, ids 20-25: what it declares for itself once it runs the main
     // delay's voicing. `link` and the six `lane_` voicing rows that stood here
     // went on 2026-09-22; see modules/dwell/params.h.
     { 20, "lane_level",    -24.0f,    24.0f,     0.0f,  0 },
     { 21, "lane_time",       1.0f,  2000.0f,   250.0f,  0 },
-    { 22, "lane_fx",         0.0f,     1.0f,     0.0f,  0 },
-    { 23, "lane_fx_type",    0.0f,     2.0f,     0.0f,  3 },
-    { 24, "lane_fx_amount",  0.0f,   100.0f,    35.0f,  0 },
-    // Id 25, the last row, and the one bool in this schema that defaults
+    { 22, "lane_note",      0.0f,    15.0f,     6.0f, 16 },
+    { 23, "lane_fx",         0.0f,     1.0f,     0.0f,  0 },
+    { 24, "lane_fx_type",    0.0f,     2.0f,     0.0f,  3 },
+    { 25, "lane_fx_amount",  0.0f,   100.0f,    35.0f,  0 },
+    // Id 26, the last row, and the one bool in this schema that defaults
     // **on**: a stage nobody has asked to differ follows the main delay.
-    { 25, "fx_link",         0.0f,     1.0f,     1.0f,  0 },
+    { 26, "fx_link",         0.0f,     1.0f,     1.0f,  0 },
 };
 
 void testSchemaIsWhatItWillAlwaysBe()
 {
     const auto& specs = P::specs();
 
-    check (specs.size() == 26, "twenty-six parameters, ids 0-25");
+    check (specs.size() == 27, "twenty-seven parameters, ids 0-26");
     check (specs.size() == (size_t) P::Index::count, "the Index enum matches specs()");
-    check ((int) P::Index::count == 26, "Index::count is 26");
+    check ((int) P::Index::count == 27, "Index::count is 27");
 
     // The same shape tests/plugin/DwellTests.cpp asserts, minus the one thing
     // this suite cannot see: it is JUCE-free and does not link the rack, so
     // `kParamsPerSlot` is not in scope here. That assertion lives over there;
     // what is checked here is the count and the last row, which is what would
     // have to move for it to start failing.
-    check (std::string (specs[25].id) == P::kFxLink, "fx_link closes the table at id 25");
+    check (std::string (specs[26].id) == P::kFxLink, "fx_link closes the table at id 26");
 
     if (specs.size() != 26)
         return;

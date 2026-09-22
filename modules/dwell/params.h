@@ -110,6 +110,7 @@ inline constexpr auto kFxAmount  = "fx_amount";
 
 inline constexpr auto kLaneLevel     = "lane_level";
 inline constexpr auto kLaneTime      = "lane_time";
+inline constexpr auto kLaneNote      = "lane_note";
 inline constexpr auto kLaneFx        = "lane_fx";
 inline constexpr auto kLaneFxType    = "lane_fx_type";
 inline constexpr auto kLaneFxAmount  = "lane_fx_amount";
@@ -122,16 +123,16 @@ enum Index
     time, sync, note, feedback, character, stereo, lowCut, highCut,
     modRate, modDepth, drive, duck, mix, send, laneGain, hold, chop,
     fx, fxType, fxAmount,
-    laneLevel, laneTime, laneFx, laneFxType, laneFxAmount,
+    laneLevel, laneTime, laneNote, laneFx, laneFxType, laneFxAmount,
     fxLink,
     count
 };
 
-/** Twenty-six rows into a slot's thirty-two lanes, with six to spare. The
+/** Twenty-seven rows into a slot's thirty-two lanes, with five to spare. The
     header comment says why that matters; DwellTests asserts it against
     `RackProcessor::kParamsPerSlot` rather than against the number 32. */
-static_assert ((int) fxLink == 25, "fx_link closes the table at id 25");
-static_assert ((int) count == 26, "the table allocates ids 0-25");
+static_assert ((int) fxLink == 26, "fx_link closes the table at id 26");
+static_assert ((int) count == 27, "the table allocates ids 0-26");
 
 //==============================================================================
 // Choice lists. Index order is stored in sessions -- append only after ship.
@@ -189,6 +190,13 @@ inline constexpr const char* kStereoNames[] { "Stereo", "Ping-pong", "Dual offse
 inline constexpr const char* kFxTypeNames[] { "Diffuse", "Pan/Tremolo", "Crush" };
 
 inline constexpr int kDefaultNote = 8;   ///< "1/8D"
+
+/** The lane's own division, "1/8" -- an eighth where the main delay is a dotted
+    eighth, which is the lane's whole rhythmic point. Chosen so the two agree
+    with their millisecond defaults at 120 BPM: 1/8D is 375 ms and 1/8 is 250,
+    which is exactly what `time` and `lane_time` default to. Switching SYNC on
+    at 120 therefore changes nothing, the way vcomp's COMPLEX does. */
+inline constexpr int kDefaultLaneNote = 6;
 
 //==============================================================================
 // Fixed values the schema itself depends on. Everything else lives in the DSP.
@@ -379,6 +387,13 @@ inline const ParamSpecs& specs()
         // value the lane kept, and it kept it because a throw at the main
         // delay's own time is not a throw, it is a louder repeat.
         S::logParam (kLaneTime, "Lane Time", 1.0f, kMaxTimeMs, 0.01f, 250.0f, F::Milliseconds),
+
+        // 22 -- the lane's own note division, for when SYNC is enabled. There is
+        // ONE sync switch (id 1) and it governs both engines: the module is
+        // either on the grid or it is not. Each engine then picks its own
+        // division, which is how a quarter runs underneath while throws land
+        // on a dotted eighth. Ships disabled with SYNC and NOTE.
+        S::choiceParam (kLaneNote, "Lane Note", { std::begin (kNoteNames), std::end (kNoteNames) }, kDefaultLaneNote),
 
         // 22, 23, 24 -- the lane's FX stage, the same three rows as the main's
         // and off the same candidate list.

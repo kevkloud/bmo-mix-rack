@@ -42,6 +42,13 @@ Left out deliberately:
   the denominator matters only for bar-length divisions, which Dwell has none.
 - **Sample/second position, loop points, record state** — no consumer.
 
+**Dwell consumes this for two divisions, not one** (added 2026-09-23): the main
+delay reads `note` and the lane reads `lane_note`, off the same sixteen values,
+under **one `sync` switch governing both engines** (`10` §11.7). That changes
+nothing here — the plumbing hands down one BPM and the module maps it twice —
+but it is why this document's "what the module needs" is a tempo, not a tempo
+per delay line, and why there is no second switch to plumb.
+
 A later beat-anchored module gets its own defaulted virtual, not a wider one.
 
 ## 3. Real-time safety

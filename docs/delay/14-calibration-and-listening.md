@@ -136,6 +136,12 @@ source**, key beside the audio, audio outside the repository, 32-bit float.
 
 On paper, before any DSP: identity row, accent. Max delay, mix law/dry region,
 feedback shape and SYNC's shipped-disabled status are DECIDED (Frosty, 2026-09-20).
+**SYNC covers two divisions from 2026-09-23** — `note` for the main delay,
+`lane_note` for the lane, under **one switch governing both engines** (`10`
+§11.7) — and all three ship disabled until `12` lands. Nothing about them is
+heard before that; when it is, the round must hear **both engines on the grid
+together**, because the failure the second division exists to prevent is one
+engine locked and the other drifting.
 
 M7 and M8 then gate everything: a click or a leaking dry path corrupts every later
 round. Then M1, M3, M5 in order — the interpolator fixes the repeat tone the filters
@@ -151,5 +157,8 @@ These re-voice saved sessions if they move: parameter ranges and curves (FEEDBAC
 law, MOD DEPTH scaling, TIME range, max delay, **LANE GAIN's law about its
 detent**), note-value multipliers, the mode list and its order, **`fx_type`'s
 three entries and their index order**, the dual-offset ratio while fixed, the
-safety-clip ceiling, the mix law and its dry region. After ship they move behind
+safety-clip ceiling, the mix law and its dry region. **Add the two note
+defaults**: `note` 1/8D against `time` 375 ms and `lane_note` 1/8 against
+`lane_time` 250 ms are what make enabling SYNC silent at 120 BPM (`10` §11.7),
+so moving either default moves what a saved session does when it is toggled. After ship they move behind
 a version gate, never in place. *(VOICE Q is struck: there is no VOICE.)*

@@ -5,14 +5,14 @@ What this folder cannot be read off its own code. The specification is in
 
 ## The schema is permanent, and three things are frozen together
 
-`params.h` holds **ids 0–25 — twenty-six parameters**, which
+`params.h` holds **ids 0–26 — twenty-seven parameters**, which
 `docs/delay/11-integration-and-test-plan.md` §3 and `docs/delay/15-lane-redesign.md`
 both list. **Every one of them is rack-automatable.** A rack slot carries
 `RackProcessor::kParamsPerSlot` = 32 host lanes, and anything past that would
 live in `SlotOverflow`: working in the panel, the DSP, presets and saved state,
 automatable standalone, but **with no host automation lane in a rack**.
-**Dwell uses none of that** — 26 rows fit inside the grid with six lanes to
-spare. The limit is still worth knowing, because it is the constraint that
+**Dwell uses none of that** — 27 rows fit inside the grid with **five lanes to
+spare**. The limit is still worth knowing, because it is the constraint that
 shaped this module: controls were being cut to fit it until Frosty pulled the
 lane's voicing back on 2026-09-23 (`docs/delay/15`, "The module was pulled
 back"). Frozen from the first release: **the
@@ -81,13 +81,24 @@ hold after it.
 
 ## What ships disabled, and what does not
 
-- **SYNC and NOTE ship disabled.** The slots and NOTE's order are permanent
-  from this release (DECIDED, Frosty 2026-09-20), but no host tempo reaches a
-  `ModuleDsp` today. That plumbing is `docs/delay/12` — processor →
-  `ModuleEngine` → `ModuleDsp::setTempo` — and it is **its own workflow and its
-  own pull request**, not part of adding this module. `kSyncIsEnabled` in
-  `params.h` is the one switch: the DSP ignores both parameters while it is
-  false and the panel shows the pair disabled.
+- **SYNC, NOTE and LANE NOTE ship disabled.** The slots and NOTE's order are
+  permanent from this release (DECIDED, Frosty 2026-09-20 and 2026-09-23), but
+  no host tempo reaches a `ModuleDsp` today. That plumbing is `docs/delay/12` —
+  processor → `ModuleEngine` → `ModuleDsp::setTempo` — and it is **its own
+  workflow and its own pull request**, not part of adding this module.
+  `kSyncIsEnabled` in `params.h` is the one switch: the DSP ignores all three
+  parameters while it is false and the panel shows them disabled.
+- **There is one SYNC and it governs both engines.** `note` (2) is the main
+  delay's division, **`lane_note` (22) is the lane's**, off the same sixteen
+  values; there is deliberately **no `lane_sync`** (`docs/delay/10` §11.7).
+  Without `lane_note` the lane would free-run in milliseconds while the main
+  locked to the grid, and drift against it — which is the one thing the lane's
+  rhythm cannot survive.
+  **Do not "tidy" `lane_note`'s default.** It is **1/8**, not the main's 1/8D,
+  because 1/8 is 250 ms at 120 BPM and `lane_time` defaults to 250 ms — just as
+  `note` 1/8D is 375 ms against `time`'s 375. **That agreement is what makes
+  enabling SYNC at 120 BPM inaudible**, the property `modules/vcomp`'s COMPLEX
+  was built around, and `11` §4h asserts it.
 - **FREEZE, THROW MODE, BUILD and VOICE do not exist.** They were cut on
   2026-09-21 (`docs/delay/15`, README items 10–12 and 18) and nothing in this
   module should name them. What replaced THROW and FREEZE is **the lane**: a
@@ -137,8 +148,8 @@ host bar (`ui::ExpandButton`): Dwell's panel has to be able to ask its host to
 flip the session-only flag. That is panel work, in `panel/`, not in
 `Module.cpp`.
 
-**`fx_link` (id 25) is the one tie left, and it has no gesture.** It makes the
-lane's FX trio (22–24) follow the main's (17–19), default on, and while it is on
+**`fx_link` (id 26) is the one tie left, and it has no gesture.** It makes the
+lane's FX trio (23–25) follow the main's (17–19), default on, and while it is on
 the lane's three values are **ignored, not overwritten** — so they are still
 there when it releases and **nothing is seeded, in either direction**
 (`docs/delay/10` §11.3). The seed-on-unlink machinery this file used to warn

@@ -52,16 +52,17 @@ namespace
         { P::kFx,        "FX",           0.0f,     1.0f,     0.0f,  2 },
         { P::kFxType,    "FX Type",      0.0f,     2.0f,     0.0f,  3 },
         { P::kFxAmount,  "FX Amount",    0.0f,   100.0f,    35.0f,  0 },
-        // The lane, ids 20-24: what it declares for itself once it shares the
+        // The lane, ids 20-25: what it declares for itself once it shares the
         // main delay's voicing. Its gates and its tail are up at 13-16, and
         // the seven rows that used to stand here -- `link` and six `lane_`
         // voicing values -- went on 2026-09-22 (modules/dwell/params.h).
         { P::kLaneLevel,     "Lane Level",      -24.0f,    24.0f,     0.0f,  0 },
         { P::kLaneTime,      "Lane Time",         1.0f,  2000.0f,   250.0f,  0 },
+        { P::kLaneNote,      "Lane Note",         0.0f,    15.0f,     6.0f, 16 },
         { P::kLaneFx,        "Lane FX",           0.0f,     1.0f,     0.0f,  2 },
         { P::kLaneFxType,    "Lane FX Type",      0.0f,     2.0f,     0.0f,  3 },
         { P::kLaneFxAmount,  "Lane FX Amount",    0.0f,   100.0f,    35.0f,  0 },
-        // Id 25, the last row, and the only parameter in this schema whose
+        // Id 26, the last row, and the only parameter in this schema whose
         // default is on.
         { P::kFxLink,        "FX Link",           0.0f,     1.0f,     1.0f,  2 },
     };
@@ -76,7 +77,7 @@ int main()
         auto proc = createDwell();
         checkSchema (*proc, kSchema);
         check (P::specs().size() == (size_t) P::Index::count, "the Index enum matches specs()");
-        check (P::specs().size() == 26, "twenty-six parameters, ids 0-25");
+        check (P::specs().size() == 27, "twenty-seven parameters, ids 0-26");
 
         //== Every parameter gets a rack automation lane again ================
         //
@@ -106,8 +107,8 @@ int main()
         // Said the other way, because the margin is the point rather than a
         // coincidence: the cut left room to append, so the next parameter can
         // be argued on merit instead of against the ceiling.
-        check (kLanes - P::specs().size() == 6,
-               "six of a rack slot's lanes are still spare");
+        check (kLanes - P::specs().size() == 5,
+               "five of a rack slot's lanes are still spare");
 
         check (std::string (P::specs().back().id) == P::kFxLink,
                "fx_link is the last row -- appended-to-the-end is the only free move after ship");

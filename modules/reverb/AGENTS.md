@@ -12,9 +12,10 @@ tidy one to match the other later — that breaks every saved session.
 The spec is `docs/reverb/`. Read `11-integration-and-test-plan.md` section 4
 first: it carries the schema table, which is the authoritative copy.
 `10-dsp-spec.md` section 6 lists the same thirty names in the same order, and
-the two were reconciled before `params.h` was written. **Both still say thirty
-and the schema now says twenty-four** — the control-set trim below cut six and
-did not edit `docs/`, so read this file for what the schema is.
+the two were reconciled before `params.h` was written. **Both still say thirty,
+and the schema says thirty, and they are not the same thirty** — the
+control-set trim below cut six and the Reverb EQ added six others, neither
+edited `docs/`, so read this file for what the schema is.
 
 **The DSP is a marked placeholder.** `dsp/DspCore.h` passes audio through
 untouched, produces no tail, and reports zero latency — which, unlike the
@@ -37,22 +38,125 @@ taps to raise density is what goes metallic on vocals and drums. The density
 stage is feed-forward — parallel short delays recombined through a 4×4
 orthogonal butterfly — so it has no poles and cannot ring.
 
-## Twenty-four parameters, and eight spare lanes
+## Thirty parameters, and two spare lanes
 
 **The control-set trim concluded on 2026-09-21 and cut six.** Frosty opened it
 that morning — "I'm not sure all these controls will survive trim" — and it
 closed the same day, before anything shipped, which is what made it free.
 
-`type`, `size`, `predelay`, `decay`, `feed`, `damplo`, `damphi`, four EQ,
+**Then the Reverb EQ spent six of the eight lanes it bought, the same day.**
+`eqfilter`, `eqloq`, `eqmidfreq`, `eqmid`, `eqmidq` and `eqhiq` turned two
+shelves into a three-node parametric. The count is back to thirty, a rack
+slot's thirty-two lanes leave **two spare**, and none of BMO DEQ's
+`SlotOverflow` machinery is needed.
+
+`type`, `size`, `predelay`, `decay`, `feed`, `damplo`, `damphi`, **ten EQ**,
 `ermode`, `erdensity`, `erspread`, `erhicut`, `ervariation`, `moddepth`,
 `modrate`, `width`, `inhicut`, `erlevel`, `verblevel`, `mix`, `output`.
-Permanent and append-only from the first ship. The relative order is what it
-always was; the six that went took their indices with them and everything after
-each one closed up.
+Permanent and append-only from the first ship.
+
+### The EQ change is purely additive, and its placement was free exactly once
+
+**No parameter was removed and no id changed meaning.** `eqlofreq`/`eqlo`
+already were node 1's frequency and gain and `eqhifreq`/`eqhi` node 3's, with
+their ranges and defaults untouched, so a state file written against the
+twenty-four restores every value it holds.
+
+**The six ids went beside their siblings rather than on the end** — the EQ
+block reads `eqfilter`, then each node as freq/gain/Q — which is a readability
+choice that cost the lane order. A session stores plain values keyed by id and
+would have survived a reshuffle either way, but **a rack slot maps host lane N
+to parameter N** (`core/rack/SlotParameter.h`), so every lane after `damphi`
+moved. Nothing errors and nothing warns. It was free because nothing has
+shipped; **after first ship the only legal move is appending at the end**, and
+the next reader does not get this choice. `tests/plugin/RackTests.cpp`'s bank
+table is the second copy of the lane order, so changing it fails a build.
+
+**Two spare lanes is tight, and that is the trade.** Freeze, a ducking control
+and the tempo-sync pair `syncon`/`syncdiv` are four candidates for two lanes
+and will now have to be argued against each other. The case for spending it
+here is that the trim's own justification leaned on this EQ — the owner's
+sentence was "the frequencies should be handled by the onboard EQ" — and an EQ
+with no Q and no middle band could not honour it.
 
 > `docs/reverb/` still lists thirty, in both `10-dsp-spec.md` section 6 and
-> `11-integration-and-test-plan.md` section 4. The trim did not edit `docs/`.
-> When the two are reconciled, this table is the record of what changed.
+> `11-integration-and-test-plan.md` section 4. Neither change edited `docs/`,
+> and the two thirties are **not the same thirty**. When they are reconciled,
+> this file is the record of what changed.
+
+### The three EQ nodes, and why their shapes are fixed
+
+Node 1 a low shelf, node 2 a bell, node 3 a high shelf — **fixed, with no shape
+selector anywhere.** Frosty's explicit call. `juce::AudioParameterChoice`
+normalises as index/(n−1), so a per-node shape list could never be revised
+after ship without remapping every automation point written on it; fixed shapes
+give a real three-band parametric with nothing permanent to regret, and BMO DEQ
+is already the module for arbitrary shapes.
+
+`eqfilter` is **a bool, and per EQ rather than per node**, which is what makes
+it a mode and not a shape. On, node 1 becomes a low cut and node 3 a high cut.
+FREQ and Q carry over unchanged in both modes — a cut has a corner and a
+resonance — so the same nine parameters serve both, and **GAIN stops reaching
+the two outer nodes**, because `dsp::hasGain` is false for a cut and the
+prototype has nowhere to put it. Node 2's bell is untouched either way.
+
+Ranges follow the suite. The two outer Qs stop at `kShelfMaxQ` = 2 rather than
+travelling to a bell's 40 and doing nothing over 2 — BMO DEQ clamps to the same
+number behind a wider knob because a DEQ band's shape is a choice, and here it
+can never be. The middle node keeps DEQ's own bell range, 0.1–40, and spans
+**20 Hz – 20 kHz**, deliberately wider than its neighbours: node 1 stops at
+1.6 kHz and node 3 at 2.1 kHz, so without it the Reverb EQ could not reach the
+presence region at all. Every gain defaults to 0 dB and `eqfilter` to off, so
+the EQ is the identity at its defaults — asserted as an exact zero rather than
+a tolerance, which is `tests/dsp/OptoDspTests.cpp`'s house rule.
+
+### Two high cuts, and the captions are what tell them apart
+
+The module now has **two**, and they are different controls in different
+places. Do not merge them and do not rename either to something that drops its
+prefix:
+
+| control | caption | where | shape |
+| --- | --- | --- | --- |
+| `inhicut` | **IN HI-CUT** | on the input, ahead of the EQ and ahead of both generators, over a fixed 20 Hz high-pass | one pole, no Q, no gain |
+| `eqhifreq` with `eqfilter` on | **EQ HIGH FREQ** | node 3 of the Reverb EQ | second-order, with a Q |
+
+IN HI-CUT darkens *what the room is given*; node 3 darkens *the room*. The "EQ"
+prefix on the nine EQ captions and its absence on the tenth is what carries it,
+and the EQ screen says it a second way — the three EQ nodes are drawn as filled
+markers and IN HI-CUT as an **open** one, because it is in series with the EQ
+rather than part of it. `checkReverbPanel`'s caption list holds both words so a
+reviewer sees them together.
+
+### The filter design is reproduced, not stacked on
+
+The matched-Z design moved out of BMO DEQ into `core/dsp` when BMO Defang
+became its second caller. BMO Linger is the third, and that branch is **not
+merged** — so the five files were copied byte-identically rather than branched
+from, which is the house rule. Verified with `git hash-object` on AURORA:
+
+| file | blob |
+| --- | --- |
+| `core/dsp/Biquad.h` | `c7d278b4bb46cdd678e5c1bd2e9e42d40779145f` |
+| `core/dsp/Design.h` | `001300c1407e75c8a8eab3b7dc3963298051e953` |
+| `core/dsp/Design.cpp` | `26d5b12e17449fcaccb26495b5ee4370f926afcf` |
+| `core/dsp/Prototype.h` | `ee680331ce5eb8ef17eaa86c6c8d003afd6a9e04` |
+| `core/dsp/Svf.h` | `8680157d75e90f1b550d98a47c0b825962dd525e` |
+
+**Nothing in those five was edited.** Everything BMO Linger needed on top is in
+`dsp/EqNodes.h`, a separate file: the three nodes, the shape table, the
+gain-does-not-reach-a-cut rule and the summed response. `core/dsp/Design.cpp`
+is the only one of the five that needs compiling, and it is listed in the
+module's `DSP_SOURCES` rather than in `bmo_core` — `bmo_reverb_dsp` is a plain
+static library that does not link `bmo_core`, and the JUCE-free tests and the
+measurement tools link that.
+
+**`EqNodes.h` is the one place the EQ's response is computed**, and both the
+panel's curve and the engine go through it. Until 2026-09-21 the screen drew
+the shelves as a hand-rolled `g / (1 + (f/f0)²)` and marked itself as not
+claiming to be the shipped filter, because there was none to be wrong about.
+There is one now, so the sketch became a measurement — which is `TapTables.h`'s
+arrangement for the ER picture, applied to this one.
 
 ### The six, and on whose authority
 
@@ -62,7 +166,7 @@ constant in the per-type block instead of vanishing.
 
 | Cut | Whose call | Why |
 |---|---|---|
-| `attack` | **Owner** | Verbatim: attack should be type dependent. The tail's bloom contour. |
+| `attack` | **Owner** | Verbatim: attack should be type dependent. The tail's onset contour. |
 | `decayshape` | **Owner** | Same sentence. The gated/linear curve. |
 | `damplofreq` | **Owner** | "The frequencies should be handled by the onboard EQ." A knee is a property of a room, not a mix decision; `damplo` survives as a pure decay multiplier over it. |
 | `damphifreq` | **Owner** | The same argument, and it spanned 1000–2100 Hz — **1.07 octaves**, which the trim review called a constant with a knob on it. |
@@ -92,10 +196,11 @@ trim is the fresh Room that was there before it, and the cut is not a voicing
 change hiding inside a control change. `kSchema` in `tests/plugin/ReverbTests.cpp`
 is where that is pinned.
 
-**A rack slot shows a host 32 lanes.** Twenty-four fits with **eight spare**,
-where thirty fitted with two — so a later Freeze, a ducking control and the
-tempo-sync pair `syncon`/`syncdiv` no longer have to be argued against each
-other for the last lane. None of BMO DEQ's `SlotOverflow` machinery is needed.
+**A rack slot shows a host 32 lanes.** Thirty fits with **two spare**. The trim
+briefly made it twenty-four with eight and the Reverb EQ spent six of those the
+same day, so a later Freeze, a ducking control and the tempo-sync pair
+`syncon`/`syncdiv` are back to being argued against each other — four
+candidates for two lanes. None of BMO DEQ's `SlotOverflow` machinery is needed.
 The headroom is asserted, so spending it still takes an edit and an argument.
 
 There is **no `voicing` parameter**. Reference B's three colour eras are a
@@ -345,11 +450,66 @@ levels, MIX and the TYPE dropdown.
 - **Persistent, on every page:** SIZE, PRE-DELAY, DECAY.
 - **EARLY (6):** ER MODE, DENSITY, ER SPREAD, ER HI-CUT, VARIATION, SOURCE.
 - **TAIL (5):** LOW x, HIGH x, MOD DEPTH, MOD RATE, WIDTH.
-- **TONE (6):** EQ LOW FREQ, EQ LOW, EQ HIGH FREQ, EQ HIGH, IN HI-CUT, OUTPUT.
+- **EQ (12):** EQ LOW FREQ / EQ LOW / EQ LOW Q, EQ MID FREQ / EQ MID / EQ MID Q,
+  EQ HIGH FREQ / EQ HIGH / EQ HIGH Q, then FILTER, IN HI-CUT, OUTPUT.
 - **Always on, at the foot:** ER, REVERB, MIX, and TYPE in the corner. The two
   faders are the thesis, and the tail-off depth-placement technique has to be
-  reachable from whatever page you are on. 3 + 6 + 5 + 6 + 4 is the whole
+  reachable from whatever page you are on. 3 + 6 + 5 + 12 + 4 is the whole
   schema, and `checkReverbPanel` asserts that sum.
+
+**The third page is captioned EQ and was TONE.** Frosty's call, 2026-09-21,
+when the two shelves became a three-node parametric: TONE named a direction and
+the page is an equaliser. The render key moved with it —
+`ui.page=early|tail|eq` — and **`tone` is now refused like any other unknown
+value** rather than accepted as a synonym, so a render script that still passes
+it stops with an error instead of quietly producing an EARLY page labelled
+TONE. That is the same argument the refusal itself rests on.
+
+**Four rows are reserved in the cluster on every page**, because EQ needs four
+and the block must not change height when the page turns. EARLY's and TAIL's
+two rows are **centred** in the reserved block rather than packed to its top: a
+lighter page should read as a lighter page, not as a page with a hole under it.
+
+### What the two extra cluster rows cost, and where it came from
+
+688 px of content was already fully allocated, so two more rows — 132 px — had
+to come out of the other blocks. Every one of them is a knob plus its caption
+plus the minimum air, measured, except the screen.
+
+| block | was | is |
+| --- | --- | --- |
+| screen | 170 | **105** |
+| cluster row | 74 (knob 54) | **66** (knob 46) |
+| persistent row | 100 (knob 68) | **80** (knob 60) |
+| level strip | 100 | **80** |
+| cluster rows reserved | 2 | **4** |
+
+`kContentHeight` lands on 640 against the 680 a panel's content area has, so
+the five inter-block gaps are `Tokens::switchGap` = 8 and the face fits to the
+pixel. **There is no slack left**: a thirteenth control on any page is another
+row, and another row comes out of the screen again.
+
+**No caption pass was needed and none was done.** A caption is drawn in the
+full 120 px cell rather than against the knob, so shrinking a knob costs a
+caption nothing — the same property that made 380 free at three columns.
+Tightest margin on the face is REVERB at **5.4 px** in the foot's 80 px cell,
+unchanged by any of this; tightest on the new page is EQ HIGH FREQ at 10.0 px.
+
+**OUTPUT stayed on the EQ page rather than joining the foot.** Moving it was
+allowed and would have made the page eleven — still four rows, 3 + 3 + 3 + 2 —
+so it would have bought nothing vertically and cost the foot its shape: the
+foot already holds four, and a fifth cell would put a 60 px knob and the TYPE
+dropdown in 72 px cells. Twelve fills four rows exactly.
+
+**FILTER is the only switch on this face.** LINK ER was the last one and went
+with `prelink` in the trim; this is not its replacement. It is a
+`ui::SwitchButton` at the suite's 70 × 26, centred in its cell so its middle
+lands on the line the two knobs beside it share, and tinted with the module's
+accent. While it is on, EQ LOW and EQ HIGH grey out through
+`PlainKnob::setKnobEnabled` — **the parameters are never written**, so
+switching FILTER off gives both shelves their gains back. A mode must not eat
+an edit, and `eqGainReachingDesign` is the same decision one folder over in the
+DSP, which is why the look and the sound cannot disagree about it.
 
 ### 380, three columns, and why the numbers are exact
 
@@ -361,18 +521,18 @@ on this face was measured against a 120 px cell and still is, "EQ HIGH FREQ" at
 10 pt included. 380 is also a multiple of 20, like every other panel in the
 suite. Anything narrower is a caption argument; anything wider is unearned.
 
-**Two rows on every page, which is what four columns used to buy.** EARLY is
-3 + 3, TAIL is 3 + 2 and TONE is 3 + 3, so the block under the keys does not
-change height when the page does — the one thing that would make paging feel
-like switching panels rather than turning a page.
+**A fixed block on every page, which is what four columns used to buy.** It was
+two rows while EARLY was 3 + 3, TAIL 3 + 2 and TONE 3 + 3; the EQ page is
+twelve, so it is now four reserved rows and the short pages centre in them. The
+block does not change height when the page does — the one thing that would make
+paging feel like switching panels rather than turning a page.
 
-**WIDTH moved from TONE to TAIL to buy it.** After the cuts TONE held seven —
-four EQ rows, IN HI-CUT, WIDTH and OUTPUT — and seven over three is 3 + 2 + 2,
-a third row on one page only; a fixed three-row block would have cost the screen
-74 px of its 170. WIDTH is M/S gain **on the tail only**, and the TONE page
-draws a frequency response of exactly three nodes that WIDTH is not one of, so
-the move is right on its own terms and not only on the arithmetic. OUTPUT stayed
-on TONE rather than joining the foot: the foot already has four.
+**WIDTH moved from the third page to TAIL** during the cuts, when that page
+held seven — four EQ rows, IN HI-CUT, WIDTH and OUTPUT — and seven over three
+is 3 + 2 + 2, a third row on one page only. WIDTH is M/S gain **on the tail
+only**, and the EQ page draws a frequency response that WIDTH is not part of,
+so the move was right on its own terms and not only on the arithmetic. It stays
+on TAIL now that the EQ page is four rows anyway.
 
 **No row holds one control**, and TAIL's second row is two centred in the three
 for the same reason MIX stopped having a row of its own.
@@ -412,16 +572,16 @@ mix panel is scanned in rows against its neighbours in the rack. Three keys over
 three columns now fill the row exactly, where they used to be three of four
 centred.
 
-**The page is UI state, not a parameter**: `ui.page=early|tail|tone` through
+**The page is UI state, not a parameter**: `ui.page=early|tail|eq` through
 `ModulePanel::setUiState`, the hook BMO Opto's meter mode and BMO DEQ's band
-already use. `specs()` is twenty-four with eight spare host lanes, and which
-page somebody is looking at is **not worth one even now that there are eight**
-— the trim bought room for controls, not for UI state — and does not belong in
-a session. **An unknown value is refused rather than defaulted**, for DEQ's
-reason: a render labelled TONE that shows EARLY is worse than no render.
+already use. `specs()` is thirty with two spare host lanes, and which page
+somebody is looking at is **least of all worth one now that there are two** —
+and does not belong in a session either way. **An unknown value is refused
+rather than defaulted**, for DEQ's reason: a render labelled EQ that shows
+EARLY is worse than no render.
 
 **One number on this panel has no control under it.** ATTACK lost its knob in
-the trim, so the bloom is printed on the TAIL page's readout line and nowhere
+the trim, so the onset is printed on the TAIL page's readout line and nowhere
 else, read off `TypeConstants::attack` through the same `constantsFor` call the
 engine makes. TYPE is therefore one of the parameters the panel redraws the
 screen on, even though nothing draws TYPE itself.
@@ -496,10 +656,14 @@ the module's accent and not in LCD green**: a second hue on one module is the
 failure the accent audit was run to find, and the dark face is a value rather
 than a hue.
 
-**Parameter-driven only. No metering, no `AnalyserTap`, none of
-`ModuleContext`'s meter callbacks.** Neither doc asks this module for a meter,
-a reverb has no gain reduction to report, and the absence is a decision rather
-than a gap to be filled in later.
+**EARLY and TAIL are parameter-driven only** — no tap, no FFT, no timer, and
+none of `ModuleContext`'s meter callbacks. A reverb has no gain reduction to
+report and no part to hear on its own, and those two absences are permanent.
+
+**The EQ page is the exception, as of 2026-09-21**: it draws a spectrum behind
+its curve, at the owner's request, and it is the one thing on this panel that
+is not drawn from parameters. See "The analyser is real and the signal under it
+is not yet" below.
 
 **EARLY — linear time, 0 to the last tap plus a tenth.** The image-source taps
 as discrete stems from a baseline. What this replaced was a symmetric envelope
@@ -514,27 +678,89 @@ visibly decay draws as a comb of near-equal lines.
 **TAIL — logarithmic time, 1 ms to 30 s**, a deliberate departure from `11`
 section 5's proposed 0–500 ms window, and the old version's worst fault: it put
 a 20 s decay in a fixed 0–500 ms window and most of the box was dead. A linear
-window wide enough for the tail puts the whole 0–120 ms bloom inside the first
+window wide enough for the tail puts the whole 0–120 ms onset inside the first
 two pixels. On a log axis 1–100 ms keeps 45 % of the width. The ends are chosen
 rather than round: 1 ms is where a reflection stops fusing with the direct
 sound, and 30 s is `bmo::kMaxTailSeconds` — the ceiling on the tail this module
 *and the rack it sits in* will ever report — so the right-hand edge is the same
 number the host is told.
 
-**TONE — logarithmic frequency, 20 Hz to 20 kHz**, level linear over ±24 dB.
-Drawn as a **3-node serial EQ**: the low shelf, the high shelf and the input
-high-cut summed in dB as one curve, with a marker on the curve at each of the
-three corners. The shelves are drawn first-order and the cut one-pole, and
-**neither is claimed to be the shipped filter** — `dsp/` is a placeholder and
-`10` section 2 gives the shelves no order, so a second-order curve here would
-be a guess presented as a measurement. `LingerScreen::responseDbAt` is the one
-place that changes when the filters land.
+**EQ — logarithmic frequency, 20 Hz to 20 kHz**, level linear over ±24 dB.
+**Four marked nodes over one summed curve.** Three are the Reverb EQ's, drawn
+by `EqNodes::design` — which is `dsp::designMatched`, which is the code the
+engine will run — and the fourth is IN HI-CUT's one pole, which is the screen's
+own arithmetic because nobody has chosen an order for it. The three EQ nodes
+are filled markers and IN HI-CUT is open; see "Two high cuts" above for why the
+picture has to distinguish them.
+
+The sketch/measurement caveat this paragraph used to carry is **closed**:
+`LingerScreen::responseDbAt` is the shipped design now, not a first-order
+stand-in for one.
+
+**FILTER reads as cuts three ways at once**, so it cannot be mistaken for a
+shelf at a lot of gain. The nodes really are `Shape::lowCut` and
+`Shape::highCut`, so the curve dives off the bottom of the ±24 dB axis at each
+end instead of levelling onto a shelf. The area between the curve and the 0 dB
+line is washed in — a lens either side of a shelf, a pair of wedges running to
+the floor for a cut — and it is the **same** drawing in both modes, no branch,
+so nothing has to be kept in step. And the readout prints "LO CUT" / "HI CUT"
+where it printed "LOW" / "HIGH", which is the one of the three a test can read
+without rendering.
 
 **The line under the screen carries a reading for the page**: the tap count and
-the ER window, the decay and where the tail ends, or the three crossover
-points. It is ASCII, it is the only number printed anywhere on the panel, and
-`LingerScreen::readout` is public so a test can read what a page says it is
-showing.
+the ER window; the decay, the onset and where the tail ends; or the three EQ
+node corners with the mode in the words. It is ASCII, it is the only number
+printed anywhere on the panel, and `LingerScreen::readout` is public so a test
+can read what a page says it is showing.
+
+**The TAIL line says ONSET and said BLOOM until 2026-09-21.** Owner approved,
+and the reason is a collision rather than taste: BMO Dimension already ships a
+control captioned BLOOM (`dim::kShuffle`) — Gerzon's bass shuffler, low-end
+width, nothing to do with a reverb's tail, and Frosty named it himself. Two
+modules in one line, possibly in one rack, showing one word for two unrelated
+things is what this avoids. ONSET is also `10-dsp-spec.md`'s own term ("Tail
+onset") and collides with nothing. **Do not tidy it back**;
+`tests/ui/LayoutTests.cpp` fails if you do. Note also that this field reports a
+**per-type constant and not a control**: `attack` was cut into the per-type
+table in the trim, so it moves when TYPE moves and never when a knob does, and
+a reader expecting it to track something they are turning will think it stuck.
+
+### The analyser is real and the signal under it is not yet
+
+**The EQ page draws a spectrum behind its curve.** Frosty's addition,
+2026-09-21, and it overrides "the display is parameter-driven only" **for that
+page only** — EARLY and TAIL are unchanged, and the screen's timer runs only
+while the EQ page is showing, so turning to either of the others stops it.
+
+`ReverbDsp::analyser()` returns `DspCore::eqAnalyser()`, a tap at **the point
+the Reverb EQ acts on** — pre both generators, which is where `10` section 2
+puts the EQ. That is where it belongs once there is an engine, so no rewiring
+is owed.
+
+**Until then it shows the dry input, and that is honest rather than broken.**
+`DspCore::process` is a marked pass-through, so the module's input, the point
+the EQ acts on and the module's output are the same samples; there is no third
+thing the tap could be showing. A reader who finds the spectrum "not reacting
+to the EQ knobs" has found the placeholder. **Do not move the tap to fix it.**
+
+Adding the override costs the other modules nothing — `ModuleDsp::analyser()`
+returns null by default and BMO DEQ was its only overrider — and
+`tests/plugin/RackTests.cpp` names all eight registered modules with the answer
+each must give, so a seventh quietly acquiring one fails. A tap is also **off
+until a panel enables it**, which the same test asserts with no editor open.
+
+**A render of this page needs signal.** A parameter-driven screen renders at
+rest and an analyser does not, so `snapshot`'s `signal=-18` is the condition —
+the house figure, and the one BMO Opto's golden hashes are rendered at.
+
+`panel/Spectrum.h` is a **trimmed copy of BMO DEQ's `panel/Analyser.h`**, not a
+call into it: no module in this suite includes another module's headers, and
+`deq::Analyser` lives in DEQ's namespace and folder. The right home is
+`core/ui`, and **the third caller should promote it rather than copy it a
+third time** — that change edits BMO DEQ and was out of this pass's scope. The
+`Tint` chooser is the one thing left out: there is nowhere on a paged 380 px
+handheld for a five-way control that matters on one page of three, and DEQ's
+own default (`Tint::neutral`, Frosty 2026-09-12) settles which colour anyway.
 
 **`dsp/TapTables.h` is JUCE-free and panel-includable, and it has to stay that
 way.** The panel and the engine read one tap table, so the picture cannot

@@ -19,12 +19,26 @@ namespace bmo::reverb
 // thirty**, because docs/ is not this pass's to edit -- the six the trim below
 // removed are named here and in AGENTS.md instead.
 //
-// **Twenty-four parameters, and the count is the decision.** It was thirty and
-// six were cut on 2026-09-21, before anything shipped. A rack slot shows a
-// host 32 lanes, so this now fits with **eight spare** where it used to fit
-// with two: a later Freeze, a ducking control and the tempo-sync pair
-// `syncon`/`syncdiv` no longer have to be argued against each other for the
-// last lane, and none of BMO DEQ's SlotOverflow machinery is needed.
+// **Thirty parameters, and the count is the decision.** It was thirty, six
+// were cut on 2026-09-21, and later the same day the Reverb EQ spent six of
+// the eight lanes that bought: `eqloq`, `eqmidfreq`, `eqmid`, `eqmidq`,
+// `eqhiq` and `eqfilter`. A rack slot shows a host 32 lanes, so this fits with
+// **two spare** and none of BMO DEQ's SlotOverflow machinery is needed.
+//
+// **The EQ change is purely additive.** No parameter was removed and no id
+// changed meaning: `eqlofreq`/`eqlo` already were node 1's frequency and gain
+// and `eqhifreq`/`eqhi` node 3's, so a state file written against the
+// twenty-four restores every value it holds. What the six buy is a real
+// three-node parametric -- a Q on each node, a middle bell, and a mode that
+// turns the two outer nodes into cuts.
+//
+// **Two spare lanes is tight, and that is the trade that was made.** Freeze, a
+// ducking control and the tempo-sync pair `syncon`/`syncdiv` are four
+// candidates for two lanes and will now have to be argued against each other.
+// The argument for spending it here is that an onboard EQ is the module's
+// answer to five of the six things the control-set trim removed -- the owner's
+// own sentence was "the frequencies should be handled by the onboard EQ" --
+// and an EQ with no Q and no middle band could not honour it.
 //
 // **The trim was free only because nothing has shipped.** State is stored as
 // plain values keyed by id (`ParamSet::toXml`), so any of the six re-appends
@@ -41,7 +55,7 @@ namespace bmo::reverb
 // now a constant in the per-type block below, written by the type and read by
 // the engine without passing through a host lane.
 //
-//  - `attack` (was index 6), the tail's bloom contour. Owner's call,
+//  - `attack` (was index 6), the tail's onset contour. Owner's call,
 //    verbatim: attack should be type dependent.
 //  - `decayshape` (5), the gated/linear curve. Owner's call, same sentence.
 //  - `damplofreq` (8), the low damping crossover. Owner's call: "the
@@ -123,14 +137,61 @@ inline constexpr auto kFeed = "feed";
 inline constexpr auto kDampLo = "damplo";
 inline constexpr auto kDampHi = "damphi";
 
-// The Reverb EQ: a low shelf and a high shelf, **pre both generators** rather
-// than on the wet output, which is where the reference puts it (10 section 2).
-// At the bottom of its travel each shelf reads "Cut" rather than "-24.0 dB",
-// because -24 is where it stops being an EQ move and starts being a removal.
-inline constexpr auto kEqLoFreq = "eqlofreq";
-inline constexpr auto kEqLo     = "eqlo";
-inline constexpr auto kEqHiFreq = "eqhifreq";
-inline constexpr auto kEqHi     = "eqhi";
+// The Reverb EQ: **three nodes**, **pre both generators** rather than on the
+// wet output, which is where the reference puts it (10 section 2). At the
+// bottom of its travel each shelf reads "Cut" rather than "-24.0 dB", because
+// -24 is where it stops being an EQ move and starts being a removal.
+//
+//== The three nodes, and why their shapes are fixed =========================
+//
+// Node 1 is a low shelf, node 2 a bell, node 3 a high shelf, **and none of the
+// three has a shape selector**. Frosty's call, 2026-09-21, and the argument is
+// the one `kTypeNames` makes about counts: `juce::AudioParameterChoice`
+// normalises as index/(n-1), so a per-node shape list could never be revised
+// after first ship without remapping every automation point written on it.
+// Fixed shapes give a real three-band parametric with nothing permanent to
+// regret, and BMO DEQ is already the module for arbitrary shapes.
+//
+// `eqlofreq`/`eqlo` and `eqhifreq`/`eqhi` **are** nodes 1 and 3; they kept
+// their ids and their meanings when the middle node and the three Qs arrived,
+// so no saved state refers to anything that moved.
+inline constexpr auto kEqLoFreq  = "eqlofreq";
+inline constexpr auto kEqLo      = "eqlo";
+inline constexpr auto kEqLoQ     = "eqloq";
+inline constexpr auto kEqMidFreq = "eqmidfreq";
+inline constexpr auto kEqMid     = "eqmid";
+inline constexpr auto kEqMidQ    = "eqmidq";
+inline constexpr auto kEqHiFreq  = "eqhifreq";
+inline constexpr auto kEqHi      = "eqhi";
+inline constexpr auto kEqHiQ     = "eqhiq";
+
+// **FILTER: the two outer nodes become cuts.** A bool, off by default, so a
+// fresh instance is the shelving EQ that shipped before it existed.
+//
+// On, node 1 is a low cut and node 3 a high cut. FREQ and Q carry over
+// unchanged in both modes -- a cut's corner is a corner and a cut's Q is its
+// resonance, which is why the outer Qs stop at `kShelfMaxQ` rather than at a
+// bell's 40 (see `kEqLoQ`'s range below). **GAIN has no meaning on a cut**, so
+// `eqlo` and `eqhi` stop reaching the response and their knobs grey out; they
+// are not written, so switching FILTER off restores the shelf gains the user
+// had. Node 2's bell is untouched in both modes.
+//
+// A bool and not a third position on some node's shape list, for the reason
+// above: a bool's normalisation is 0 or 1 forever, and this one is *per EQ*
+// rather than per node, which is what makes it a mode rather than a shape.
+inline constexpr auto kEqFilter  = "eqfilter";
+
+/** The widest a shelf's -- or a cut's -- Q goes, and the range the two outer
+    nodes' Q knobs are given rather than a limit clamped behind them.
+
+    BMO DEQ carries the same number as `deq::kShelfMaxQ` and clamps to it,
+    because a DEQ band's shape is a choice and one Q knob has to serve a bell
+    at 40 as well as a shelf. Here the outer nodes can never be bells, so the
+    knob itself stops where the design does: past about 2 a shelf's resonant
+    bump is where the matched design is weakest near Nyquist, and a knob that
+    travelled to 40 and did nothing over 2 would be lying about four fifths of
+    itself. The middle node is always a bell and keeps the full 0.1-40. */
+inline constexpr float kShelfMaxQ = 2.0f;
 
 // How the early cluster is generated. Taps / Energy / Blend, index order
 // frozen -- and see kErModeNames on what Blend is and is not.
@@ -198,15 +259,32 @@ inline constexpr auto kOutput = "output";
 
 /** Positions in `specs()`, and in a rack slot's host lanes. Permanent **from
     first ship**, which has not happened -- the six the trim removed took their
-    positions with them and everything after each one closed up. The relative
-    order of the twenty-four that survived is unchanged, and the ids are
-    unchanged, which is what makes a state file written before the trim still
-    restore every parameter it still has. */
+    positions with them and everything after each one closed up, and the six
+    the EQ added were then placed **beside their siblings rather than
+    appended**. The ids are unchanged throughout, which is what makes a state
+    file written before either change still restore every parameter it still
+    has.
+
+    **That freedom ends at first ship**, and this is the last change that has
+    it. After a release the only legal move is appending at the end: a session
+    stores plain values keyed by id and would survive a reshuffle, but a rack
+    slot maps host lane N to parameter N (`core/rack/SlotParameter.h`), so
+    moving a parameter moves the lane a DAW has already recorded automation on.
+    Nothing errors and nothing warns. Readability was worth it once, here,
+    because nothing has shipped; the next reader does not get the same choice.
+    See modules/reverb/AGENTS.md, "Thirty parameters, and two spare lanes". */
 enum Index
 {
     type = 0, size, predelay, decay, feed,
     damplo, damphi,
-    eqlofreq, eqlo, eqhifreq, eqhi,
+
+    // The Reverb EQ, in the order the panel reads it: the mode, then each node
+    // as freq/gain/Q.
+    eqfilter,
+    eqlofreq, eqlo, eqloq,
+    eqmidfreq, eqmid, eqmidq,
+    eqhifreq, eqhi, eqhiq,
+
     ermode, erdensity, erspread, erhicut, ervariation,
     moddepth, modrate, width, inhicut,
     erlevel, verblevel, mix, output,
@@ -330,7 +408,7 @@ namespace roomDefaults
     // SCHEMA rather than CALIBRATE for that reason -- a CALIBRATE number is
     // one invented here to give an ordering, and these were not invented here.
     inline constexpr float kDecayShape   = 3.50f;     // SCHEMA: 3.5 is linear, i.e. truncation off
-    inline constexpr float kAttack       = 30.0f;     // SCHEMA: per cent of the 0-120 ms bloom
+    inline constexpr float kAttack       = 30.0f;     // SCHEMA: per cent of the 0-120 ms onset
     inline constexpr float kDampLoFreqHz = 200.0f;    // SCHEMA
     inline constexpr float kDampHiFreqHz = 1600.0f;   // SCHEMA
 }
@@ -370,7 +448,7 @@ struct TypeConstants
 
     //== No parameter under any of these four ==================================
     float decayShape;    ///< 0.04..3.5; 3.5 is linear, i.e. truncation off
-    float attack;        ///< per cent of the 0-120 ms bloom
+    float attack;        ///< per cent of the 0-120 ms onset
     float dampLoFreqHz;  ///< the low absorption knee
     float dampHiFreqHz;  ///< the high absorption knee
 };
@@ -644,8 +722,8 @@ namespace detail
     // **`decayShapeText` and `attackText` were here and went with the trim.**
     // A value string exists to make a host's automation lane readable, and
     // neither DECAY SHAPE nor ATTACK has a lane any more. The words they
-    // printed -- Gated / Steep / Natural / Long / Linear, and the bloom in
-    // milliseconds -- are not lost: the bloom is what the TAIL page's readout
+    // printed -- Gated / Steep / Natural / Long / Linear, and the tail onset in
+    // milliseconds -- are not lost: the onset is what the TAIL page's readout
     // line prints from `TypeConstants::attack`, and the shape ladder was only
     // ever a gloss on a number the type now owns. Restore them with the
     // parameter if one ever comes back.
@@ -817,15 +895,55 @@ inline const ParamSpecs& specs()
         S::textParam (kDampHi, "High x", 0.10f, 2.00f, 0.01f, 0.40f, &detail::multiplierText),
 
         //== The Reverb EQ, pre both generators ================================
+        //
+        // Three nodes, fixed shapes, and **neutral at every default**: both
+        // shelf gains and the bell's gain open at 0 dB and FILTER opens off,
+        // so a fresh instance's EQ is the identity. `tests/dsp` asserts that
+        // as an absolute rather than as "close to what it was", which is
+        // OptoDspTests' house rule.
+        //
+        // The 0.1 Hz and 0.01 Q steps are BMO DEQ's argument, not a precision
+        // anyone turns a knob to: a host carries a value as a 32-bit
+        // normalised float and a continuous log law does not round-trip
+        // exactly through one, so the step is what makes a saved session come
+        // back where it was saved.
 
+        // 7. FILTER. The outer two nodes become a low cut and a high cut, and
+        // their GAIN knobs grey out because a cut has no gain. See kEqFilter.
+        S::boolParam (kEqFilter, "EQ Filter", false),
+
+        // 8-10. Node 1: low shelf, or a low cut with FILTER on. The Q ceiling
+        // is kShelfMaxQ and the knob stops there rather than travelling to a
+        // bell's 40 and doing nothing over 2 -- see kShelfMaxQ. 0.71 is
+        // maximally flat, which is what makes the default neutral in shape as
+        // well as in gain.
         S::logParam (kEqLoFreq, "EQ Low Freq", 16.0f, 1600.0f, 0.1f, 200.0f, F::Hertz),
         S::textParam (kEqLo, "EQ Low", -24.0f, 12.0f, 0.1f, 0.0f, &detail::shelfText),
+        S::logParam (kEqLoQ, "EQ Low Q", 0.1f, kShelfMaxQ, 0.01f, 0.71f),
+
+        // 11-13. Node 2: a bell, in both modes, and the only node FILTER does
+        // not touch. **The full 20 Hz - 20 kHz**, deliberately wider than its
+        // neighbours: node 1 stops at 1.6 kHz and node 3 at 2.1 kHz, so
+        // without this the Reverb EQ could not reach the presence region at
+        // all and IN HI-CUT was the only control above 2.1 kHz. A bell's Q is
+        // BMO DEQ's own 0.1-40; 1 kHz and 0.71 are the conventional opening,
+        // and the gain is 0, so it is doing nothing until it is asked to.
+        S::logParam (kEqMidFreq, "EQ Mid Freq", 20.0f, 20000.0f, 0.1f, 1000.0f, F::Hertz),
+        // Decibels rather than `shelfText`: -24 on a shelf is a removal and
+        // the word "Cut" is worth more than the number there, and -24 on a
+        // bell is a deep notch at one frequency, which is an EQ move like any
+        // other. The three gain knobs share a travel and not a value string.
+        S::floatParam (kEqMid, "EQ Mid", -24.0f, 12.0f, 0.1f, 0.0f, F::Decibels),
+        S::logParam (kEqMidQ, "EQ Mid Q", 0.1f, 40.0f, 0.01f, 0.71f),
+
+        // 14-16. Node 3: high shelf, or a high cut with FILTER on.
         S::logParam (kEqHiFreq, "EQ High Freq", 1000.0f, 2100.0f, 0.1f, 1600.0f, F::Hertz),
         S::textParam (kEqHi, "EQ High", -24.0f, 12.0f, 0.1f, 0.0f, &detail::shelfText),
+        S::logParam (kEqHiQ, "EQ High Q", 0.1f, kShelfMaxQ, 0.01f, 0.71f),
 
         //== Early reflections =================================================
 
-        // 11. ER MODE. Taps is the default and the one the module is argued
+        // 17. ER MODE. Taps is the default and the one the module is argued
         // from; Blend is defined-but-unheard (kErModeNames). **A choice, so
         // the trim did not touch it**: three is what its normalisation
         // depends on.
@@ -833,7 +951,7 @@ inline const ParamSpecs& specs()
                         { kErModeNames[taps], kErModeNames[energy], kErModeNames[blend] },
                         taps),
 
-        // 12. DENSITY. Linear per cent: the activation thresholds it sweeps
+        // 18. DENSITY. Linear per cent: the activation thresholds it sweeps
         // are spread over (0,1], so the knob and the weighting share a scale.
         S::textParam (kErDensity, "Density", 0.0f, 100.0f, 0.1f,
                       roomDefaults::kErDensity, &detail::densityText),
@@ -842,14 +960,14 @@ inline const ParamSpecs& specs()
         // `TypeConstants::erShape`. It was already per-type; the trim took
         // away the knob, not the number.
 
-        // 13. ER SPREAD, the envelope's sigma. Log, as a time.
+        // 19. ER SPREAD, the envelope's sigma. Log, as a time.
         S::logParam (kErSpread, "ER Spread", 5.0f, 200.0f, 0.1f,
                      roomDefaults::kErSpreadMs, F::Milliseconds),
 
-        // 14. ER HI-CUT. Log, 1-20 kHz, defaulting to 7 kHz.
+        // 20. ER HI-CUT. Log, 1-20 kHz, defaulting to 7 kHz.
         S::logParam (kErHiCut, "ER Hi-Cut", 1000.0f, 20000.0f, 0.1f, 7000.0f, F::Hertz),
 
-        // 15. VARIATION. **Stepped, not a choice list.** Seven positions that
+        // 21. VARIATION. **Stepped, not a choice list.** Seven positions that
         // are an ordered amount of decorrelation rather than seven named
         // behaviours, so they belong on a float with a step of one: a stepped
         // float normalises as (v - min) / (max - min), which is stable if a
@@ -861,20 +979,20 @@ inline const ParamSpecs& specs()
 
         //== Modulation, width, input bandwidth ================================
 
-        // 16. MOD DEPTH. Linear over a sub-millisecond travel.
+        // 22. MOD DEPTH. Linear over a sub-millisecond travel.
         S::textParam (kModDepth, "Mod Depth", 0.1f, 0.8f, 0.01f,
                       roomDefaults::kModDepthMs, &detail::modDepthText),
 
-        // 17. MOD RATE. Log: 0.1 to 1.2 Hz is a bit over a decade and the slow
+        // 23. MOD RATE. Log: 0.1 to 1.2 Hz is a bit over a decade and the slow
         // end is where the difference between randomised and chorused lives.
         S::logParam (kModRate, "Mod Rate", 0.1f, 1.2f, 0.01f,
                      roomDefaults::kModRateHz, F::Hertz),
 
-        // 18. WIDTH. M/S gain on the tail only. 100 % is unity, 0 is mono and
+        // 24. WIDTH. M/S gain on the tail only. 100 % is unity, 0 is mono and
         // 200 is the widest the M/S law allows before it stops being one.
         S::floatParam (kWidth, "Width", 0.0f, 200.0f, 1.0f, 100.0f, F::Percent),
 
-        // 19. IN HI-CUT. Defaults wide open, so a fresh instance is not
+        // 25. IN HI-CUT. Defaults wide open, so a fresh instance is not
         // quietly darker than the signal it was given. See kInHiCut for why
         // this parameter is marked "owner confirm".
         S::logParam (kInHiCut, "In Hi-Cut", 2000.0f, 20000.0f, 0.1f,
@@ -882,7 +1000,7 @@ inline const ParamSpecs& specs()
 
         //== Output ============================================================
 
-        // 20/21. The two absolute trims, both off at the bottom -- and both
+        // 26/27. The two absolute trims, both off at the bottom -- and both
         // per-type since 2026-09-21, which is what makes Ambience buildable.
         // The defaults are Room's row, like every other per-type default here.
         S::textParam (kErLevel, "ER", -40.0f, 0.0f, 0.1f,
@@ -890,14 +1008,14 @@ inline const ParamSpecs& specs()
         S::textParam (kVerbLevel, "Reverb", -40.0f, 0.0f, 0.1f,
                       roomDefaults::kVerbLevelDb, &detail::levelText),
 
-        // 22. MIX. Defaults to 100 %, because the two faders above are the
+        // 28. MIX. Defaults to 100 %, because the two faders above are the
         // wet balance and this is the dry/wet one -- a reverb used as a send,
         // which is the normal case, wants the dry out of the way. **The MIX
         // law itself is 11 section 7's open owner-confirm item**; what is
         // frozen here is the range, the step and the default.
         S::floatParam (kMix, "Mix", 0.0f, 100.0f, 0.1f, 100.0f, F::Percent),
 
-        // 23. OUTPUT. Trim only, cut only.
+        // 29. OUTPUT. Trim only, cut only.
         S::floatParam (kOutput, "Output", -24.0f, 0.0f, 0.1f, 0.0f, F::Decibels),
     };
 

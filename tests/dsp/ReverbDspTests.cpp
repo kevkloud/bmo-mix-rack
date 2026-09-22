@@ -25,6 +25,7 @@
 #include "modules/reverb/dsp/ReverbDsp.h"
 #include "modules/reverb/dsp/TapTables.h"
 
+#include <array>
 #include <cmath>
 #include <iostream>
 #include <string>
@@ -62,13 +63,13 @@ int main()
     //== The schema and the adapter agree about length ========================
     {
         check (specs().size() == (size_t) Index::count, "the Index enum matches specs()");
-        check (specs().size() == 24, "twenty-four parameters");
+        check (specs().size() == 30, "thirty parameters");
     }
 
     //== The adapter unpacks every field, and unpacks it correctly ============
     //
     // **This is the test that catches a transposed pair**, which is the one
-    // mistake a twenty-four-field unpack invites and the one that no amount of
+    // mistake a thirty-field unpack invites and the one that no amount of
     // listening would localise. Every parameter is set to a value distinct
     // from every other, and every field of Params is read back.
     //
@@ -89,10 +90,16 @@ int main()
         v[Index::feed]        = 40.0f;
         v[Index::damplo]      = 1.55f;
         v[Index::damphi]      = 0.65f;
+        v[Index::eqfilter]    = 1.0f;
         v[Index::eqlofreq]    = 140.0f;
         v[Index::eqlo]        = -6.0f;
+        v[Index::eqloq]       = 1.35f;
+        v[Index::eqmidfreq]   = 2600.0f;
+        v[Index::eqmid]       = -7.5f;
+        v[Index::eqmidq]      = 3.25f;
         v[Index::eqhifreq]    = 1400.0f;
         v[Index::eqhi]        = 4.5f;
+        v[Index::eqhiq]       = 0.45f;
         v[Index::ermode]      = (float) energy;
         v[Index::erdensity]   = 82.0f;
         v[Index::erspread]    = 125.0f;
@@ -121,6 +128,12 @@ int main()
         check (near (p.eqLoDb, -6.0f), "eq low");
         check (near (p.eqHiFreqHz, 1400.0f), "eq high freq");
         check (near (p.eqHiDb, 4.5f), "eq high");
+        check (p.eqFilter, "eq filter");
+        check (near (p.eqLoQ, 1.35f), "eq low q");
+        check (near (p.eqMidFreqHz, 2600.0f), "eq mid freq");
+        check (near (p.eqMidDb, -7.5f), "eq mid");
+        check (near (p.eqMidQ, 3.25f), "eq mid q");
+        check (near (p.eqHiQ, 0.45f), "eq high q");
         check (p.erMode == ErMode::energy, "er mode");
         check (near (p.erSpreadMs, 125.0f), "er spread");
         check (near (p.erHiCutHz, 4500.0f), "er hi-cut");
@@ -506,6 +519,203 @@ int main()
         delayed.preDelayMs = 250.0f;
         check (DspCore::tailSecondsFor (delayed) > DspCore::tailSecondsFor (p),
                "pre-delay lengthens the reported tail");
+    }
+
+    //== The Reverb EQ: three nodes, fixed shapes, and one mode ===============
+    //
+    // **Absolutes, not "it changed".** `tests/dsp/OptoDspTests.cpp` is the
+    // house rule and the reason: a relative test there passed for a whole
+    // release while both of the things it compared were broken. Every figure
+    // below is either exactly zero -- which a matched-Z design at 0 dB really
+    // is, numerator equal to denominator -- or a number a shape has to produce
+    // in order to be that shape.
+    {
+        const auto db = [] (const EqSettings& s, double hz)
+        {
+            return EqNodes::design (s, kEqDesignRate).magnitudeDbAt (hz, kEqDesignRate);
+        };
+
+        const auto nodeDb = [] (const EqSettings& s, EqNode n, double hz)
+        {
+            return EqNodes::design (s, kEqDesignRate).nodeDbAt (n, hz, kEqDesignRate);
+        };
+
+        //-- Flat at the defaults, and flat means zero -------------------------
+        //
+        // The schema's own defaults, through the adapter, so this is the EQ a
+        // fresh instance has rather than one written out here.
+        {
+            const auto v = defaults();
+            const auto fresh = DspCore::eqSettingsFor (ReverbDsp::paramsFrom (v.data(), (int) v.size()));
+
+            check (! fresh.filter, "a fresh instance opens with FILTER off");
+
+            for (const auto hz : { 20.0, 50.0, 200.0, 1000.0, 1600.0, 5000.0, 20000.0 })
+                check (std::abs (db (fresh, hz)) < 1.0e-9,
+                       "the Reverb EQ is exactly flat at its defaults");
+
+            // Per node as well as summed: +6, 0 and -6 would also sum to flat,
+            // and that is not the same claim.
+            for (const auto n : { EqNode::low, EqNode::mid, EqNode::high })
+                for (const auto hz : { 30.0, 1000.0, 12000.0 })
+                    check (std::abs (nodeDb (fresh, n, hz)) < 1.0e-9,
+                           "every node is individually flat at the defaults");
+        }
+
+        //-- The shapes are what they are said to be ---------------------------
+        //
+        // Node 1 low shelf, node 2 bell, node 3 high shelf, and no selector
+        // anywhere. Through `eqShapeOf`, which is the only branch `filter`
+        // causes, and then on the response -- so a table that agreed with
+        // itself and with nothing audible would still fail.
+        {
+            check (eqShapeOf (EqNode::low,  false) == bmo::dsp::Shape::lowShelf,  "node 1 is a low shelf");
+            check (eqShapeOf (EqNode::mid,  false) == bmo::dsp::Shape::bell,      "node 2 is a bell");
+            check (eqShapeOf (EqNode::high, false) == bmo::dsp::Shape::highShelf, "node 3 is a high shelf");
+            check (eqShapeOf (EqNode::low,  true)  == bmo::dsp::Shape::lowCut,    "FILTER makes node 1 a low cut");
+            check (eqShapeOf (EqNode::mid,  true)  == bmo::dsp::Shape::bell,      "node 2 is a bell in both modes");
+            check (eqShapeOf (EqNode::high, true)  == bmo::dsp::Shape::highCut,   "FILTER makes node 3 a high cut");
+
+            EqSettings s;
+            s.loDb = 6.0f;
+            s.hiDb = -6.0f;
+            s.midFreqHz = 1000.0f;
+            s.midDb = 9.0f;
+            s.midQ = 4.0f;
+
+            check (std::abs (nodeDb (s, EqNode::low, 20.0) - 6.0) < 0.25,
+                   "the low shelf reaches its gain below its corner");
+            check (std::abs (nodeDb (s, EqNode::high, 19000.0) + 6.0) < 0.35,
+                   "the high shelf reaches its gain above its corner");
+            check (std::abs (nodeDb (s, EqNode::mid, 1000.0) - 9.0) < 0.05,
+                   "a bell is at its gain at its own centre");
+            check (std::abs (nodeDb (s, EqNode::mid, 20.0)) < 0.2
+                     && std::abs (nodeDb (s, EqNode::mid, 18000.0)) < 0.2,
+                   "a Q-4 bell is spent well away from its centre");
+        }
+
+        //-- FILTER moves nodes 1 and 3 and does not move node 2 --------------
+        //
+        // **The three claims separately**, because "the curve changed" is also
+        // true of a change that broke the bell. Node 2 has to be the same
+        // filter either way -- same shape, frequency, Q and gain -- so it is
+        // an exact equality rather than a tolerance.
+        {
+            EqSettings shelves;
+            shelves.loFreqHz = 200.0f;  shelves.loDb = 6.0f;   shelves.loQ = 0.71f;
+            shelves.midFreqHz = 900.0f; shelves.midDb = -5.0f; shelves.midQ = 2.0f;
+            shelves.hiFreqHz = 1600.0f; shelves.hiDb = 6.0f;   shelves.hiQ = 0.71f;
+
+            auto cuts = shelves;
+            cuts.filter = true;
+
+            for (const auto hz : { 30.0, 300.0, 900.0, 4000.0, 15000.0 })
+                check (nodeDb (shelves, EqNode::mid, hz) == nodeDb (cuts, EqNode::mid, hz),
+                       "FILTER must not move node 2 by so much as a rounding bit");
+
+            check (nodeDb (shelves, EqNode::low, 20.0) > 5.0,
+                   "as a shelf, node 1 lifts below its corner");
+            check (nodeDb (cuts, EqNode::low, 20.0) < -18.0,
+                   "as a cut, node 1 removes below its corner");
+            check (nodeDb (shelves, EqNode::high, 16000.0) > 5.0,
+                   "as a shelf, node 3 lifts above its corner");
+            check (nodeDb (cuts, EqNode::high, 16000.0) < -18.0,
+                   "as a cut, node 3 removes above its corner");
+
+            // A second-order cut is 3 dB down at its own corner, which is what
+            // makes a corner a corner -- and what tells a cut from a shelf
+            // that happens to lean the same way.
+            EqSettings butterworth;
+            butterworth.filter = true;
+            butterworth.loFreqHz = 200.0f;  butterworth.loQ = 0.7071f;
+            butterworth.hiFreqHz = 2000.0f; butterworth.hiQ = 0.7071f;
+
+            check (std::abs (nodeDb (butterworth, EqNode::low, 200.0) + 3.01) < 0.25,
+                   "a Butterworth low cut is 3 dB down at its corner");
+            check (std::abs (nodeDb (butterworth, EqNode::high, 2000.0) + 3.01) < 0.25,
+                   "a Butterworth high cut is 3 dB down at its corner");
+        }
+
+        //-- GAIN does not reach a cut, and the mode does not eat it ----------
+        //
+        // The DSP half of greying the two shelf GAIN knobs out. The parameter
+        // keeps whatever the user set -- nothing writes it -- so the value
+        // survives a trip through FILTER and back, and all that changes is
+        // whether it reaches the design.
+        {
+            EqSettings s;
+            s.loDb = 9.0f;
+            s.hiDb = -9.0f;
+
+            check (near (eqGainReachingDesign (s, EqNode::low), 9.0f),
+                   "as a shelf, node 1's GAIN reaches the design");
+            check (eqNodeHasGain (EqNode::low, false) && eqNodeHasGain (EqNode::high, false),
+                   "both shelves have gain");
+
+            s.filter = true;
+
+            check (near (eqGainReachingDesign (s, EqNode::low), 0.0f)
+                     && near (eqGainReachingDesign (s, EqNode::high), 0.0f),
+                   "as a cut, neither outer node's GAIN reaches the design");
+            check (! eqNodeHasGain (EqNode::low, true) && ! eqNodeHasGain (EqNode::high, true),
+                   "neither outer node has gain in filter mode -- this is what greys the knobs");
+            check (eqNodeHasGain (EqNode::mid, true),
+                   "the bell keeps its gain in filter mode");
+
+            check (near (eqKnobGainDbOf (s, EqNode::low), 9.0f)
+                     && near (eqKnobGainDbOf (s, EqNode::high), -9.0f),
+                   "FILTER does not eat the shelf gains it is ignoring");
+
+            // Turning a cut's gain knob does nothing to the sound, which is
+            // the claim a greyed knob makes to the eye.
+            auto moved = s;
+            moved.loDb = -24.0f;
+            moved.hiDb = 12.0f;
+
+            for (const auto hz : { 30.0, 1000.0, 15000.0 })
+                check (db (s, hz) == db (moved, hz),
+                       "a cut's GAIN knob changes nothing at all");
+        }
+
+        //-- Stable and finite everywhere a host can put it -------------------
+        //
+        // Both ends and the default of all seven continuous EQ controls, both
+        // modes, four rates. A design that went unstable on one combination is
+        // a burst of noise in somebody's session and there is no listening
+        // pass that finds it first.
+        {
+            const auto& sp = specs();
+
+            const auto ends = [&sp] (int i)
+            {
+                return std::array<float, 3> { sp[(size_t) i].min, sp[(size_t) i].def, sp[(size_t) i].max };
+            };
+
+            auto unstable = 0;
+
+            for (const auto rate : { 44100.0, 48000.0, 96000.0, 192000.0 })
+                for (const auto filter : { false, true })
+                    for (const auto lf : ends (Index::eqlofreq))
+                        for (const auto lq : ends (Index::eqloq))
+                            for (const auto mf : ends (Index::eqmidfreq))
+                                for (const auto mg : ends (Index::eqmid))
+                                    for (const auto mq : ends (Index::eqmidq))
+                                        for (const auto hf : ends (Index::eqhifreq))
+                                            for (const auto hq : ends (Index::eqhiq))
+                                            {
+                                                EqSettings s;
+                                                s.filter = filter;
+                                                s.loFreqHz = lf;  s.loDb = sp[Index::eqlo].min;  s.loQ = lq;
+                                                s.midFreqHz = mf; s.midDb = mg;                  s.midQ = mq;
+                                                s.hiFreqHz = hf;  s.hiDb = sp[Index::eqhi].max;  s.hiQ = hq;
+
+                                                if (! EqNodes::design (s, rate).isStable())
+                                                    ++unstable;
+                                            }
+
+            check (unstable == 0,
+                   "every corner of the EQ's own ranges designs a stable, finite filter");
+        }
     }
 
     //== prepare() and reset() are reachable and do not throw ================

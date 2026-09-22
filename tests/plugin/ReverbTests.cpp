@@ -29,14 +29,23 @@ namespace
     // VARIATION's seven positions and WIDTH's 201 both come back as 0 here.
     // The stepping is real and is asserted on the range below.
     //
-    // If any of these twenty-four ever needs to change, this is the first
-    // thing that fails, and 11 section 4 is where the argument has to be made.
+    // If any of these thirty ever needs to change, this is the first thing
+    // that fails, and 11 section 4 is where the argument has to be made.
     //
-    // **It was thirty until the 2026-09-21 control-set trim.** Six rows were
-    // deleted -- prelink, decayshape, attack, damplofreq, damphifreq and
-    // ershape -- and every surviving row is what it was, in the order it was
-    // in. That is the claim the trim makes, and this table is where it is
-    // checked: nothing that stayed was quietly retuned on the way past.
+    // **It was thirty, then twenty-four, and is thirty again**, all on
+    // 2026-09-21 and all before first ship. The control-set trim deleted six
+    // rows -- prelink, decayshape, attack, damplofreq, damphifreq and ershape
+    // -- and the Reverb EQ then added six others: eqfilter, eqloq, eqmidfreq,
+    // eqmid, eqmidq and eqhiq. Every row that survived either change is what
+    // it was, and this table is where that is checked rather than described:
+    // nothing that stayed was quietly retuned on the way past, `eqlofreq` and
+    // `eqhifreq` least of all -- they were already nodes 1 and 3 and their
+    // ranges and defaults are untouched.
+    //
+    // **The EQ block sits where it reads rather than at the end**, which is
+    // legal exactly once and this was it: a rack slot maps host lane N to
+    // parameter N, so after a release the only safe move is appending. See
+    // `Index` in params.h.
     const Expected kSchema[]
     {
         { P::kType,       "Type",             0.0f,     5.0f,     0.0f,     6 },
@@ -46,10 +55,20 @@ namespace
         { P::kFeed,       "Source",           0.0f,   100.0f,    70.0f,     0 },
         { P::kDampLo,     "Low x",           0.10f,    2.00f,    1.20f,     0 },
         { P::kDampHi,     "High x",          0.10f,    2.00f,    0.40f,     0 },
+
+        // The Reverb EQ. FILTER is a bool, so it reports two steps -- the one
+        // row in this table that is not a float or a choice.
+        { P::kEqFilter,   "EQ Filter",        0.0f,     1.0f,     0.0f,     2 },
         { P::kEqLoFreq,   "EQ Low Freq",     16.0f,  1600.0f,   200.0f,     0 },
         { P::kEqLo,       "EQ Low",         -24.0f,    12.0f,     0.0f,     0 },
+        { P::kEqLoQ,      "EQ Low Q",        0.10f,    2.00f,    0.71f,     0 },
+        { P::kEqMidFreq,  "EQ Mid Freq",     20.0f, 20000.0f,  1000.0f,     0 },
+        { P::kEqMid,      "EQ Mid",         -24.0f,    12.0f,     0.0f,     0 },
+        { P::kEqMidQ,     "EQ Mid Q",        0.10f,   40.00f,    0.71f,     0 },
         { P::kEqHiFreq,   "EQ High Freq",  1000.0f,  2100.0f,  1600.0f,     0 },
         { P::kEqHi,       "EQ High",        -24.0f,    12.0f,     0.0f,     0 },
+        { P::kEqHiQ,      "EQ High Q",       0.10f,    2.00f,    0.71f,     0 },
+
         { P::kErMode,     "ER Mode",          0.0f,     2.0f,     0.0f,     3 },
         { P::kErDensity,  "Density",          0.0f,   100.0f,    50.0f,     0 },
         { P::kErSpread,   "ER Spread",        5.0f,   200.0f,    80.0f,     0 },
@@ -76,21 +95,71 @@ int main()
         auto proc = createReverb();
         checkSchema (*proc, kSchema);
         check (P::specs().size() == (size_t) P::Index::count, "the Index enum matches specs()");
-        check (P::specs().size() == 24, "v1 ships exactly twenty-four parameters");
+        check (P::specs().size() == 30, "v1 ships exactly thirty parameters");
     }
 
-    //== Twenty-four against thirty-two, and the eight spare are the point ====
+    //== Thirty against thirty-two, and the two spare are the point ===========
     //
-    // A rack slot shows a host 32 lanes. It was thirty with two spare until
-    // the 2026-09-21 control-set trim and is twenty-four with eight: a later
-    // Freeze, a ducking control and the tempo-sync pair no longer have to be
-    // argued against each other for the last lane. Asserted rather than
-    // described, so the headroom cannot be spent without somebody editing this
-    // line and saying why.
+    // A rack slot shows a host 32 lanes. It was thirty with two spare, then
+    // twenty-four with eight after the 2026-09-21 control-set trim, and the
+    // Reverb EQ spent six of those eight later the same day. Asserted rather
+    // than described, so the last two lanes cannot be spent without somebody
+    // editing this line and saying why -- and Freeze, a ducking control and
+    // the tempo-sync pair `syncon`/`syncdiv` are four candidates for them.
     {
         check (P::specs().size() <= 32, "every parameter gets a rack host lane");
-        check (32 - (int) P::specs().size() == 8,
-               "exactly eight host lanes are spare -- see modules/reverb/AGENTS.md");
+        check (32 - (int) P::specs().size() == 2,
+               "exactly two host lanes are spare -- see modules/reverb/AGENTS.md");
+    }
+
+    //== The Reverb EQ is purely additive =====================================
+    //
+    // **The whole claim the schema change makes, as assertions.** Six ids
+    // arrived, nothing left, and the four that were already here kept their
+    // meanings -- `eqlofreq`/`eqlo` were node 1's frequency and gain before
+    // the change and are node 1's frequency and gain after it, `eqhifreq`/
+    // `eqhi` likewise for node 3. A state file written against the
+    // twenty-four therefore restores every value it holds, which is the thing
+    // that made the change free.
+    //
+    // Their ranges and defaults are pinned in `kSchema` above; what is pinned
+    // here is that the six are present, that they are the six, and that the
+    // EQ is **neutral at its defaults** -- which is a property of the schema
+    // before it is a property of any filter.
+    {
+        for (const auto* added : { "eqfilter", "eqloq", "eqmidfreq", "eqmid", "eqmidq", "eqhiq" })
+            check (bmo::indexOfParam (P::specs(), added) >= 0,
+                   juce::String ("'") + added + "' is one of the six the Reverb EQ added");
+
+        check (P::specs()[P::Index::eqfilter].kind == bmo::ParamKind::Bool,
+               "eqfilter is a bool -- not a choice, whose count could never be revised");
+
+        // Neutral: both shelves and the bell open at 0 dB and FILTER opens
+        // off, so a fresh instance's EQ is the identity. Absolutes, which is
+        // tests/dsp/OptoDspTests.cpp's house rule.
+        for (const auto i : { P::Index::eqlo, P::Index::eqmid, P::Index::eqhi })
+            checkClose (P::specs()[(size_t) i].def, 0.0, 1.0e-9,
+                        juce::String ("'") + P::specs()[(size_t) i].id + "' opens at exactly 0 dB");
+
+        checkClose (P::specs()[P::Index::eqfilter].def, 0.0, 1.0e-9, "FILTER opens off");
+
+        // The two outer Qs stop at the shelf ceiling and the bell's does not.
+        // The knob stopping there is the decision -- see kShelfMaxQ -- and a
+        // range that had quietly widened to a bell's 40 would draw four fifths
+        // of a travel that did nothing.
+        for (const auto i : { P::Index::eqloq, P::Index::eqhiq })
+            checkClose (P::specs()[(size_t) i].max, (double) P::kShelfMaxQ, 1.0e-6,
+                        juce::String ("'") + P::specs()[(size_t) i].id + "' stops at the shelf ceiling");
+
+        checkClose (P::specs()[P::Index::eqmidq].max, 40.0, 1.0e-6,
+                    "the middle node is a bell and keeps a bell's Q range");
+
+        // And the middle node reaches above its neighbours' ceilings, which is
+        // the reason it exists at the width it does: node 1 stops at 1.6 kHz
+        // and node 3 at 2.1 kHz, so without this the Reverb EQ could not touch
+        // the presence region at all.
+        check (P::specs()[P::Index::eqmidfreq].max > P::specs()[P::Index::eqhifreq].max,
+               "the mid bell reaches above the high shelf's own ceiling");
     }
 
     //== The six the trim cut, by id ==========================================
@@ -329,14 +398,21 @@ int main()
         const bmo::Setting kUntouched[] {
             { P::kPreDelay, 120.0f }, { P::kDecay, 7.5f },
             { P::kDampLo, 1.9f }, { P::kDampHi, 0.2f },
-            { P::kEqLoFreq, 120.0f }, { P::kEqLo, -9.0f },
-            { P::kEqHiFreq, 1900.0f }, { P::kEqHi, 5.0f },
+            // The whole Reverb EQ. **A type is a room and not an EQ setting**:
+            // the ten of these are a mix decision the user made, and the one
+            // thing a voicing must not do is undo one. The six that arrived on
+            // 2026-09-21 are in this list rather than in `kStamped` for that
+            // reason, and the sum below is what stops one quietly moving.
+            { P::kEqFilter, 1.0f },
+            { P::kEqLoFreq, 120.0f }, { P::kEqLo, -9.0f }, { P::kEqLoQ, 1.4f },
+            { P::kEqMidFreq, 3500.0f }, { P::kEqMid, -4.5f }, { P::kEqMidQ, 6.0f },
+            { P::kEqHiFreq, 1900.0f }, { P::kEqHi, 5.0f }, { P::kEqHiQ, 0.4f },
             { P::kErMode, (float) P::energy }, { P::kErHiCut, 3000.0f },
             { P::kErVariation, 6.0f }, { P::kWidth, 175.0f },
             { P::kMix, 33.0f }, { P::kOutput, -11.0f },
         };
 
-        // Nine stamped plus fourteen untouched plus TYPE itself is the whole
+        // Nine stamped plus twenty untouched plus TYPE itself is the whole
         // schema, so no parameter is missing from both lists -- which is how a
         // control silently stops being covered here.
         check ((int) (std::size (kStamped) + std::size (kUntouched) + 1) == (int) P::Index::count,
@@ -639,8 +715,16 @@ int main()
             { P::kFeed, 40.0f },
             { P::kDampLo, 1.55f },
             { P::kDampHi, 0.65f },
+            { P::kEqFilter, 1.0f },
+            { P::kEqLoFreq, 90.0f },
             { P::kEqLo, -6.0f },
+            { P::kEqLoQ, 1.25f },
+            { P::kEqMidFreq, 2400.0f },
+            { P::kEqMid, -7.5f },
+            { P::kEqMidQ, 3.5f },
+            { P::kEqHiFreq, 2050.0f },
             { P::kEqHi, 4.5f },
+            { P::kEqHiQ, 0.55f },
             { P::kErMode, (float) P::energy },
             { P::kErDensity, 82.0f },
             { P::kErSpread, 125.0f },
@@ -739,10 +823,14 @@ int main()
     // match. That is a deferral, unlike BMO Defang's, where the absence is by
     // construction.
     //
-    // **Nothing about metering, solo or an analyser tap**, and that absence is
-    // permanent: the panel's display is drawn from the parameters and from the
-    // shared tap table, neither doc asks this module for a meter, and a reverb
-    // has no gain reduction to report.
+    // **Nothing about metering or solo**, and those two absences are
+    // permanent: a reverb has no gain reduction to report and no part of it to
+    // hear on its own.
+    //
+    // **The analyser tap is no longer in that sentence.** The owner asked for
+    // a spectrum behind the EQ page's curve on 2026-09-21, so `ReverbDsp`
+    // overrides `analyser()` and it is asserted just below rather than
+    // described here.
     //
     // **Everything about the sound** -- T60, damping, tap times, comb and flam
     // rules, echo density, modulation, the level laws and the phasing nulls --

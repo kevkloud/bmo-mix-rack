@@ -48,7 +48,28 @@ namespace
         read as a bezel rather than as a border: 12 px of well on all four
         sides, plus the readout line's own row underneath. */
     constexpr int kBezelPad       = 12;
-    constexpr int kScreenHeight   = 170;
+
+    /** **170 until the EQ page became twelve controls, and 105 now.**
+
+        The cluster went from two reserved rows to four, which is 132 px on a
+        panel whose 688 were already spoken for, and the screen is the only
+        block on this face that can give any back -- every other one is a knob
+        plus its caption plus the minimum air, measured. 65 px came from here
+        and the other 67 from the cluster knob (54 to 46) and the two 100 px
+        rows (to 80 each).
+
+        The picture that lost most is not the EQ page, which is a curve across
+        the width and barely notices; it is TAIL, whose 72 dB of level axis is
+        now 95 px of plot. Both were checked in render before the number was
+        settled: a stem cluster and a decay envelope are shapes against a
+        baseline, and a letterbox is a poor place for fine detail and a
+        perfectly good one for a shape.
+
+        `kContentHeight` below comes out at 640 against the 680 a panel has, so
+        the five gaps are `Tokens::switchGap` exactly and the face fits to the
+        pixel. **There is no slack left.** A thirteenth control on any page
+        takes another row, and another row comes out of this number again. */
+    constexpr int kScreenHeight   = 105;
     constexpr int kScreenToLine   = 4;
 
     /** The line of small printed text under the screen. It carries a reading
@@ -74,31 +95,55 @@ namespace
         15; two caption sizes on one face is BMO DEQ's precedent, its band row
         and its detector row being set differently, and `ui_layout_tests`
         measures the overflow rather than trusting this. */
-    constexpr int   kMainKnobSide    = 68;
+    /** 68 and 100 until the EQ page's four rows. The caption row at 12 pt is
+        18 px, so a 60 px knob needs 78 and has 80: the two px of air is all
+        that is left, and the caption's own box is the 120 px cell rather than
+        the knob, so nothing that fitted stopped fitting. */
+    constexpr int   kMainKnobSide    = 60;
     constexpr float kMainCaptionSize = 12.0f;
-    constexpr int   kMainRow         = 100;
+    constexpr int   kMainRow         = 80;
 
     /** The cluster. Smaller knobs and a smaller caption, because there are up
-        to six of them in two rows and the captions are the panel's longest
-        -- "EQ HIGH FREQ" is twelve characters. */
-    constexpr int   kClusterKnobSide    = 54;
-    constexpr float kClusterCaptionSize = 10.0f;
-    constexpr int   kClusterRow         = 74;
-    constexpr int   kClusterRows        = 2;
+        to **twelve** of them in four rows and the captions are the panel's
+        longest -- "EQ HIGH FREQ" is twelve characters.
 
-    constexpr int kStripRow = 100;
+        54 and 74 until the EQ page. At 10 pt the caption row is 16 px, so a
+        46 px knob needs 62 and has 66. The caption is measured against the
+        120 px cell and not against the knob, so shrinking the knob costs no
+        caption anything -- which is the same reason 380 was free at three
+        columns. */
+    constexpr int   kClusterKnobSide    = 46;
+    constexpr float kClusterCaptionSize = 10.0f;
+    constexpr int   kClusterRow         = 66;
+
+    /** **Four, reserved on every page.** EARLY is two rows and TAIL is two,
+        and both are centred in the block rather than packed to its top -- see
+        `ReverbPanel`'s class comment. The block does not change height with
+        the page, which is what keeps turning a page from feeling like
+        switching panels. */
+    constexpr int   kClusterRows        = 4;
+
+    constexpr int kStripRow = 80;
 
     /** Everything above, added up, so the gap between the blocks is whatever
         is left over divided evenly rather than a number somebody has to redo
-        when a block's height changes. */
+        when a block's height changes.
+
+        148 + 52 + 80 + 264 + 16 + 80 = 640, against the 680 a panel's content
+        area has, so the five gaps are `Tokens::switchGap` and the sum is
+        exact. `tests/ui/LayoutTests.cpp` is what notices if it stops being. */
     constexpr int kContentHeight = kBezelHeight + kPageRow + kMainRow
                                  + kClusterRow * kClusterRows
                                  + ui::ModulePanel::kRuleRow + kStripRow;
 
-    // `kSwitchWidth` and `kSwitchHeight` were here for LINK ER, which was the
-    // only switch this panel ever had and went with `prelink` in the
-    // 2026-09-21 trim. Every control on this face is now a knob or a dropdown,
-    // which is why `place` below has nothing to special-case.
+    /** FILTER, and the only switch on this face. LINK ER was the last one and
+        went with `prelink` in the 2026-09-21 trim; the constants are back
+        because the Reverb EQ's mode is a switch, at the suite's own 70 x 26.
+        It is centred in its cluster cell, which puts its middle on the line
+        the two knobs beside it share -- `tests/ui/LayoutTests.cpp` asserts a
+        row by its shared centre for exactly this case. */
+    constexpr int kSwitchWidth  = 70;
+    constexpr int kSwitchHeight = ui::Tokens::switchHeight;
 
     //== The screen's own arithmetic ===========================================
 
@@ -127,15 +172,25 @@ namespace
         return (float) (i + 1) / (float) (kMaxInfill + 1);
     }
 
-    /** The bloom a type's ATTACK constant selects, in milliseconds. Linear,
-        because the contour is CALIBRATE (10 section 8) and a curve here would
-        be a guess drawn as a fact.
+    /** The tail onset a type's ATTACK constant selects, in milliseconds.
+        Linear, because the contour is CALIBRATE (10 section 8) and a curve
+        here would be a guess drawn as a fact.
 
-        **This is the only place the bloom is printed now.** ATTACK lost its
+        **This is the only place the figure is printed now.** ATTACK lost its
         knob and its value string in the 2026-09-21 trim, so the readout line
         under the TAIL picture is where a user finds out what the selected type
-        does to the onset. */
-    constexpr float bloomMs (float percent) noexcept { return percent * 1.2f; }
+        does to the onset.
+
+        **The readout says ONSET and said BLOOM until 2026-09-21.** Owner
+        approved, and the reason is a collision rather than a preference: BMO
+        Dimension ships a control captioned BLOOM (`modules/dim/params.h`,
+        `shuffle`), which is Gerzon's bass shuffler -- low-end width, nothing
+        to do with a reverb's tail, and Frosty named it himself. Two modules in
+        one line, possibly in one rack, showing one word for two unrelated
+        things is the confusion this avoids. ONSET is also what
+        `docs/reverb/10-dsp-spec.md` calls the behaviour ("Tail onset") and it
+        collides with nothing. **Do not tidy it back to BLOOM.** */
+    constexpr float onsetMs (float percent) noexcept { return percent * 1.2f; }
 
     /** The right-hand edge of the TAIL page's time axis, in milliseconds. */
     constexpr float kMaxMs = LingerScreen::kMaxSeconds * 1000.0f;
@@ -178,8 +233,30 @@ LingerScreen::LingerScreen (juce::Colour accentColour) : accent (accentColour)
     setInterceptsMouseClicks (false, false);
 }
 
+LingerScreen::~LingerScreen()
+{
+    // Before `spectrum` is destroyed, so no timer tick can read a
+    // half-destroyed analyser. `Spectrum`'s own destructor is what tells the
+    // audio thread to stop writing.
+    stopTimer();
+}
+
 void LingerScreen::setState (const State& s)
 {
+    const auto& a = s.eq;
+    const auto& b = state.eq;
+
+    const auto sameEq = a.filter == b.filter
+                     && juce::approximatelyEqual (a.loFreqHz,  b.loFreqHz)
+                     && juce::approximatelyEqual (a.loDb,      b.loDb)
+                     && juce::approximatelyEqual (a.loQ,       b.loQ)
+                     && juce::approximatelyEqual (a.midFreqHz, b.midFreqHz)
+                     && juce::approximatelyEqual (a.midDb,     b.midDb)
+                     && juce::approximatelyEqual (a.midQ,      b.midQ)
+                     && juce::approximatelyEqual (a.hiFreqHz,  b.hiFreqHz)
+                     && juce::approximatelyEqual (a.hiDb,      b.hiDb)
+                     && juce::approximatelyEqual (a.hiQ,       b.hiQ);
+
     const auto same = juce::approximatelyEqual (s.sizeM, state.sizeM)
                    && juce::approximatelyEqual (s.preDelayMs, state.preDelayMs)
                    && juce::approximatelyEqual (s.erDensity, state.erDensity)
@@ -189,17 +266,35 @@ void LingerScreen::setState (const State& s)
                    && juce::approximatelyEqual (s.dampHi, state.dampHi)
                    && juce::approximatelyEqual (s.attack, state.attack)
                    && juce::approximatelyEqual (s.verbLevelDb, state.verbLevelDb)
-                   && juce::approximatelyEqual (s.eqLoFreqHz, state.eqLoFreqHz)
-                   && juce::approximatelyEqual (s.eqLoDb, state.eqLoDb)
-                   && juce::approximatelyEqual (s.eqHiFreqHz, state.eqHiFreqHz)
-                   && juce::approximatelyEqual (s.eqHiDb, state.eqHiDb)
+                   && sameEq
                    && juce::approximatelyEqual (s.inHiCutHz, state.inHiCutHz);
 
     if (same)
         return;
 
     state = s;
+
+    // Designing three biquads is a few hundred flops and happens on a knob
+    // move, not per pixel and not per frame. `paintEq` reads `nodes`.
+    if (! sameEq)
+        redesign();
+
     repaint();
+}
+
+void LingerScreen::setAnalyserTap (AnalyserTap* tap)
+{
+    spectrum.setTap (tap);
+}
+
+void LingerScreen::setHostRate (std::function<double()> f)
+{
+    hostRate = std::move (f);
+}
+
+void LingerScreen::redesign()
+{
+    nodes = EqNodes::design (state.eq, drawnAt);
 }
 
 void LingerScreen::setPage (Page p)
@@ -208,7 +303,48 @@ void LingerScreen::setPage (Page p)
         return;
 
     page = p;
+
+    // **The timer is the EQ page's and nobody else's.** EARLY and TAIL are
+    // parameter-driven, so on those two pages this component is exactly as
+    // static as it was before the analyser arrived -- no ticks, no FFT, no
+    // repaints between knob moves. The tap itself is left enabled either way:
+    // it is the panel's lifetime that owns that, and a page turn is not a
+    // panel going away.
+    if (page == Page::eq)
+        startTimerHz (kFrameHz);
+    else
+        stopTimer();
+
     repaint();
+}
+
+void LingerScreen::timerCallback()
+{
+    // The rate first, because the three nodes are designed at it and a host
+    // can re-prepare a plugin with its editor open. 0 means "not prepared
+    // yet" and leaves the curve on kEqDesignRate.
+    if (hostRate != nullptr)
+        if (const auto rate = hostRate(); rate > 0.0 && ! juce::approximatelyEqual (rate, drawnAt))
+        {
+            drawnAt = rate;
+            redesign();
+            repaint();
+        }
+
+    // The spectrum moves on its own, independently of whether a knob has. A
+    // closed editor never gets here, and a tap that is null or has not been
+    // filled costs a read and a comparison and no repaint.
+    if (spectrum.update (drawnAt))
+    {
+        rebuildSpectrum();
+        repaint();
+    }
+}
+
+void LingerScreen::rebuildSpectrum()
+{
+    spectrum.buildPath (spectrumPath, plotArea(),
+                        [this] (double hz) { return eqXFor (hz); });
 }
 
 float LingerScreen::firstTapTimeMs() const noexcept
@@ -260,29 +396,65 @@ int LingerScreen::activeTapCount() const noexcept
     return kNumReferenceTaps + infill;
 }
 
-float LingerScreen::responseDbAt (float hz) const noexcept
+namespace
 {
-    // Three nodes in series, summed in dB, and **first-order** -- see the
-    // class comment for why that is a decision rather than a shortcut. Each
-    // one is written as its own limit rather than as a filter: the shelves go
-    // to their full gain on one side of the corner and to nothing on the
-    // other, and the cut is a one-pole roll-off.
-    const auto f = juce::jmax (1.0f, hz);
-
-    const auto lo = f / juce::jmax (1.0f, state.eqLoFreqHz);
-    const auto hi = f / juce::jmax (1.0f, state.eqHiFreqHz);
-    const auto cut = f / juce::jmax (1.0f, state.inHiCutHz);
-
-    const auto lowShelf  = state.eqLoDb / (1.0f + lo * lo);
-    const auto highShelf = state.eqHiDb * (hi * hi) / (1.0f + hi * hi);
-    const auto hiCut     = -10.0f * std::log10 (1.0f + cut * cut);
-
-    return lowShelf + highShelf + hiCut;
+    /** IN HI-CUT, and it is **not** one of the three EQ nodes -- it is the
+        input high-cut in series ahead of them. One pole, no Q, no gain, so it
+        has no `EqNodes` entry: giving it a `Biquad` would claim an order that
+        nobody has chosen for it (10 section 2 does not say), and an unmarked
+        guess about a filter is the same fault as an unmarked CALIBRATE number.
+        The three that *are* the EQ have a shipped design and go through it. */
+    float inputHiCutDbAt (float hz, float cornerHz) noexcept
+    {
+        const auto r = juce::jmax (1.0f, hz) / juce::jmax (1.0f, cornerHz);
+        return -10.0f * std::log10 (1.0f + r * r);
+    }
 }
 
-std::array<float, 3> LingerScreen::nodeFrequencies() const noexcept
+float LingerScreen::nodeDbAt (EqNode node, float hz) const noexcept
 {
-    return { state.eqLoFreqHz, state.eqHiFreqHz, state.inHiCutHz };
+    return (float) nodes.nodeDbAt (node, (double) juce::jmax (1.0f, hz), drawnAt);
+}
+
+float LingerScreen::responseDbAt (float hz) const noexcept
+{
+    // The three Reverb EQ nodes, **as the engine's own matched-Z designs**,
+    // plus the input high-cut's one pole. Serial, so the dB add.
+    //
+    // At the defaults all three are `designMatched`'s exact unity case --
+    // numerator equal to denominator -- so they contribute 0.0 and the whole
+    // reading is IN HI-CUT's, which is -0.011 dB at 1 kHz with the knob wide
+    // open. `tests/ui/LayoutTests.cpp` pins that absolute rather than "it is
+    // roughly flat", which is OptoDspTests' house rule.
+    return (float) nodes.magnitudeDbAt ((double) juce::jmax (1.0f, hz), drawnAt)
+             + inputHiCutDbAt (hz, state.inHiCutHz);
+}
+
+std::array<float, 4> LingerScreen::nodeFrequencies() const noexcept
+{
+    return { state.eq.loFreqHz, state.eq.midFreqHz, state.eq.hiFreqHz, state.inHiCutHz };
+}
+
+juce::Rectangle<float> LingerScreen::plotArea() const noexcept
+{
+    return getLocalBounds().toFloat().reduced (5.0f);
+}
+
+float LingerScreen::eqXFor (double hz) const noexcept
+{
+    const auto plot = plotArea();
+    const auto n = std::log (juce::jlimit ((double) kMinHz, (double) kMaxHz, hz) / (double) kMinHz)
+                     / std::log ((double) kMaxHz / (double) kMinHz);
+
+    return plot.getX() + plot.getWidth() * (float) n;
+}
+
+float LingerScreen::eqYFor (double db) const noexcept
+{
+    const auto plot = plotArea();
+    const auto n = juce::jlimit (-1.0, 1.0, db / (double) kEqRangeDb);
+
+    return plot.getCentreY() - plot.getHeight() * 0.5f * (float) n;
 }
 
 juce::String LingerScreen::readout() const
@@ -298,18 +470,35 @@ juce::String LingerScreen::readout() const
                      + juce::String (lastTapTimeMs(), 1) + " MS";
 
         case Page::tail:
-            // The decay itself, the bloom in the milliseconds ATTACK's per
-            // cent selects, and where the drawn tail actually ends -- which is
-            // DECAY times the slowest damping multiplier and is the figure the
-            // knob cannot show.
-            return "DECAY " + juce::String (state.decaySeconds, 2) + " S   BLOOM "
-                     + juce::String (juce::roundToInt (bloomMs (state.attack))) + " MS   TAIL "
+            // The decay itself, the tail onset in the milliseconds ATTACK's
+            // per cent selects, and where the drawn tail actually ends --
+            // which is DECAY times the slowest damping multiplier and is the
+            // figure the knob cannot show.
+            //
+            // **ONSET is the one field on this line that is not a control.**
+            // `attack` was cut into the per-type table in the 2026-09-21 trim,
+            // so this number moves when TYPE moves and never when a knob does
+            // -- a reader who expects it to track something they are turning
+            // will think it has stuck. It said BLOOM until later the same day;
+            // `onsetMs` carries why it does not any more.
+            return "DECAY " + juce::String (state.decaySeconds, 2) + " S   ONSET "
+                     + juce::String (juce::roundToInt (onsetMs (state.attack))) + " MS   TAIL "
                      + juce::String (tailEndSeconds(), 2) + " S";
 
-        case Page::tone:
-            // The three crossover points, in the order the curve crosses them.
-            return "LOW " + hzText (state.eqLoFreqHz) + "   HIGH " + hzText (state.eqHiFreqHz)
-                     + "   CUT " + hzText (state.inHiCutHz);
+        case Page::eq:
+            // The three nodes' corners, in the order the curve crosses them,
+            // **and the mode in the words rather than as a fourth field**: the
+            // two outer nodes read LOW and HIGH as shelves and LO CUT and
+            // HI CUT as filters, so the line says what the picture says.
+            //
+            // IN HI-CUT is deliberately not on this line. Four corners plus
+            // their units is about fifty-six characters at 11 pt across
+            // 336 px, which does not set; the input cut has its own caption,
+            // it is the open marker on the curve rather than a filled one, and
+            // it is not part of the Reverb EQ. The three that are, are here.
+            return juce::String (state.eq.filter ? "LO CUT " : "LOW ") + hzText (state.eq.loFreqHz)
+                     + "   MID " + hzText (state.eq.midFreqHz)
+                     + (state.eq.filter ? "   HI CUT " : "   HIGH ") + hzText (state.eq.hiFreqHz);
     }
 
     return {};
@@ -319,7 +508,7 @@ juce::String LingerScreen::readout() const
 void LingerScreen::paint (juce::Graphics& g)
 {
     const auto bounds = getLocalBounds().toFloat();
-    const auto plot = bounds.reduced (5.0f);
+    const auto plot = plotArea();
 
     // A dark face, in `meterFace` -- the token a needle meter's scale is
     // printed on. A value rather than a hue, and the same one in both
@@ -330,10 +519,21 @@ void LingerScreen::paint (juce::Graphics& g)
 
     const auto ink = ui::accentInk (accent, ui::tokens().meterFace);
 
-    // The dot matrix, under everything: a faint regular grid, which is what
-    // makes the box read as a display rather than as a hole in the plate. It
-    // is drawn from the plot's own origin so the dots do not crawl when the
-    // panel is laid out again.
+    // **The spectrum goes in first, under everything**, which is BMO DEQ's
+    // order and its reason: it is a filled shape at low alpha that the grid
+    // and the curve are read *against*, so anything drawn over it stays
+    // legible. EARLY and TAIL never have one -- the path is only ever built by
+    // the EQ page's own timer.
+    if (page == Page::eq && spectrum.isEnabled() && ! spectrumPath.isEmpty())
+    {
+        g.setColour (Spectrum::colour().withAlpha (0.28f));
+        g.fillPath (spectrumPath);
+    }
+
+    // The dot matrix: a faint regular grid, which is what makes the box read
+    // as a display rather than as a hole in the plate. It is drawn from the
+    // plot's own origin so the dots do not crawl when the panel is laid out
+    // again.
     {
         g.setColour (ui::tokens().hairline.withMultipliedAlpha (0.22f));
 
@@ -346,7 +546,7 @@ void LingerScreen::paint (juce::Graphics& g)
     {
         case Page::early: paintEarly (g, plot, ink); break;
         case Page::tail:  paintTail  (g, plot, ink); break;
-        case Page::tone:  paintTone  (g, plot, ink); break;
+        case Page::eq:    paintEq    (g, plot, ink); break;
     }
 
     g.setColour (ui::tokens().outline);
@@ -504,10 +704,10 @@ void LingerScreen::paintTail (juce::Graphics& g, juce::Rectangle<float> plot,
     if (state.verbLevelDb <= -39.95f)
         return;
 
-    const auto bloom = bloomMs (state.attack);
+    const auto onset = onsetMs (state.attack);
 
     /** The envelope at `ms`, for a 60 dB time of `t60` seconds. Below the
-        bloom it rises; after it, it decays. */
+        onset it rises; after it, it decays. */
     const auto envelopeDb = [&] (float ms, float t60)
     {
         const auto since = ms - state.preDelayMs;
@@ -515,11 +715,11 @@ void LingerScreen::paintTail (juce::Graphics& g, juce::Rectangle<float> plot,
         if (since <= 0.0f)
             return kFloorDb;
 
-        const auto rise = bloom > 0.0f && since < bloom
-                            ? 20.0f * std::log10 (juce::jmax (1.0e-3f, since / bloom))
+        const auto rise = onset > 0.0f && since < onset
+                            ? 20.0f * std::log10 (juce::jmax (1.0e-3f, since / onset))
                             : 0.0f;
 
-        const auto decayFrom = bloom > 0.0f ? juce::jmax (0.0f, since - bloom) : since;
+        const auto decayFrom = onset > 0.0f ? juce::jmax (0.0f, since - onset) : since;
 
         return state.verbLevelDb + rise - 60.0f * (decayFrom * 0.001f) / juce::jmax (0.01f, t60);
     };
@@ -592,21 +792,15 @@ void LingerScreen::paintTail (juce::Graphics& g, juce::Rectangle<float> plot,
 }
 
 //==============================================================================
-void LingerScreen::paintTone (juce::Graphics& g, juce::Rectangle<float> plot,
-                              juce::Colour ink) const
+void LingerScreen::paintEq (juce::Graphics& g, juce::Rectangle<float> plot,
+                            juce::Colour ink) const
 {
-    const auto xFor = [&] (float hz)
-    {
-        const auto n = std::log (juce::jlimit (kMinHz, kMaxHz, hz) / kMinHz)
-                         / std::log (kMaxHz / kMinHz);
-        return plot.getX() + plot.getWidth() * (float) n;
-    };
-
-    const auto yFor = [&] (float db)
-    {
-        const auto n = juce::jlimit (-1.0f, 1.0f, db / kToneRangeDb);
-        return plot.getCentreY() - plot.getHeight() * 0.5f * n;
-    };
+    // `eqXFor` and `eqYFor` and not two lambdas, because the spectrum behind
+    // this is built on the same `eqXFor` -- see `rebuildSpectrum`. A shape
+    // that laid out its own log axis would drift from the one it is drawn
+    // against by however much the two disagreed.
+    const auto xFor = [this] (float hz) { return eqXFor ((double) hz); };
+    const auto yFor = [this] (float db) { return eqYFor ((double) db); };
 
     // The decades, and the line a flat response sits on.
     {
@@ -621,45 +815,87 @@ void LingerScreen::paintTone (juce::Graphics& g, juce::Rectangle<float> plot,
                                             ui::Tokens::hairlineWeight));
     }
 
-    // The summed curve, one sample a pixel.
+    // The summed curve, one sample a pixel, computed once and used twice --
+    // for the wash and for the line -- so the two cannot disagree about where
+    // the response is.
+    const auto steps = juce::jmax (8, (int) plot.getWidth());
+
+    const auto xAt = [&] (int i)
     {
-        const auto steps = juce::jmax (8, (int) plot.getWidth());
+        return plot.getX() + plot.getWidth() * (float) i / (float) steps;
+    };
 
-        juce::Path p;
+    std::vector<float> ys ((size_t) steps + 1);
 
-        for (int i = 0; i <= steps; ++i)
-        {
-            const auto n = (float) i / (float) steps;
-            const auto hz = kMinHz * std::pow (kMaxHz / kMinHz, n);
-            const auto x = plot.getX() + plot.getWidth() * n;
-            const auto y = yFor (responseDbAt (hz));
-
-            if (i == 0)
-                p.startNewSubPath (x, y);
-            else
-                p.lineTo (x, y);
-        }
-
-        g.setColour (ink);
-        g.strokePath (p, juce::PathStrokeType (1.6f));
+    for (int i = 0; i <= steps; ++i)
+    {
+        const auto n = (float) i / (float) steps;
+        ys[(size_t) i] = yFor (responseDbAt (kMinHz * std::pow (kMaxHz / kMinHz, n)));
     }
 
-    // **A marked node per band**, sitting on the summed curve rather than on
-    // its own contribution: what a serial EQ's node says is "this control's
+    juce::Path curve;
+    curve.startNewSubPath (xAt (0), ys[0]);
+
+    for (int i = 1; i <= steps; ++i)
+        curve.lineTo (xAt (i), ys[(size_t) i]);
+
+    // **The wash between the curve and 0 dB, and it is how FILTER reads as
+    // cuts.** Closing the curve onto the zero line rather than onto the floor
+    // is what makes the shape mean something: a shelf gives a lens that
+    // flattens out past its corner, and a cut gives a wedge that runs off the
+    // end of the axis and keeps going. It is the same drawing in both modes --
+    // no branch, no second style -- so nothing has to be kept in step, and a
+    // deep shelf cannot be mistaken for a cut because a deep shelf stops.
+    //
+    // Low alpha, and over the grid rather than under it, so the spectrum
+    // behind stays readable through both.
+    {
+        auto region = curve;
+        region.lineTo (xAt (steps), yFor (0.0f));
+        region.lineTo (xAt (0), yFor (0.0f));
+        region.closeSubPath();
+
+        g.setColour (ink.withAlpha (0.14f));
+        g.fillPath (region);
+    }
+
+    g.setColour (ink);
+    g.strokePath (curve, juce::PathStrokeType (1.6f));
+
+    // **A marked node per control**, sitting on the summed curve rather than
+    // on its own contribution: what a serial EQ's node says is "this control's
     // corner is here, and here is what the chain is doing at that corner".
+    //
+    // **Three filled and one open.** The filled three are the Reverb EQ's own
+    // nodes; the open one is IN HI-CUT, which is a different control in a
+    // different place -- ahead of the EQ, ahead of both generators, one pole,
+    // no Q. The module has two high cuts and a reader looking at one curve has
+    // to be able to tell which is which. See the class comment.
     {
         constexpr auto radius = 3.4f;
 
-        for (const auto hz : nodeFrequencies())
+        const auto frequencies = nodeFrequencies();
+
+        for (size_t i = 0; i < frequencies.size(); ++i)
         {
+            const auto hz = frequencies[i];
+            const auto isInput = i + 1 == frequencies.size();
+
             const auto centre = juce::Point<float> (xFor (hz), yFor (responseDbAt (hz)));
             const auto dot = juce::Rectangle<float> (radius * 2.0f, radius * 2.0f)
                                  .withCentre (centre);
 
+            // The face is punched out under every marker so it reads against
+            // the curve and the spectrum both.
             g.setColour (ui::tokens().meterFace);
             g.fillEllipse (dot.expanded (1.6f));
+
             g.setColour (ink);
-            g.drawEllipse (dot, 1.6f);
+
+            if (isInput)
+                g.drawEllipse (dot, 1.6f);
+            else
+                g.fillEllipse (dot);
         }
     }
 }
@@ -783,15 +1019,35 @@ ReverbPanel::ReverbPanel (ui::ModuleContext ctx)
       modRateKnob    (context.params.param (Index::modrate),    "MOD RATE",    ui::Knob::Style::character, 0.58f, context.def.accent),
       widthKnob      (context.params.param (Index::width),      "WIDTH",       ui::Knob::Style::character, 0.58f, context.def.accent),
 
-      // TONE. OUTPUT is the one `utility` knob on this panel: a trim on the
-      // way out is exactly what the style is for, and it is the same knob BMO
-      // DEQ leaves blue at the foot of its own accent-coloured face.
-      eqLoFreqKnob (context.params.param (Index::eqlofreq), "EQ LOW FREQ",  ui::Knob::Style::character, 0.58f, context.def.accent),
-      eqLoKnob     (context.params.param (Index::eqlo),     "EQ LOW",       ui::Knob::Style::character, 0.58f, context.def.accent),
-      eqHiFreqKnob (context.params.param (Index::eqhifreq), "EQ HIGH FREQ", ui::Knob::Style::character, 0.58f, context.def.accent),
-      eqHiKnob     (context.params.param (Index::eqhi),     "EQ HIGH",      ui::Knob::Style::character, 0.58f, context.def.accent),
-      inHiCutKnob  (context.params.param (Index::inhicut),  "IN HI-CUT",    ui::Knob::Style::character, 0.58f, context.def.accent),
-      outputKnob   (context.params.param (Index::output),   "OUTPUT",       ui::Knob::Style::utility,   0.58f, context.def.accent),
+      // EQ. OUTPUT is the one `utility` knob on this panel: a trim on the way
+      // out is exactly what the style is for, and it is the same knob BMO DEQ
+      // leaves blue at the foot of its own accent-coloured face.
+      //
+      // **"EQ HIGH FREQ" against "IN HI-CUT" is the distinction that matters
+      // on this page**, and it is carried by the captions because the module
+      // now has two high cuts: node 3 with FILTER on is a cut on the reverb
+      // path, and IN HI-CUT is the input's, ahead of the EQ and ahead of both
+      // generators. The "EQ" prefix on nine captions and its absence on the
+      // tenth is what says which is which; the screen says it a second way, by
+      // drawing IN HI-CUT's marker open and the three EQ nodes' filled.
+      //
+      // FILTER's tint is the module's accent: modules/AGENTS.md's table gives
+      // the accent to a switch that changes what the module *is* rather than
+      // routing it, and `switchAlt` to the rest. A mode over three controls is
+      // the first of those.
+      eqFilterSwitch (context.params.param (Index::eqfilter), "FILTER", context.def.accent),
+
+      eqLoFreqKnob  (context.params.param (Index::eqlofreq),  "EQ LOW FREQ",  ui::Knob::Style::character, 0.58f, context.def.accent),
+      eqLoKnob      (context.params.param (Index::eqlo),      "EQ LOW",       ui::Knob::Style::character, 0.58f, context.def.accent),
+      eqLoQKnob     (context.params.param (Index::eqloq),     "EQ LOW Q",     ui::Knob::Style::character, 0.58f, context.def.accent),
+      eqMidFreqKnob (context.params.param (Index::eqmidfreq), "EQ MID FREQ",  ui::Knob::Style::character, 0.58f, context.def.accent),
+      eqMidKnob     (context.params.param (Index::eqmid),     "EQ MID",       ui::Knob::Style::character, 0.58f, context.def.accent),
+      eqMidQKnob    (context.params.param (Index::eqmidq),    "EQ MID Q",     ui::Knob::Style::character, 0.58f, context.def.accent),
+      eqHiFreqKnob  (context.params.param (Index::eqhifreq),  "EQ HIGH FREQ", ui::Knob::Style::character, 0.58f, context.def.accent),
+      eqHiKnob      (context.params.param (Index::eqhi),      "EQ HIGH",      ui::Knob::Style::character, 0.58f, context.def.accent),
+      eqHiQKnob     (context.params.param (Index::eqhiq),     "EQ HIGH Q",    ui::Knob::Style::character, 0.58f, context.def.accent),
+      inHiCutKnob   (context.params.param (Index::inhicut),   "IN HI-CUT",    ui::Knob::Style::character, 0.58f, context.def.accent),
+      outputKnob    (context.params.param (Index::output),    "OUTPUT",       ui::Knob::Style::utility,   0.58f, context.def.accent),
 
       // The strip at the foot.
       erLevelKnob   (context.params.param (Index::erlevel),   "ER",     ui::Knob::Style::character, 0.62f, context.def.accent),
@@ -800,11 +1056,25 @@ ReverbPanel::ReverbPanel (ui::ModuleContext ctx)
 {
     addAndMakeVisible (screen);
 
+    // **The spectrum behind the EQ page's curve.** Handing the tap over is
+    // what starts the audio thread writing at all, and `LingerScreen`'s
+    // destructor hands null back -- the contract `AnalyserTap` is emphatic
+    // about. `context.analyser` is null for a module with no tap, which is
+    // every module in this suite but BMO DEQ and this one.
+    screen.setAnalyserTap (context.analyser);
+
+    // Polled and not read once: a matched-Z design is rate-dependent, and a
+    // host can re-prepare a plugin with its editor open. BMO DEQ's
+    // `ResponseView` takes the same callback for the same reason.
+    screen.setHostRate (context.sampleRate);
+
     // The three keys, in page order, so `pageButtons[(size_t) page]` is the
     // one that is lit and nothing has to map between them.
     {
-        static const char* const names[] { "EARLY", "TAIL", "TONE" };
-        static constexpr Page pages[] { Page::early, Page::tail, Page::tone };
+        // **EQ and not TONE.** Frosty, 2026-09-21: the page is a three-node
+        // parametric now and TONE named a direction rather than a control.
+        static const char* const names[] { "EARLY", "TAIL", "EQ" };
+        static constexpr Page pages[] { Page::early, Page::tail, Page::eq };
 
         for (size_t i = 0; i < pageButtons.size(); ++i)
         {
@@ -834,6 +1104,11 @@ ReverbPanel::ReverbPanel (ui::ModuleContext ctx)
     // The cluster's controls are sized here and parented in `resized`, which
     // is the only place that decides which page's are children. See the class
     // comment for why they are unparented rather than hidden.
+    //
+    // A `SwitchButton` takes neither call: it has no caption under it -- its
+    // word is inside the box -- and its box is a fixed 70 x 26 that `resized`
+    // centres in the cell. So FILTER falls through both branches, which is
+    // right rather than an omission.
     for (auto* c : allPageControls())
     {
         if (auto* k = dynamic_cast<ui::PlainKnob*> (c))
@@ -863,9 +1138,9 @@ ReverbPanel::ReverbPanel (ui::ModuleContext ctx)
     // wants to be able to check at a glance.
     {
         // **TYPE is in the list and is not itself drawn.** The TAIL picture's
-        // bloom is `TypeConstants::attack`, which has no parameter since the
+        // onset is `TypeConstants::attack`, which has no parameter since the
         // 2026-09-21 trim, so a type change is the only thing that moves it --
-        // and without this the bloom would only redraw when some *other* knob
+        // and without this the onset would only redraw when some *other* knob
         // happened to move. It is also what makes the nine the type stamps
         // redraw as one event rather than nine.
         const int drawn[] { Index::type,
@@ -873,15 +1148,24 @@ ReverbPanel::ReverbPanel (ui::ModuleContext ctx)
                             Index::erdensity, Index::erlevel,
                             Index::decay, Index::damplo, Index::damphi,
                             Index::verblevel,
-                            Index::eqlofreq, Index::eqlo, Index::eqhifreq, Index::eqhi,
+                            // **`eqfilter` is in the list and it is the one
+                            // that would be easiest to leave out**: it moves
+                            // no frequency and no gain, it changes two of the
+                            // three nodes' *shapes*, and without this the
+                            // curve would only redraw when some other knob
+                            // happened to move.
+                            Index::eqfilter,
+                            Index::eqlofreq, Index::eqlo, Index::eqloq,
+                            Index::eqmidfreq, Index::eqmid, Index::eqmidq,
+                            Index::eqhifreq, Index::eqhi, Index::eqhiq,
                             Index::inhicut };
 
-        static_assert (sizeof (drawn) / sizeof (int) == 14, "one attachment per drawn parameter");
+        static_assert (sizeof (drawn) / sizeof (int) == 20, "one attachment per drawn parameter");
 
         for (size_t i = 0; i < screenAttachments.size(); ++i)
             screenAttachments[i] = std::make_unique<juce::ParameterAttachment> (
                 context.params.param (drawn[i]),
-                [this] (float) { refreshScreen(); });
+                [this] (float) { refreshScreen(); refreshFilterMode(); });
     }
 
     pageButtons[(size_t) page]->setToggleState (true, juce::dontSendNotification);
@@ -890,6 +1174,7 @@ ReverbPanel::ReverbPanel (ui::ModuleContext ctx)
     // Draw whatever the parameters already say, which is how a render and a
     // reopened editor come up in the state they were left in.
     refreshScreen();
+    refreshFilterMode();
 }
 
 //==============================================================================
@@ -914,11 +1199,18 @@ std::vector<juce::Component*> ReverbPanel::pageControls (Page p) const
             return { &self->dampLoKnob, &self->dampHiKnob, &self->modDepthKnob,
                      &self->modRateKnob, &self->widthKnob };
 
-        case Page::tone:
-            // Three and three: the two shelves with their corners, then the
-            // input cut and the output trim.
-            return { &self->eqLoFreqKnob, &self->eqLoKnob, &self->eqHiFreqKnob,
-                     &self->eqHiKnob, &self->inHiCutKnob, &self->outputKnob };
+        case Page::eq:
+            // **Twelve, in four rows of three, and the rows are the nodes.**
+            // One node a row as FREQ / GAIN / Q, low to high, so the page
+            // reads down the spectrum -- then the mode, the input cut and the
+            // output trim on the fourth. Reading across a row is one band;
+            // reading down a column is all three frequencies, all three gains
+            // or all three Qs, which is the arrangement every parametric on a
+            // desk has.
+            return { &self->eqLoFreqKnob,  &self->eqLoKnob,  &self->eqLoQKnob,
+                     &self->eqMidFreqKnob, &self->eqMidKnob, &self->eqMidQKnob,
+                     &self->eqHiFreqKnob,  &self->eqHiKnob,  &self->eqHiQKnob,
+                     &self->eqFilterSwitch, &self->inHiCutKnob, &self->outputKnob };
     }
 
     return {};
@@ -936,7 +1228,7 @@ std::vector<juce::Component*> ReverbPanel::allPageControls() const
 {
     std::vector<juce::Component*> all;
 
-    for (const auto p : { Page::early, Page::tail, Page::tone })
+    for (const auto p : { Page::early, Page::tail, Page::eq })
         for (auto* c : pageControls (p))
             all.push_back (c);
 
@@ -966,12 +1258,18 @@ bool ReverbPanel::setUiState (const juce::String& key, const juce::String& value
 
     if (value.equalsIgnoreCase ("early")) { setPage (Page::early); return true; }
     if (value.equalsIgnoreCase ("tail"))  { setPage (Page::tail);  return true; }
-    if (value.equalsIgnoreCase ("tone"))  { setPage (Page::tone);  return true; }
+    if (value.equalsIgnoreCase ("eq"))    { setPage (Page::eq);    return true; }
 
+    // **"tone" is refused like any other unknown value**, and deliberately so:
+    // it was the third page's key until 2026-09-21 and a render script that
+    // still passes it should stop with an error rather than quietly produce an
+    // EARLY page labelled TONE. Accepting it as a synonym would hide exactly
+    // the scripts that need updating.
+    //
     // **Refused, not defaulted.** BMO DEQ's comment is the argument and it
-    // holds exactly here: a render labelled TONE that shows EARLY is worse
-    // than no render, and nothing downstream could tell the two apart. The
-    // snapshot tool treats a false as fatal for the same reason.
+    // holds exactly here: a render labelled EQ that shows EARLY is worse than
+    // no render, and nothing downstream could tell the two apart. The snapshot
+    // tool treats a false as fatal for the same reason.
     return false;
 }
 
@@ -980,7 +1278,7 @@ void ReverbPanel::refreshScreen()
     LingerScreen::State s;
 
     // **Thirteen values and one row.** ATTACK has no parameter since the
-    // 2026-09-21 trim, so the bloom the TAIL page draws comes off the selected
+    // 2026-09-21 trim, so the onset the TAIL page draws comes off the selected
     // type's constants -- through `constantsFor`, which is the same call
     // `ReverbDsp::paramsFrom` makes, so the picture and the engine cannot come
     // to disagree about what a Plate's onset is.
@@ -997,10 +1295,20 @@ void ReverbPanel::refreshScreen()
     s.attack       = voicing.attack;
     s.verbLevelDb  = context.params.getReal (Index::verblevel);
 
-    s.eqLoFreqHz   = context.params.getReal (Index::eqlofreq);
-    s.eqLoDb       = context.params.getReal (Index::eqlo);
-    s.eqHiFreqHz   = context.params.getReal (Index::eqhifreq);
-    s.eqHiDb       = context.params.getReal (Index::eqhi);
+    // The Reverb EQ, as the same `EqSettings` the engine builds in
+    // `DspCore::eqSettingsFor` -- one struct, one design, so the curve and the
+    // sound cannot be two transcriptions of ten numbers.
+    s.eq.filter    = context.params.getReal (Index::eqfilter) > 0.5f;
+    s.eq.loFreqHz  = context.params.getReal (Index::eqlofreq);
+    s.eq.loDb      = context.params.getReal (Index::eqlo);
+    s.eq.loQ       = context.params.getReal (Index::eqloq);
+    s.eq.midFreqHz = context.params.getReal (Index::eqmidfreq);
+    s.eq.midDb     = context.params.getReal (Index::eqmid);
+    s.eq.midQ      = context.params.getReal (Index::eqmidq);
+    s.eq.hiFreqHz  = context.params.getReal (Index::eqhifreq);
+    s.eq.hiDb      = context.params.getReal (Index::eqhi);
+    s.eq.hiQ       = context.params.getReal (Index::eqhiq);
+
     s.inHiCutHz    = context.params.getReal (Index::inhicut);
 
     screen.setState (s);
@@ -1008,6 +1316,24 @@ void ReverbPanel::refreshScreen()
     // The readout line is painted by the panel and lives in the bezel, so it
     // is the panel that has to redraw it when a number under it moves.
     repaint (readoutBox);
+}
+
+void ReverbPanel::refreshFilterMode()
+{
+    // **A cut has no gain, so the two shelf GAIN knobs grey out.** The claim
+    // the greying makes is exactly `eqGainReachingDesign`'s: with FILTER on,
+    // `dsp::hasGain` is false for `Shape::lowCut` and `Shape::highCut` and the
+    // gain never reaches the design. The panel asks the same function rather
+    // than repeating the rule, so there is no way for the look and the sound
+    // to disagree about which knobs are live.
+    //
+    // FREQ and Q stay live in both modes, because a cut has a corner and a
+    // resonance and the same two knobs set them. Node 2's three are never
+    // touched -- a bell is a bell in both modes.
+    const auto filter = context.params.getReal (Index::eqfilter) > 0.5f;
+
+    eqLoKnob.setKnobEnabled (eqNodeHasGain (EqNode::low, filter));
+    eqHiKnob.setKnobEnabled (eqNodeHasGain (EqNode::high, filter));
 }
 
 //==============================================================================
@@ -1123,7 +1449,16 @@ void ReverbPanel::resized()
         for (auto* c : showing)
             addAndMakeVisible (c);
 
-        auto block = clusterBox;
+        // **A short page is centred in the four reserved rows, not packed to
+        // the top.** The block is four rows on every page so that nothing
+        // below it moves when the page turns, and EARLY and TAIL are two --
+        // left at the top, the two empty rows underneath read as a page that
+        // has lost half its controls. Centred, the page reads as what it is: a
+        // lighter page than EQ.
+        const auto rowsUsed = ((int) showing.size() + kCols - 1) / kCols;
+
+        auto block = clusterBox.withSizeKeepingCentre (clusterBox.getWidth(),
+                                                       kClusterRow * rowsUsed);
 
         for (size_t first = 0; first < showing.size(); first += (size_t) kCols)
         {
@@ -1140,7 +1475,21 @@ void ReverbPanel::resized()
                 cells = cells.withSizeKeepingCentre (cell * n, cells.getHeight());
 
             for (int i = 0; i < n; ++i)
-                showing[first + (size_t) i]->setBounds (cells.removeFromLeft (cell));
+            {
+                auto cellBounds = cells.removeFromLeft (cell);
+
+                // FILTER is the one control here that is not laid out by
+                // filling its cell. A `SwitchButton` has no caption under it
+                // and no square to hang one off -- its word is inside the box
+                // -- so it takes the suite's 70 x 26 centred, which puts its
+                // middle on the same line as the two knobs beside it. Every
+                // other control on this face is a knob or a dropdown and fills
+                // its cell, which is why this is the only branch.
+                if (auto* sw = dynamic_cast<ui::SwitchButton*> (showing[first + (size_t) i]))
+                    sw->setBounds (cellBounds.withSizeKeepingCentre (kSwitchWidth, kSwitchHeight));
+                else
+                    showing[first + (size_t) i]->setBounds (cellBounds);
+            }
         }
     }
 

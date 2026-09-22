@@ -36,7 +36,7 @@ namespace bmo::reverb
     A preset is free to set any of the nine *after* the type; that is how it
     departs from the voicing, which is the normal case here.
 
-    **And a preset can no longer ask for a bloom, a decay curve, an ER contour
+    **And a preset can no longer ask for an onset, a decay curve, an ER contour
     or a damping knee.** Those went into the per-type block in the 2026-09-21
     control-set trim, so they are not ids any more and cannot appear in a
     `Setting` list. Three settings went with them -- Vocal Chamber's and Long

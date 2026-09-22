@@ -29,11 +29,13 @@ inline ErMode erModeFor (int index) noexcept
     arrives as a 0..2 M/S gain, and the two choice indices become enums. Those
     are the only conversions, and they are all here.
 
-    **Nothing else crosses.** There is no solo path, no gain-reduction figure
-    and no analyser tap: the panel's display is drawn from the parameters and
-    from `TapTables.h`, which is why it cannot affect the sound or the latency.
-    `ModuleDsp`'s defaults cover all three, so their absence is silence rather
-    than an override that does nothing. */
+    **Almost nothing else crosses.** There is no solo path and no
+    gain-reduction figure -- a reverb has no part to hear on its own and
+    nothing to report reducing -- and `ModuleDsp`'s defaults cover both, so
+    their absence is silence rather than an override that does nothing.
+    `analyser()` **is** overridden, as of 2026-09-21: the EQ page draws a
+    spectrum behind its response curve, which is the owner's call and the one
+    place on this panel that is not parameter-driven. See it below. */
 class ReverbDsp final : public ModuleDsp
 {
 public:
@@ -83,10 +85,19 @@ public:
         p.dampHiFreqHz  = c.dampHiFreqHz;
         p.dampHi        = v[Index::damphi];
 
+        // The Reverb EQ, ten fields, and one more conversion: `eqfilter` is a
+        // bool on a float lane, so it crosses as `> 0.5f` the way every other
+        // bool in the suite does.
+        p.eqFilter      = v[Index::eqfilter] > 0.5f;
         p.eqLoFreqHz    = v[Index::eqlofreq];
         p.eqLoDb        = v[Index::eqlo];
+        p.eqLoQ         = v[Index::eqloq];
+        p.eqMidFreqHz   = v[Index::eqmidfreq];
+        p.eqMidDb       = v[Index::eqmid];
+        p.eqMidQ        = v[Index::eqmidq];
         p.eqHiFreqHz    = v[Index::eqhifreq];
         p.eqHiDb        = v[Index::eqhi];
+        p.eqHiQ         = v[Index::eqhiq];
 
         p.erMode        = erModeFor ((int) v[Index::ermode]);
         p.erDensity     = v[Index::erdensity] * 0.01f;
@@ -155,6 +166,20 @@ public:
     {
         return (double) DspCore::tailSecondsFor (paramsFrom (v, count));
     }
+
+    /** The EQ page's spectrum window, at the point the Reverb EQ acts on.
+
+        The default in `ModuleDsp` is null and every other module in the suite
+        still takes it, so adding this changes nothing for any of them -- a
+        panel with no tap draws no spectrum, which is the state BMO EQ, the
+        Saturator, Util, Opto, Dimension, LTV Comp and the rack's own slots are
+        all in. BMO DEQ is the other module that overrides it.
+
+        `DspCore::eqAnalyser` carries the important part: **the samples are the
+        dry input until there is a reverb under them**, because the core is a
+        marked pass-through, and the tap is nonetheless at the point it belongs
+        at rather than at the output. */
+    AnalyserTap* analyser() noexcept override { return &core.eqAnalyser(); }
 
     DspCore& getCore() noexcept { return core; }
 

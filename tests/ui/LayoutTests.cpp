@@ -1003,40 +1003,52 @@ void checkReverbPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
 
     const char* const tailPage[] { "LOW x", "HIGH x", "MOD DEPTH", "MOD RATE", "WIDTH" };
 
-    const char* const tonePage[] { "EQ LOW FREQ", "EQ LOW", "EQ HIGH FREQ", "EQ HIGH",
-                                   "IN HI-CUT", "OUTPUT" };
+    // **Twelve, in four rows of three, and the rows are the nodes.** The page
+    // was TONE with six until 2026-09-21; the Reverb EQ's six new parameters
+    // brought six new controls and the page was relabelled EQ.
+    //
+    // "EQ HIGH FREQ" and "IN HI-CUT" appear in this list a few entries apart
+    // on purpose: the module has **two** high cuts -- node 3 with FILTER on,
+    // and the input's, ahead of the EQ -- and the captions are what tell them
+    // apart. If either is ever renamed to something carrying neither "EQ" nor
+    // "IN", this list is where a reviewer sees the two words together.
+    const char* const eqPage[] { "EQ LOW FREQ", "EQ LOW", "EQ LOW Q",
+                                 "EQ MID FREQ", "EQ MID", "EQ MID Q",
+                                 "EQ HIGH FREQ", "EQ HIGH", "EQ HIGH Q",
+                                 "FILTER", "IN HI-CUT", "OUTPUT" };
 
-    // Seven persistent plus six plus five plus six is the whole schema, and
+    // Seven persistent plus six plus five plus twelve is the whole schema, and
     // the panel is where that sum is checked: a parameter with no control
     // anywhere is the Saturator's oversampling row, which sat on the schema
     // and nowhere on the panel for three releases.
     //
-    // **This is also where the 2026-09-21 control-set trim lands on the
-    // face.** Six controls went with six parameters, and this sum is what
-    // stops one of them being deleted from the schema and left on the panel,
-    // or the other way round.
+    // **This is also where both of 2026-09-21's schema changes land on the
+    // face.** The control-set trim took six controls out with six parameters
+    // and the Reverb EQ put six back; this sum is what stops one being deleted
+    // from the schema and left on the panel, or added to the schema and never
+    // given a control.
     check ((int) (std::size (alwaysOn) + std::size (earlyPage)
-                    + std::size (tailPage) + std::size (tonePage)) == (int) R::Index::count,
+                    + std::size (tailPage) + std::size (eqPage)) == (int) R::Index::count,
            "every parameter has a control on some page of the panel");
 
     const auto captionsFor = [&] (R::Page p) -> const char* const*
     {
-        return p == R::Page::early ? earlyPage : (p == R::Page::tail ? tailPage : tonePage);
+        return p == R::Page::early ? earlyPage : (p == R::Page::tail ? tailPage : eqPage);
     };
 
     const auto countFor = [&] (R::Page p)
     {
         return p == R::Page::early ? (int) std::size (earlyPage)
              : p == R::Page::tail  ? (int) std::size (tailPage)
-                                   : (int) std::size (tonePage);
+                                   : (int) std::size (eqPage);
     };
 
     const auto nameFor = [] (R::Page p)
     {
-        return p == R::Page::early ? "EARLY" : (p == R::Page::tail ? "TAIL" : "TONE");
+        return p == R::Page::early ? "EARLY" : (p == R::Page::tail ? "TAIL" : "EQ");
     };
 
-    static constexpr R::Page kPages[] { R::Page::early, R::Page::tail, R::Page::tone };
+    static constexpr R::Page kPages[] { R::Page::early, R::Page::tail, R::Page::eq };
 
     //== The bezel, the screen inside it and the line under it ================
     {
@@ -1352,14 +1364,20 @@ void checkReverbPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
         check (panel.setUiState ("page", "tail"), who + " should take ui.page=tail");
         check (reverbPanel->getPage() == R::Page::tail, who + " ui.page=tail did not turn the page");
 
-        check (panel.setUiState ("page", "TONE"), who + " should take ui.page=TONE, case and all");
-        check (reverbPanel->getPage() == R::Page::tone, who + " ui.page=TONE did not turn the page");
+        check (panel.setUiState ("page", "EQ"), who + " should take ui.page=EQ, case and all");
+        check (reverbPanel->getPage() == R::Page::eq, who + " ui.page=EQ did not turn the page");
 
-        for (const auto* bad : { "middle", "1", "", "earl", "early tail", " early" })
+        // **"tone" is refused like any other unknown value, and it is in this
+        // list rather than accepted as a synonym.** It was the third page's
+        // key until 2026-09-21. A render script that still passes it should
+        // stop with an error rather than quietly produce an EARLY page
+        // labelled TONE, which is the same argument the refusal itself rests
+        // on -- and accepting it would hide the scripts that need updating.
+        for (const auto* bad : { "tone", "middle", "1", "", "earl", "early tail", " early" })
             check (! panel.setUiState ("page", bad),
                    who + " should refuse ui.page=" + bad + " rather than falling back");
 
-        check (reverbPanel->getPage() == R::Page::tone,
+        check (reverbPanel->getPage() == R::Page::eq,
                who + " a refused page must leave the panel on the one it was showing");
 
         for (const auto* key : { "band", "meter", "view", "" })
@@ -1490,7 +1508,7 @@ void checkReverbPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
     {
         reverbPanel->setPage (R::Page::tail);
 
-        const auto bloomFor = [&] (int detent)
+        const auto onsetFor = [&] (int detent)
         {
             params.setReal (R::Index::type, (float) detent);
             return reverbPanel->getScreen().readout();
@@ -1499,86 +1517,279 @@ void checkReverbPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
         for (const auto detent : { (int) R::room, (int) R::plate, (int) R::cavern,
                                    (int) R::ambience })
         {
-            const auto expected = "BLOOM " + juce::String (juce::roundToInt (
+            // **ONSET and not BLOOM**, owner-approved 2026-09-21. BMO
+            // Dimension already ships a control captioned BLOOM -- Gerzon's
+            // bass shuffler, `dim::kShuffle`, nothing to do with a reverb's
+            // tail -- and two modules in one rack showing one word for two
+            // unrelated things is the collision this avoids. ONSET is also
+            // what 10-dsp-spec.md calls the behaviour. Pinned here so a tidy
+            // back to BLOOM fails rather than passing quietly.
+            const auto expected = "ONSET " + juce::String (juce::roundToInt (
                                       R::constantsFor (detent).attack * 1.2f)) + " MS";
 
-            check (bloomFor (detent).contains (expected),
+            check (onsetFor (detent).contains (expected),
                    who + " on " + R::kTypeNames[detent] + " the TAIL reading should carry '"
-                       + expected + "', reads '" + bloomFor (detent) + "'");
+                       + expected + "', reads '" + onsetFor (detent) + "'");
+
+            check (! onsetFor (detent).contains ("BLOOM"),
+                   who + " the TAIL reading still says BLOOM, which is BMO Dimension's word");
         }
 
         // Non-vacuous: Plate's tail is immediate and Cavern's is not, so the
         // two readings cannot be the same string.
-        check (bloomFor (R::plate) != bloomFor (R::cavern),
-               who + " Plate and Cavern print the same bloom, so the readout is not"
+        check (onsetFor (R::plate) != onsetFor (R::cavern),
+               who + " Plate and Cavern print the same onset, so the readout is not"
                      " following the type");
 
         params.setReal (R::Index::type, (float) R::room);
         reverbPanel->setPage (R::Page::early);
     }
 
-    //== TONE: three nodes in series ==========================================
+    //== EQ: three designed nodes, plus the input cut, in series ==============
     //
     // Absolute figures rather than "the curve moved", which is the house rule
     // from tests/dsp/OptoDspTests.cpp -- a relative test there passed for a
-    // whole release while both of the things it compared were broken. Every
-    // number below is a first-order response worked out by hand from the
-    // corner and the gain.
+    // whole release while both of the things it compared were broken.
+    //
+    // **And the figures are now the engine's own.** The three Reverb EQ nodes
+    // are `dsp::designMatched`, so at their defaults they are that function's
+    // exact unity case and contribute exactly nothing. The hand-rolled
+    // first-order sketch this replaced could only ever be checked against
+    // itself. The one approximation left is IN HI-CUT's single pole, which is
+    // the screen's own arithmetic and marked as such.
+    //
+    // What is asserted *here* rather than in tests/dsp is the wiring: that the
+    // panel's screen reads the parameters a host is holding and hands them to
+    // the same design the engine uses. The filters themselves are
+    // tests/dsp/ReverbDspTests.cpp's, JUCE-free.
     {
-        reverbPanel->setPage (R::Page::tone);
+        reverbPanel->setPage (R::Page::eq);
 
         const auto& screen = reverbPanel->getScreen();
 
-        const auto flat = { R::Index::eqlo, R::Index::eqhi };
+        const auto resetEq = [&]
+        {
+            for (const auto i : { R::Index::eqfilter,
+                                  R::Index::eqlofreq, R::Index::eqlo, R::Index::eqloq,
+                                  R::Index::eqmidfreq, R::Index::eqmid, R::Index::eqmidq,
+                                  R::Index::eqhifreq, R::Index::eqhi, R::Index::eqhiq,
+                                  R::Index::inhicut })
+                params.setReal (i, R::specs()[(size_t) i].def);
+        };
 
-        for (const auto i : flat)
-            params.setReal (i, 0.0f);
+        resetEq();
 
-        params.setReal (R::Index::eqlofreq, 200.0f);
-        params.setReal (R::Index::eqhifreq, 1600.0f);
-        params.setReal (R::Index::inhicut, 20000.0f);
+        // **Flat at the defaults, and flat is the input cut's number alone.**
+        // Every node is a unity biquad, so the whole reading at 1 kHz is
+        // IN HI-CUT's one pole at 20 kHz: -10*log10(1 + (1000/20000)^2), which
+        // is -0.01086 dB. Not "roughly zero" -- the exact figure, because an
+        // EQ that had quietly acquired half a dB somewhere would still read as
+        // roughly zero.
+        checkNear (screen.responseDbAt (1000.0f), -0.010857, 1.0e-4,
+                   who + " a flat EQ page draws a flat curve");
 
-        // Both shelves at zero and the cut wide open is a flat chain, to
-        // within the cut's own third of a dB at 20 kHz.
-        checkNear (screen.responseDbAt (1000.0f), -0.0109, 1.0e-3,
-                   who + " a flat TONE page draws a flat curve");
+        for (const auto hz : { 30.0f, 200.0f, 1000.0f, 1600.0f, 8000.0f })
+            for (const auto n : { R::EqNode::low, R::EqNode::mid, R::EqNode::high })
+                checkNear (screen.nodeDbAt (n, hz), 0.0, 1.0e-9,
+                           who + " every EQ node is exactly flat at its default");
 
-        // The one-pole cut is -3.01 dB at its own corner, which is what makes
-        // it a corner.
+        // The one-pole input cut is -3.01 dB at its own corner, which is what
+        // makes it a corner.
         params.setReal (R::Index::inhicut, 2000.0f);
         checkNear (screen.responseDbAt (2000.0f), -3.0103, 1.0e-3,
                    who + " the input high-cut is 3 dB down at its corner");
-        params.setReal (R::Index::inhicut, 20000.0f);
+        resetEq();
 
-        // A first-order low shelf reaches its full gain a decade under its
-        // corner and has given nearly all of it back a decade over.
-        params.setReal (R::Index::eqlo, 6.0f);
-        checkNear (screen.responseDbAt (20.0f), 6.0 / 1.01 - 0.0000, 2.0e-3,
-                   who + " the low shelf is at its gain a decade under its corner");
-        check (screen.responseDbAt (2000.0f) < 0.15f,
-               who + " the low shelf should be spent a decade over its corner, is "
-                   + juce::String (screen.responseDbAt (2000.0f), 3) + " dB");
-        params.setReal (R::Index::eqlo, 0.0f);
+        //-- Each node is the control it says it is, and only that control ----
+        //
+        // Node by node, on the node's own contribution rather than on the sum,
+        // so a wire that read node 2's gain onto node 3 fails here rather than
+        // in a listening pass.
+        {
+            params.setReal (R::Index::eqlo, 6.0f);
+            checkNear (screen.nodeDbAt (R::EqNode::low, 20.0f), 6.0, 0.25,
+                       who + " EQ LOW's gain reaches node 1 below its corner");
+            checkNear (screen.nodeDbAt (R::EqNode::mid, 20.0f), 0.0, 1.0e-9,
+                       who + " EQ LOW must not move node 2");
+            resetEq();
 
-        // And the three nodes are the three controls, in the order the curve
-        // crosses them.
-        params.setReal (R::Index::eqlofreq, 120.0f);
-        params.setReal (R::Index::eqhifreq, 1800.0f);
-        params.setReal (R::Index::inhicut, 9000.0f);
+            params.setReal (R::Index::eqmidfreq, 1000.0f);
+            params.setReal (R::Index::eqmid, 9.0f);
+            params.setReal (R::Index::eqmidq, 4.0f);
+            checkNear (screen.nodeDbAt (R::EqNode::mid, 1000.0f), 9.0, 0.05,
+                       who + " EQ MID peaks at its own centre at its own gain");
+            checkNear (screen.nodeDbAt (R::EqNode::low, 1000.0f), 0.0, 1.0e-9,
+                       who + " EQ MID must not move node 1");
+            resetEq();
 
-        const auto nodes = screen.nodeFrequencies();
+            params.setReal (R::Index::eqhi, -6.0f);
+            checkNear (screen.nodeDbAt (R::EqNode::high, 19000.0f), -6.0, 0.35,
+                       who + " EQ HIGH's gain reaches node 3 above its corner");
+            resetEq();
 
-        checkNear (nodes[0], 120.0, 0.5, who + " node 0 is EQ LOW's corner");
-        checkNear (nodes[1], 1800.0, 0.5, who + " node 1 is EQ HIGH's corner");
-        checkNear (nodes[2], 9000.0, 0.5, who + " node 2 is IN HI-CUT's corner");
+            // Q is a control and not decoration: a wider bell at the same gain
+            // and centre reaches further out. Absolutes at both settings, and
+            // the comparison on top of them.
+            params.setReal (R::Index::eqmidfreq, 1000.0f);
+            params.setReal (R::Index::eqmid, 12.0f);
 
-        check (reverbPanel->getScreen().readout().contains ("9.00 KHZ"),
-               who + " the TONE reading should carry the crossover points, reads '"
-                   + reverbPanel->getScreen().readout() + "'");
+            params.setReal (R::Index::eqmidq, 8.0f);
+            const auto narrow = screen.nodeDbAt (R::EqNode::mid, 2000.0f);
 
-        for (const auto i : { R::Index::eqlofreq, R::Index::eqhifreq, R::Index::inhicut,
-                              R::Index::eqlo, R::Index::eqhi })
-            params.setReal (i, R::specs()[(size_t) i].def);
+            params.setReal (R::Index::eqmidq, 0.5f);
+            const auto wide = screen.nodeDbAt (R::EqNode::mid, 2000.0f);
+
+            checkNear (screen.nodeDbAt (R::EqNode::mid, 1000.0f), 12.0, 0.05,
+                       who + " a bell is at its gain at its centre whatever its Q");
+            check (wide > narrow + 3.0f,
+                   who + " EQ MID Q does not widen the bell -- an octave out reads "
+                       + juce::String (wide, 2) + " dB wide and " + juce::String (narrow, 2)
+                       + " dB narrow");
+            resetEq();
+        }
+
+        //-- FILTER: nodes 1 and 3 become cuts, node 2 does not ---------------
+        //
+        // **The claim the mode makes, as three separate assertions.** "The
+        // curve changed" is also true of a change that broke the bell, so node
+        // 2 is checked for exact equality across the mode and the outer two
+        // for the sign of what they do.
+        {
+            params.setReal (R::Index::eqlofreq, 200.0f);
+            params.setReal (R::Index::eqhifreq, 1600.0f);
+            params.setReal (R::Index::eqmidfreq, 900.0f);
+            params.setReal (R::Index::eqmid, -5.0f);
+            params.setReal (R::Index::eqmidq, 2.0f);
+            params.setReal (R::Index::eqlo, 6.0f);
+            params.setReal (R::Index::eqhi, 6.0f);
+
+            check (! screen.isFilterMode(), who + " the screen thinks FILTER is on at the default");
+
+            const auto shelfLow  = screen.nodeDbAt (R::EqNode::low, 20.0f);
+            const auto shelfHigh = screen.nodeDbAt (R::EqNode::high, 16000.0f);
+
+            float midAsShelf[3] {};
+            const float probes[3] { 300.0f, 900.0f, 4000.0f };
+
+            for (int i = 0; i < 3; ++i)
+                midAsShelf[i] = screen.nodeDbAt (R::EqNode::mid, probes[i]);
+
+            params.setReal (R::Index::eqfilter, 1.0f);
+
+            check (screen.isFilterMode(), who + " the screen did not take FILTER");
+
+            // Node 2, bit for bit. A bell is a bell in both modes.
+            for (int i = 0; i < 3; ++i)
+                check (screen.nodeDbAt (R::EqNode::mid, probes[i]) == midAsShelf[i],
+                       who + " FILTER moved node 2 at " + juce::String (probes[i], 0)
+                           + " Hz, and a bell is a bell in both modes");
+
+            // Nodes 1 and 3: a boost became a removal, which is what a cut is.
+            check (shelfLow > 5.0f && screen.nodeDbAt (R::EqNode::low, 20.0f) < -18.0f,
+                   who + " FILTER should turn node 1 from a " + juce::String (shelfLow, 1)
+                       + " dB lift at 20 Hz into a cut, reads "
+                       + juce::String (screen.nodeDbAt (R::EqNode::low, 20.0f), 1) + " dB");
+            check (shelfHigh > 5.0f && screen.nodeDbAt (R::EqNode::high, 16000.0f) < -18.0f,
+                   who + " FILTER should turn node 3 from a " + juce::String (shelfHigh, 1)
+                       + " dB lift at 16 kHz into a cut, reads "
+                       + juce::String (screen.nodeDbAt (R::EqNode::high, 16000.0f), 1) + " dB");
+
+            // **The GAIN knobs grey out and the parameters keep their values.**
+            // Both halves, because a mode that reset a knob to make the
+            // greying "true" would also pass a check on the greying alone.
+            // **Read through `knobFace`, not off the PlainKnob.**
+            // `setKnobEnabled` disables the rotary *inside* the component --
+            // that is what the look and feel draws dimmed -- while the wrapper
+            // stays enabled so its caption still lays out. A check on the
+            // wrapper would pass whatever the knob was actually doing, which
+            // is the MAKEUP-shaped blind spot one class over.
+            const auto live = [&] (const char* caption) -> int
+            {
+                auto* found = dynamic_cast<bmo::ui::PlainKnob*> (findNamed (panel, caption));
+
+                if (found == nullptr)
+                {
+                    check (false, who + " the EQ page has no " + caption + " knob");
+                    return -1;
+                }
+
+                const auto* face = knobFace (*found);
+
+                if (face == nullptr)
+                {
+                    check (false, juce::String (who) + " " + caption + " has no rotary under it");
+                    return -1;
+                }
+
+                return face->isEnabled() ? 1 : 0;
+            };
+
+            check (live ("EQ LOW") == 0 && live ("EQ HIGH") == 0,
+                   who + " FILTER should grey out both shelf GAIN knobs -- a cut has no gain");
+
+            // FREQ and Q carry over into filter mode, so they stay live; so
+            // does the bell's gain, which FILTER does not touch.
+            check (live ("EQ LOW FREQ") == 1 && live ("EQ LOW Q") == 1
+                     && live ("EQ HIGH FREQ") == 1 && live ("EQ HIGH Q") == 1
+                     && live ("EQ MID") == 1,
+                   who + " FILTER should leave FREQ, Q and the bell's GAIN alone");
+
+            checkNear (params.getReal (R::Index::eqlo), 6.0, 1.0e-4,
+                       who + " FILTER must not write the shelf gain it is ignoring");
+
+            params.setReal (R::Index::eqfilter, 0.0f);
+
+            check (live ("EQ LOW") == 1 && live ("EQ HIGH") == 1,
+                   who + " switching FILTER off should give the shelf GAIN knobs back");
+
+            checkNear (screen.nodeDbAt (R::EqNode::low, 20.0f), (double) shelfLow, 1.0e-4,
+                       who + " switching FILTER off should restore the shelf exactly");
+
+            resetEq();
+        }
+
+        //-- The four marked nodes are the four controls ----------------------
+        {
+            params.setReal (R::Index::eqlofreq, 120.0f);
+            params.setReal (R::Index::eqmidfreq, 1500.0f);
+            params.setReal (R::Index::eqhifreq, 1800.0f);
+            params.setReal (R::Index::inhicut, 9000.0f);
+
+            const auto nodes = screen.nodeFrequencies();
+
+            check (nodes.size() == 4,
+                   who + " the EQ page should mark four nodes: three EQ and the input cut");
+            checkNear (nodes[0], 120.0, 0.5, who + " node 0 is EQ LOW's corner");
+            checkNear (nodes[1], 1500.0, 0.5, who + " node 1 is EQ MID's centre");
+            checkNear (nodes[2], 1800.0, 0.5, who + " node 2 is EQ HIGH's corner");
+            checkNear (nodes[3], 9000.0, 0.5, who + " node 3 is IN HI-CUT's corner");
+
+            // The reading is of the three EQ nodes, and **it names the mode**:
+            // LOW / HIGH as shelves, LO CUT / HI CUT as filters. That is the
+            // third of the three ways the picture says it is drawing cuts, and
+            // the only one a test can read without rendering.
+            const auto shelfLine = screen.readout();
+
+            check (shelfLine.contains ("LOW ") && shelfLine.contains ("HIGH ")
+                     && shelfLine.contains ("MID 1.50 KHZ"),
+                   who + " the EQ reading should carry the three node corners, reads '"
+                       + shelfLine + "'");
+            check (! shelfLine.contains ("CUT"),
+                   who + " the EQ reading says CUT with FILTER off, reads '" + shelfLine + "'");
+
+            params.setReal (R::Index::eqfilter, 1.0f);
+            const auto cutLine = screen.readout();
+
+            check (cutLine.contains ("LO CUT") && cutLine.contains ("HI CUT"),
+                   who + " with FILTER on the EQ reading should say LO CUT and HI CUT, reads '"
+                       + cutLine + "'");
+            check (cutLine.contains ("MID 1.50 KHZ"),
+                   who + " FILTER must not change what the reading says about the bell");
+            check (cutLine != shelfLine,
+                   who + " the EQ reading is the same with FILTER on and off");
+
+            resetEq();
+        }
 
         reverbPanel->setPage (R::Page::early);
     }
@@ -1833,7 +2044,7 @@ int main (int argc, char** argv)
                 if (auto* paged = dynamic_cast<bmo::reverb::ReverbPanel*> (&panel))
                 {
                     for (const auto p : { bmo::reverb::Page::early, bmo::reverb::Page::tail,
-                                          bmo::reverb::Page::tone })
+                                          bmo::reverb::Page::eq })
                     {
                         paged->setPage (p);
                         dump (panel, juce::String (product.who) + " page "

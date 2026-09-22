@@ -82,8 +82,19 @@ bmo_add_module(vcomp
         ${CMAKE_CURRENT_SOURCE_DIR}/vcomp/panel/LevelBars.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/vcomp/Module.cpp)
 
+# BMO Linger is the third caller of the shared matched-Z filter design, after
+# BMO DEQ -- which still carries its own copy under modules/deq/dsp -- and BMO
+# Defang, which is where the five files moved to core/dsp. Every target already
+# reaches those headers through the root include path, so `core/dsp/Design.cpp`
+# is the only one of them that needs a build rule.
+#
+# It goes in DSP_SOURCES and not in bmo_core: `bmo_reverb_dsp` is a plain
+# static library that does not link bmo_core, and the JUCE-free DSP tests and
+# the measurement tools link that. In bmo_core it would also be absent from
+# every BMO_DSP_ONLY configure, which is the CI job the EQ's own tests run in.
 bmo_add_module(reverb
     DSP_SOURCES
+        ${BMO_ROOT}/core/dsp/Design.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/reverb/dsp/DspCore.cpp
     UI_SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/reverb/panel/ReverbPanel.cpp

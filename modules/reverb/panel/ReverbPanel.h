@@ -1,9 +1,12 @@
 #pragma once
 
 #include "core/product/ModuleDef.h"
+#include "modules/reverb/dsp/EqNodes.h"
 #include "modules/reverb/dsp/TapTables.h"
+#include "modules/reverb/panel/Spectrum.h"
 
 #include <array>
+#include <functional>
 #include <vector>
 
 namespace bmo::reverb
@@ -13,27 +16,47 @@ namespace bmo::reverb
 /** Which page the handheld is showing.
 
     **UI state, not a parameter**, and the distinction is the whole design of
-    it. `specs()` is twenty-four with eight spare host lanes; which page
-    somebody is looking at is not something a session should carry, not
-    something a host should be able to automate, and **not worth a lane even
-    now that there are eight of them** -- the 2026-09-21 control-set trim
-    bought room for controls, not for UI state. BMO Opto's meter mode and BMO DEQ's selected band are the same
-    kind of thing and reach their panels the same way -- through
+    it. `specs()` is thirty with two spare host lanes; which page somebody is
+    looking at is not something a session should carry, not something a host
+    should be able to automate, and **least of all worth a lane now that there
+    are two left**. BMO Opto's meter mode and BMO DEQ's selected band are the
+    same kind of thing and reach their panels the same way -- through
     `ModulePanel::setUiState`, which is also what makes every page renderable
-    headlessly. See `ReverbPanel::setUiState`. */
-enum class Page { early = 0, tail, tone };
+    headlessly. See `ReverbPanel::setUiState`.
+
+    **The third page is EQ and was TONE.** Frosty's call, 2026-09-21, when the
+    two shelves became a three-node parametric: TONE named a vague direction
+    and the page is now an equaliser. The `ui.page` key moved with the label --
+    `ui.page=early|tail|eq` -- because a render key that said `tone` for a page
+    captioned EQ is the kind of drift a reader has to hold in their head. */
+enum class Page { early = 0, tail, eq };
 
 //==============================================================================
 /** The screen: a small dark display inside the bezel, drawing one of three
     pictures depending on the page the handheld is on.
 
-    **Static: no tap, no FFT, no timer, no audio path.** It redraws when one of
-    the parameters it draws from moves, and when the page changes, and at no
-    other time. It reads neither `AnalyserTap` nor any of `ModuleContext`'s
-    meter callbacks, and that is a decision rather than a gap: neither
-    `docs/reverb/10-dsp-spec.md` nor `11-integration-and-test-plan.md` asks
-    this module for metering at all, and a reverb has no gain reduction to
-    report.
+    **EARLY and TAIL are static: no tap, no FFT, no timer, no audio path.**
+    They redraw when one of the parameters they draw from moves, and when the
+    page changes, and at no other time.
+
+    **The EQ page is not, as of 2026-09-21.** The owner asked for a spectrum
+    analyser behind its response curve, which overrides what this comment said
+    -- "the display is parameter-driven only" -- for that one page. So the
+    screen owns a `Spectrum` and a timer, and **the timer runs only while the
+    EQ page is showing**: turning to EARLY or TAIL stops it, so those two pages
+    cost exactly what they cost before. `core/dsp/AnalyserTap.h` is why the
+    tap itself cannot change the sound or the latency.
+
+    It still reads none of `ModuleContext`'s meter callbacks, and that part is
+    unchanged: a reverb has no gain reduction to report.
+
+    **What the spectrum is showing is the dry input**, because
+    `dsp/DspCore.h` is a marked pass-through and there is no reverb under it
+    yet. The tap is at the point the Reverb EQ acts on -- pre both generators,
+    which is where 10 section 2 puts the EQ -- so the wiring is already right
+    and only the signal is missing. It is honest rather than broken, and it is
+    marked at the tap site, here, and in AGENTS.md so that nobody "fixes" a
+    working analyser.
 
     **It draws in the module's accent, not in LCD green.** A second hue on one
     module is the failure the accent audit was run to find -- the cluster's
@@ -68,52 +91,91 @@ enum class Page { early = 0, tail, tone };
     **TAIL -- logarithmic time, 1 ms to 30 s.** This is the axis argued for
     when the display was one picture, and the argument survives the split
     intact: a fixed 0-500 ms window -- 11 section 5's proposal -- shows the
-    bloom beautifully and cannot show a 20 s decay at all, and DECAY reaches
+    onset beautifully and cannot show a 20 s decay at all, and DECAY reaches
     20 s with a 2.0x damping multiplier over it. The old version did exactly
     that, and most of the box was dead. A linear window wide enough for the
-    tail puts the whole 0-120 ms attack bloom inside the first two pixels. On a
-    log axis 1-100 ms keeps 45 % of the width, so the bloom and a 20 s tail are
+    tail puts the whole 0-120 ms attack onset inside the first two pixels. On a
+    log axis 1-100 ms keeps 45 % of the width, so the onset and a 20 s tail are
     both legible in one picture. The ends are chosen rather than round: 1 ms is
     where a reflection stops fusing with the direct sound (05 section 1.1), and
     30 s is `bmo::kMaxTailSeconds`, the ceiling on the tail this module -- and
     now the rack it sits in -- will ever report, so the right-hand edge is the
     same number the host is told rather than a second opinion about it.
 
-    **TONE -- logarithmic frequency, 20 Hz to 20 kHz,** which is the only axis
-    a frequency response has. Level is linear in dB over +/-`kToneRangeDb`.
+    **EQ -- logarithmic frequency, 20 Hz to 20 kHz,** which is the only axis a
+    frequency response has. Level is linear in dB over +/-`kEqRangeDb`. It was
+    captioned TONE until 2026-09-21; see `Page`.
 
-    ## What the TONE curve is, and what it is not
+    ## What the EQ curve is, and it is now the real filters
 
-    Three nodes in series -- the Reverb EQ's low shelf, its high shelf and the
-    input high-cut -- summed in dB and drawn as one curve with a marker on it
-    per node, which is how a serial EQ reads.
+    **Four marked nodes over one summed curve.** Three of them are the Reverb
+    EQ's -- node 1 a low shelf, node 2 a bell, node 3 a high shelf, or a low
+    cut and a high cut with FILTER on -- and they are designed by
+    `EqNodes::design`, which is `dsp::designMatched`, which is **the code the
+    engine will run**. The fourth is IN HI-CUT, which is not one of the three;
+    see below.
 
-    **The shelves are drawn first-order and the cut one-pole, and neither is
-    claimed to be the shipped filter.** `dsp/DspCore.h` is a marked placeholder
-    and 10 section 2 gives the shelves no order, so there is nothing to agree
-    with yet; a second-order curve drawn here would be a guess presented as a
-    measurement, which is the same fault as an unmarked CALIBRATE number. What
-    the picture does promise is the part that is settled: which three controls
-    are in series, where their corners sit, and which way each one leans. When
-    the filters land, `responseDbAt` is the one place this changes. */
-class LingerScreen final : public juce::Component
+    That closes what this comment used to own up to. The shelves were drawn
+    first-order and the cut one-pole, marked as "not claimed to be the shipped
+    filter" because `dsp/DspCore.h` was a marked placeholder and there was no
+    shipped filter to be wrong about. Reproducing the matched-Z design into
+    `core/dsp` gave the module one, so the sketch became a measurement. 11
+    section 5 names sketch/DSP drift as the display's one real risk and asks
+    for one source of truth; `TapTables.h` is that answer for the ER picture
+    and `EqNodes.h` is now that answer for this one.
+
+    ## The two high cuts, and how the picture tells them apart
+
+    This module has **two** and they are different controls:
+
+    - **IN HI-CUT** (`inhicut`), the input high-cut, ahead of the EQ and ahead
+      of both generators, on top of a fixed 20 Hz high-pass. No Q, no gain, one
+      pole. It darkens *what the room is given*.
+    - **EQ HIGH with FILTER on**, node 3 of the Reverb EQ, second-order with a
+      Q. It darkens *the room*.
+
+    The captions carry the distinction -- "IN HI-CUT" against "EQ HIGH FREQ",
+    "EQ HIGH" and "EQ HIGH Q" -- and the curve carries it too: the three EQ
+    nodes are drawn as filled circles and IN HI-CUT as an open one, because it
+    is in series with the EQ rather than part of it. Its one-pole roll-off is
+    still arithmetic in this file rather than an `EqNodes` node, and that is
+    deliberate: giving it a `Biquad` would imply an order nobody has chosen for
+    it.
+
+    ## How FILTER reads as cuts
+
+    Three things at once, so it cannot be mistaken for a shelf at a lot of
+    gain. The nodes really are `Shape::lowCut` and `Shape::highCut`, so the
+    curve dives off the bottom of the +/-24 dB axis at each end instead of
+    levelling onto a shelf. The area between the curve and the 0 dB line is
+    washed in, which is a lens either side of a shelf and a pair of wedges
+    running to the floor for a cut. And the readout line prints "LO CUT" and
+    "HI CUT" where it printed "LOW" and "HIGH". */
+class LingerScreen final : public juce::Component,
+                           private juce::Timer
 {
 public:
     explicit LingerScreen (juce::Colour accentColour);
+    ~LingerScreen() override;
 
     /** Everything the three pictures are drawn from, in the units `specs()`
-        uses. One struct rather than fourteen arguments, because the panel
+        uses. One struct rather than twenty arguments, because the panel
         refreshes all of it at once and a partial update is not a state this
         screen can be in.
 
-        **Thirteen of these come from a parameter and `attack` does not.** It
+        **Nineteen of these come from a parameter and `attack` does not.** It
         is `TypeConstants::attack` for whichever type is selected, since the
         2026-09-21 control-set trim took its knob away -- so TYPE is one of the
-        parameters the panel redraws the screen on, and the TAIL page's bloom
+        parameters the panel redraws the screen on, and the TAIL page's onset
         follows a type change with no knob having moved.
 
         `linkEr` was here and went with `prelink`: ER travel with dry, fixed,
-        so the pictures no longer have two cases to draw. */
+        so the pictures no longer have two cases to draw.
+
+        The EQ block is an `EqSettings` and not ten loose fields, because that
+        is the struct `EqNodes::design` takes and the same struct the engine
+        builds through `DspCore::eqSettingsFor`. Two transcriptions of the same
+        ten numbers is exactly how the picture and the sound come apart. */
     struct State
     {
         // EARLY.
@@ -126,19 +188,38 @@ public:
         float decaySeconds = 1.8f;
         float dampLo       = 1.20f;
         float dampHi       = 0.40f;
-        float attack       = 30.0f;   ///< per cent of the 0-120 ms bloom, off the type's row
+        float attack       = 30.0f;   ///< per cent of the 0-120 ms onset, off the type's row
         float verbLevelDb  = -6.0f;
 
-        // TONE.
-        float eqLoFreqHz   = 200.0f;
-        float eqLoDb       = 0.0f;
-        float eqHiFreqHz   = 1600.0f;
-        float eqHiDb       = 0.0f;
+        // EQ: the three nodes and the mode, plus the input high-cut, which is
+        // in series with them and is not one of them.
+        EqSettings eq {};
         float inHiCutHz    = 20000.0f;
     };
 
-    /** Repaints only when something has actually moved. */
+    /** Repaints only when something has actually moved, and redesigns the
+        three EQ nodes when one of the ten values behind them has. */
     void setState (const State&);
+
+    /** The tap the spectrum is drawn from, or null for none. Handing one over
+        is what starts the audio thread writing; the destructor hands null
+        back. `ReverbPanel` passes `ModuleContext::analyser` straight through,
+        which is null for a product that has no tap. */
+    void setAnalyserTap (AnalyserTap*);
+
+    /** Where the screen gets the rate to design its filters at.
+
+        Polled rather than read once: a matched-Z design is rate-dependent by
+        construction, and a host can re-prepare a plugin with its editor open.
+        BMO DEQ drew the 48 kHz design at every rate until 2026-09-15, which
+        was up to a dB out in the top octave at 44.1 and 96 k. Null, or
+        returning 0, means "not prepared yet" and leaves the curve on
+        `kEqDesignRate`. */
+    void setHostRate (std::function<double()>);
+
+    /** The rate the curve was last designed at. For a test that wants to know
+        the fallback held. */
+    double designedAt() const noexcept { return drawnAt; }
 
     /** Repaints only when the page has actually changed. */
     void setPage (Page);
@@ -175,13 +256,31 @@ public:
         knob has paid for, so the picture thickens with the control. */
     int activeTapCount() const noexcept;
 
-    /** The summed response of the three TONE nodes at `hz`, in dB. See the
-        class comment for what order of filter this is and why. */
+    /** The whole EQ chain at `hz`, in dB: the three designed nodes plus the
+        input high-cut, summed. This is what the curve is drawn from and what a
+        test should assert against.
+
+        The three nodes are `dsp::designMatched`, the engine's own design, so
+        at the defaults every one of them is that function's exact unity case
+        and the three contribute **0.0 dB and not nearly zero**. The only
+        approximation left in the number is IN HI-CUT's one pole, which is a
+        third of a dB at 20 kHz with the knob wide open. */
     float responseDbAt (float hz) const noexcept;
 
-    /** The three nodes' corner frequencies, in the order they are drawn:
-        EQ LOW, EQ HIGH, IN HI-CUT. */
-    std::array<float, 3> nodeFrequencies() const noexcept;
+    /** One Reverb EQ node's own contribution at `hz`, in dB -- without its two
+        neighbours and without the input high-cut. This is how a test says
+        "FILTER changed node 1 and node 3 and left node 2 alone" as three
+        separate claims rather than as one about a sum. */
+    float nodeDbAt (EqNode node, float hz) const noexcept;
+
+    /** The four marked corner frequencies, in the order they are drawn:
+        EQ LOW, EQ MID, EQ HIGH, IN HI-CUT. */
+    std::array<float, 4> nodeFrequencies() const noexcept;
+
+    /** Whether the two outer nodes are cuts. The same bool the GAIN knobs grey
+        out on, read back through the screen so a test can check the picture
+        and the controls agree about the mode. */
+    bool isFilterMode() const noexcept { return state.eq.filter; }
 
     /** The line of small printed text under the screen, for whichever page is
         showing: the tap count and the ER window, the decay time and where the
@@ -218,19 +317,50 @@ public:
         thing on the screen as the fader at the bottom of its travel does. */
     static constexpr float kTapFloorDb = -40.0f;
 
-    /** The TONE page's axes. */
-    static constexpr float kMinHz       = 20.0f;
-    static constexpr float kMaxHz       = 20000.0f;
-    static constexpr float kToneRangeDb = 24.0f;
+    /** The EQ page's axes. */
+    static constexpr float kMinHz     = 20.0f;
+    static constexpr float kMaxHz     = 20000.0f;
+    static constexpr float kEqRangeDb = 24.0f;
+
+    /** The spectrum's own frame rate, and the rate the EQ page redraws at.
+        Thirty, which is every meter in the suite's. */
+    static constexpr int kFrameHz = 30;
 
 private:
+    void timerCallback() override;
+
+    /** Rebuilds the three nodes at `drawnAt`. Called when the ten EQ values
+        move and when the host's rate does, never per pixel. */
+    void redesign();
+
+    void rebuildSpectrum();
+
+    /** Hz to x and dB to y on the EQ page, shared by the grid, the curve, the
+        wash, the node markers **and the spectrum** -- which is why they are
+        members rather than lambdas inside `paintEq`. A spectrum that built its
+        own log axis would drift from the one it is drawn against. */
+    float eqXFor (double hz) const noexcept;
+    float eqYFor (double db) const noexcept;
+
+    /** The plotting area, inset from the component. */
+    juce::Rectangle<float> plotArea() const noexcept;
+
     void paintEarly (juce::Graphics&, juce::Rectangle<float> plot, juce::Colour ink) const;
     void paintTail  (juce::Graphics&, juce::Rectangle<float> plot, juce::Colour ink) const;
-    void paintTone  (juce::Graphics&, juce::Rectangle<float> plot, juce::Colour ink) const;
+    void paintEq    (juce::Graphics&, juce::Rectangle<float> plot, juce::Colour ink) const;
 
     juce::Colour accent;
     State state;
     Page page = Page::early;
+
+    /** The three Reverb EQ nodes as designed filters, and the rate they were
+        designed at. `kEqDesignRate` until a host says otherwise. */
+    EqNodes nodes = EqNodes::design (EqSettings {}, kEqDesignRate);
+    double drawnAt = kEqDesignRate;
+    std::function<double()> hostRate;
+
+    Spectrum spectrum;
+    juce::Path spectrumPath;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (LingerScreen)
 };
@@ -341,7 +471,9 @@ private:
 
     It costs the width the groups used to take. It was **500** at four columns
     and is **380** at three, since the 2026-09-21 control-set trim took the
-    schema from thirty parameters to twenty-four.
+    schema from thirty parameters to twenty-four -- and it **stayed 380** when
+    the Reverb EQ took it back to thirty later the same day. Frosty's call:
+    the density belongs on the page, which is what paging is for.
 
     ## The grid, and why three columns at 380
 
@@ -362,26 +494,44 @@ private:
     holds four controls: ER, REVERB, MIX and TYPE. Three there would orphan
     TYPE in a row of its own, which is the one thing this panel does not do.
 
-    ## Two rows on every page, and what that cost
+    ## Four rows reserved on every page, and what that cost
 
-    EARLY is six, TAIL five and TONE six, so the cluster is 3 + 3, 3 + 2 and
-    3 + 3 -- **two rows whatever page you are on**, so the block under the keys
-    does not change height when the page does, which is the one thing that
-    would make paging feel like switching panels rather than turning a page.
-    That property is why the old face had four columns at all.
+    EARLY is six and TAIL five, which is 3 + 3 and 3 + 2. **EQ is twelve**:
+    each of the three nodes as FREQ / GAIN / Q, then FILTER, IN HI-CUT and
+    OUTPUT. Twelve over three is four rows, and four rows is what the cluster
+    block is reserved at **on every page**, so the block under the keys does
+    not change height when the page does -- the one thing that would make
+    paging feel like switching panels rather than turning a page. EARLY's and
+    TAIL's rows are centred in the reserved block rather than packed to its
+    top, so a lighter page reads as a lighter page instead of as a page with a
+    hole under it.
 
-    **WIDTH moved from TONE to TAIL to buy it, and the move is right on its own
-    terms.** After the trim TONE held seven -- the four EQ rows, IN HI-CUT,
-    WIDTH and OUTPUT -- and seven over three is 3 + 2 + 2, a third row on one
-    page only. A fixed three-row block would have cost the screen 74 px of its
-    170. WIDTH is M/S gain **on the tail only** (`kWidth`), the TONE page draws
-    a frequency response of exactly three nodes and WIDTH is not one of them,
-    and TAIL had four. So TONE is six and TAIL is five, both pages read better
-    for it, and the screen keeps its height.
+    **The screen paid for the two extra rows, and it is the only thing that
+    could have.** A panel is 688 px of content and every block in it was
+    already sized; two more cluster rows are 132 px and there are five gaps of
+    8 px between six blocks. The screen came down from **170 to 105**, the
+    cluster knob from 54 to 46, and the persistent row and the level strip from
+    100 to 80 apiece -- which together is exactly the 132. `kContentHeight` is
+    640 against the 680 available, so the five gaps are `Tokens::switchGap` and
+    the panel fits to the pixel. **There is no slack left**: anything added to
+    a page now comes out of the screen again.
 
-    OUTPUT stays on TONE rather than joining the foot, which was the other way
-    to land it: the foot already has four, and a fifth cell there would put a
-    68 px knob and the TYPE dropdown in 72 px cells.
+    A 336 x 105 screen is still a real instrument -- it is wider than BMO DEQ's
+    compact curve -- but it is a letterbox, and the EARLY and TAIL pictures are
+    the two that felt the loss. Both were checked in render: the ER stems and
+    the tail envelope both read, because both are shapes against a baseline
+    rather than fine detail.
+
+    **OUTPUT stays on the EQ page rather than joining the foot.** Moving it was
+    allowed and would have made EQ eleven -- which is still four rows, 3 + 3 +
+    3 + 2, so it would have bought nothing vertically and cost the foot its
+    shape: the foot already holds four, and a fifth cell there would put a
+    60 px knob and the TYPE dropdown in 72 px cells. Twelve is the number that
+    fills four rows exactly, and a full last row is the tidier picture.
+
+    **WIDTH stays on TAIL**, where it moved in the 2026-09-21 trim: it is M/S
+    gain on the tail only (`kWidth`), the EQ page draws a frequency response
+    and WIDTH is not part of one.
 
     **No row anywhere holds one control.** That is the rule MIX broke on the
     old face -- a lone centred knob with two empty quarters beside it reads as
@@ -395,14 +545,14 @@ private:
     stale or zeroed rectangle either escapes the panel, overlaps something, or
     reports a caption overflowing a box of width zero. Unparenting is the one
     state in which a control is genuinely not part of this layout. All
-    seventeen keep their parameter attachments throughout, so nothing is
+    twenty-three keep their parameter attachments throughout, so nothing is
     rebound and nothing is rebuilt when the page turns. This is the same
     arrangement the expanded groups used, and it is the reason turning a page
     costs a `resized` and nothing else.
 
     ## The page is UI state, and an unknown value is refused
 
-    `ui.page=early|tail|tone`, through `ModulePanel::setUiState`. See `Page`
+    `ui.page=early|tail|eq`, through `ModulePanel::setUiState`. See `Page`
     for why it is not a parameter, and `setUiState` for why an unknown value
     comes back false rather than falling back to EARLY.
 
@@ -420,7 +570,7 @@ public:
 
     void resized() override;
 
-    /** `ui.page=early|tail|tone`. Anything else is refused. */
+    /** `ui.page=early|tail|eq`. Anything else is refused. */
     bool setUiState (const juce::String& key, const juce::String& value) override;
 
     Page getPage() const noexcept { return page; }
@@ -478,7 +628,7 @@ private:
         as one state. */
     void refreshScreen();
 
-    /** All seventeen cluster controls at once, for the unparenting walk. */
+    /** All twenty-three cluster controls at once, for the unparenting walk. */
     std::vector<juce::Component*> allPageControls() const;
 
     Page page = Page::early;
@@ -515,8 +665,19 @@ private:
     // of.
     ui::PlainKnob dampLoKnob, dampHiKnob, modDepthKnob, modRateKnob, widthKnob;
 
-    // TONE.
-    ui::PlainKnob eqLoFreqKnob, eqLoKnob, eqHiFreqKnob, eqHiKnob,
+    // EQ. Twelve controls in four rows: each node as FREQ / GAIN / Q, then the
+    // mode, the input cut and the output trim.
+    //
+    // **FILTER is the only switch on this panel.** LINK ER was the last one
+    // and went with `prelink` in the 2026-09-21 trim; this is not its
+    // replacement, it is a mode over three controls rather than a behaviour
+    // toggle. `ui::SwitchButton` and not a `ChoiceBox`, because two states
+    // named by one word is a switch, and not a page key, because a page key
+    // has no parameter under it and this one does.
+    ui::SwitchButton eqFilterSwitch;
+    ui::PlainKnob eqLoFreqKnob, eqLoKnob, eqLoQKnob,
+                  eqMidFreqKnob, eqMidKnob, eqMidQKnob,
+                  eqHiFreqKnob, eqHiKnob, eqHiQKnob,
                   inHiCutKnob, outputKnob;
 
     // The strip at the foot: the two absolute trims, which are the thesis of
@@ -524,11 +685,26 @@ private:
     // whole thing.
     ui::PlainKnob erLevelKnob, verbLevelKnob, mixKnob;
 
-    /** One per parameter the screen is drawn from. Fourteen: thirteen of
-        `LingerScreen::State`'s fields plus TYPE, which is not drawn itself but
+    /** One per parameter the screen is drawn from. Twenty: nineteen of
+        `LingerScreen::State`'s values plus TYPE, which is not drawn itself but
         carries `attack` now that the knob is gone. The list in the constructor
-        is the thing a reader wants to be able to check at a glance. */
-    std::array<std::unique_ptr<juce::ParameterAttachment>, 14> screenAttachments;
+        is the thing a reader wants to be able to check at a glance.
+
+        It was fourteen; the Reverb EQ's six new parameters brought it to
+        twenty, and `eqfilter` is one of them -- it moves the two outer nodes'
+        shapes and so redraws the curve with no frequency or gain having
+        changed. */
+    std::array<std::unique_ptr<juce::ParameterAttachment>, 20> screenAttachments;
+
+    /** Greys out the two shelf GAIN knobs while FILTER is on, because a cut
+        has no gain.
+
+        `setKnobEnabled` and **not** `setLockedOn`'s equivalent: the parameters
+        still hold whatever the user set, they are never written, and switching
+        FILTER off gives both shelves their gains back. A mode must not eat an
+        edit. `eqGainReachingDesign` is the same decision one folder over, in
+        the DSP, and it is the reason the two cannot disagree. */
+    void refreshFilterMode();
 
     juce::Rectangle<int> bezelBox, screenBox, readoutBox, clusterBox;
 

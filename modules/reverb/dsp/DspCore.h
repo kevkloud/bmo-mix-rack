@@ -4,6 +4,7 @@
 // here rather than copied: the rack clamps its summed total at the same
 // figure, and two 30.0s written down in two folders is how they come to differ.
 #include "core/dsp/ModuleDsp.h"
+#include "modules/reverb/dsp/EqNodes.h"
 #include "modules/reverb/dsp/TapTables.h"
 #include "modules/reverb/params.h"
 
@@ -66,10 +67,14 @@ enum class ErMode { taps = 0, energy, blend };
       and an automatable one would thrash PDC on every move. Dimension reports
       zero for exactly this reason (`modules/dim/dsp/DimDsp.h:45-58`). That is
       the costly decision to undo, so it is stated in three places.
-    - **Nothing in this module uses `setSolo`, `currentGainReductionDb` or an
-      `AnalyserTap`.** The panel's display is parameter-driven only; neither
-      doc asks for metering, and a reverb has no gain reduction to report. If
-      one of those ever arrives it is a design change, not a fill-in.
+    - **`setSolo` and `currentGainReductionDb` are still unused**, and that
+      part has not moved: a reverb has no gain reduction to report and there is
+      no part of it to hear on its own. **The `AnalyserTap` is no longer in
+      that list.** The owner asked for a spectrum behind the EQ page's response
+      curve on 2026-09-21, so `eqAnalyser()` below is a real tap at the point
+      the Reverb EQ acts on -- see it for why it shows the dry input until
+      there is an engine, and why that is honest rather than broken. EARLY and
+      TAIL stay parameter-driven.
     - `tailSecondsFor` below is the figure the host should be told, and
       **nothing tells it yet**: both processors still hardcode
       `getTailLengthSeconds()` to 0.0 and `ModuleDsp` has no tail accessor.
@@ -107,7 +112,7 @@ public:
         bool  linkEr        = kPreLinkFixed;                ///< fixed: ER travel with dry
         float decaySeconds  = 1.8f;                          ///< 0.1..20, T_mid
         float decayShape    = roomDefaults::kDecayShape;      ///< per type; 3.5 is linear, i.e. off
-        float attack        = roomDefaults::kAttack * 0.01f;  ///< per type, 0..1 over the 0-120 ms bloom
+        float attack        = roomDefaults::kAttack * 0.01f;  ///< per type, 0..1 over the 0-120 ms onset
         float feed          = roomDefaults::kFeed * 0.01f;   ///< 0..1; d in (1-d)*direct + d*ER
 
         float dampLoFreqHz  = roomDefaults::kDampLoFreqHz;   ///< per type, the low knee
@@ -115,10 +120,22 @@ public:
         float dampHiFreqHz  = roomDefaults::kDampHiFreqHz;   ///< per type, the high knee
         float dampHi        = 0.40f;                         ///< 0.10..2.00, T60 multiplier above it
 
+        //== The Reverb EQ: three nodes, fixed shapes, one mode ================
+        //
+        // Node 1 low shelf, node 2 bell, node 3 high shelf, and `eqFilter`
+        // turns the outer two into cuts. `EqNodes.h` is the arithmetic and the
+        // argument; `eqSettings()` below is the only thing that reads these
+        // ten fields, so the engine and the panel design one set of filters.
+        bool  eqFilter      = false;                         ///< outer nodes become cuts
         float eqLoFreqHz    = 200.0f;                        ///< 16..1600
-        float eqLoDb        = 0.0f;                          ///< -24..+12; -24 is "Cut"
+        float eqLoDb        = 0.0f;                          ///< -24..+12; -24 is "Cut"; ignored in filter mode
+        float eqLoQ         = 0.71f;                         ///< 0.1..2, kShelfMaxQ
+        float eqMidFreqHz   = 1000.0f;                       ///< 20..20000
+        float eqMidDb       = 0.0f;                          ///< -24..+12
+        float eqMidQ        = 0.71f;                         ///< 0.1..40, a bell's range
         float eqHiFreqHz    = 1600.0f;                       ///< 1000..2100
-        float eqHiDb        = 0.0f;                          ///< -24..+12
+        float eqHiDb        = 0.0f;                          ///< -24..+12; ignored in filter mode
+        float eqHiQ         = 0.71f;                         ///< 0.1..2
 
         ErMode erMode       = ErMode::taps;
         float erDensity     = roomDefaults::kErDensity * 0.01f;   ///< 0..1, the bridge
@@ -199,6 +216,22 @@ public:
 
     //==========================================================================
 
+    /** The ten EQ fields as `EqNodes.h` wants them. The **only** reader of
+        them, so the curve the panel draws and the filters the engine will run
+        are designed from one struct rather than from two transcriptions of
+        one. */
+    static EqSettings eqSettingsFor (const Params& p) noexcept
+    {
+        EqSettings s;
+        s.filter    = p.eqFilter;
+        s.loFreqHz  = p.eqLoFreqHz;   s.loDb  = p.eqLoDb;   s.loQ  = p.eqLoQ;
+        s.midFreqHz = p.eqMidFreqHz;  s.midDb = p.eqMidDb;  s.midQ = p.eqMidQ;
+        s.hiFreqHz  = p.eqHiFreqHz;   s.hiDb  = p.eqHiDb;   s.hiQ  = p.eqHiQ;
+        return s;
+    }
+
+    EqSettings eqSettings() const noexcept { return eqSettingsFor (params); }
+
     void prepare (double newSampleRate, int maxBlockSize, int numChannels)
     {
         // Recorded so the real engine has them, and so a test can see that
@@ -209,6 +242,18 @@ public:
         sampleRate = newSampleRate;
         blockSize  = maxBlockSize;
         channels   = numChannels;
+
+        // The design grid the real EQ will build its three nodes on, built
+        // once per rate change because 48 pow() and sin() calls is most of a
+        // shelf design's cost (`dsp::DesignGrid`). Nothing runs it yet; it is
+        // here so that `prepare` is where it lands when the engine arrives,
+        // rather than being discovered on the audio thread.
+        grid = dsp::DesignGrid::make (newSampleRate > 0.0 ? newSampleRate : kEqDesignRate);
+
+        // 4096 samples is the analyser's frame (`Analyser::kFftSize`), and the
+        // tap rounds up to a power of two anyway. Twice the frame so a reader
+        // trailing the write head still gets a whole one.
+        eqTap.prepare (1 << 13);
     }
 
     void reset() {}
@@ -217,8 +262,40 @@ public:
 
     const Params& getParams() const noexcept { return params; }
 
-    /** **Pass-through.** Marked, not forgotten: see the class comment. */
-    void process (float* const* /*channelData*/, int /*numChannels*/, int /*numSamples*/) {}
+    /** The window the EQ page's spectrum is drawn from.
+
+        **It is the signal the Reverb EQ acts on**, which 10 section 2 puts
+        pre both generators: the EQ shapes what the room is given rather than
+        what it returns, so this is the point whose spectrum a user is reading
+        the EQ curve against. Wiring it here rather than on the output is not a
+        placeholder decision -- it is where the tap belongs once there is a
+        reverb, and putting it on the output would have to be undone.
+
+        **Until the engine exists this shows the dry input, and that is
+        honest.** `process` below is a marked pass-through, so the module's
+        input, the point the EQ acts on and the module's output are the same
+        samples; there is no third thing the tap could be showing. A reader who
+        finds the spectrum "not reacting to the EQ knobs" has found the
+        placeholder, not a broken analyser. **Do not move the tap to fix it.**
+        See modules/reverb/AGENTS.md, "The analyser is real and the signal
+        under it is not yet".
+
+        Reading it costs the audio thread nothing until a panel enables it, and
+        a closed editor is the normal state of a plugin in a finished session
+        -- `core/dsp/AnalyserTap.h` is emphatic that this path can change
+        neither the sound nor the latency, and why. */
+    AnalyserTap& eqAnalyser() noexcept { return eqTap; }
+
+    /** **Pass-through.** Marked, not forgotten: see the class comment.
+
+        The one thing it does do is write the analyser window, and only while a
+        panel has asked for it. That is a copy and a relaxed store on the way
+        past: nothing downstream reads it, no state survives a block boundary,
+        so block-size invariance and the zero latency are both untouched. */
+    void process (float* const* channelData, int numChannels, int numSamples)
+    {
+        eqTap.write (channelData, numChannels, numSamples);
+    }
 
     /** Zero, at every setting, always. Not computed from the values, because
         nothing in the schema can move it. */
@@ -257,6 +334,21 @@ public:
 
 private:
     Params params;
+
+    /** The grid the three EQ nodes are designed on, at the running rate.
+        Unused by the placeholder; rebuilt in `prepare` so the engine has it.
+        `kEqDesignRate` until a host says otherwise, which is BMO DEQ's
+        `kDesignRate` and its argument. */
+    dsp::DesignGrid grid = dsp::DesignGrid::make (kEqDesignRate);
+
+    /** Held by value and not behind a `unique_ptr<Shared>` as BMO DEQ's is.
+        DEQ needs the indirection because `deq::DspCore` is built and handed
+        back **by value** across its tests and tools and an atomic is neither
+        copyable nor movable; nothing copies this one -- every caller holds a
+        `ReverbDsp` and reaches the core through it -- so the indirection would
+        buy nothing. If a copy is ever wanted, this is the member that will
+        refuse to compile, which is the right way to be told. */
+    AnalyserTap eqTap;
 
     double sampleRate = 0.0;
     int blockSize = 0;

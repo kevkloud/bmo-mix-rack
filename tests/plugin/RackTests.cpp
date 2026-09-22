@@ -63,16 +63,26 @@ namespace
                     "diffuse", "rate", "depth", "rotation", "asymmetry" } },
         { "ltvcomp", { "amount", "gate", "output", "complex", "attack", "release",
                      "arc", "sidechain", "low_thru", "high_thru" } },
-        // BMO Linger. **Twenty-four parameters against a slot's thirty-two
-        // lanes**, so the whole schema gets a lane, none of BMO DEQ's
-        // SlotOverflow machinery is needed, and eight are left over. It was
-        // thirty with two spare until the 2026-09-21 control-set trim moved
-        // prelink, decayshape, attack, damplofreq, damphifreq and ershape into
-        // the per-type constants. The order of what remains is unchanged, and
-        // this list is the second copy of it.
+        // BMO Linger. **Thirty parameters against a slot's thirty-two lanes**,
+        // so the whole schema gets a lane, none of BMO DEQ's SlotOverflow
+        // machinery is needed, and two are left over. It was thirty with two
+        // spare, then twenty-four with eight after the 2026-09-21 control-set
+        // trim moved prelink, decayshape, attack, damplofreq, damphifreq and
+        // ershape into the per-type constants. The order of what survived that
+        // is unchanged, and this list is the second copy of it.
+        //
+        // And then back to **thirty** the same day, when the Reverb EQ spent
+        // six of the eight lanes the trim had bought. Its six went in
+        // **between `damphi` and `ermode`** rather than on the end, so every
+        // lane after them moved -- legal exactly once, before first ship, and
+        // never again: a lane is the thing a DAW records automation on.
+        // modules/reverb/params.h's `Index` carries the argument.
         { "reverb", { "type", "size", "predelay", "decay", "feed",
                       "damplo", "damphi",
-                      "eqlofreq", "eqlo", "eqhifreq", "eqhi",
+                      "eqfilter",
+                      "eqlofreq", "eqlo", "eqloq",
+                      "eqmidfreq", "eqmid", "eqmidq",
+                      "eqhifreq", "eqhi", "eqhiq",
                       "ermode", "erdensity", "erspread", "erhicut",
                       "ervariation", "moddepth", "modrate", "width", "inhicut",
                       "erlevel", "verblevel", "mix", "output" } },
@@ -243,6 +253,68 @@ int main()
                 check (juce::String (def->specs[i].id) == bank->ids[i],
                        juce::String (def->id) + " p" + juce::String ((int) i + 1) + " should be '"
                            + bank->ids[i] + "', is '" + def->specs[i].id + "'");
+        }
+    }
+
+    //== Which modules have an analyser tap, and which must not ===============
+    //
+    // **The cost of adding one, stated as the thing it must not have moved.**
+    // `ModuleDsp::analyser()` returns null by default and BMO DEQ was its only
+    // overrider until BMO Linger's EQ page got a spectrum on 2026-09-21. A
+    // virtual with a default is exactly the kind of change that looks free and
+    // is only free if nobody else quietly picks it up, so the six that have no
+    // tap are named here rather than assumed.
+    //
+    // Through the rack, one slot at a time, because that is where a wrong
+    // answer would cost the most: a tap nobody asked for is written on the
+    // audio thread for every block a rack processes.
+    {
+        auto rack = createRack();
+
+        struct Tapped { const char* id; bool hasOne; };
+
+        const Tapped kTaps[] {
+            { "util", false }, { "eq", false }, { "sat", false }, { "opto", false },
+            { "dim", false }, { "ltvcomp", false },
+            // BMO DEQ's is post-EQ; BMO Linger's is at the point the Reverb EQ
+            // acts on, and shows the dry input until there is a reverb under
+            // it (modules/reverb/dsp/DspCore.h, `eqAnalyser`).
+            { "deq", true }, { "reverb", true },
+        };
+
+        check ((int) std::size (kTaps) == (int) rack->getRegistry().size(),
+               "every registered module is listed here, tap or no tap");
+
+        for (const auto& t : kTaps)
+        {
+            rack->clearChain();
+
+            auto* def = rack->findModule (t.id);
+            check (def != nullptr, juce::String ("no module '") + t.id + "' in the registry");
+
+            if (def == nullptr)
+                continue;
+
+            rack->addModule (*def);
+            rack->prepareToPlay (48000.0, 512);
+
+            auto* engine = rack->getEngineAt (0);
+            check (engine != nullptr, juce::String (t.id) + " has no engine in slot 1");
+
+            if (engine == nullptr)
+                continue;
+
+            check ((engine->analyser() != nullptr) == t.hasOne,
+                   juce::String (t.id) + (t.hasOne ? " should have an analyser tap and has none"
+                                                   : " should have no analyser tap and has one"));
+
+            // And a tap that exists is **off** until a panel asks for it.
+            // There is no editor anywhere in this file, so nothing should have
+            // enabled one -- which is the property that makes a closed session
+            // cost nothing rather than nearly nothing.
+            if (auto* tap = engine->analyser())
+                check (! tap->isEnabled(),
+                       juce::String (t.id) + "'s tap is enabled with no editor open");
         }
     }
 

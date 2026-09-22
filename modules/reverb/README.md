@@ -13,9 +13,9 @@ have one without the other. No latency.
 ## The shape of it
 
 It is built like a handheld: a screen in a recess at the top with a line of
-print under it, three round keys — **EARLY**, **TAIL**, **TONE** — and then the
+print under it, three round keys — **EARLY**, **TAIL**, **EQ** — and then the
 controls. The keys change two things at once: what the screen is drawing, and
-which five or six knobs are on the panel under it.
+which five, six or twelve controls are on the panel under it.
 
 Three controls never move, whatever key you are on — **SIZE**, **PRE-DELAY**,
 **DECAY** — and four more sit along the foot: **ER**, **REVERB**, **MIX**, and
@@ -26,7 +26,7 @@ There is one size of window: three columns of knobs, 120 px narrower than it
 used to be. The module does not expand, because there is nothing to expand
 into.
 
-## Twenty-four controls, not thirty
+## Six controls left, and six others arrived
 
 Six were taken off this panel before it shipped, and none of them went away —
 each is now part of what a **TYPE** *is*, set by the type you pick rather than
@@ -43,6 +43,13 @@ by you:
 The reasoning is the same each time: these are what makes a Plate a Plate and a
 Cavern a Cavern, not what an engineer dials mid-session. A panel with six fewer
 of them is a panel you can read.
+
+**And then the EQ grew into the room they left.** The two shelves became a
+proper three-band parametric: a **Q** on each band, a **MID** bell between
+them, and a **FILTER** key that turns the outer two into a low cut and a high
+cut. That is deliberate rather than opportunistic — the argument for taking the
+damping frequencies off the panel was "reach for the EQ when what you want is a
+frequency", and the EQ had to be worth reaching for.
 
 ## Always on the panel
 
@@ -80,22 +87,32 @@ the window is.
 
 **TAIL** draws the tail's shape: the swell the type gives it, then the decay
 away to nothing. The time ruler is logarithmic, from 1 ms to 30 s, because a
-bloom lasts a tenth of a second and a tail can run for twenty — each vertical
+onset lasts a tenth of a second and a tail can run for twenty — each vertical
 line is ten times further along than the last, and no straight ruler shows
 both. It is drawn as a band rather than a line because it does not die at one
 rate: the band is the range between its fastest and its slowest, which is what
 **LOW x** and **HIGH x** set. A wide band means a tail that changes colour as
-it fades. The print gives the decay, the bloom in milliseconds, and where the
-whole thing actually ends. **The bloom is the one number on this panel with no
+it fades. The print gives the decay, the onset in milliseconds, and where the
+whole thing actually ends. **The onset is the one number on this panel with no
 knob under it** — change TYPE and watch it move.
 
-**TONE** draws the EQ as one curve with three marks on it — the low shelf, the
-high shelf and the input high-cut, in that order left to right. They are in
-series, so what you see is the three of them together rather than three
-separate lines. The print gives the three frequencies.
+**EQ** draws the whole chain as one curve with four marks on it — the three EQ
+bands, and then the input high-cut. They are in series, so what you see is all
+four together rather than four separate lines. **The three EQ bands are solid
+dots and the input cut is a hollow one**, because it is a different control in
+a different place: it darkens what goes *into* the reverb, ahead of the EQ, and
+the EQ darkens the reverb. The area between the curve and the flat line is
+shaded, which is a gentle lens for a shelf and a pair of wedges running off the
+bottom for a cut — so **FILTER** is unmistakable at a glance. The print gives
+the three EQ frequencies and says `LO CUT` and `HI CUT` when they are cuts.
 
-Nothing in the screen is measured from the audio. It is drawn from the
-controls, so it costs nothing and cannot affect the sound.
+**There is a spectrum analyser behind the curve on the EQ page**, so you can
+see what you are shaping. It is the only thing on this panel measured from the
+audio; EARLY and TAIL are drawn from the controls alone and cost nothing.
+
+> While the processing is a placeholder the analyser shows the signal going
+> **in**, unchanged, because that is all there is — the reverb is not built
+> yet. It is reading the right point; there is just nothing happening at it.
 
 ## EARLY — how the reflections are made
 
@@ -117,13 +134,24 @@ controls, so it costs nothing and cannot affect the sound.
 | **MOD DEPTH / MOD RATE** | A slow random movement in the tail that stops it ringing on one note. It is random rather than a sweep, so it should not sound like a chorus. |
 | **WIDTH** | How wide the tail is. The reflections have their own width; this does not touch them. |
 
-## TONE — what goes in, and what comes out
+## EQ — what goes into the reverb, and what comes out
+
+Three bands on what feeds the reverb, each with a frequency, a gain and a Q,
+one band per row. The shapes are fixed — low shelf, bell, high shelf — and
+there is no shape menu, on purpose: a menu whose length can never change again
+after release is worse than three bands that do one job each.
 
 | Control | What it does |
 |---|---|
-| **EQ LOW / EQ HIGH** and their frequencies | Two shelves on what feeds the reverb, +12 to −24 dB. At the bottom each reads `Cut`. |
-| **IN HI-CUT** | Darkens what feeds *both* generators, before the shelves. |
+| **EQ LOW** + FREQ + Q | A low shelf, 16 Hz to 1.6 kHz, +12 to −24 dB. At the bottom it reads `Cut`. |
+| **EQ MID** + FREQ + Q | A bell, and the wide one: **20 Hz to 20 kHz**, so it is the only band that reaches the presence region. Q goes to 40 for a notch. |
+| **EQ HIGH** + FREQ + Q | A high shelf, 1 to 2.1 kHz. |
+| **FILTER** | Turns **EQ LOW** into a low cut and **EQ HIGH** into a high cut. The frequencies and the Qs mean the same thing in both modes — a corner and a resonance — so only the two GAIN knobs change, and they grey out, because a cut has no gain to set. **They keep what you set them to**: switch FILTER back off and both shelves are where you left them. The MID bell is untouched either way. |
+| **IN HI-CUT** | Darkens what feeds *both* generators, ahead of the EQ. **This is not the same as EQ HIGH in filter mode**: this one is on the way in, that one is on the reverb. |
 | **OUTPUT** | Trim. |
+
+At its defaults the EQ does nothing at all — every gain is 0 dB and FILTER is
+off — so a fresh instance is not quietly coloured.
 
 ## Presets
 

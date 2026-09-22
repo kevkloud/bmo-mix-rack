@@ -4,6 +4,42 @@ For a separate session that owns the look of `modules/fetcomp`. Written on
 AURORA, 2026-09-20. The session that wrote this keeps the DSP and the de-esser
 groundwork; this one keeps the panel.
 
+> **The pass is done, AURORA 2026-09-21.** Write-up and every figure:
+> `testing-notes/ui-pass-fetcomp-2026-09-21.md`. Steps 1 and 3 were already
+> complete; 2, 4, 5 and 6 are now.
+>
+> **Step 2's three deviations, all settled on renders:**
+>
+> - **The voicing colours the controls, not just the bezel.** Blue takes the
+>   accent, Black takes the plate's opposite — black on pale, white on dark.
+>   The parameter defaults to Black, so the default panel is monochrome.
+> - **The accent takes a dark-plate variant**, `#8fb4e6`, because `#5489d4`
+>   was chosen against `#efefef` and misses both of `faceOf`'s bands on the
+>   dark plate: cap 3.80:1 and pointer 3.97:1 become 6.34 and 6.61, both
+>   mid-band. The pale plate keeps `#5489d4`.
+> - **MIX ships neutral grey**, `#b0b0b0` / `#585858`. The azure cleared the
+>   lifted accent by only 1.05:1; white and black were rendered and rejected
+>   for putting the quietest control at over twice the character knobs'
+>   contrast.
+> - **The switches keep the accent.** `switchAlt` was rendered: `#5489d4`
+>   against `#4fb8e8` is 1.58:1 and 16.4° of hue, two blues almost-but-not-
+>   quite the same. The deviation is deliberate.
+>
+> **Step 4 is done and the needle pins:** meter crops at 30.3 dB and 35.4 dB
+> GR are byte-identical, and the rest position is genuinely 0 dB — a true
+> 0 dB render and the at-rest render produce identical meter crops.
+>
+> **The hashes below are superseded.** `65a43d6afd63e58b` and the rest do not
+> reproduce: the DSP landed and the control colour changed. Current hashes are
+> in the new note. Also note `tools/snapshot` appended rather than truncating
+> until `c1607d7`, so **any hash taken from a path rendered more than once
+> before that commit is suspect** — the tool reported success and left the
+> previous image in place.
+>
+> BMO Opto's three and BMO Saturator's one are re-proved unchanged.
+> `core/ui` was not touched.
+
+
 > **Update, AURORA, 2026-09-21.** Four things below went out of date the day
 > after it was written, and the rest still stands.
 >

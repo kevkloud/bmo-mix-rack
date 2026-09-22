@@ -29,7 +29,8 @@ it goes stale.
 - `testing-notes/fetcomp-alias-origin-2026-09-21.md` — which harmonic is actually in the alias bin, and why oversampling cannot lower the floor.
 - `testing-notes/fetcomp-section3-2026-09-21.md` — the four missing suites and the two missing tool modes, and three things the measurements settled that the plan assumed otherwise.
 - `testing-notes/fetcomp-curve-slope-2026-09-21.md` — what adds slope to the GR curve above 20 dB GR, proved by linearising the input amplifier.
-- `testing-notes/ui-pass-fetcomp-2026-09-20.md` — the visual pass: render hashes, contrast ratios, layout gaps.
+- `testing-notes/ui-pass-fetcomp-2026-09-20.md` — the first visual pass: the skeleton, the bezel-alpha call, render hashes since superseded.
+- `testing-notes/ui-pass-fetcomp-2026-09-21.md` — the visual pass run after the DSP landed: the voicing colours the panel, the accent takes a dark variant, MIX goes neutral. Final hashes and per-box contrast.
 
 ## Decided
 

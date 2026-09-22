@@ -56,7 +56,7 @@ sized in `prepare()` for the largest type (`00` §2), so switching never
 allocates.
 
 The list is append-only once shipped, so this order is final.
-**v1 (6):** 1 Room · 2 Chamber · 3 Hall · 4 Large Hall · 5 Plate · 6 Ambience —
+**v1 (6):** 1 Room · 2 Chamber · 3 Hall · 4 Cavern · 5 Plate · 6 Ambience —
 the Reference-A core set, small→large→plate→ambience. Ambience is the ER-star
 type: tiny tail, ER-dominant, where "tail off, distance sets depth" lands by
 default. **Appended later:** 7 Church · 8 Shaped Hall · 9 Pattern Room ·
@@ -79,7 +79,7 @@ specified publicly, so it would ship as guesswork. Instead each type's constant
 block **reserves three era fields** — bandwidth, modulation distribution
 (clean-random / noisy-random / chorused), and an output quantisation depth left
 at "off" — set per type in v1 (Plate and Chamber bright and clean, Room and
-Ambience narrower, Large Hall deep-random). Because they already exist as
+Ambience narrower, Cavern deep-random). Because they already exist as
 constants, promoting them to a 3-position Era control in v2 changes no type
 ordinals and no state layout. Anything added there aliases at 44.1 kHz and must
 be bandlimited or oversampled (`04` §3).
@@ -131,7 +131,7 @@ orders 1–3. For image *k* at path *d*ₖ, order *n*ₖ: time *t*ₖ = *d*ₖ/*
 (*c* = 343 m/s), gain *a*ₖ = (1 m/*d*ₖ)·β^{*n*ₖ}, pan from the image bearing. No
 closed-form tap-gain law is published; **1/t spreading × exponential absorption
 is the physically correct model, and it is both, not either** (`05` §10.3).
-β = 0.70 Room … 0.88 Large Hall (CALIBRATE). Base count **21**; Moorer's 19-tap
+β = 0.70 Room … 0.88 Cavern (CALIBRATE). Base count **21**; Moorer's 19-tap
 table, span 4.3–79.7 ms, is the sanity reference, and its implied direct distance
 of ~3.4 m checks the *d*ref choice (`05` §10.2).
 
@@ -299,7 +299,7 @@ path needs the tail to exist.
 ## 4. Late reverb math
 
 **Delays.** Eight lines log-spaced over [τ̄/1.3, τ̄·1.3], τ̄ per type (Plate 18,
-Ambience 20, Room 25, Chamber 35, Hall 55, Large Hall 80 ms; CALIBRATE).
+Ambience 20, Room 25, Chamber 35, Hall 55, Cavern 80 ms; CALIBRATE).
 *m*ᵢ = **mutually prime** integers near τᵢ·*f*s — `05` §11 records that the
 published requirement is mutual primality or incommensurability, not primality,
 and that the classic hardware values were picked with "no mathematical basis" —

@@ -37,7 +37,7 @@ labels.
    order; the count settled when `inhicut` (IN HI-CUT) proved to be the
    difference and was kept, marked "owner confirm" — accept or cut it before
    first ship. Main face takes 7 controls plus a display. Type list append-only:
-   Room, Chamber, Hall, Large Hall, Plate, Ambience.
+   Room, Chamber, Hall, Cavern, Plate, Ambience.
 3. **Three shared-code changes.** Tail-length reporting (every module reports 0
    today; the rack would sum its slots) is in v1, as decided. **Mono-in to
    stereo-out is also in v1** — Frosty's call on 2026-09-21, reversing the

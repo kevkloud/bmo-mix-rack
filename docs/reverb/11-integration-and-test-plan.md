@@ -57,9 +57,38 @@ product list **and link line**, or the panel cannot be rendered; `scripts/build.
 
 **Permanence.** Parameter ids, their order in `specs()`, ranges, steps, defaults
 and every choice list *with its index order* freeze at first ship; append only.
-That binds 10 §1's type order — **Room · Chamber · Hall · Large Hall · Plate ·
-Ambience**, with Church, Shaped Hall, Pattern Room, Positional Room and Vintage
-Room appended later — and ER Mode's Taps/Energy/Blend. Module id, plugin code,
+That binds 10 §1's type order — **Room · Chamber · Hall · Cavern · Plate ·
+Ambience** — and ER Mode's Taps/Energy/Blend.
+
+**The type list was settled by the owner on 2026-09-21 and index 3 changed.**
+*Large Hall was cut:* the late network scales with the taps under SIZE, so
+Hall→Large Hall is τ̄ 55→80, a factor of 1.45 inside a SIZE range spanning
+0.5–80 m. SIZE already covers it several times over, and its only non-size
+residual is β, whose own ladder is indexed by size. Reference A offers two halls
+but nowhere states that the difference is size — that was this pack's inference,
+and it does not hold. *Cavern takes the slot*, carrying what was reserved as
+Church: the long, dense, stone-reflective character. The name is deliberately
+secular, and Church is therefore struck from the reserved list rather than
+waiting in it. Reserved for later: Shaped Hall, Pattern Room, Positional Room,
+Vintage Room — though note that four of those five read as universal controls
+rather than as rooms, so the reserve may be emptier than it looks.
+
+Renaming a choice position is free at any time; the **count** is what
+normalisation depends on, and six is unchanged.
+
+**Levels are now per-type, and a type re-applies on every change.** `erlevel`
+and `verblevel` join the per-type constants, taking `roomDefaults` from eight to
+ten. Without that, Ambience was unbuildable as specified: the pack describes it
+as "tiny tail, ER-dominant by default" while the two faders were
+type-independent, so no type could set its own tail level. Frosty confirmed
+Ambience is a sound he reaches for often and will bring references to the
+Ableton pass.
+
+*The consequence, recorded rather than discovered later:* `type` is an
+automatable parameter that now writes other automatable parameters. Automating
+TYPE while also automating ER or REVERB puts the two in conflict — the type
+change stamps a level the host is simultaneously driving. This is inherent to
+"a type is a voicing", which is the behaviour that was chosen. Module id, plugin code,
 bundle id, preset extension, state tags and accent freeze too.
 
 ## 2. Shared-code changes, each its own commit

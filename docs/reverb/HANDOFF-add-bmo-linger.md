@@ -52,7 +52,7 @@ parameter, metering, tail and type sections of `10-dsp-spec.md`.
   ER and Reverb faders, pre-delay moves the tail only and lives in the wet
   path, one ER density control, a feed-the-tail control, decay-time multipliers
   for damping, no allpass in the ER path, zero reported latency.
-- v1 types, append-only, in this order: Room, Chamber, Hall, Large Hall, Plate,
+- v1 types, append-only, in this order: Room, Chamber, Hall, Cavern, Plate,
   Ambience.
 - No third-party product or brand names in code, docs or UI strings.
 

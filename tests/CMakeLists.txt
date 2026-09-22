@@ -132,6 +132,14 @@ bmo_add_tool(ui_layout_tests ui/LayoutTests.cpp ${BMO_ROOT}/products/rack/Regist
 target_link_libraries(ui_layout_tests PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp bmo_reverb)
 add_test(NAME ui_layout COMMAND ui_layout_tests)
 
+# The shared controls in core/ui, asserted on their own rather than through a
+# panel that happens to use one. Links `bmo_core` and no module: the claims are
+# the control's, and `ui::Fader` has no call site yet -- BMO Linger's panel is
+# the pass after the one that added it.
+bmo_add_tool(ui_control_tests ui/ControlTests.cpp)
+target_link_libraries(ui_control_tests PRIVATE bmo_core)
+add_test(NAME ui_control COMMAND ui_control_tests)
+
 # The render loop's own plumbing. Links no module and instantiates no panel: it
 # asserts that writing a PNG over an existing one replaces it, after a period
 # where `snapshot` appended instead and every render reviewed was the previous

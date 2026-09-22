@@ -153,6 +153,196 @@ private:
 };
 
 //==============================================================================
+/** The slider inside a `Fader`, which hands its paint call back to the
+    component that owns it.
+
+    A `juce::Slider` draws through the look and feel, and `BmoLookAndFeel` has
+    no linear treatment: there was no fader anywhere in the suite until BMO
+    Linger needed three, so `drawLinearSlider` would have been a shared method
+    with one caller. The drawing lives in `Fader::paintFader` instead, beside
+    the caption it has to line up with. The look and feel keeps the treatments
+    more than one module shares -- the rotary, the toggle, the combo -- and
+    gains nothing by holding this one.
+
+    Mouse handling is the slider's own and is untouched. */
+class FaderSlider final : public juce::Slider
+{
+public:
+    FaderSlider() : juce::Slider (juce::Slider::LinearVertical, juce::Slider::NoTextBox) {}
+
+    /** Set by the owning `Fader` in its constructor; nothing else paints this. */
+    std::function<void (juce::Graphics&)> painter;
+
+    void paint (juce::Graphics& g) override { if (painter != nullptr) painter (g); }
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FaderSlider)
+};
+
+//==============================================================================
+/** A vertical fader with its name underneath and its value under that.
+
+    **The first control in the suite that is not a knob, a dropdown, a switch,
+    a band or a meter**, and the argument for it is comparison. BMO Linger's
+    ER and REVERB are two absolute levels -- `docs/reverb/10-dsp-spec.md` has
+    called them "two absolute faders" since the groundwork pack -- and what a
+    user judges is not either number but the *balance*: two caps side by side
+    put that on one line the eye reads without arithmetic, where two pointers
+    at two angles do not. MIX joins them because it sits in the same row, and a
+    row of two faders and a knob would read as an accident.
+
+    Shared rather than BMO Linger's own: BMO Dwell and BMO Defang have the same
+    row. It lives here beside `PlainKnob` and `ChoiceBox` for that reason, and
+    it labels itself exactly as they do -- same caption face, same size, same
+    box, the caption derived from the accent against the plate unless one is
+    passed -- so a fader and a knob sharing a row are named in one voice.
+
+    ## How it is drawn
+
+    A recessed track in `well` with a darker outline; the travelled portion of
+    it filled in the accent at low opacity, so the level reads without first
+    finding the cap; a cap in the accent, edged in `knobEdge`, with a centre
+    line across it; and five short ticks down the left, **unlabelled** -- the
+    value line under the caption carries the number, and a scale printed twice
+    is a scale that can disagree with itself.
+
+    ## Why the value line is on by default
+
+    Every knob in the suite says less and more rather than how much (see
+    `PlainKnob`), and `setShowsValue` is off by default there. A fader is the
+    opposite case: it carries an *absolute* level, its ticks are deliberately
+    mute, and the number is the only thing that says what the cap is on. So it
+    is on here, and `setShowsValue (false)` is for a panel with somewhere else
+    to put the reading.
+
+    ## The one measurement that matters
+
+    `kCapWidth` is **the knob cap's diameter and not the knob's footprint**.
+    `PlainKnob` is laid out square and draws its face at `faceScale` of that
+    square, so a 46 px knob at 0.6 has a 27.6 px cap -- and 46 is what a fader
+    beside it would match if it took the footprint, which is 18 px too wide.
+    The two numbers have been confused before. */
+class Fader final : public juce::Component
+{
+public:
+    /** Leave `captionColour` alone and the caption is derived from `accent`
+        against the current plate, as `PlainKnob`'s is. */
+    Fader (juce::RangedAudioParameter&, const juce::String& caption,
+           juce::Colour accent = tokens().accent, juce::Colour captionColour = {});
+
+    void paint (juce::Graphics&) override;
+    void resized() override;
+
+    void setFaderEnabled (bool);
+
+    /** Re-colours the fader and, unless a caption colour was passed in, its
+        caption with it. See `PlainKnob::setAccent`. */
+    void setAccent (juce::Colour);
+
+    /** Point size for the name underneath. 15 unless set, as a knob's is. */
+    void setCaptionSize (float points);
+
+    /** Whether the number is printed under the name. On -- see the class
+        comment, which is the one place this class differs from `PlainKnob`
+        about its default. */
+    void setShowsValue (bool shouldShow);
+    bool isShowingValue() const noexcept { return showsValue; }
+
+    /** Rewrites the host's text before it is drawn. `PlainKnob`'s, exactly:
+        paint only, and measured by `captionOverflow` like the rest. */
+    void setValueFormat (std::function<juce::String (const juce::String&)> format);
+
+    /** How much wider the caption, or the widest value string, is than the
+        room it has, in px; zero or less fits. `PlainKnob::captionOverflow`'s
+        argument and its measurement -- the same boxes and the same faces the
+        paint uses, so it cannot agree with the bug it is looking for. */
+    float captionOverflow() const;
+
+    /** What is printed under the name: the host's own text for the current
+        position, through `setValueFormat` if one is set.
+
+        The host's, so a fader reads the same standalone, in a rack slot and in
+        an automation lane -- `PlainKnob::setShowsValue` carries the argument. */
+    juce::String valueText() const;
+
+    /** Where the cap is drawn right now, in this component's coordinates.
+
+        One definition, read by `paintFader` and by the test that asserts the
+        cap tracks the parameter -- `PlainKnob::captionBox`'s discipline, for
+        the same reason: a test that measured the cap its own way could agree
+        with a cap drawn in the wrong place. */
+    juce::Rectangle<float> capBounds() const;
+
+    /** The box the fader itself draws in: everything above the caption. */
+    juce::Rectangle<int> bodyBox() const;
+
+    /** How far the cap's centre moves between the bottom of the parameter's
+        range and the top, in px.
+
+        Derived and not fixed: it is the body less the cap, because a cap
+        cannot leave its own slot. A 120 px row with the suite's 15 pt caption
+        leaves 98 px of body and so **86 px of travel**, which is the mockup's
+        figure; the value line takes 14 px more, so a row that wants both wants
+        134. Nothing here rounds that away. */
+    float travel() const;
+
+    /** The cap, in px. **The knob cap's 27.6, not the 46 px knob.** See the
+        class comment. */
+    static constexpr float kCapWidth  = 27.6f;
+    static constexpr float kCapHeight = 12.0f;
+
+    /** The slot the cap runs in. Narrow enough to read as a recess rather than
+        as a second control, and wide enough to carry the travelled fill at the
+        alpha below. */
+    static constexpr float kTrackWidth = 10.0f;
+
+    /** How loud the travelled portion is. Low: it is there to be seen without
+        being looked at, and at full strength it would read as a meter. */
+    static constexpr float kFillAlpha = 0.35f;
+
+    /** Five, unlabelled -- the ends, the middle and the two quarters. An even
+        count would have no middle tick, and the middle is the one position on
+        a level fader worth marking. */
+    static constexpr int kTicks = 5;
+
+private:
+    static constexpr float kValueSize  = 11.0f;
+    static constexpr float kTickLength = 6.0f;
+    static constexpr float kTickGap    = 5.0f;   ///< track edge to the ticks
+
+    /** The slider's paint, in the slider's coordinates. Private because the
+        geometry is worked out in *this* component's, and the transform inside
+        is what reconciles the two. */
+    void paintFader (juce::Graphics&);
+
+    /** Room under the fader for its name, and for the value under that when
+        one is shown. `PlainKnob::captionRow` exactly, so a fader and a knob in
+        one row put their captions on one line. */
+    int captionRow() const { return juce::roundToInt (captionSize * 1.2f) + 4 + (showsValue ? valueRow() : 0); }
+    int valueRow() const   { return juce::roundToInt (kValueSize * 1.2f) + 1; }
+
+    juce::Rectangle<int> captionBox() const;
+    juce::Rectangle<int> valueBox() const;
+
+    /** The parameter's position, 0 at the bottom of its range and 1 at the
+        top. Read off the parameter rather than off the slider: the slider is
+        what a hand moves and the parameter is what a host moves, and the cap
+        has to follow both. */
+    float proportion() const;
+
+    juce::String caption;
+    juce::Colour captionColour;   ///< transparent means "derive from accentColour"
+    juce::Colour accentColour;
+    float captionSize = 15.0f;
+    bool showsValue = true;
+    std::function<juce::String (const juce::String&)> valueFormat;
+    juce::RangedAudioParameter& parameter;
+    FaderSlider slider;
+    std::unique_ptr<juce::SliderParameterAttachment> attachment;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Fader)
+};
+
+//==============================================================================
 /** A band, or a filter.
 
     With a gain parameter it is a band: the selector is the white ring,

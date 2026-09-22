@@ -149,22 +149,30 @@ arrow on the panel itself that opens and closes the column. The view is still
 session-only and still not a parameter, so automating or preset-loading `fx`
 never resizes the module -- see `modules/dwell/AGENTS.md`.
 
-**BMO Dwell's accent is not settled, and two golds are out.** The olive-gold
-`#b2bb54` that stood in `modules/dwell/Module.cpp` is **rejected** -- "i hate
-this color", Frosty 2026-09-21 -- and so is the pale gold `#e6e278`, which
-measured 9.99 dark and 1.18 pale, outside the band at both ends. Neither is
-offered again, which retires most of the list in
+**BMO Dwell has the orchid `#f094e6` (Frosty, 2026-09-21), and two golds are
+out.** The olive-gold `#b2bb54` that first stood in `modules/dwell/Module.cpp`
+is **rejected** -- "i hate this color" -- and so is the pale gold `#e6e278`,
+which measured 9.99 dark and 1.18 pale, outside the band at both ends. Neither
+is offered again, which retires most of the list in
 `docs/delay/11-integration-and-test-plan.md` §1 and
 `docs/delay/13-panel-direction.md` §6.
 
-The file now carries `#f288eb`, a magenta at 304.0 degrees: the centre of the
-64.4-degree arc between BMO Dimension's lavender and BMO EQ's pink, which is
-half again the widest gap left once BMO FET's `#5489d4` (215.2 degrees) and
-the de-esser's rose `#ea9f9a` (3.8) are counted alongside the table above.
-6.12 on `#2e2e32` and 1.92 on `#efefef`, measured off a render with
-`Inspect.exe ratio`. It is a recommendation left set so the tree renders it,
-**not an allocation** -- Frosty picks from the renders, and this table gains
-its row when he does.
+The orchid sits at 306.5 degrees, inside the 64.4-degree arc between BMO
+Dimension's lavender and BMO EQ's pink -- half again the widest gap left once
+BMO FET's `#5489d4` (215.2 degrees) and the de-esser's rose `#ea9f9a` (3.8) are
+counted alongside the table above. Three magentas were rendered and measured
+first (`#ee85f5`, `#f288eb`, `#f587df`); Frosty chose the orchid `13` §6 had
+proposed, which sits between the first two of them.
+
+**6.49 on `#2e2e32` and 1.81 on `#efefef`**, read off the knob face of a
+rendered panel in both appearances with `Inspect.exe ratio`, not computed --
+both mid-band. `13` §6 predicted 6.5 and 1.84 and was right.
+
+Its nearest neighbour is BMO EQ's pink at 29.5 degrees. `13` §6 warned that an
+orchid "may read as EQ in a rack"; that objection was put to Frosty with
+renders before he chose, and 29.5 still clears the 26.8 the shipped teal and
+the utility azure already live with. This is an allocation, and the table above
+carries its row.
 
 **"Dwell" is cleared to ship on a USPTO search alone** (`docs/delay/20`):
 no live mark in audio software or musical instruments; the nearest live class 9
@@ -307,6 +315,7 @@ there are distinguishable ones.
 | BMO Dimension | `#d4a4ff` | 271.6° | 6.80 | 1.73 |
 | *(not an accent)* utility azure `#4fb8e8` | | 198.8° | 6.02 | -- |
 | BMO DEQ | `#5ecfc0` teal | 172.0° | **7.19** | 1.64 |
+| BMO Dwell | `#f094e6` orchid | 306.5° | 6.49 | 1.81 |
 | BMO Tune RT (not in the rack) | `#b6e35d` lime | 80.1° | **9.10** | **1.29** |
 | LTV Comp -- **unsigned, and on the LTV ground** | `#a2a8ff` periwinkle | 236.1° | 6.17 | 1.91 |
 

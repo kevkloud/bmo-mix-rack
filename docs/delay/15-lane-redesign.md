@@ -113,10 +113,28 @@ candidates cheapest first. Add to it:
   parameter changing** — otherwise automating LINK rewrites eight parameters on
   every pass and fights the user's own automation.
 
+## Settled since
+
+**The accent is the orchid `#f094e6`** (Frosty, 2026-09-21), at 306.5 degrees.
+Measured off a rendered panel rather than computed: 6.49:1 on the dark plate
+and 1.81:1 on the pale, both mid-band. Its nearest neighbour is BMO EQ's pink
+at 29.5 degrees; `13` §6's warning that an orchid "may read as EQ in a rack"
+was put to Frosty with renders before he chose. `products/AGENTS.md` carries
+the allocation row.
+
 ## Still open
 
-The accent (the rack has run out of hue space; BMO Opto's no-accent precedent is
-live), the lit-state glow on the pale plate, whether the lane needs its own
-level control to balance against the main delay, the lane's build ceiling, and
-the expanded width — two mirrored voicings plus two FX sections will not fit the
-built 560.
+- Whether the lane needs its own **level** control to balance against the main
+  delay. `laneGain` sets its tail, not its loudness, so as drafted the lane's
+  volume relative to the main delay is fixed -- which seems wrong for a feature
+  whose job is emphasis.
+- The lane's **build ceiling**: the main loop caps at 1.05 by Decided item 4.
+  Does the lane's build region cap there too, or higher because a violent build
+  is the point?
+- The **lit-state glow on the pale plate**. It reads by fill rather than by
+  glow: the bloom peaks at 1.37:1 against `#efefef` versus 2.49:1 on the dark
+  plate, because a bloom brightens and there is little room to brighten against
+  light grey. The fix is a darker halo -- the panel already derives `#965491`
+  for pale-plate legends at 4.6:1.
+- The **expanded width**. Two mirrored voicings plus two FX sections will not
+  fit the built 560.

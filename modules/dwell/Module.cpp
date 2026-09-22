@@ -28,23 +28,29 @@ namespace bmo::dwell
     (236.1) sits inside it and splits it into 20.9 and 35.5 degrees; the best
     an indigo can do is 17.8, fifth behind chartreuse and jade.
 
-    Three magentas were rendered at 2x, compact, expanded and lit, in both
-    appearances, and measured off the pixels with `Inspect.exe ratio` rather
-    than from the formula: `#ee85f5` (296.3 deg, 5.99 dark / 1.96 pale),
-    this one (304.0 deg, 6.12 / 1.92) and `#f587df` (312.0 deg, 6.06 / 1.94).
-    All three are inside the shipped band -- 5.87 to 7.19 on
-    `#2e2e32` and 1.72 to 2.00 on `#efefef`. This one is the centre of the gap
-    and the only one whose *nearest* neighbour is more than 25 degrees away.
+    Three magentas were rendered and measured before this one, off the pixels
+    with `Inspect.exe ratio` rather than from the formula: `#ee85f5` (296.3 deg,
+    5.99 dark / 1.96 pale), `#f288eb` (304.0, 6.12 / 1.92) and `#f587df` (312.0,
+    6.06 / 1.94). Frosty chose the orchid `13` section 6 had proposed instead,
+    which sits between the first two.
 
-    **Measured on the render, not computed**: 6.12:1 on the dark plate and
-    1.92:1 on the pale one, both from `ee85f5`-style pixel reads of the knob
-    face and the caption ink.
+    **Measured on the render, not computed**: **6.49:1** on the dark plate
+    `#2e2e32` and **1.81:1** on the pale `#efefef`, read off the knob face of a
+    rendered panel in both appearances. Both are mid-band -- the shipped
+    accents run 5.87 to 7.19 dark and 1.72 to 2.00 pale. Section 6 of `13`
+    predicted 6.5 and 1.84 from the formula and was right.
+
+    Its nearest neighbour is BMO EQ's pink at 29.5 degrees, with BMO Dimension's
+    lavender 34.9 the other way. `13` section 6 flagged an orchid as something
+    that "may read as EQ in a rack", and that objection is real and was put to
+    Frosty with renders before he chose it; 29.5 still clears the 26.8 the
+    shipped teal and the utility azure already live with.
 
     It is one literal, here, so changing it is a one-line edit. Nothing else in
     the module names a colour: a panel asks for `ui::accentInk`,
     `ui::onAccentOf` or `ui::accentTextOn` and gets this derived against the
     current appearance (modules/AGENTS.md, "Do not write a hex in a panel"). */
-inline constexpr juce::uint32 kAccent = 0xfff288eb;
+inline constexpr juce::uint32 kAccent = 0xfff094e6;
 
 const ModuleDef& module()
 {

@@ -566,11 +566,53 @@ Two consequences worth knowing before touching the foot:
   in the suite for one corner's sake. `checkReverbPanel` asserts TYPE under the
   rule so it reads as a decision rather than an accident.
 
-**The page keys are round and level rather than raked.** Frosty's explicit
-call: a handheld is held at an angle and can afford a raked key block, and a
-mix panel is scanned in rows against its neighbours in the rack. Three keys over
-three columns now fill the row exactly, where they used to be three of four
-centred.
+**The page keys are round, level rather than raked, and carry their names
+inside themselves.** Frosty's explicit calls, in that order.
+
+Round and level was 2026-09-21: a handheld is held at an angle and can afford a
+raked key block, and a mix panel is scanned in rows against its neighbours in
+the rack. Three keys over three columns fill the row exactly, where they used
+to be three of four centred. The roundness is **a deliberate exception** to the
+suite's rounded-rect switches, approved on the same grounds the mockup argues —
+the row should read as a console key cluster rather than as a settings panel.
+
+The name moved **inside** the key on 2026-09-22, against the approved mockup,
+and this was the more house-consistent of the two arrangements rather than a
+departure: everything in this suite that is a *key* rather than a *control*
+puts its word inside itself — `ui::SwitchButton` (FILTER here, MONO in Util),
+BMO Opto's TELE and ELD. A circle with a caption row under it was borrowing a
+knob's arrangement for something that is not a knob.
+
+Three things that fell out of it, all measured on AURORA through
+`ui_layout_tests --dump`:
+
+- **The key is 36 px and "EARLY" clears its chord by 4.3 px**, set at 9 pt in
+  `labelFont`. Ten points leaves 1.0 px and ten-and-a-half clips, so the size
+  is a measurement and the table behind it is in `PageButton::kLabelSize`.
+  **The old comment claiming a word could not be set inside a 32 px key at any
+  readable size was measuring `captionFont`** — Blender, which is *wider* than
+  Minerva Black at the same nominal height by nearly two to one on this word.
+  The face was the problem, not the circle.
+- **The caption row freed 20 px and all twenty stayed in this row**: 4 to the
+  circle (32 → 36) and 16 to the PAGE legend. `kContentHeight` is still 640,
+  the five gaps are still `Tokens::switchGap`, and **nothing below the keys
+  moved by a pixel** — every render of the rest of the face is still current.
+- **The ink now derives against the fill, not the plate** (`ui::onAccentOf`,
+  which is what a switch's label uses). The fills are untouched: accent for the
+  page you are on, `switchOff` grey for the two you are not.
+
+**The keys are flat and stay flat** — no gradient, no bevel, no drop shadow,
+and deliberately not even the faint glow `drawToggleButton` gives an engaged
+switch. Frosty is assessing dimensional treatment across the whole suite
+separately and three keys must not decide it early.
+
+**The row carries a PAGE legend under it**, through `ModulePanel::addRule` —
+the suite's one section device, the same call LEVEL uses at the foot, so the
+panel has two rules of one kind rather than one rule and one special case. It
+sits **hard under the keys with the gap below it**, which is LEVEL's
+arrangement reflected: in both cases the legend is 0 px from the block it names
+and a full `switchGap` from the next one, and that proximity is the only thing
+that says which way a legend points. `checkReverbPanel` asserts both distances.
 
 **The page is UI state, not a parameter**: `ui.page=early|tail|eq` through
 `ModulePanel::setUiState`, the hook BMO Opto's meter mode and BMO DEQ's band

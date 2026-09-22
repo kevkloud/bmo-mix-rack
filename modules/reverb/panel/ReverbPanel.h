@@ -375,13 +375,35 @@ private:
     raked grille at the foot used to be the one sloped thing here; it was cut
     later the same day and nothing on this panel slopes now.
 
-    The circle carries no text and the name sits under it, which is what every
-    other control here does -- a knob and its caption, a dropdown and its
-    caption. A word set inside a 32 px circle has about 24 px of chord to live
-    in, and "EARLY" does not fit that at any size worth reading; the
-    alternatives were a much larger key or a much smaller word. The fill is the
-    module's accent when its page is selected and `switchOff` -- the raised
-    grey every unlit switch in the suite is filled with -- when it is not.
+    **The name is set inside the key, and was under it until 2026-09-22.**
+    Frosty's call, against the mockup. The old arrangement borrowed a knob's --
+    a circle with a caption row beneath it -- and that was the *less*
+    house-consistent of the two: every other thing in this suite that is a key
+    rather than a control puts its word inside itself. `ui::SwitchButton` does
+    (FILTER here, MONO in Util, LINK ER before the trim), and so do BMO Opto's
+    TELE and ELD. A page key is a key.
+
+    The old comment here claimed "EARLY does not fit at any size worth
+    reading", and it was measuring a 32 px circle. It is 36 now, paid for by
+    the caption row that went -- see `kPageRow` -- and the word fits with real
+    room to spare; `labelOverflow` is the measurement and
+    `tests/ui/LayoutTests.cpp` asserts on it per key per page. **Do not take
+    the diameter back down without re-reading that number**: this is the
+    MAKEUP -> MAKEU failure mode with a circle round it, and a chord is less
+    forgiving than a rectangle because the room runs out fastest exactly where
+    the letters are.
+
+    The fill is unchanged: the module's accent when its page is selected and
+    `switchOff` -- the raised grey every unlit switch in the suite is filled
+    with -- when it is not. The *ink* had to change, because it moved off the
+    plate and onto the fill: `ui::onAccentOf` is what a switch's label uses for
+    the same reason, and deriving against the plate here would have put the
+    accent on top of itself.
+
+    **Flat, and staying flat.** No gradient, no bevel, no drop shadow. Every
+    control in this suite is flat and Frosty is assessing that separately; a
+    key that got a dimensional treatment on its own would decide the question
+    by accident.
 
     A `juce::Button` rather than a `ui::SwitchButton`, because it is not a
     switch: there is no parameter under it, the three are a radio set rather
@@ -396,8 +418,8 @@ public:
     /** Re-colours the key. See `ui::PlainKnob::setAccent`. */
     void setAccent (juce::Colour);
 
-    /** How much wider the name is than the room it has, in pixels; zero or
-        less fits.
+    /** How much wider the name is than the room it has **inside the circle**,
+        in pixels; zero or less fits, and the negative of it is the margin.
 
         Here rather than in the test that asserts on it, because it has to use
         the same box and the same face `paintButton` does.
@@ -410,20 +432,58 @@ public:
         to know the key is round rather than merely present. */
     juce::Rectangle<int> dotBounds() const;
 
-    static constexpr int   kDotSide     = 32;
-    static constexpr float kCaptionSize = 11.0f;
+    /** The box the name is actually set in, inside the circle.
 
-    /** Room under the circle for its name -- `ui::PlainKnob::captionRow`
-        exactly, 1.2 x the point size plus four.
+        Public because a label inside a round bound is not something the
+        caption walk in `tests/ui/LayoutTests.cpp` can check -- that walk knows
+        about captions under controls -- so the test asserts this box is inside
+        `dotBounds` itself. */
+    juce::Rectangle<int> labelBox() const;
 
-        `constexpr` and public because the panel's own page-row height is the
-        circle plus the air plus this, and a second transcription of it there
-        is how a key ends up with its name clipped off the bottom of its row. */
-    static constexpr int kCaptionRow = (int) (kCaptionSize * 1.2f + 0.5f) + 4;
+    /** 32 until the caption row went. The four extra pixels are four of the
+        twenty that row freed; the other sixteen are the PAGE legend under the
+        row. See `kPageRow` in ReverbPanel.cpp, which adds it up. */
+    static constexpr int kDotSide = 36;
+
+    /** The name's point size, and **it is a measurement, not a preference**.
+
+        `ui::SwitchButton` derives its label from the box height at 62%, which
+        on a 36 px key would be 22 pt and absurd: that ratio is calibrated for
+        a 26 px switch whose word runs the length of a 70 px box, and a chord
+        is not a box. Pinned instead, the way BMO CEQ's square HI-Q switch pins
+        its own.
+
+        "EARLY" in `labelFont`, against the chord `labelBox` gives it inside a
+        36 px key, measured on AURORA through `ui_layout_tests --dump`:
+
+            8.0 pt   23.7 px in 31.1   margin  7.4
+            9.0 pt   26.7 px in 30.9   margin  4.2     <- this
+           10.0 pt   29.6 px in 30.6   margin  1.0
+           10.5 pt   31.1 px in 30.4   margin -0.7     <- clips
+
+        Ten was the first choice and 1.0 px of margin is not a margin; it is
+        the half-pixel case `tests/ui/LayoutTests.cpp`'s own dump comment warns
+        about, one type size away from being the next MAKEUP. Nine gives four
+        px and reads.
+
+        **The face matters more than the size here.** `captionFont` -- Blender,
+        what the name was set in while it was a caption under the key -- is
+        *wider* than Minerva Black at the same nominal height, and by a lot:
+        "EARLY" is 45.4 px at 9 pt against Minerva's 26.7. That, and not the
+        circle, is why the old comment here concluded a word could not be set
+        inside a key at any size worth reading. It was measuring the wrong
+        face. */
+    static constexpr float kLabelSize = 9.0f;
+
+    /** How far inside the circle the name's box stops, each side.
+
+        The chord is where the outline is drawn, so a name measured to the
+        chord is a name touching the rim. Two pixels is the hairline plus air,
+        and it is taken off the measurement rather than off the drawing, so the
+        margin `labelOverflow` reports is room the reader can actually see. */
+    static constexpr float kLabelInset = 2.0f;
 
 private:
-    juce::Rectangle<int> captionBox() const;
-
     juce::Colour accentColour;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PageButton)

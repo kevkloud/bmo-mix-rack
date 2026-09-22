@@ -1079,11 +1079,20 @@ void checkReverbPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
                        + " and the bezel put it at " + glass.toString());
     }
 
-    //== The three page keys ==================================================
+    //== The three page keys, and the names inside them ========================
     //
     // Round, and **level rather than raked** -- Frosty's explicit call. A rack
     // is scanned in rows against the slot beside it, so a sloped key block
     // would be the one thing in the window that did not line up.
+    //
+    // **The name is inside the key as of 2026-09-22**, which is why the two
+    // label assertions below exist at all. `checkCaptionsFit` further down
+    // walks captions *under* controls -- knobs, dropdowns -- and a word set in
+    // the middle of a circle is invisible to it, so a key whose name had
+    // outgrown its circle would have walked straight through the generic pass.
+    // That is the MAKEUP -> MAKEU fault with a round bound, and a circle is the
+    // less forgiving shape: the room runs out fastest at the tops of the
+    // letters, which is exactly where the reader is looking.
     {
         const auto& first = reverbPanel->getPageButton (R::Page::early);
 
@@ -1100,9 +1109,20 @@ void checkReverbPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
             checkEquals (dot.getWidth(), R::PageButton::kDotSide,
                          juce::String (who) + " the " + nameFor (p) + " key's diameter");
 
+            // The name fits the room it is given...
             check (key.labelOverflow() <= 0.0f,
                    juce::String (who) + " page key '" + key.getName() + "' overflows its box by "
                        + juce::String (key.labelOverflow(), 1) + " px");
+
+            // ...and the room it is given is inside the circle. Two halves of
+            // one claim, and neither is worth much alone: a label box that had
+            // drifted outside the key would pass the overflow check by being
+            // roomy, and an overflow check alone says nothing about where the
+            // box it measured against actually is.
+            check (dot.contains (key.labelBox()),
+                   juce::String (who) + " page key '" + key.getName() + "' sets its name in "
+                       + key.labelBox().toString() + ", which is not inside the key "
+                       + dot.toString());
 
             checkEquals (key.getY(), first.getY(),
                          juce::String (who) + " the " + nameFor (p)
@@ -1112,26 +1132,57 @@ void checkReverbPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
         }
     }
 
-    //== LEVEL, the one rule, and the strip under it ==========================
+    //== The two rules: PAGE over the keys, LEVEL over the strip ==============
+    //
+    // Both are `ModulePanel::addRule`, which is the suite's one section device
+    // -- a hairline with the legend knocked out of the middle. There is no
+    // second kind of rule here, which is the thing worth asserting: PAGE
+    // arrived on 2026-09-22 and the easy wrong answer would have been a
+    // hand-painted legend that looked the same and drifted later.
+    //
+    // They are asserted **in order** and by index, because the order is the
+    // layout: PAGE is up at the keys and LEVEL is down at the foot, and a
+    // panel that had added them the other way round would be a panel whose
+    // legends had swapped ends.
     {
         const auto& rules = panel.getRules();
 
-        check (rules.size() == 1,
-               who + " should carry exactly one rule, has " + juce::String ((int) rules.size()));
+        check (rules.size() == 2,
+               who + " should carry exactly two rules, has " + juce::String ((int) rules.size()));
 
-        if (rules.size() == 1)
+        if (rules.size() == 2)
         {
-            check (rules[0].text == "LEVEL",
-                   who + " the rule should be legended LEVEL, reads '" + rules[0].text + "'");
+            check (rules[0].text == "PAGE",
+                   who + " the first rule should be legended PAGE, reads '" + rules[0].text + "'");
+            check (rules[1].text == "LEVEL",
+                   who + " the second rule should be legended LEVEL, reads '" + rules[1].text + "'");
 
-            // TYPE is under it too, and deliberately: the rule says LEVEL and
-            // a type is not a level, but a rule that stopped one cell short
-            // would be a second kind of rule in the suite. The wrinkle is
+            // **PAGE points up, and proximity is the only thing that says so.**
+            // It sits hard under the keys -- no gap at all -- and a full
+            // `switchGap` above the persistent row beneath it, which is LEVEL's
+            // arrangement upside down. If that ever inverts, the legend starts
+            // reading as a heading for SIZE / PRE-DELAY / DECAY.
+            const auto& early = reverbPanel->getPageButton (R::Page::early);
+
+            checkEquals (rules[0].row.getY(), early.getBottom(),
+                         who + " the PAGE rule should sit hard under the keys");
+
+            if (auto* size = findNamed (panel, "SIZE"))
+                check (size->getY() - rules[0].row.getBottom() >= bmo::ui::Tokens::switchGap,
+                       who + " the PAGE rule is "
+                           + juce::String (size->getY() - rules[0].row.getBottom())
+                           + " px above the persistent row and should be at least a switchGap --"
+                             " a legend nearer the block below it than the block above reads as"
+                             " heading the wrong one");
+
+            // TYPE is under LEVEL too, and deliberately: the rule says LEVEL
+            // and a type is not a level, but a rule that stopped one cell
+            // short would be a second kind of rule in the suite. The wrinkle is
             // owned in `ReverbPanel`'s class comment, so it is asserted here
             // rather than left to look like an accident.
             for (const auto* caption : { "ER", "REVERB", "MIX", "TYPE" })
                 if (auto* c = findNamed (panel, caption))
-                    check (c->getY() >= rules[0].row.getBottom(),
+                    check (c->getY() >= rules[1].row.getBottom(),
                            who + " " + caption + " should sit under the LEVEL rule");
         }
     }
@@ -1945,6 +1996,14 @@ void dump (bmo::ui::ModulePanel& panel, const juce::String& who)
 
         if (auto* s = dynamic_cast<bmo::ui::SwitchButton*> (c))
             return "   margin " + juce::String (-s->labelOverflow(), 1);
+
+        // BMO Linger's page keys, which set their names inside themselves as
+        // of 2026-09-22 and so have the tightest margin on the panel: the room
+        // is a chord and not a cell. This is the print the diameter was chosen
+        // from, and it is the print to re-read before anyone shrinks it.
+        if (auto* k = dynamic_cast<bmo::reverb::PageButton*> (c))
+            return "   margin " + juce::String (-k->labelOverflow(), 1)
+                     + "   in " + k->labelBox().toString();
 
         return {};
     };

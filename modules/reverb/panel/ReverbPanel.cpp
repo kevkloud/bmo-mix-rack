@@ -81,10 +81,39 @@ namespace
 
     //== The rows ==============================================================
 
-    /** The page keys. Their own height is the circle plus the air under it
-        plus the caption row, and `PageButton` lays out against exactly that,
-        so the two cannot come apart. */
-    constexpr int kPageRow = PageButton::kDotSide + 3 + PageButton::kCaptionRow;
+    /** The page keys: the circle and nothing else.
+
+        **It was 52 -- a 32 px circle, 3 px of air and a 17 px caption row --
+        until the name moved inside the key on 2026-09-22.** That freed
+        **20 px** on a face whose class comment says in so many words that
+        there is no slack left, and all twenty were spent here rather than
+        given back: **4** to the circle, which went 32 -> 36 so "EARLY" fits
+        inside it with room to read, and **16** to `kPageLegendRow` below,
+        which is the PAGE legend the row now carries.
+
+        So `kContentHeight` is unchanged at 640, the five gaps are still
+        `Tokens::switchGap` exactly, and **nothing below the keys moved by a
+        pixel** -- the bezel, the persistent row, the cluster, the LEVEL rule
+        and the strip are all at the y they were at. That was the point of
+        spending it here: a UI pass on one row of a panel this tight should not
+        invalidate every render of the other five. */
+    constexpr int kPageRow = PageButton::kDotSide;
+
+    /** The PAGE legend under the keys.
+
+        The suite's own section device -- a hairline with the legend knocked
+        out of the middle of it, through `ModulePanel::addRule` -- which is
+        what LEVEL already is on this panel and what ROOM and TIME were on the
+        face before the trim. There is no second kind of rule here and this
+        does not introduce one.
+
+        **Under the keys and hard against them, with the gap below.** LEVEL has
+        the gap *above* it and its strip hard below, so in both cases the
+        legend is 0 px from the block it names and a full `switchGap` from the
+        next one. That proximity is the whole of how a reader knows which way a
+        legend points, and it is the reason a rule under a button row does not
+        read as heading the row beneath it. */
+    constexpr int kPageLegendRow = ui::ModulePanel::kRuleRow;
 
     /** The persistent row and the level strip: the same size of knob and the
         same caption, because they are the same kind of control -- the ones
@@ -129,10 +158,13 @@ namespace
         is left over divided evenly rather than a number somebody has to redo
         when a block's height changes.
 
-        148 + 52 + 80 + 264 + 16 + 80 = 640, against the 680 a panel's content
-        area has, so the five gaps are `Tokens::switchGap` and the sum is
-        exact. `tests/ui/LayoutTests.cpp` is what notices if it stops being. */
-    constexpr int kContentHeight = kBezelHeight + kPageRow + kMainRow
+        148 + 36 + 16 + 80 + 264 + 16 + 80 = 640, against the 680 a panel's
+        content area has, so the five gaps are `Tokens::switchGap` and the sum
+        is exact. It was 148 + **52** + 80 + 264 + 16 + 80 on the same total
+        until 2026-09-22: the key row gave up its caption row and the PAGE
+        legend took what the bigger circle did not -- see `kPageRow`.
+        `tests/ui/LayoutTests.cpp` is what notices if it stops being exact. */
+    constexpr int kContentHeight = kBezelHeight + kPageRow + kPageLegendRow + kMainRow
                                  + kClusterRow * kClusterRows
                                  + ui::ModulePanel::kRuleRow + kStripRow;
 
@@ -913,21 +945,35 @@ PageButton::PageButton (const juce::String& name, juce::Colour accent)
 
 juce::Rectangle<int> PageButton::dotBounds() const
 {
-    const auto area = getLocalBounds().withTrimmedBottom (kCaptionRow);
+    // The whole component now: the caption row under the circle went on
+    // 2026-09-22 and there is nothing left in here but the key.
+    const auto area = getLocalBounds();
     const auto side = juce::jmin (area.getWidth(), area.getHeight(), kDotSide);
 
     return area.withSizeKeepingCentre (side, side);
 }
 
-juce::Rectangle<int> PageButton::captionBox() const
+juce::Rectangle<int> PageButton::labelBox() const
 {
-    return { 0, dotBounds().getBottom(), getWidth(), kCaptionRow - 4 };
+    // **The chord at the name's own height, not the diameter.** A word set
+    // across the middle of a circle has the full diameter only on the centre
+    // line; it has less at the top of its letters and less again at the
+    // bottom, and the top of the letters is exactly where "EARLY" runs out of
+    // room. Half-chord at +/- h/2 is sqrt(r^2 - (h/2)^2), and `kLabelInset`
+    // comes off each end so the measurement stops short of the outline rather
+    // than at it.
+    const auto dot  = dotBounds().toFloat();
+    const auto r    = dot.getWidth() * 0.5f;
+    const auto half = std::sqrt (juce::jmax (0.0f, r * r - kLabelSize * kLabelSize * 0.25f));
+    const auto w    = juce::jmax (0.0f, 2.0f * (half - kLabelInset));
+
+    return juce::Rectangle<float> (w, kLabelSize).withCentre (dot.getCentre()).toNearestInt();
 }
 
 float PageButton::labelOverflow() const
 {
-    return juce::GlyphArrangement::getStringWidth (ui::captionFont (kCaptionSize), getButtonText())
-             - (float) captionBox().getWidth();
+    return juce::GlyphArrangement::getStringWidth (ui::labelFont (kLabelSize, true), getButtonText())
+             - (float) labelBox().getWidth();
 }
 
 void PageButton::setAccent (juce::Colour colour)
@@ -939,11 +985,16 @@ void PageButton::setAccent (juce::Colour colour)
 void PageButton::paintButton (juce::Graphics& g, bool shouldDrawHighlighted, bool shouldDrawDown)
 {
     const auto on = getToggleState();
-    const auto plate = ui::panelTokensFor (*this).plate;
 
     // The same fill logic a switch has, one shape over: the module's accent
     // when it is the page you are on, and `switchOff` -- the raised grey every
     // unlit switch in the suite is filled with -- when it is not.
+    //
+    // **Flat.** No glow, no gradient, no bevel. `drawToggleButton` does put a
+    // faint glow behind an engaged switch, and this deliberately does not
+    // follow it there: Frosty is assessing dimensional treatment across the
+    // whole suite separately, and three keys deciding it early is the kind of
+    // drift that gets shipped by accident.
     auto fill = on ? accentColour : ui::tokens().switchOff;
 
     if (shouldDrawDown)             fill = fill.darker (0.12f);
@@ -956,12 +1007,19 @@ void PageButton::paintButton (juce::Graphics& g, bool shouldDrawHighlighted, boo
     g.setColour (ui::tokens().outline);
     g.drawEllipse (dot.reduced (0.6f), ui::Tokens::hairlineWeight);
 
-    // The name under the key, in the module's own ink when its page is
-    // showing and in the secondary grey when it is not -- so the lit key and
-    // its name say the same thing twice rather than once.
-    ui::drawLabel (g, getButtonText(), captionBox().toFloat(), juce::Justification::centred,
-                   ui::captionFont (kCaptionSize),
-                   on ? ui::accentInk (accentColour, plate) : ui::tokens().text2);
+    // **Ink derived against the fill, not against the plate.** The name used
+    // to sit under the key on the faceplate, where `accentInk (accent, plate)`
+    // was right; it sits on the key now, so the ground it has to be legible
+    // against is the fill -- which for the lit key *is* the accent, and
+    // deriving against the plate would have set the accent on itself.
+    // `ui::onAccentOf` is the same call `drawToggleButton` makes for a
+    // switch's label, and carries the 4.5:1 target with it.
+    //
+    // `labelFont`, the face a switch's label is set in, and not `captionFont`:
+    // the caption face was right while this was a caption. It is a key's word
+    // now and is set like one.
+    ui::drawLabel (g, getButtonText(), labelBox().toFloat(), juce::Justification::centred,
+                   ui::labelFont (kLabelSize, true), ui::onAccentOf (fill));
 }
 
 //==============================================================================
@@ -1404,10 +1462,16 @@ void ReverbPanel::resized()
         screen.setBounds (screenBox);
     }
 
-    //== The three page keys, one per column ===================================
+    //== The three page keys, and the PAGE legend under them ===================
     //
     // Three keys over three columns, so the row fills the grid exactly. It was
     // three of four centred while the grid was four wide.
+    //
+    // The keys carry their names inside themselves as of 2026-09-22, so the
+    // row is the circle and nothing else and the legend row underneath is what
+    // the freed caption row paid for. It goes on hard under the keys, with the
+    // gap after it rather than before it: see `kPageLegendRow` for why that
+    // way round and not the other.
     {
         area.removeFromTop (gap);
 
@@ -1415,6 +1479,8 @@ void ReverbPanel::resized()
 
         for (auto& button : pageButtons)
             button->setBounds (row.removeFromLeft (cell));
+
+        addRule (area.removeFromTop (kPageLegendRow), "PAGE");
     }
 
     //== The persistent row ====================================================

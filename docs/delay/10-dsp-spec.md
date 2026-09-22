@@ -110,9 +110,21 @@ LOW CUT → HIGH CUT → mode filters → DC blocker → shaper → clip.
 
 Peak follower on the **dry input only** (`(|L|+|R|)/2`), 5 ms attack / 180 ms release
 (CALIBRATE), in dB as `E`: `GR_dB = −DUCK·clamp((E − T_d)/W, 0, 1)`, `T_d = −30 dBFS`,
-`W = 20 dB` (both CALIBRATE). DUCK spans 0–24 dB, default 4 dB (01: 2–4 dB). `GR`
+`W = 20 dB` (both CALIBRATE). DUCK spans 0–24 dB, **default 0 dB** (DECIDED, Frosty
+2026-09-21). 01 measures 2–4 dB on the units it surveys, and that remains the useful
+range — but `params.h`'s rule that a freshly inserted instance does nothing it was not
+asked to wins over a helpful starting value, so ducking ships inert and opt-in. `GR`
 applies to the **wet output after the loop tap**, never inside the feedback path, so
 ducking never shortens the tail.
+
+**The detector's key high-pass is fixed at build time** (DECIDED, Frosty 2026-09-21):
+no parameter is reserved for it, and its corner is settled with the other CALIBRATE
+figures. The detector is keyed structurally rather than by routing — the module is an
+insert, so the dry input *is* the track being sent to the delay — and it can never be
+keyed from a different source, because `ModuleDsp::process` takes audio channels only
+and both host processors declare stereo in/out with no sidechain bus. That is the
+stated limit of this control: what it buys over a compressor on a return is that it
+travels in presets and rack state, which routing does not.
 
 ## 7. Tempo sync
 
@@ -299,7 +311,7 @@ heaviest (DECISION; bench per 11 §4k). Only Diffuse and the octaves should meas
 | Alias floor | ≤ −60 dBFS, 10 repeats | DECISION |
 | Wow / flutter | 0.1–8 Hz / 11.7 Hz at 0.25× | 01 |
 | Mod depth | 0–0.5% speed; clean 0–8 ms | 01 / CALIBRATE |
-| Duck range, detector | 0–24 dB (4 dB); 5/180 ms, −30 dBFS, W 20 | 01 / CALIBRATE |
+| Duck range, detector | 0–24 dB (**0 dB**); 5/180 ms, −30 dBFS, W 20; key HP fixed | DECIDED 2026-09-21 / CALIBRATE |
 | Dotted / triplet | ×1.5 / ×2/3 | 01 |
 | Dual-offset ratio | 2/3 | CALIBRATE |
 | Max delay / latency | 2000 ms (BBD 1500) / 0 | DECIDED (Frosty, 2026-09-20) / 00 §4 |

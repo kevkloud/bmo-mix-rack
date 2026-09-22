@@ -74,7 +74,7 @@ ui::ModuleContext RackProcessor::makeContext (int slot)
     auto* engine = getEngineAt (slot);
     jassert (engine != nullptr);
 
-    return { engine->params(), engine->def(),
+    ui::ModuleContext ctx { engine->params(), engine->def(),
              [engine] { return engine->meter().maxPeak(); },
              [engine] { return engine->meter().maxRms(); },
              [engine] { return engine->inputMeter().maxPeak(); },
@@ -83,6 +83,16 @@ ui::ModuleContext RackProcessor::makeContext (int slot)
              [engine] { return engine->sampleRate(); },
              [engine] (int band) { engine->setSolo (band); },
              engine->analyser() };
+
+    // The slot's session-only view, for a panel with an expand arrow of its
+    // own (core/ui/ModulePanel.h). Keyed on the slot index rather than on the
+    // engine, because the flag lives on the slot and travels with the module
+    // when the chain is edited. RackEditor replaces the setter with one that
+    // also re-lays the plate out, so the arrow acts inside the click.
+    ctx.isExpanded  = [this, slot] { return isSlotExpanded (slot); };
+    ctx.setExpanded = [this, slot] (bool shouldBe) { setSlotExpanded (slot, shouldBe); };
+
+    return ctx;
 }
 
 bool RackProcessor::isSlotExpanded (int slot) const noexcept

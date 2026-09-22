@@ -14,6 +14,7 @@ by dispatched agents on AURORA, 2026-09-20, under `HANDOFF-groundwork.md`.
 - `12-tempo-and-tail-plumbing.md` — host tempo and tail-length plumbing, processor → rack → module; can land as its own PR first.
 - `13-panel-direction.md` — control hierarchy, layout, readouts, meter, accent. Owns layout and captions.
 - `14-calibration-and-listening.md` — how every CALIBRATE and DECISION value gets settled, and what freezes at ship.
+- `15-lane-redesign.md` — **read before `10`, `11` and `13`**: the nine-control face, THROW rebuilt as a parallel lane, the schema changes, the tape stability bug, and what stage 2 now is.
 - `20-name-clearance.md` — name-clearance note for "Dwell": web search plus a USPTO registry search; not legal advice.
 - `HANDOFF-groundwork.md` — the ruleset that produced this pack.
 - `HANDOFF-add-bmo-dwell.md` — the prompt that starts the build from this pack.
@@ -40,3 +41,27 @@ by dispatched agents on AURORA, 2026-09-20, under `HANDOFF-groundwork.md`.
 - THROW strictly momentary or modifier-click latch; `throwMode` order (Send open → Throw → Build).
 - Ping-pong on a stereo source: sum to mono (specified) or keep L/R; dual-offset ratio fixed at 2/3.
 - Whether the accumulated alias floor (target ≤ −60 dBFS at 10 repeats) forces a half-band stage into the loop.
+
+## Decided (Frosty, 2026-09-21) — see `15-lane-redesign.md`
+
+9. **The face is nine controls**; everything else is revealed, and the split is
+   visibility only — **no DSP gate**, every parameter stays live.
+10. **THROW becomes a parallel lane** running simultaneously with the main
+    delay: its own TIME, fed by SEND, life-gated by HOLD (off **clears**),
+    output-gated by CHOP, tail set by one bipolar knob whose sticky centre is
+    unity. SEND onto an occupied lane **sums**.
+11. **The lane is a full mirror** of the main delay — its own character, stereo,
+    filters, voice, modulation, drive and FX — with **LINK**, and unlinking
+    **seeds from the main's current values**.
+12. **This supersedes item 2**: the old bit-exact FREEZE is replaced by the
+    lane's centre detent, which holds at unity but still laps the character and
+    filters, so a long hold colours. The non-eroding hold is gone from v1.
+13. **DUCK keeps id 12 but defaults to 0**, ships inert and opt-in, and its
+    detector's key high-pass is **fixed at build time** with no parameter
+    reserved.
+14. **"Dwell" ships on the USPTO search alone** — EU, UK, WIPO and unregistered
+    use unchecked, risk accepted.
+
+**Blocking, found 2026-09-21:** `10` §3's stability premise is wrong for tape.
+The +2 dB head bump puts unity at FEEDBACK 84 %, not 97 %, and a freeze parked
+at the detent tilts into a 55 Hz boom. Bucket-brigade's compander is unchecked.

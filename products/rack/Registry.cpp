@@ -1,6 +1,7 @@
 #include "Registry.h"
 #include "modules/deq/Module.h"
 #include "modules/dim/Module.h"
+#include "modules/dwell/Module.h"
 #include "modules/eq/Module.h"
 #include "modules/opto/Module.h"
 #include "modules/sat/Module.h"
@@ -20,6 +21,7 @@ const std::vector<const ModuleDef*>& registry()
         &dim::module(),
         &deq::module(),
         &vcomp::module(),
+        &dwell::module(),
     };
 
     return defs;

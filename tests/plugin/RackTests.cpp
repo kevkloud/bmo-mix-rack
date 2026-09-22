@@ -63,6 +63,13 @@ namespace
                     "diffuse", "rate", "depth", "rotation", "asymmetry" } },
         { "ltvcomp", { "amount", "gate", "output", "complex", "attack", "release",
                      "arc", "sidechain", "low_thru", "high_thru" } },
+        // Twenty, so every one of BMO Dwell's parameters gets a host lane and
+        // all of them are automatable in a rack as well as standalone. The
+        // order is permanent -- docs/delay/11-integration-and-test-plan.md §3.
+        { "dwell", { "time", "sync", "note", "feedback", "character", "stereo",
+                     "low_cut", "high_cut", "voice", "mod_rate", "mod_depth",
+                     "drive", "duck", "mix", "throw", "throw_mode", "freeze",
+                     "fx", "fx_type", "fx_amount" } },
     };
 
     std::vector<juce::String> chainIds (RackProcessor& rack)
@@ -202,7 +209,7 @@ int main()
         auto rack = createRack();
         const auto& registry = rack->getRegistry();
 
-        check (registry.size() == 7, "the registry holds util, eq, sat, opto, dim, deq and vcomp");
+        check (registry.size() == 8, "the registry holds util, eq, sat, opto, dim, deq, vcomp and dwell");
 
         // A bank is a module's host lanes, so it stops at 32 even if the
         // module does not. Past that, its golden schema test pins the order.

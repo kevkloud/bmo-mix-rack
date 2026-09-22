@@ -79,6 +79,26 @@ struct ModuleContext
     // screen pays nothing (core/dsp/AnalyserTap.h).
     std::function<void (int)> setSolo;
     AnalyserTap* analyser = nullptr;
+
+    // The session-only view flag of an expandable module (ModuleDef::
+    // expandedWidth), and a request to change it. Both are empty unless the
+    // host keeps one -- check before calling, like the optional meters above.
+    //
+    // Reading it is **not** how a panel picks its layout: that comes from the
+    // width the host hands over, and BMO DEQ needs neither of these. They
+    // exist for BMO Dwell, whose panel carries an expand arrow of its own
+    // (docs/delay/13 §6a, DECIDED Frosty 2026-09-20) and therefore has to be
+    // able to *ask* the host to flip the flag rather than only be told what it
+    // says.
+    //
+    // **Not a parameter and not panel state.** What they reach is
+    // SingleModuleProcessor::expanded or RackProcessor's per-slot flag: kept
+    // with the session, absent from presets, never automatable. So a panel
+    // must never call setExpanded from a parameter listener -- doing that
+    // would let automation and preset recall resize the module, which is the
+    // one thing core/AGENTS.md's view rule forbids.
+    std::function<bool()> isExpanded;
+    std::function<void (bool)> setExpanded;
 };
 
 /** Base of every module panel: a fixed-size faceplate of the module's design
@@ -268,15 +288,31 @@ private:
     void paintRules (juce::Graphics&) const;
 
     std::vector<Rule> rules;
+    bool columnScopedRules = false;
 
 protected:
 
-    /** A hairline through the middle of a row, inset by the padding. */
+    /** Draws every rule across the row it was handed rather than across the
+        whole panel.
+
+        For a panel laid out in **columns**. BMO Dwell's wide view puts a DELAY
+        rule in one column and a LOOP rule in the other, and a hairline drawn
+        the full width runs each of them straight through the other column's
+        contents. Off by default and opted into by that one panel, so every
+        single-column panel in the suite -- all of which hand `addRule` a row
+        that already spans the content area -- is unaffected. */
+    void setColumnScopedRules (bool shouldBe) noexcept { columnScopedRules = shouldBe; }
+
+    /** A hairline through the middle of a row, inset by the padding -- or
+        across the row's own width, for a panel that asked for that. */
     void drawRule (juce::Graphics& g, juce::Rectangle<int> row) const
     {
+        const auto x = columnScopedRules ? (float) row.getX() : (float) kPad;
+        const auto w = columnScopedRules ? (float) row.getWidth()
+                                         : (float) (getWidth() - kPad * 2);
+
         g.setColour (tokens().hairline);
-        g.fillRect (juce::Rectangle<float> ((float) kPad, (float) row.getCentreY(),
-                                            (float) (getWidth() - kPad * 2), Tokens::hairlineWeight));
+        g.fillRect (juce::Rectangle<float> (x, (float) row.getCentreY(), w, Tokens::hairlineWeight));
     }
 
     /** A section name drawn on a rule, in the module's own colour.

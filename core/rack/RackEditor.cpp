@@ -179,13 +179,27 @@ int RackEditor::slotWidth (int slot) const
 
 void RackEditor::toggleSlotView (int slot)
 {
+    setSlotView (slot, ! proc.isSlotExpanded (slot));
+}
+
+void RackEditor::setSlotView (int slot, bool expanded)
+{
+    if (expanded == proc.isSlotExpanded (slot))
+        return;
+
     // Nothing is torn down: the panel is resized in place and lays itself out
     // again, the modules to its right move over, and the window keeps the
-    // scale the user had.
+    // scale the user had. That is what lets a panel's own arrow call this from
+    // inside its mouse handler.
     const auto scale = (float) getWidth() / (float) plate.getWidth();
-    proc.setSlotExpanded (slot, ! proc.isSlotExpanded (slot));
+    proc.setSlotExpanded (slot, expanded);
     layoutPlate();
     refit (scale);
+
+    // The slot bar's chevron asks rather than remembers, so it draws the truth
+    // already; this is its tooltip and its title, which do not.
+    if (slot >= 0 && slot < (int) views.size() && views[(size_t) slot].bar != nullptr)
+        views[(size_t) slot].bar->refreshExpand();
 }
 
 void RackEditor::rebuildViews()
@@ -196,8 +210,17 @@ void RackEditor::rebuildViews()
     for (int s = 0; s < proc.getNumModules(); ++s)
     {
         SlotView view;
-        view.bar   = std::make_unique<SlotBar> (*this, s);
-        view.panel = proc.getModuleAt (s)->createPanel (proc.makeContext (s));
+        view.bar = std::make_unique<SlotBar> (*this, s);
+
+        // A panel with an expand arrow of its own -- BMO Dwell's, docs/delay/13
+        // §6a -- gets a setter that re-lays the plate out rather than the
+        // processor's bare flag, so the view follows the click. The panel this
+        // closure belongs to dies with `views`, so the captured slot index
+        // cannot outlive the layout it refers to.
+        auto ctx = proc.makeContext (s);
+        ctx.setExpanded = [this, s] (bool shouldBe) { setSlotView (s, shouldBe); };
+
+        view.panel = proc.getModuleAt (s)->createPanel (std::move (ctx));
 
         plate.addAndMakeVisible (*view.bar);
         plate.addAndMakeVisible (*view.panel);

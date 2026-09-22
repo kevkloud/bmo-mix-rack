@@ -19,6 +19,7 @@ Permanent. Allocate here before the first build of anything new.
 | BMO Dimension | `dim` | `Bdim` | `com.lt3audio.bmodimension` | `.bmodim` |
 | BMO Mix Rack | -- | `Brck` | `com.lt3audio.bmomixrack` | `.bmorack` |
 | BMO DEQ | `deq` | `Bpar` | `com.lt3audio.bmodeq` | `.bmodeq` |
+| BMO Dwell | `dwell` | `Bdly` | `com.lt3audio.bmodwell` | `.bmodwell` |
 | BMO Tune RT -- **not in the rack** | `tune` | `Btun` | `com.lt3audio.bmotunert` | `.bmotune` |
 | LTV Comp -- **not a BMO product** | `ltvcomp` | `Ltvc` | `com.lt3audio.ltvcomp` | `.ltvcomp` (reads `.bmovcomp`) |
 
@@ -139,14 +140,42 @@ lanes; the module's first 32 parameters take them and the rest are kept in
 the slot's state, off the host grid -- see `modules/AGENTS.md`, step 2. Which
 32 is Frosty's allocation, recorded in `modules/deq/params.h`.
 
-It is also the one module with **two widths**: 320 compact and 600 full. A
+It was the first module with **two widths**: 320 compact and 600 full. A
 rack opens it compact and standalone opens it full; the switch between them
 is on the host's bar, not on the panel (`ModuleDef::expandedWidth`,
-`ui::ExpandButton`). See `modules/deq/AGENTS.md`.
+`ui::ExpandButton`). See `modules/deq/AGENTS.md`. **BMO Dwell is the second**,
+at 280 compact and 460 expanded, and it adds one thing DEQ does not have: an
+arrow on the panel itself that opens and closes the column. The view is still
+session-only and still not a parameter, so automating or preset-loading `fx`
+never resizes the module -- see `modules/dwell/AGENTS.md`.
+
+**BMO Dwell's accent is not settled, and two golds are out.** The olive-gold
+`#b2bb54` that stood in `modules/dwell/Module.cpp` is **rejected** -- "i hate
+this color", Frosty 2026-09-21 -- and so is the pale gold `#e6e278`, which
+measured 9.99 dark and 1.18 pale, outside the band at both ends. Neither is
+offered again, which retires most of the list in
+`docs/delay/11-integration-and-test-plan.md` §1 and
+`docs/delay/13-panel-direction.md` §6.
+
+The file now carries `#f288eb`, a magenta at 304.0 degrees: the centre of the
+64.4-degree arc between BMO Dimension's lavender and BMO EQ's pink, which is
+half again the widest gap left once BMO FET's `#5489d4` (215.2 degrees) and
+the de-esser's rose `#ea9f9a` (3.8) are counted alongside the table above.
+6.12 on `#2e2e32` and 1.92 on `#efefef`, measured off a render with
+`Inspect.exe ratio`. It is a recommendation left set so the tree renders it,
+**not an allocation** -- Frosty picks from the renders, and this table gains
+its row when he does.
+
+**"Dwell" is cleared to ship on a USPTO search alone** (`docs/delay/20`):
+no live mark in audio software or musical instruments; the nearest live class 9
+mark is a home-design media brand. EU, UK, WIPO and unregistered use were not
+checked. Frosty accepted that residual risk on 2026-09-21 and released the row
+above, which is permanent from here.
 
 Reserved for later products (not built, do not reuse): `Bfet` FET comp,
 `Bdyn` dynamics, `Bdes` de-esser, `Bovr` overdrive,
-`Bcmp` compressor, `Bdly` delay, `Brvb` reverb.
+`Bcmp` compressor, `Brvb` reverb. (`Bdly` was this list's delay entry; it is
+allocated above now.)
 
 ## BMO EQ and BMO DEQ — settle BMO EQ's name
 

@@ -70,7 +70,7 @@ is added, its whole-sample group delay comes off `D`, keeping the figure 0.
 | 9 | `modRate` | 0.1…8 Hz, log | 0.6 | 20 ms |
 | 10 | `modDepth` | 0…100 %, lin | 0 | 20 ms |
 | 11 | `drive` | 0…100 %, lin | 0 | 20 ms |
-| 12 | `duck` | 0…24 dB, lin | 4 | 20 ms |
+| 12 | `duck` | 0…24 dB, lin | **0** | 20 ms |
 | 13 | `mix` | 0…100 %, 10 §9's sin/cos hinge at 50 % | 35 | 30 ms |
 | 14 | `throw` | bool, momentary | off | 5–10 ms ramp |
 | 15 | `throwMode` | Send open/Throw/Build | Send open | xfade |

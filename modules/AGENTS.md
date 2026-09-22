@@ -36,6 +36,12 @@ own tests could not see. What belongs *here* is anything every module shares.
   measurement harness caught that no test had: a band split that silently
   stopped compressing above 10.8 kHz, and a clipped caption that ui_layout
   never saw because the module was missing from its product list.
+- [`dwell/AGENTS.md`](dwell/AGENTS.md) -- BMO Dwell, the delay. Schema and
+  plumbing so far; the loop is stage 2. What is frozen in the permanent schema
+  and why NOTE's index order is not "least to most" like the other three lists;
+  why latency is 0 and why reporting the delay time as latency is the trap;
+  what ships disabled (SYNC) and what does not (FREEZE); and why `fx` the
+  parameter and the expanded view are tied but not the same.
 - [`tune/AGENTS.md`](tune/AGENTS.md) -- BMO Tune RT. **A product of this
   repository, not a rack module**: nothing of it is in the rack's registry or
   on its link line, and `-DBMO_BUILD_TUNE=OFF` / `-DBMO_BUILD_RACK=OFF` keep

@@ -45,6 +45,12 @@ private:
         void paint (juce::Graphics&) override;
         void resized() override;
 
+        /** The chevron's tooltip and title, after the view was changed by
+            something other than this bar -- a panel's own expand arrow. What
+            it draws is asked for rather than remembered and is already
+            right. */
+        void refreshExpand() { if (expand != nullptr) expand->refresh(); }
+
     private:
         void showMenu();
 
@@ -105,6 +111,11 @@ private:
 
     /** An expandable module's slot bar asks for its other width here. */
     void toggleSlotView (int slot);
+
+    /** The same, to a stated view rather than the other one: what a panel's
+        own expand arrow reaches through ui::ModuleContext::setExpanded. Does
+        nothing if the slot is already there. */
+    void setSlotView (int slot, bool expanded);
 
     void showModuleMenu (juce::Component& target, std::function<void (const ModuleDef&)>);
 

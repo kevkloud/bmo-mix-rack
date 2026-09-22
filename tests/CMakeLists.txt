@@ -30,6 +30,10 @@ bmo_add_dsp_tool(vcomp_dsp_tests dsp/VcompDspTests.cpp)
 target_link_libraries(vcomp_dsp_tests PRIVATE bmo_vcomp_dsp)
 add_test(NAME vcomp_dsp COMMAND vcomp_dsp_tests)
 
+bmo_add_dsp_tool(dwell_dsp_tests dsp/DwellDspTests.cpp)
+target_link_libraries(dwell_dsp_tests PRIVATE bmo_dwell_dsp)
+add_test(NAME dwell_dsp COMMAND dwell_dsp_tests)
+
 endif()
 
 # BMO Tune RT's suites. Their sources keep the names they were written under,
@@ -98,15 +102,19 @@ bmo_add_tool(vcomp_tests plugin/VcompTests.cpp)
 target_link_libraries(vcomp_tests PRIVATE bmo_vcomp)
 add_test(NAME vcomp COMMAND vcomp_tests)
 
+bmo_add_tool(dwell_tests plugin/DwellTests.cpp)
+target_link_libraries(dwell_tests PRIVATE bmo_dwell)
+add_test(NAME dwell COMMAND dwell_tests)
+
 bmo_add_tool(rack_tests plugin/RackTests.cpp ${BMO_ROOT}/products/rack/Registry.cpp)
-target_link_libraries(rack_tests PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp)
+target_link_libraries(rack_tests PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp bmo_dwell)
 add_test(NAME rack COMMAND rack_tests)
 
 # Layout assertions on the real panels. JUCE, not bmo_add_dsp_tool: no
 # rendering happens, but Tokens.h includes juce_gui_basics, so a UI assertion
 # cannot run in the DSP-only job whatever docs/ui-workflow-brief.md §4 says.
 bmo_add_tool(ui_layout_tests ui/LayoutTests.cpp ${BMO_ROOT}/products/rack/Registry.cpp)
-target_link_libraries(ui_layout_tests PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp)
+target_link_libraries(ui_layout_tests PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp bmo_dwell)
 add_test(NAME ui_layout COMMAND ui_layout_tests)
 
 endif()

@@ -22,6 +22,8 @@
 #include "modules/vcomp/panel/LevelBars.h"
 #include "modules/vcomp/params.h"
 #include "products/dim/Product.h"
+#include "products/dwell/Product.h"
+#include "modules/dwell/params.h"
 #include "products/eq/Product.h"
 #include "products/opto/Product.h"
 #include "products/vcomp/Product.h"
@@ -29,6 +31,7 @@
 #include "products/util/Product.h"
 #include "products/rack/Product.h"
 
+#include "core/ui/ExpandButton.h"
 #include "core/ui/ModulePanel.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -770,6 +773,199 @@ void checkDeqBandToggle (bmo::ui::ModulePanel& panel, const juce::String& who)
     ctx.setSolo = realSolo;
 }
 
+//== BMO Dwell =================================================================
+//
+// **These numbers are the settled panel's, not docs/delay/13 §2's.** The panel
+// §2 draws literally was built and rejected, and so were two more after it --
+// "too busy and not intuitive", Frosty 2026-09-21. What is measured here is
+// the eleven-control face and the column that opens beside it; `13` is not
+// rewritten until the rest of the module is settled, so this file and that
+// document disagree on purpose until it is.
+//
+// Absolutes, not comparisons. The face is nine rows and a foot -- 28, 16, 152,
+// 122, 20, 28, 16, 108, 40, and the 28 px foot taken off the bottom -- which
+// is 558 px of the 676 px the content area is once a 4 px foot margin is
+// reserved. Neither the input nor the output section is taken, so the 118 px
+// over is laid on as one 9 px unit of air above every row and a **double**
+// unit at each of the three section breaks, the odd 10 px going to the first
+// of them. That puts the DELAY rule at 77 and the TONE rule at 460.
+//
+// Four of those row heights carry the **15 pt captions** -- the suite standard
+// that ui::PlainKnob defaults to and that every earlier attempt at this panel
+// had to give up. A caption row is round(15 * 1.2) + 4 = 22 px rather than the
+// 18 that 12 pt cost, and the face pays for it out of its air. Eleven controls
+// laid out in pairs is what makes it affordable: a caption gets a 130 px cell
+// instead of the 86 a three-knob primary row could cut, and "FEEDBACK" needs
+// 125 at 15 pt. No word on this panel was shortened to buy it.
+//
+// The wide view adds two more rules and keeps every one of those rows exactly
+// where the compact one has them. The second column is laid out **between the
+// face's two rules**: its LOOP rule shares row 77 and its FX rule shares row
+// 460, with its own THROW rule in between at 395. Two columns whose rules
+// miss each other by a dozen pixels read as a failed alignment rather than as
+// two sections, so the column is cut on those lines rather than laid out as
+// one run and hoped over. What is left bare above it is the CHARACTER band --
+// that is the point: the trio sits over both columns.
+//
+// **The first row is CHARACTER, above the first rule.** Frosty, 2026-09-21:
+// "so users know it affects the delay as a whole". CLEAN / TAPE / BUCKET
+// voices the repeats, the loop and the FX section alike, and under the DELAY
+// rule it read as one more row of that section. The assertion below is what
+// keeps it out: if a later change puts the trio back between the rules, this
+// is what should be argued with first.
+
+constexpr int kDwellDelayRule = 77;    ///< and the LOOP rule of the second column
+constexpr int kDwellToneRule  = 460;   ///< and the FX rule of the second column
+constexpr int kDwellThrowRule = 395;   ///< the second column's own, and only there
+
+/** The face, at either width. The wide view keeps its ten bands exactly where
+    the compact one has them and adds a column beside them, so every number
+    here is the same in both. */
+void checkDwellFace (bmo::ui::ModulePanel& panel, const juce::String& who, bool expanded)
+{
+    checkEquals ((int) ruleCentres (panel).size(), expanded ? 5 : 2, who + " rule count");
+    checkHasRuleAt (panel, kDwellDelayRule, who);
+    checkHasRuleAt (panel, kDwellToneRule, who);
+
+    // The second column shares both of the face's lines and adds one of its
+    // own. Five rules and three rows between them, which is the assertion that
+    // catches the column drifting off the face by a few pixels -- the failure
+    // this layout is cut in two segments to make impossible.
+    if (expanded)
+        checkHasRuleAt (panel, kDwellThrowRule, who);
+
+    // **Eleven controls, and these are they.** The count is the whole redesign:
+    // three attempts carried eighteen down a 280 px strip and all three read as
+    // dense. LO CUT, HI CUT and the rest are what the panel prints -- a caption
+    // is not schema (WORKFLOWS.md's control audit).
+    for (const auto* name : { "TIME", "FEEDBACK", "MIX", "LO CUT", "HI CUT",
+                              "SYNC", "THROW", "FREEZE", "FX" })
+        check (findNamed (panel, name) != nullptr,
+               who + " has no " + juce::String (name));
+
+    // The two trios, by a cell each, because a ChoiceRow's buttons are laid out
+    // in the row's own coordinates and only the row knows where it sits.
+    for (const auto* cell : { "CLEAN", "TAPE", "BUCKET", "STEREO", "PING-PONG", "DUAL" })
+        check (findNamed (panel, cell) != nullptr,
+               who + " has no " + juce::String (cell) + " cell");
+
+    // TIME and NOTE share one position, so only one of them is ever there.
+    // SYNC ships disabled (params.h kSyncIsEnabled), so it is TIME.
+    check (findNamed (panel, "NOTE") == nullptr,
+           who + " shows NOTE and TIME at once -- they share one position");
+
+    // No control is labelled DWELL. The module is; nothing on it is.
+    check (findNamed (panel, "DWELL") == nullptr, who + " has a control labelled DWELL");
+
+    auto* time = findNamed (panel, "TIME");
+    auto* sync = findNamed (panel, "SYNC");
+    auto* mix  = findNamed (panel, "MIX");
+    auto* hiCut = findNamed (panel, "HI CUT");
+    auto* freeze = findNamed (panel, "FREEZE");
+    auto* fx = findNamed (panel, "FX");
+
+    // The CHARACTER trio is above the DELAY rule; the two cuts are below the
+    // TONE rule; the performance pair and FX are below both.
+    if (auto* clean = findNamed (panel, "CLEAN"); clean != nullptr)
+        if (auto* row = clean->getParentComponent(); row != nullptr)
+            check (row->getBottom() <= kDwellDelayRule,
+                   who + " the CHARACTER trio is not above the DELAY rule");
+
+    if (time != nullptr && sync != nullptr && mix != nullptr
+        && hiCut != nullptr && freeze != nullptr && fx != nullptr)
+    {
+        check (time->getY() >= kDwellDelayRule, who + " TIME is above the DELAY rule");
+        check (time->getBottom() <= mix->getY(), who + " TIME and MIX are out of order");
+        check (mix->getBottom() <= kDwellToneRule, who + " MIX runs past the TONE rule");
+        check (hiCut->getY() >= kDwellToneRule, who + " HI CUT is above the TONE rule");
+        check (freeze->getY() >= hiCut->getBottom(), who + " FREEZE is not below the tone pair");
+        check (fx->getY() >= freeze->getBottom(), who + " FX is not at the foot");
+
+        // **TIME is the hero and it is on the column's centre line.** SYNC
+        // sits beside it rather than under it, which is what buys the band;
+        // the knob is still dead centre, because its box is the middle of
+        // three cells rather than the whole column.
+        checkEquals (time->getBounds().getCentreX(), bmo::ui::ModulePanel::kPad + 130,
+                     who + " TIME is not centred on its column");
+        check (sync->getX() >= time->getRight(), who + " SYNC is not beside TIME");
+        check (sync->getBounds().getCentreY() < time->getBounds().getCentreY(),
+               who + " SYNC is level with TIME's caption rather than its face");
+
+        // **FX is centred on its column**, not hung off one side of the foot
+        // (Frosty, 2026-09-21). The left column's centre is the same number at
+        // both widths -- kPad + 260/2 -- because the wide view only ever adds
+        // a second column to the right of the first.
+        checkEquals (fx->getBounds().getCentreX(), bmo::ui::ModulePanel::kPad + 130,
+                     who + " FX is not centred on its column");
+    }
+
+    // The expand arrow is *not* centred with it: it moves no parameter and is
+    // the same view affordance as the host bar's own, which sits at an edge
+    // throughout the suite. Centring the pair would put FX off centre, which
+    // is the look the change above removes.
+    if (auto* expand = findNamed (panel, "expand"); expand != nullptr && fx != nullptr)
+        check (expand->getX() > fx->getRight(),
+               who + " the expand arrow is not at the right edge of the foot");
+}
+
+/** The revealed section is there in the wide view and gone in the compact one
+    -- gone rather than hidden, because a control left parented with no bounds
+    passes every overlap check and fails no caption check while being
+    invisible.
+
+    **It is a visibility split and nothing else.** Every one of these
+    parameters stays live and is read by the DSP whichever width the panel is
+    at; there is no gate and `params.h` is untouched. Nothing here asserts on
+    the sound, because nothing about the sound changes. */
+void checkDwellRevealed (bmo::ui::ModulePanel& panel, const juce::String& who, bool expanded)
+{
+    // DUCK is in this list while `kDuckHome` says `revealed`, which is where
+    // it sits today and is explicitly still under investigation. If it is
+    // promoted to the face, it moves from here to checkDwellFace and nothing
+    // else in this file changes.
+    const juce::StringArray hidden { "VOICE", "DRIVE", "RATE", "DEPTH", "DUCK", "GR",
+                                     "AMOUNT (SMEAR)" };
+
+    for (const auto& name : hidden)
+    {
+        const auto* found = findNamed (panel, name);
+
+        if (expanded)
+            check (found != nullptr, who + " wide has no " + name);
+        else
+            check (found == nullptr, who + " compact still carries " + name);
+    }
+
+    // The THROW MODE trio, whose cells are named with a prefix so the middle
+    // one and the performance switch on the face do not answer to the same
+    // name -- findNamed walks children by name and the child order changes
+    // every time the section opens.
+    const auto* modeCell = findNamed (panel, "mode.SEND");
+    const auto* fxCell = findNamed (panel, "DIFFUSE");
+
+    if (expanded)
+    {
+        check (modeCell != nullptr, who + " wide has no THROW MODE cells");
+        check (fxCell != nullptr, who + " wide has no FX type cells");
+
+        // Everything the section carries is to the right of the face's own
+        // column, which is what "the module can only grow sideways" means.
+        for (const auto& name : hidden)
+            if (const auto* found = findNamed (panel, name))
+                check (found->getX() >= 280 - bmo::ui::ModulePanel::kPad,
+                       who + " " + name + " is not in the column beside the face");
+
+        if (fxCell != nullptr && fxCell->getParentComponent() != nullptr)
+            check (fxCell->getParentComponent()->getX() >= 280 - bmo::ui::ModulePanel::kPad,
+                   who + " the FX cells are not in the second column");
+    }
+    else
+    {
+        check (modeCell == nullptr, who + " compact still carries the THROW MODE cells");
+        check (fxCell == nullptr, who + " compact still carries the FX type cells");
+    }
+}
+
 /** Every switch label fits its switch.
 
     Switches are one size across the whole suite -- Tokens::switchWidth -- so a
@@ -1060,6 +1256,16 @@ int main (int argc, char** argv)
                              p->setExpanded (false);
                              return std::unique_ptr<juce::AudioProcessor> (p.release());
                          } },
+
+        // BMO Dwell, the second expandable module, and twice for the same
+        // reason: standalone opens the FX column and a rack opens without it.
+        { "dwell", +[] () -> std::unique_ptr<juce::AudioProcessor> { return createDwell(); } },
+        { "dwell compact", +[] () -> std::unique_ptr<juce::AudioProcessor>
+                           {
+                               auto p = createDwell();
+                               p->setExpanded (false);
+                               return std::unique_ptr<juce::AudioProcessor> (p.release());
+                           } },
     };
 
 
@@ -1161,6 +1367,94 @@ int main (int argc, char** argv)
 
     withPanel (named ("deq"), [] (bmo::ui::ModulePanel& panel) { checkEquals (panel.getWidth(), 600, "deq opens full standalone"); });
     withPanel (named ("deq compact"), [] (bmo::ui::ModulePanel& panel) { checkEquals (panel.getWidth(), 320, "deq compact width"); });
+
+    // BMO Dwell: the eleven-control face at both widths, and the revealed
+    // section only at the wide one. 560 rather than docs/delay/13 §6a's 460 --
+    // two 260 px columns and a gutter -- because at 460 the second column
+    // cannot hold a switch grid three cells across and the seven FX types have
+    // to stack seven deep, which makes the wide view busier than the face it
+    // was meant to relieve. See modules/dwell/Module.cpp.
+    withPanel (named ("dwell"), [] (bmo::ui::ModulePanel& panel)
+    {
+        checkEquals (panel.getWidth(), 560, "dwell opens wide standalone");
+        checkDwellFace     (panel, "dwell", true);
+        checkDwellRevealed (panel, "dwell", true);
+        check (findNamed (panel, "expand") != nullptr,
+               "dwell has no expand arrow on the panel");
+    });
+
+    withPanel (named ("dwell compact"), [] (bmo::ui::ModulePanel& panel)
+    {
+        checkEquals (panel.getWidth(), 280, "dwell compact width");
+        checkDwellFace     (panel, "dwell compact", false);
+        checkDwellRevealed (panel, "dwell compact", false);
+    });
+
+    // **The view is not a parameter.** docs/delay/13 §6a and
+    // modules/dwell/AGENTS.md: automation, preset load and session recall move
+    // `fx` and must never resize the module, and turning `fx` off must never
+    // close the column. Both directions, because both have to hold and only
+    // one of them is the obvious one.
+    {
+        auto proc = createDwell();
+        proc->setExpanded (false);
+        proc->prepareToPlay (48000.0, 512);
+
+        std::unique_ptr<juce::AudioProcessorEditor> editor (proc->createEditorAndMakeActive());
+        std::vector<bmo::ui::ModulePanel*> panels;
+        collectPanels (*editor, panels);
+
+        if (panels.size() != 1)
+            check (false, "dwell view test has no panel");
+        else
+        {
+            auto& panel = *panels.front();
+            auto& params = panel.getContext().params;
+
+            // A host writing the parameter, which is what an automation lane
+            // and a preset both are.
+            params.setReal (bmo::dwell::Index::fx, 1.0f);
+            checkEquals (panel.getWidth(), 280, "dwell stayed compact when fx was automated on");
+            check (! proc->isExpanded(), "dwell's view flag moved with a parameter");
+
+            // And the other way: the column stays open with fx off.
+            proc->setExpanded (true);
+            params.setReal (bmo::dwell::Index::fx, 0.0f);
+            check (proc->isExpanded(), "turning fx off closed dwell's FX column");
+
+            // The arrow is the new touch point -- a panel asking its host for
+            // the other width through ui::ModuleContext::setExpanded. Nothing
+            // else in the suite does it, so nothing else would catch it coming
+            // unplugged. Driven through onClick rather than triggerClick,
+            // which posts to a message loop this test does not run.
+            proc->setExpanded (false);
+            editor->resized();
+
+            if (auto* arrow = dynamic_cast<bmo::ui::ExpandButton*> (findNamed (panel, "expand")))
+            {
+                if (arrow->onClick)
+                    arrow->onClick();
+
+                check (proc->isExpanded(), "dwell's arrow did not open the FX column");
+                checkEquals (panel.getWidth(), 560, "dwell's width after the arrow opened it");
+
+                // It closes it again, and `fx` never moved either way.
+                if (arrow->onClick)
+                    arrow->onClick();
+
+                check (! proc->isExpanded(), "dwell's arrow did not close the FX column");
+                check (params.getReal (bmo::dwell::Index::fx) < 0.5f,
+                       "dwell's arrow moved the fx parameter -- it must touch none");
+            }
+            else
+            {
+                check (false, "dwell has no expand arrow to click");
+            }
+        }
+
+        proc->editorBeingDeleted (editor.get());
+        editor.reset();
+    }
 
     // BMO Util reserves the output section and adopts neither half of it. This
     // is the case that proves a reservation is worth anything.

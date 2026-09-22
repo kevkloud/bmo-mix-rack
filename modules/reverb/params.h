@@ -922,10 +922,15 @@ inline const ParamSpecs& specs()
         S::logParam (kEqLoQ, "EQ Low Q", 0.1f, kShelfMaxQ, 0.01f, 0.71f),
 
         // 11-13. Node 2: a bell, in both modes, and the only node FILTER does
-        // not touch. **The full 20 Hz - 20 kHz**, deliberately wider than its
-        // neighbours: node 1 stops at 1.6 kHz and node 3 at 2.1 kHz, so
-        // without this the Reverb EQ could not reach the presence region at
-        // all and IN HI-CUT was the only control above 2.1 kHz. A bell's Q is
+        // not touch. **The full 20 Hz - 20 kHz**, because a parametric bell
+        // should sweep the whole band -- that is what makes it the node you
+        // reach for when the other two cannot help.
+        //
+        // It was originally widened for a worse reason: node 1 stopped at
+        // 1.6 kHz and node 3 at 2.1 kHz, so the bell was the only way for the
+        // Reverb EQ to reach the presence region at all. Node 3 now runs to
+        // 20 kHz, so the bell is wide because a bell should be, not because it
+        // was covering for a shelf that could not reach air. A bell's Q is
         // BMO DEQ's own 0.1-40; 1 kHz and 0.71 are the conventional opening,
         // and the gain is 0, so it is doing nothing until it is asked to.
         S::logParam (kEqMidFreq, "EQ Mid Freq", 20.0f, 20000.0f, 0.1f, 1000.0f, F::Hertz),
@@ -937,7 +942,21 @@ inline const ParamSpecs& specs()
         S::logParam (kEqMidQ, "EQ Mid Q", 0.1f, 40.0f, 0.01f, 0.71f),
 
         // 14-16. Node 3: high shelf, or a high cut with FILTER on.
-        S::logParam (kEqHiFreq, "EQ High Freq", 1000.0f, 2100.0f, 0.1f, 1600.0f, F::Hertz),
+        //
+        // **1 kHz - 20 kHz, opening at 6 kHz.** It was 1000-2100 Hz, which is
+        // 1.07 octaves: a high shelf that could not reach air, on a module
+        // whose commonest EQ move is darkening or brightening a tail. The
+        // range was inherited rather than chosen -- `eqhifreq` predates the
+        // parametric, and making that change "purely additive" to preserve the
+        // id preserved its range with it. The bell above was then widened to
+        // the full band to compensate, which treated the symptom: read its
+        // comment with this one.
+        //
+        // Widening a range and moving a default is free until first ship and
+        // changes no id. The three nodes now open at 200 Hz, 1 kHz and 6 kHz,
+        // spread across the band, instead of the bell and the shelf sitting
+        // 0.68 octaves apart with their markers touching on the screen.
+        S::logParam (kEqHiFreq, "EQ High Freq", 1000.0f, 20000.0f, 0.1f, 6000.0f, F::Hertz),
         S::textParam (kEqHi, "EQ High", -24.0f, 12.0f, 0.1f, 0.0f, &detail::shelfText),
         S::logParam (kEqHiQ, "EQ High Q", 0.1f, kShelfMaxQ, 0.01f, 0.71f),
 

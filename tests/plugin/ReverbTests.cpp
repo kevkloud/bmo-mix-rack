@@ -36,11 +36,16 @@ namespace
     // 2026-09-21 and all before first ship. The control-set trim deleted six
     // rows -- prelink, decayshape, attack, damplofreq, damphifreq and ershape
     // -- and the Reverb EQ then added six others: eqfilter, eqloq, eqmidfreq,
-    // eqmid, eqmidq and eqhiq. Every row that survived either change is what
-    // it was, and this table is where that is checked rather than described:
-    // nothing that stayed was quietly retuned on the way past, `eqlofreq` and
-    // `eqhifreq` least of all -- they were already nodes 1 and 3 and their
-    // ranges and defaults are untouched.
+    // eqmid, eqmidq and eqhiq. This table is where that is checked rather
+    // than described, so nothing can be quietly retuned on the way past.
+    //
+    // **One row was deliberately retuned, on 2026-09-22: `eqhifreq`.** It
+    // carried 1000-2100 Hz because it predates the parametric, and making that
+    // change purely additive to preserve the id preserved its range with it --
+    // a high shelf that could not reach air. It is now 1 kHz - 20 kHz opening
+    // at 6 kHz. Widening a range before first ship is free and changes no id,
+    // and a state file written against the old range still restores: every
+    // value it can hold is inside the new one. `eqlofreq` is untouched.
     //
     // **The EQ block sits where it reads rather than at the end**, which is
     // legal exactly once and this was it: a rack slot maps host lane N to
@@ -65,7 +70,7 @@ namespace
         { P::kEqMidFreq,  "EQ Mid Freq",     20.0f, 20000.0f,  1000.0f,     0 },
         { P::kEqMid,      "EQ Mid",         -24.0f,    12.0f,     0.0f,     0 },
         { P::kEqMidQ,     "EQ Mid Q",        0.10f,   40.00f,    0.71f,     0 },
-        { P::kEqHiFreq,   "EQ High Freq",  1000.0f,  2100.0f,  1600.0f,     0 },
+        { P::kEqHiFreq,   "EQ High Freq",  1000.0f, 20000.0f,  6000.0f,     0 },
         { P::kEqHi,       "EQ High",        -24.0f,    12.0f,     0.0f,     0 },
         { P::kEqHiQ,      "EQ High Q",       0.10f,    2.00f,    0.71f,     0 },
 
@@ -154,12 +159,27 @@ int main()
         checkClose (P::specs()[P::Index::eqmidq].max, 40.0, 1.0e-6,
                     "the middle node is a bell and keeps a bell's Q range");
 
-        // And the middle node reaches above its neighbours' ceilings, which is
-        // the reason it exists at the width it does: node 1 stops at 1.6 kHz
-        // and node 3 at 2.1 kHz, so without this the Reverb EQ could not touch
-        // the presence region at all.
-        check (P::specs()[P::Index::eqmidfreq].max > P::specs()[P::Index::eqhifreq].max,
-               "the mid bell reaches above the high shelf's own ceiling");
+        // This used to assert that the bell reached above the high shelf's
+        // ceiling, which encoded a defect as a requirement: node 3 stopped at
+        // 2.1 kHz, so the bell was the only node that could touch the presence
+        // region, and the test pinned that workaround in place.
+        //
+        // What actually matters is that **the high shelf can reach air** --
+        // the commonest EQ move on a reverb, and one a shelf stopping at
+        // 2.1 kHz cannot make. Assert the requirement rather than the
+        // workaround, and as an absolute rather than a comparison between two
+        // nodes: the house rule from tests/dsp/OptoDspTests.cpp, where a
+        // relative test passed for a whole release while both sides of the
+        // comparison were wrong.
+        check (P::specs()[P::Index::eqhifreq].max >= 16000.0f,
+               "the high shelf reaches air, not just the presence region");
+
+        // And the three nodes open spread across the band rather than stacked.
+        // Before the widening, the bell and the shelf opened 0.68 octaves apart
+        // and their markers touched on screen.
+        checkClose (P::specs()[P::Index::eqlofreq].def,   200.0, 1.0e-4, "node 1 opens at 200 Hz");
+        checkClose (P::specs()[P::Index::eqmidfreq].def, 1000.0, 1.0e-4, "node 2 opens at 1 kHz");
+        checkClose (P::specs()[P::Index::eqhifreq].def,  6000.0, 1.0e-4, "node 3 opens at 6 kHz");
     }
 
     //== The six the trim cut, by id ==========================================

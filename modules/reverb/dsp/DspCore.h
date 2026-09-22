@@ -133,7 +133,7 @@ public:
         float eqMidFreqHz   = 1000.0f;                       ///< 20..20000
         float eqMidDb       = 0.0f;                          ///< -24..+12
         float eqMidQ        = 0.71f;                         ///< 0.1..40, a bell's range
-        float eqHiFreqHz    = 1600.0f;                       ///< 1000..2100
+        float eqHiFreqHz    = 6000.0f;                       ///< 1000..20000
         float eqHiDb        = 0.0f;                          ///< -24..+12; ignored in filter mode
         float eqHiQ         = 0.71f;                         ///< 0.1..2
 

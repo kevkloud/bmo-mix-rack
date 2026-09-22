@@ -1,38 +1,65 @@
 #pragma once
 
+#include "modules/dwell/dsp/DelayEngine.h"
 #include "modules/dwell/params.h"
+#include "modules/tune/dsp/Denormals.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <vector>
 
 namespace bmo::dwell
 {
 
 //==============================================================================
+/** docs/delay/10 §3's FEEDBACK law, `g = (1.05 . fb^1.6) / P_c`.
+
+    A free function because the **law is not the engine's** (10 §11.1): the
+    main delay maps FEEDBACK through this one, the lane maps `lane_gain`
+    through §11.2's bipolar law, and an engine that knew both would be an
+    engine that knew which instance it was. `P_c` comes from the engine the
+    gain is for, which computes it by sweep -- it is never a constant here.
+
+    The exponent puts resolution in the 2-8-repeat region; the 1.05 puts the
+    loop's peak magnitude at 1.000 at fb = 97.0 % and 1.05 at full travel, on
+    every character, which is what lets the panel carry one self-oscillation
+    tick rather than one per character. */
+inline float feedbackGainFor (float feedbackPercent, double loopPeak) noexcept
+{
+    const auto fb = std::clamp ((double) feedbackPercent * 0.01, 0.0, 1.0);
+    return (float) (1.05 * std::pow (fb, 1.6) / std::max (loopPeak, 1.0e-6));
+}
+
+//==============================================================================
 /** BMO Dwell's audio core.
 
-    **This is stage 1: the plumbing, not the delay.** Every parameter is
-    carried in real units from the schema to this struct, the sample rate and
-    the channel count are taken at `prepare`, and `process` passes the buffer
-    through untouched. The ring, the character chain, the feedback matrix and
-    the FX stage are stage 2, per docs/delay/10-dsp-spec.md.
+    **This is stage 2a: the delay engine, clean only.** The ring, the
+    fractional read, §3's feedback law with its computed `P_c`, §9's MIX law
+    and both engines live here now. The characters, the modulation, the
+    ducker, the stereo matrix, the FX stage and the lane's gates are 2b and 2c,
+    per docs/delay/10-dsp-spec.md.
 
-    **Stage 2 builds one delay engine and instantiates it twice** -- the main
-    delay and the lane -- rather than one bespoke dual engine with the lane
-    written into it (DECIDED, Frosty 2026-09-22, with the voicing cut that made
-    it obvious). The two engines now take the *same* character, stereo mode,
-    cuts, modulation and drive and differ only in their time, their gain law
-    and their FX stage, which is exactly the shape a reusable engine has: one
-    class, a `Params` of its own, two members here. Written the other way the
-    lane would be a set of branches threaded through the main loop, and pulling
-    it apart later -- if Frosty ever wants the throw lane as its own product,
-    or the main delay without one -- would be a rewrite rather than a
-    deletion. This is the framing to build against, not a preference.
+    **One delay engine, instantiated twice** -- the main delay and the lane --
+    rather than one bespoke dual engine with the lane written into it (10
+    §11.1; DECIDED, Frosty 2026-09-23). `DelayEngine` knows nothing about
+    which instance it is: it is handed a time and a character, it publishes
+    the `P_c` its own filters and interpolator come to, and the **laws** that
+    turn a knob into a loop gain stay out here, where the difference between
+    the main delay and the lane lives. Written the other way the lane would be
+    a set of branches threaded through the main loop, and pulling it apart
+    later -- if Frosty ever wants the throw lane as its own product, or the
+    main delay without one -- would be a rewrite rather than a deletion.
 
-    It exists in this state on purpose rather than as a stub: the schema is
-    permanent from this release, so the wiring from spec index to named value
-    is pinned by tests now, before any DSP can be written against a mis-read
-    lane. `DwellDspTests` checks the mapping value by value.
+    **The lane is instantiated, allocated, summed and fed silence.** SEND,
+    HOLD, CHOP and §11.2's bipolar tail law are 2c; until they land the lane's
+    input is a block of zeros and its loop gain is zero, so it contributes
+    exact zeros through `lane_level`. What it proves now is that the summing
+    path and the second ring exist and cost what §10 says they cost.
+
+    The schema is permanent from this release, so the wiring from spec index
+    to named value stays pinned by tests: `DwellDspTests` checks the mapping
+    value by value.
 
     **Latency is 0 at every setting, now and after stage 2.** There is no
     oversampling (docs/delay/10 §0 drops it), no lookahead and therefore no dry
@@ -102,43 +129,213 @@ public:
         bool  fxLink            = true;
     };
 
-    void prepare (double newSampleRate, int newMaxBlockSize, int newNumChannels) noexcept
+    /** **Everything either engine will ever need is allocated here**, from
+        `kMaxTimeMs` and never from a parameter (10 §10): two rings of the
+        fixed maximum -- 2.0 MB a channel each at 192 kHz -- the sweep grids,
+        and the three scratch blocks the wet sum is built in. `process` then
+        allocates nothing, which `DwellDspTests` asserts by counting. */
+    void prepare (double newSampleRate, int newMaxBlockSize, int newNumChannels)
     {
         sampleRate   = newSampleRate > 0.0 ? newSampleRate : 48000.0;
         maxBlockSize = std::max (newMaxBlockSize, 1);
         numChannels  = std::max (newNumChannels, 1);
 
-        // Stage 2 allocates the ring here, from kMaxTimeMs and never from a
-        // parameter, so nothing is allocated on the audio thread. Nothing to
-        // allocate yet.
+        const auto engineChannels = std::min (numChannels, (int) DelayEngine::kMaxChannels);
+
+        mainEngine.prepare (sampleRate, maxBlockSize, engineChannels, (double) kMaxTimeMs);
+        laneEngine.prepare (sampleRate, maxBlockSize, engineChannels, (double) kMaxTimeMs);
+
+        for (int ch = 0; ch < (int) DelayEngine::kMaxChannels; ++ch)
+        {
+            wetMain[(size_t) ch].assign ((size_t) maxBlockSize, 0.0f);
+            wetLane[(size_t) ch].assign ((size_t) maxBlockSize, 0.0f);
+            laneFeed[(size_t) ch].assign ((size_t) maxBlockSize, 0.0f);
+        }
+
+        // 20 ms on the wet and dry gains (10 §9). The dry is only ever
+        // smoothed above the hinge; below it, it is not a gain at all.
+        wetGain.prepare (sampleRate, 20.0);
+        dryGain.prepare (sampleRate, 20.0);
+        laneLevel.prepare (sampleRate, 20.0);
+        gainsPrimed = false;
+
+        applyParams (true);
         reset();
     }
 
-    void reset() noexcept {}
+    void reset() noexcept
+    {
+        mainEngine.reset();
+        laneEngine.reset();
 
-    void setParams (const Params& p) noexcept { params = p; }
+        for (auto& b : wetMain)  std::fill (b.begin(), b.end(), 0.0f);
+        for (auto& b : wetLane)  std::fill (b.begin(), b.end(), 0.0f);
+        for (auto& b : laneFeed) std::fill (b.begin(), b.end(), 0.0f);
+    }
+
+    void setParams (const Params& p) noexcept
+    {
+        params = p;
+        applyParams (false);
+    }
 
     const Params& getParams() const noexcept { return params; }
 
-    /** Pass-through, bit-exact. Stage 1 has no loop to run and no dry gain to
-        apply, and the dry path's MIX law (10 §9) is bit-exact unity below
-        50 % anyway -- so the null test that stage 2 has to pass already
-        passes, and it is registered now rather than written later. */
-    void process (float* const*, int, int) noexcept {}
+    /** One block, in place: the dry arrives in `channels` and the mixed output
+        leaves in it.
+
+        Both engines read the block before anything writes over it, so the dry
+        is still intact when §9's law runs. Chunked at `maxBlockSize` so a host
+        handing over more than it promised is still served from the scratch
+        that `prepare` allocated rather than from a fresh buffer. */
+    void process (float* const* channels, int numChannels_, int numSamples) noexcept
+    {
+        if (channels == nullptr || numChannels_ <= 0 || numSamples <= 0)
+            return;
+
+        const bmo::tune::ScopedNoDenormals noDenormals;
+
+        for (int offset = 0; offset < numSamples; )
+        {
+            const auto count = std::min (numSamples - offset, maxBlockSize);
+            processChunk (channels, numChannels_, offset, count);
+            offset += count;
+        }
+    }
 
     double getSampleRate() const noexcept { return sampleRate; }
     int getMaxBlockSize() const noexcept  { return maxBlockSize; }
     int getNumChannels() const noexcept   { return numChannels; }
 
-    /** The longest delay the ring is sized for, in samples at the prepared
-        rate. Stage 2 allocates the next power of two at or above this. */
+    /** The two engines, for the tests that have to see one of them alone --
+        `P_c` on clean, and later `11` §4e's claim that the main's own tap is
+        bit-identical with and without a send. */
+    const DelayEngine& getMainEngine() const noexcept { return mainEngine; }
+    const DelayEngine& getLaneEngine() const noexcept { return laneEngine; }
+
+    /** The longest delay a ring is sized for, in samples at the prepared
+        rate. Each engine allocates the next power of two at or above this. */
     int maxDelaySamples() const noexcept
     {
         return (int) std::ceil ((double) kMaxTimeMs * 0.001 * sampleRate);
     }
 
 private:
+    //==========================================================================
+    /** Both engines take the same TIME law and the same character -- one
+        voicing, two engines (params.h, 2026-09-22) -- and differ in the law
+        that turns a knob into their loop gain.
+
+        The order matters: TIME and CHARACTER go in first, because that is what
+        re-sweeps `P_c`, and only then is the gain built from the figure the
+        sweep landed on. */
+    void applyParams (bool snapNow) noexcept
+    {
+        DelayEngine::Params mainParams;
+        mainParams.timeMs    = params.timeMs;
+        mainParams.character = params.characterChoice;
+        mainEngine.setParams (mainParams, snapNow);
+        mainEngine.setFeedbackGain (feedbackGainFor (params.feedbackPct,
+                                                     mainEngine.referenceLoopPeak()),
+                                    snapNow);
+
+        DelayEngine::Params laneParams;
+        laneParams.timeMs    = params.laneTimeMs;
+        laneParams.character = params.characterChoice;
+        laneEngine.setParams (laneParams, snapNow);
+
+        // 10 §11.2's bipolar law -- throw, freeze and build off one knob --
+        // arrives with the gates in 2c, together with the `g_max` figure it
+        // needs, which is still CALIBRATE (10 §12). Until then the lane runs
+        // with no tail at all rather than with half a law in place.
+        laneEngine.setFeedbackGain (0.0f, snapNow);
+
+        const auto m = std::clamp ((double) params.mixPct * 0.01, 0.0, 1.0);
+        dryIsBitExact = m <= 0.5;
+
+        const auto wetTarget = dryIsBitExact ? std::sin (kPiD * m) : 1.0;
+        const auto dryTarget = dryIsBitExact ? 1.0 : std::cos (kPiD * (m - 0.5));
+        const auto laneTarget = std::pow (10.0, (double) params.laneLevelDb / 20.0);
+
+        if (! gainsPrimed || snapNow)
+        {
+            wetGain.snap ((float) wetTarget);
+            dryGain.snap ((float) dryTarget);
+            laneLevel.snap ((float) laneTarget);
+            gainsPrimed = true;
+            return;
+        }
+
+        wetGain.setTarget ((float) wetTarget);
+        laneLevel.setTarget ((float) laneTarget);
+
+        // Below the hinge the dry is not multiplied at all, so there is
+        // nothing to smooth and nothing that can zipper; the smoother is
+        // snapped so that crossing back up starts from the right place. At the
+        // hinge itself cos(0) is 1, so the two branches meet without a step.
+        if (dryIsBitExact)
+            dryGain.snap (1.0f);
+        else
+            dryGain.setTarget ((float) dryTarget);
+    }
+
+    void processChunk (float* const* channels, int numChannels_, int offset, int count) noexcept
+    {
+        const auto nch = std::min (numChannels_, (int) DelayEngine::kMaxChannels);
+
+        const float* dry[DelayEngine::kMaxChannels] {};
+        const float* silence[DelayEngine::kMaxChannels] {};
+        float* main[DelayEngine::kMaxChannels] {};
+        float* lane[DelayEngine::kMaxChannels] {};
+
+        for (int ch = 0; ch < nch; ++ch)
+        {
+            dry[ch]     = channels[ch] + offset;
+            silence[ch] = laneFeed[(size_t) ch].data();
+            main[ch]    = wetMain[(size_t) ch].data();
+            lane[ch]    = wetLane[(size_t) ch].data();
+        }
+
+        mainEngine.process (dry, main, nch, count);
+
+        // 10 §11.1: the lane taps the **dry input**, gated by SEND -- which is
+        // 2c. Until it lands the gate is closed, so what the lane is fed is a
+        // block of zeros it never allocated.
+        laneEngine.process (silence, lane, nch, count);
+
+        for (int i = 0; i < count; ++i)
+        {
+            const auto w  = wetGain.tick();
+            const auto d  = dryGain.tick();
+            const auto ll = laneLevel.tick();
+
+            for (int ch = 0; ch < nch; ++ch)
+            {
+                // §11.1 item 3: the lane sums into the wet bus after the
+                // main's loop tap. §6's GR goes between the two and is 2b.
+                const auto wet = main[ch][i] + ll * lane[ch][i];
+                auto* slot = channels[ch] + offset + i;
+
+                // §9: below 50 % the dry is multiplied by **nothing**, not by
+                // 1.0f. That is what makes the null bit-exact rather than
+                // merely -120 dB, and it is why this is a branch and not a
+                // gain of 1.
+                const auto out = dryIsBitExact ? (*slot + w * wet)
+                                               : (d * *slot + wet);
+
+                *slot = std::isfinite (out) ? out : 0.0f;
+            }
+        }
+    }
+
     Params params;
+
+    DelayEngine mainEngine, laneEngine;
+
+    std::array<std::vector<float>, DelayEngine::kMaxChannels> wetMain, wetLane, laneFeed;
+
+    Smoother wetGain, dryGain, laneLevel;
+    bool dryIsBitExact = true, gainsPrimed = false;
 
     double sampleRate  = 48000.0;
     int maxBlockSize   = 512;

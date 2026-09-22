@@ -31,8 +31,12 @@
 #include "modules/dwell/dsp/DspCore.h"
 #include "modules/dwell/dsp/DwellDsp.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
+#include <limits>
+#include <new>
 #include <string>
 #include <vector>
 
@@ -42,6 +46,38 @@ namespace
 {
 
 int failures = 0, checks = 0;
+
+/** Armed only around a `setParams` + `process` pair. `11` §4k: both rings come
+    from `prepare()` and **nothing** is allocated on the audio thread. */
+bool allocationGuardArmed = false;
+int  allocationsWhileArmed = 0;
+
+} // namespace
+
+//==============================================================================
+// Replacing the global allocator is the only way to assert (k)'s claim from
+// inside a JUCE-free test: a delay that allocated its ring, its FX scratch or a
+// temporary from process() would sound perfect and still drop out under load,
+// which is exactly the class of fault a listening pass cannot catch.
+void* operator new (std::size_t size)
+{
+    if (allocationGuardArmed)
+        ++allocationsWhileArmed;
+
+    if (auto* p = std::malloc (size == 0 ? 1 : size))
+        return p;
+
+    throw std::bad_alloc();
+}
+
+void* operator new[] (std::size_t size)                  { return operator new (size); }
+void operator delete (void* p) noexcept                  { std::free (p); }
+void operator delete[] (void* p) noexcept                { std::free (p); }
+void operator delete (void* p, std::size_t) noexcept     { std::free (p); }
+void operator delete[] (void* p, std::size_t) noexcept   { std::free (p); }
+
+namespace
+{
 
 void check (bool condition, const std::string& what)
 {
@@ -375,11 +411,14 @@ void testLatencyIsAlwaysZero()
            "the wet delay time is not reported as latency");
 }
 
-/** Stage 1 passes audio through untouched, sample for sample.
+/** At the defaults, with the loop running behind it, the block comes out
+    exactly as it went in.
 
-    Not a placeholder assertion: docs/delay/10 §9 requires the dry path to be
-    **bit-exact** unity for every MIX at or below 50 %, and the stage-2 null
-    test is this comparison with a loop running behind it. */
+    docs/delay/10 §9 requires the dry path to be **bit-exact** unity for every
+    MIX at or below 50 %, and the defaults sit at 35 % with TIME at 375 ms, so
+    no repeat reaches a 512-sample block. `testTheDryNullIsBitExact` is the
+    same claim walked over the hinge; this one stays because it is the claim as
+    a freshly inserted instance meets it. */
 void testStageOneIsBitExact()
 {
     P::DwellDsp dsp;
@@ -448,6 +487,585 @@ void testAShortParameterArrayIsIgnored()
            "a short parameter array leaves the last good set in place");
 }
 
+//==============================================================================
+// Stage 2a: the delay engine itself. docs/delay/11 §4 i, k and c.
+//==============================================================================
+
+/** A deterministic noise source, so every render in this file is reproducible
+    and two renders of "the same input" really are the same input. */
+struct Noise
+{
+    unsigned int state = 22695477u;
+
+    float next() noexcept
+    {
+        state = state * 1103515245u + 12345u;
+        return (float) ((double) (state >> 8) / 8388608.0 - 1.0);
+    }
+};
+
+/** Two planar channels, and the pointer pair a `ModuleDsp` wants. */
+struct Block
+{
+    explicit Block (int n) : left ((size_t) n, 0.0f), right ((size_t) n, 0.0f) {}
+
+    float* const* channels() noexcept
+    {
+        ptrs[0] = left.data();
+        ptrs[1] = right.data();
+        return ptrs;
+    }
+
+    std::vector<float> left, right;
+    float* ptrs[2] {};
+};
+
+/** Renders `block` through `dsp` in chunks of `chunk`, in place. */
+void renderInChunks (P::DwellDsp& dsp, Block& block, int numSamples, int chunk)
+{
+    for (int offset = 0; offset < numSamples; )
+    {
+        const auto count = std::min (chunk, numSamples - offset);
+        float* channels[] { block.left.data() + offset, block.right.data() + offset };
+        dsp.process (channels, 2, count);
+        offset += count;
+    }
+}
+
+double rms (const std::vector<float>& v, int from, int count)
+{
+    auto sum = 0.0;
+
+    for (int i = 0; i < count; ++i)
+    {
+        const auto x = (double) v[(size_t) (from + i)];
+        sum += x * x;
+    }
+
+    return std::sqrt (sum / std::max (count, 1));
+}
+
+/** **The dry null is bit-exact, not small** (docs/delay/10 §9, `11` §4i).
+
+    At or below 50 % MIX the dry is not multiplied at all, so with TIME set
+    beyond the render no repeat arrives and the output must equal the input
+    sample for sample. The assertion is a worst-case difference of exactly
+    0.0 -- a -120 dB figure would pass a build that multiplied by 1.0f and
+    hid a rounding error, which is the build this rule exists to forbid. */
+void testTheDryNullIsBitExact()
+{
+    for (const auto mix : { 0.0f, 25.0f, 50.0f })
+    {
+        for (const auto feedback : { 0.0f, 35.0f, 97.0f })
+        {
+            P::DwellDsp dsp;
+            dsp.prepare (48000.0, 512, 2);
+
+            auto v = defaults();
+            v[P::Index::mix]       = mix;
+            v[P::Index::feedback]  = feedback;
+            v[P::Index::time]      = 1000.0f;   // 48 000 samples: no repeat inside
+            v[P::Index::laneLevel] = 24.0f;     // the lane is summed at full travel
+            dsp.setParams (v.data(), (int) v.size());
+
+            constexpr int n = 4096;
+            Block block { n };
+            Noise noise;
+
+            for (int i = 0; i < n; ++i)
+            {
+                block.left[(size_t) i]  = 0.6f * noise.next();
+                block.right[(size_t) i] = 0.6f * noise.next();
+            }
+
+            const auto inLeft = block.left, inRight = block.right;
+
+            renderInChunks (dsp, block, n, 512);
+
+            auto worst = 0.0f;
+
+            for (int i = 0; i < n; ++i)
+            {
+                worst = std::max (worst, std::abs (block.left[(size_t) i]  - inLeft[(size_t) i]));
+                worst = std::max (worst, std::abs (block.right[(size_t) i] - inRight[(size_t) i]));
+            }
+
+            check (worst == 0.0f,
+                   "the dry null is exactly 0.0 at MIX " + std::to_string ((int) mix)
+                       + " %, FEEDBACK " + std::to_string ((int) feedback) + " %");
+        }
+    }
+}
+
+/** **`P_c` is swept, not written down** (docs/delay/10 §3).
+
+    Clean's reference chain is the 20 Hz LOW CUT rail, the 18 kHz HIGH CUT cap
+    and the 10 Hz blocker, with a sinc that is a pure delay at whole samples,
+    so the peak lands just under unity and in the low hundreds of Hz. Both
+    figures are asserted: a build that returned a constant would pass the first
+    and fail the second, and a build that swept the wrong grid would fail
+    both. Every engine sweeps its own -- the lane is checked with the main.
+
+    **The figure moves with the sample rate, and that is the point.** Measured
+    on AURORA: 0.99959 at 44.1 kHz down to 0.99880 at 192 kHz, because the
+    18 kHz cap prewarps to a very different shape when it sits at 0.41 f_s
+    rather than at 0.09 f_s, and the low-band droop it leaves behind moves with
+    it. 10 §3's "expected clean 0.999" covers the span. A single hardcoded
+    constant would be wrong at five of these six rates -- by enough that
+    `testUnityLandsAtNinetySevenPercent` fails, since 0.0006 of error in `P_c`
+    is a dB of drift over that test's 190 laps. */
+void testTheReferenceLoopPeakIsSwept()
+{
+    for (const auto rate : { 44100.0, 48000.0, 88200.0, 96000.0, 176400.0, 192000.0 })
+    {
+        P::DspCore core;
+        core.prepare (rate, 512, 2);
+
+        auto p = P::DspCore::Params {};
+        core.setParams (p);
+
+        const auto pc = core.getMainEngine().referenceLoopPeak();
+        const auto hz = core.getMainEngine().referencePeakHz();
+        const auto lanePc = core.getLaneEngine().referenceLoopPeak();
+
+        check (std::abs (pc - 0.9992) < 0.0012,
+               "clean's P_c is just under unity at " + std::to_string ((int) rate) + " Hz (swept "
+                   + std::to_string (pc) + ")");
+
+        check (hz > 300.0 && hz < 1200.0,
+               "clean's loop peak sits in the low band at " + std::to_string ((int) rate)
+                   + " Hz (" + std::to_string ((int) hz) + " Hz)");
+
+        check (std::abs (pc - lanePc) < 0.0015,
+               "both engines sweep their own P_c to the same clean figure at "
+                   + std::to_string ((int) rate) + " Hz");
+    }
+}
+
+/** **Unity lands at FEEDBACK 97.0 %** (docs/delay/10 §3, `11` §4c, §4e6).
+
+    §3's law puts the loop's peak magnitude at `1.05 . 0.97^1.6 = 1.0001`, and
+    unity is a claim about **the loudest band**, not about every band -- so the
+    tone is placed at the frequency the engine's own sweep found the peak at,
+    which is the only frequency the claim is about. A burst is used rather than
+    a sustained input because at unity a sustained input accumulates without
+    bound and would reach the safety clip, which would be measuring the clip
+    instead.
+
+    **Tolerance 0.3 dB over 190 laps, and it is a sharp assertion rather than a
+    generous one.** Measured on AURORA: **-0.05 dB**, the law's own +0.09 dB
+    from 1.0001 less the burst's off-peak shoulders, which decay at their own
+    slightly lower per-lap gain. What the tolerance rejects is a `P_c` that is
+    wrong by more than about 0.0002 -- so the 0.0006 between 48 kHz's swept
+    figure and 192 kHz's, i.e. exactly the error a single hardcoded constant
+    would make, lands a decibel outside it. */
+void testUnityLandsAtNinetySevenPercent()
+{
+    constexpr auto rate = 48000.0;
+    constexpr auto timeMs = 100.0f;
+    const auto lap = (int) (rate * 0.001 * (double) timeMs);   // 4800, a whole number
+
+    P::DwellDsp dsp;
+    dsp.prepare (rate, 512, 2);
+
+    auto v = defaults();
+    v[P::Index::time]     = timeMs;
+    v[P::Index::feedback] = 97.0f;
+    v[P::Index::mix]      = 100.0f;   // wet only, so the dry never lands in a window
+    dsp.setParams (v.data(), (int) v.size());
+
+    const auto fPeak = dsp.getCore().getMainEngine().referencePeakHz();
+
+    constexpr int laps = 200;
+    const auto n = lap * (laps + 2);
+    Block block { n };
+
+    // A Hann-windowed burst, half a lap long, at 0.002: small enough that the
+    // safety clip is linear to a part in a million.
+    const auto burst = lap / 2;
+
+    for (int i = 0; i < burst; ++i)
+    {
+        const auto w = 0.5 - 0.5 * std::cos (2.0 * P::kPiD * (double) i / (double) burst);
+        const auto s = (float) (0.002 * w * std::sin (2.0 * P::kPiD * fPeak * (double) i / rate));
+        block.left[(size_t) i]  = s;
+        block.right[(size_t) i] = s;
+    }
+
+    renderInChunks (dsp, block, n, 512);
+
+    const auto early = rms (block.left, 10 * lap, lap);
+    const auto late  = rms (block.left, 200 * lap, lap);
+
+    check (early > 1.0e-6, "the loop is still ringing ten laps in");
+
+    const auto drift = 20.0 * std::log10 (std::max (late, 1.0e-30) / std::max (early, 1.0e-30));
+
+    check (std::abs (drift) <= 0.3,
+           "at FEEDBACK 97 % the loudest band neither grows nor decays: "
+               + std::to_string (drift) + " dB over 190 laps");
+
+    // The other half of the claim: below 97 % it decays and above it the clip
+    // -- not the arithmetic -- is what keeps it bounded.
+    {
+        P::DwellDsp quiet;
+        quiet.prepare (rate, 512, 2);
+        auto q = v;
+        q[P::Index::feedback] = 80.0f;
+        quiet.setParams (q.data(), (int) q.size());
+
+        Block b { n };
+
+        for (int i = 0; i < burst; ++i)
+        {
+            const auto w = 0.5 - 0.5 * std::cos (2.0 * P::kPiD * (double) i / (double) burst);
+            const auto s = (float) (0.002 * w * std::sin (2.0 * P::kPiD * fPeak * (double) i / rate));
+            b.left[(size_t) i]  = s;
+            b.right[(size_t) i] = s;
+        }
+
+        renderInChunks (quiet, b, n, 512);
+
+        const auto decayEarly = rms (b.left, 10 * lap, lap);
+        const auto decayLate  = rms (b.left, 60 * lap, lap);
+
+        check (decayLate < decayEarly * 0.001,
+               "at FEEDBACK 80 % the tail is well down fifty laps later");
+    }
+
+    {
+        P::DwellDsp loud;
+        loud.prepare (rate, 512, 2);
+        auto l = v;
+        l[P::Index::feedback] = 100.0f;
+        loud.setParams (l.data(), (int) l.size());
+
+        const auto m = lap * 400;
+        Block b { m };
+        Noise noise;
+        for (int i = 0; i < lap; ++i)
+            b.left[(size_t) i] = b.right[(size_t) i] = 0.5f * noise.next();
+
+        renderInChunks (loud, b, m, 512);
+
+        auto peak = 0.0f;
+        auto finite = true;
+
+        for (int i = m - 4 * lap; i < m; ++i)
+        {
+            peak = std::max (peak, std::abs (b.left[(size_t) i]));
+            finite = finite && std::isfinite (b.left[(size_t) i]) && std::isfinite (b.right[(size_t) i]);
+        }
+
+        check (finite && peak < 2.0f,
+               "at FEEDBACK 100 % the safety clip bounds the loop rather than it diverging (peak "
+                   + std::to_string (peak) + ")");
+    }
+}
+
+/** **Sample-rate invariance** (`11` §4k).
+
+    Every coefficient in the loop depends only on `f_c / f_s` and the ring is
+    sized from a time, so the same settings must give the same delay in
+    *seconds* and the same decay per lap at every rate the suite supports. The
+    reference is 48 kHz; the tolerance on the echo's arrival is 0.05 ms. */
+void testSampleRateInvariance()
+{
+    struct Measured { double echoSeconds = 0.0, lapDb = 0.0, pc = 0.0; };
+
+    const auto measure = [] (double rate)
+    {
+        P::DwellDsp dsp;
+        dsp.prepare (rate, 512, 2);
+
+        auto v = defaults();
+        v[P::Index::time]     = 100.0f;
+        v[P::Index::feedback] = 60.0f;
+        v[P::Index::mix]      = 100.0f;
+        dsp.setParams (v.data(), (int) v.size());
+
+        const auto n = (int) (rate * 0.5);
+        Block block { n };
+
+        const auto burst = (int) (rate * 0.02);
+
+        for (int i = 0; i < burst; ++i)
+        {
+            const auto w = 0.5 - 0.5 * std::cos (2.0 * P::kPiD * (double) i / (double) burst);
+            const auto s = (float) (0.25 * w * std::sin (2.0 * P::kPiD * 1000.0 * (double) i / rate));
+            block.left[(size_t) i]  = s;
+            block.right[(size_t) i] = s;
+        }
+
+        renderInChunks (dsp, block, n, 512);
+
+        auto bestIndex = 0;
+        auto best = 0.0f;
+
+        for (int i = (int) (rate * 0.05); i < (int) (rate * 0.15); ++i)
+        {
+            if (std::abs (block.left[(size_t) i]) > best)
+            {
+                best = std::abs (block.left[(size_t) i]);
+                bestIndex = i;
+            }
+        }
+
+        const auto window = (int) (rate * 0.03);
+        const auto first  = rms (block.left, (int) (rate * 0.10), window);
+        const auto second = rms (block.left, (int) (rate * 0.20), window);
+
+        Measured m;
+        m.echoSeconds = (double) bestIndex / rate;
+        m.lapDb = 20.0 * std::log10 (std::max (second, 1.0e-30) / std::max (first, 1.0e-30));
+        m.pc = dsp.getCore().getMainEngine().referenceLoopPeak();
+        return m;
+    };
+
+    const auto reference = measure (48000.0);
+
+    for (const auto rate : { 44100.0, 48000.0, 88200.0, 96000.0, 176400.0, 192000.0 })
+    {
+        const auto m = measure (rate);
+        const auto name = std::to_string ((int) rate) + " Hz";
+
+        check (std::abs (m.echoSeconds - reference.echoSeconds) < 5.0e-5,
+               "the echo arrives at the same time at " + name);
+
+        check (std::abs (m.lapDb - reference.lapDb) < 0.1,
+               "the decay per lap matches 48 kHz within 0.1 dB at " + name);
+
+        check (std::abs (m.pc - reference.pc) < 0.002,
+               "P_c matches 48 kHz at " + name);
+    }
+}
+
+/** **Block-size invariance** (`11` §4k): 1, 32, 64, 512, 1023 and a random
+    schedule must give the same audio as one long call, to -120 dB. A delay
+    whose state advanced per block rather than per sample passes every other
+    test in this file and fails this one. */
+void testBlockSizeInvariance()
+{
+    constexpr auto rate = 48000.0;
+    constexpr int n = 48000;
+
+    const auto render = [] (int chunk, bool randomise)
+    {
+        P::DwellDsp dsp;
+        dsp.prepare (rate, 2048, 2);
+
+        auto v = defaults();
+        v[P::Index::time]     = 37.0f;
+        v[P::Index::feedback] = 70.0f;
+        v[P::Index::mix]      = 50.0f;
+        dsp.setParams (v.data(), (int) v.size());
+
+        Block block { n };
+        Noise noise;
+
+        for (int i = 0; i < n; ++i)
+        {
+            block.left[(size_t) i]  = 0.3f * noise.next();
+            block.right[(size_t) i] = 0.3f * noise.next();
+        }
+
+        if (! randomise)
+        {
+            renderInChunks (dsp, block, n, chunk);
+        }
+        else
+        {
+            Noise sizes;
+
+            for (int offset = 0; offset < n; )
+            {
+                const auto want = 1 + (int) (std::abs ((double) sizes.next()) * 700.0);
+                const auto count = std::min (want, n - offset);
+                float* channels[] { block.left.data() + offset, block.right.data() + offset };
+                dsp.process (channels, 2, count);
+                offset += count;
+            }
+        }
+
+        return block.left;
+    };
+
+    const auto reference = render (n, false);
+
+    for (const auto chunk : { 1, 32, 64, 512, 1023 })
+    {
+        const auto got = render (chunk, false);
+        auto worst = 0.0f;
+
+        for (int i = 0; i < n; ++i)
+            worst = std::max (worst, std::abs (got[(size_t) i] - reference[(size_t) i]));
+
+        check (worst < 1.0e-6f,
+               "blocks of " + std::to_string (chunk) + " give the same audio as one call");
+    }
+
+    const auto got = render (0, true);
+    auto worst = 0.0f;
+
+    for (int i = 0; i < n; ++i)
+        worst = std::max (worst, std::abs (got[(size_t) i] - reference[(size_t) i]));
+
+    check (worst < 1.0e-6f, "a random block schedule gives the same audio as one call");
+}
+
+/** **Silence, denormals and NaN** (`11` §4k).
+
+    Silence in must give **exact zeros** out, not a decaying tail of
+    subnormals: a one-pole and a feedback ring both approach zero without
+    reaching it, and on x86 a single subnormal operand costs a hundred cycles,
+    so "quiet" and "zero" are a CPU spike apart. And nothing non-finite may
+    ever leave, whatever arrives -- a NaN that reached a feedback ring would
+    circulate for the life of the instance. */
+void testSilenceDenormalsAndNaN()
+{
+    constexpr auto rate = 48000.0;
+
+    {
+        P::DwellDsp dsp;
+        dsp.prepare (rate, 512, 2);
+
+        auto v = defaults();
+        v[P::Index::time]     = 20.0f;
+        v[P::Index::feedback] = 50.0f;
+        v[P::Index::mix]      = 100.0f;
+        dsp.setParams (v.data(), (int) v.size());
+
+        const auto n = (int) (rate * 4.0);
+        Block block { n };
+        Noise noise;
+
+        for (int i = 0; i < (int) rate / 2; ++i)
+        {
+            block.left[(size_t) i]  = 0.5f * noise.next();
+            block.right[(size_t) i] = 0.5f * noise.next();
+        }
+
+        renderInChunks (dsp, block, n, 512);
+
+        auto zeroed = true;
+
+        for (int i = n - 4096; i < n; ++i)
+            zeroed = zeroed && block.left[(size_t) i] == 0.0f && block.right[(size_t) i] == 0.0f;
+
+        check (zeroed, "silence in gives exact zeros out once the tail has run down");
+    }
+
+    {
+        P::DwellDsp dsp;
+        dsp.prepare (rate, 512, 2);
+
+        auto v = defaults();
+        v[P::Index::time]     = 30.0f;
+        v[P::Index::feedback] = 90.0f;
+        v[P::Index::mix]      = 100.0f;
+        dsp.setParams (v.data(), (int) v.size());
+
+        const auto n = (int) (rate * 2.0);
+        Block block { n };
+        Noise noise;
+
+        for (int i = 0; i < n; ++i)
+        {
+            block.left[(size_t) i]  = 0.4f * noise.next();
+            block.right[(size_t) i] = 0.4f * noise.next();
+        }
+
+        // A NaN, an infinity and a denormal, on and off a block boundary.
+        block.left[100]   = std::numeric_limits<float>::quiet_NaN();
+        block.right[512]  = std::numeric_limits<float>::infinity();
+        block.left[1023]  = -std::numeric_limits<float>::infinity();
+        block.right[4097] = 1.0e-42f;
+
+        renderInChunks (dsp, block, n, 512);
+
+        auto finite = true;
+
+        for (int i = 0; i < n; ++i)
+            finite = finite && std::isfinite (block.left[(size_t) i])
+                            && std::isfinite (block.right[(size_t) i]);
+
+        check (finite, "nothing non-finite ever leaves, whatever arrives");
+
+        check (rms (block.left, n - 8192, 8192) > 1.0e-5,
+               "the loop is still working after a NaN rather than stuck at zero");
+    }
+}
+
+/** **Nothing is allocated on the audio thread** (`11` §4k).
+
+    Both rings, both sweep grids and the wet scratch come from `prepare()`.
+    The guard is armed around a `setParams` + `process` pair rather than
+    `process` alone because `setParams` runs on the audio thread too
+    (`ModuleEngine::process` calls it once a block), and it is where §3's
+    re-sweep happens on a TIME move. */
+void testProcessAllocatesNothing()
+{
+    P::DwellDsp dsp;
+    dsp.prepare (48000.0, 512, 2);
+
+    auto v = defaults();
+    dsp.setParams (v.data(), (int) v.size());
+
+    Block block { 512 };
+    Noise noise;
+
+    for (int i = 0; i < 512; ++i)
+    {
+        block.left[(size_t) i]  = 0.3f * noise.next();
+        block.right[(size_t) i] = 0.3f * noise.next();
+    }
+
+    // The guard has to be shown to work before it is trusted: a replaced
+    // operator new that the linker quietly ignored would make this test a
+    // permanent, silent pass.
+    allocationsWhileArmed = 0;
+    allocationGuardArmed = true;
+    {
+        std::vector<float> deliberate ((size_t) 4096, 0.0f);
+        check (allocationsWhileArmed > 0 && deliberate.size() == 4096,
+               "the allocation guard counts a deliberate allocation");
+    }
+
+    allocationsWhileArmed = 0;
+
+    for (int pass = 0; pass < 8; ++pass)
+    {
+        // A TIME move, a CHARACTER move and a MIX move across the hinge --
+        // every path that re-sweeps or re-smooths, none of which may allocate.
+        v[P::Index::time]      = 20.0f + 200.0f * (float) pass;
+        v[P::Index::laneTime]  = 500.0f - 40.0f * (float) pass;
+        v[P::Index::character] = (float) (pass % 3);
+        v[P::Index::mix]       = 10.0f * (float) pass;
+        v[P::Index::feedback]  = 12.5f * (float) pass;
+        dsp.setParams (v.data(), (int) v.size());
+        dsp.process (block.channels(), 2, 512);
+    }
+
+    allocationGuardArmed = false;
+
+    // Those eight passes also walked TIME and LANE TIME across §2's crossfade
+    // on every block boundary, which is the one path here that runs two taps
+    // at once. Nothing non-finite may come out of it.
+    {
+        auto finite = true;
+
+        for (int i = 0; i < 512; ++i)
+            finite = finite && std::isfinite (block.left[(size_t) i])
+                            && std::isfinite (block.right[(size_t) i]);
+
+        check (finite, "a TIME move mid-block leaves the output finite");
+    }
+
+    check (allocationsWhileArmed == 0,
+           "process() and setParams() allocate nothing ("
+               + std::to_string (allocationsWhileArmed) + " allocations)");
+}
+
 } // namespace
 
 //==============================================================================
@@ -461,6 +1079,15 @@ int main()
     testStageOneIsBitExact();
     testTheRingIsSizedFromTheFixedMaximum();
     testAShortParameterArrayIsIgnored();
+
+    // Stage 2a.
+    testTheDryNullIsBitExact();
+    testTheReferenceLoopPeakIsSwept();
+    testUnityLandsAtNinetySevenPercent();
+    testSampleRateInvariance();
+    testBlockSizeInvariance();
+    testSilenceDenormalsAndNaN();
+    testProcessAllocatesNothing();
 
     std::printf ("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

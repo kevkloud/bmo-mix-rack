@@ -7,6 +7,33 @@
 namespace bmo
 {
 
+/** The longest tail anything in this repository reports to a host, in seconds
+    -- **one number for the whole product, per module and per rack.**
+
+    A module clamps its own figure at this (`reverb::DspCore::tailSecondsFor`)
+    and the rack clamps the sum over its occupied slots at the same ceiling
+    (`RackProcessor::totalTail`), so there is one rule rather than two: no BMO
+    Mix Rack instance ever tells a host it rings for more than thirty seconds.
+
+    **The rack needs its own clamp and the per-module one is not enough.**
+    `RackProcessor::addModule` checks the slot count and not for duplicates, so
+    eight BMO Lingers is a legal chain and eight honest 30 s figures summed is a
+    four-minute tail. Over-reporting costs a host some idle pulling at transport
+    stop, which is why the sum is the right answer there; it is not free for an
+    offline bounce, where the reported tail is rendered onto the end of every
+    export. Frosty approved the rack clamp on 2026-09-21.
+
+    It lives here rather than in a module because the two clampers have to
+    agree and only one of them can see the other: `core` cannot include
+    `modules/reverb`, and a second 30.0 written out in `RackProcessor.cpp` is
+    exactly the drift a shared constant exists to prevent.
+
+    Thirty rather than a round larger number: 20 s of decay at a 2.0 damping
+    multiplier is an effective T60 of 40 s, and handing a host 40 s of idle
+    pulling per instance is worse than truncating the last few dB of something
+    already inaudible. */
+inline constexpr double kMaxTailSeconds = 30.0;
+
 /** The audio side of a module, with no dependency on JUCE or on a host.
 
     A module's DSP is driven by an array of real-unit parameter values in the

@@ -10,9 +10,22 @@ have one without the other. No latency.
 > processing is a marked placeholder that passes audio through untouched.
 > Nothing here has been heard. See `AGENTS.md` and `docs/reverb/`.
 
-## The face
+## The shape of it
 
-Seven controls and a picture. Everything else is one click away.
+It is built like a handheld: a screen in a recess at the top with a line of
+print under it, three round keys — **EARLY**, **TAIL**, **TONE** — and then the
+controls. The keys change two things at once: what the screen is drawing, and
+which eight or seven knobs are on the panel under it.
+
+Four controls never move, whatever key you are on — **TYPE**, **SIZE**,
+**PRE-DELAY**, **DECAY** — and three more sit along the foot: **ER**,
+**REVERB** and **MIX**. Those are the ones you reach for without thinking about
+which part of the reverb you are in.
+
+There is one size of window. The module does not expand, because there is
+nothing to expand into.
+
+## Always on the panel
 
 | Control | What it does |
 |---|---|
@@ -33,35 +46,38 @@ no room attached to it.
 **"Off" means off.** At the bottom of its travel a fader reads `Off` rather
 than `-40.0 dB`, because the bus is silent rather than quiet.
 
-## The picture
+## The screen
 
-The box at the top draws what you have set, from left to right in time: the
-sound itself at the left edge, the early reflections as a cluster of lines, the
-gap your pre-delay leaves, and then the tail's envelope decaying away.
+Three pictures, one per key, and the line of print under the screen tells you
+what you are looking at.
 
-**The time axis is logarithmic, from 1 ms to 30 s.** It has to be. A reflection
-arrives 7 ms in and a tail can run for twenty seconds, and no straight ruler
-shows both. Each vertical line is ten times further along than the last.
+**EARLY** draws the reflections as a row of upright lines, one per reflection,
+standing where they arrive and as tall as they are loud. The window is the real
+one — the first reflection at the left and the last at the right — so it
+stretches and shrinks as you turn SIZE. Turn DENSITY up and fainter lines fill
+in between, and the ones already there do not move or change height, which is
+what stops the sweep clicking. The print says how many there are and how wide
+the window is.
 
-The tall reflections are loud ones; a reflection that leans above the centre
-line is to your right and one that leans below is to your left. As you turn
-DENSITY up, more of them fill in between — and the ones that were already there
-do not move or change level, which is what stops the sweep clicking.
+**TAIL** draws the tail's shape: the swell **ATTACK** gives it, then the decay
+away to nothing. The time ruler is logarithmic, from 1 ms to 30 s, because a
+bloom lasts a tenth of a second and a tail can run for twenty — each vertical
+line is ten times further along than the last, and no straight ruler shows
+both. It is drawn as a band rather than a line because it does not die at one
+rate: the band is the range between its fastest and its slowest, which is what
+**LOW x** and **HIGH x** set. A wide band means a tail that changes colour as
+it fades. The print gives the decay, the bloom in milliseconds, and where the
+whole thing actually ends.
 
-The tail is drawn as a shape rather than a line because it does not decay at
-one rate: the pale band is the range between its fastest and its slowest band,
-which is what the **LOW x** and **HIGH x** controls set. A wide band means a
-tail that changes colour as it dies.
+**TONE** draws the EQ as one curve with three marks on it — the low shelf, the
+high shelf and the input high-cut, in that order left to right. They are in
+series, so what you see is the three of them together rather than three
+separate lines. The print gives the three frequencies.
 
-Nothing in the box is measured from the audio. It is drawn from the controls,
-so it costs nothing and cannot affect the sound.
+Nothing in the screen is measured from the audio. It is drawn from the
+controls, so it costs nothing and cannot affect the sound.
 
-## Expanded
-
-The arrow on the header opens three more groups. In a rack the module opens
-compact; on its own it opens expanded.
-
-**EARLY** — how the reflections are made.
+## EARLY — how the reflections are made
 
 | Control | What it does |
 |---|---|
@@ -74,7 +90,7 @@ compact; on its own it opens expanded.
 | **LINK ER** | Off, the reflections arrive with the dry signal and only the tail is pre-delayed. On, they move together. |
 | **SOURCE** | What feeds the tail: the dry signal at one end, the early reflections at the other. Turn it up and the tail inherits the room's own timing and colour. |
 
-**TAIL** — how it decays.
+## TAIL — how it behaves once it is there
 
 | Control | What it does |
 |---|---|
@@ -82,15 +98,15 @@ compact; on its own it opens expanded.
 | **DECAY SHAPE** | At the top it is a natural decay. Turned down it truncates — gated at the bottom end. |
 | **LOW x FREQ / LOW x** | Below the frequency you set, the tail decays this much faster or slower than DECAY says. Over 1.00x the low end rings longer, which is what a large room does. |
 | **HIGH x FREQ / HIGH x** | The same above its frequency. Under 1.00x the top dies first, which is also what a real room does. |
+| **MOD DEPTH / MOD RATE** | A slow random movement in the tail that stops it ringing on one note. It is random rather than a sweep, so it should not sound like a chorus. |
 
-**TONE & OUT** — everything else.
+## TONE — what goes in, and what comes out
 
 | Control | What it does |
 |---|---|
 | **EQ LOW / EQ HIGH** and their frequencies | Two shelves on what feeds the reverb, +12 to −24 dB. At the bottom each reads `Cut`. |
 | **IN HI-CUT** | Darkens what feeds *both* generators, before the shelves. |
 | **WIDTH** | How wide the tail is. The reflections have their own width; this does not touch them. |
-| **MOD DEPTH / MOD RATE** | A slow random movement in the tail that stops it ringing on one note. It is random rather than a sweep, so it should not sound like a chorus. |
 | **OUTPUT** | Trim. |
 
 ## Presets

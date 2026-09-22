@@ -1,5 +1,9 @@
 #pragma once
 
+// For `bmo::kMaxTailSeconds`, which is the suite's tail ceiling and is read
+// here rather than copied: the rack clamps its summed total at the same
+// figure, and two 30.0s written down in two folders is how they come to differ.
+#include "core/dsp/ModuleDsp.h"
 #include "modules/reverb/dsp/TapTables.h"
 #include "modules/reverb/params.h"
 
@@ -174,11 +178,15 @@ public:
         into the rest of the chain (10 section 5). */
     static constexpr float kBypassFadeMs = 150.0f;
 
-    /** The ceiling on a reported tail. 20 s of decay at a 2.0 high multiplier
-        is an effective T60 of 40 s, and handing a host 40 s of idle pulling
-        per instance is worse than truncating the last few dB of something
-        already inaudible. */
-    static constexpr float kMaxTailSeconds = 30.0f;
+    /** The ceiling on a reported tail, **the suite's own and not a second
+        opinion about it**.
+
+        `bmo::kMaxTailSeconds` (core/dsp/ModuleDsp.h) is where the number is
+        decided, because the rack clamps its summed total at the same figure
+        and `core` cannot include this file to find out what it is. This is the
+        float the module's own arithmetic uses, named here so the display and
+        the tests can go on reading it where they always did. */
+    static constexpr float kMaxTailSeconds = (float) bmo::kMaxTailSeconds;
 
     //==========================================================================
 

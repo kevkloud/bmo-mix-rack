@@ -169,7 +169,19 @@ private:
         is still being fed after four seconds and rings for six; taking the
         larger would cut the last two off. Erring the other way only costs a
         host some idle pulling, so the sum is the safe direction as well as
-        the correct one (docs/reverb/11-integration-and-test-plan.md 2a). */
+        the correct one (docs/reverb/11-integration-and-test-plan.md 2a).
+
+        **Then clamped at `bmo::kMaxTailSeconds`, the same ceiling a module
+        clamps its own figure at**, so the whole product has one rule: no BMO
+        Mix Rack instance ever reports more than thirty seconds. `addModule`
+        checks the slot count and not for duplicates, so eight reverbs is a
+        legal chain and the honest sum of eight maxed ones is four minutes --
+        free at transport stop, where over-reporting only idles the host, and
+        not free for an offline bounce, where the figure is rendered onto the
+        end of every export. Frosty approved it on 2026-09-21.
+
+        The clamp is a ceiling and not an answer: a chain under it, including
+        the two-reverb 8.6223 s sum the tail suite pins, is reported in full. */
     double totalTail() const;
 
     std::vector<FactoryEntry> factoryEntries (std::vector<RackPreset>);

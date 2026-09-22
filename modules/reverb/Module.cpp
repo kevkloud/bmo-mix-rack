@@ -36,21 +36,33 @@ const ModuleDef& module()
     //
     // The line is left null, which means BMO (ModuleDef::lineOf).
     //
-    // **Two widths, BMO DEQ's precedent.** 300 compact, which a rack opens it
-    // at, and 700 full, which standalone opens it at. Both are multiples of
-    // 20. The main face is the same seven controls and the same display at
-    // either width and keeps its own 300 px: the extra 400 is the three
-    // expanded groups, and nothing on the face stretches to fill it.
+    // **One width, 500, and `expandedWidth` is 0.**
+    //
+    // It was 300 compact and 700 full, BMO DEQ's precedent, with the same face
+    // down the left of both and three groups of knobs filling the extra
+    // 400 px. The panel is a paged handheld as of 2026-09-21 and paging
+    // removes the reason for a second width: eight, eight and seven controls
+    // never need to be on screen at once, and a page key under the screen
+    // reaches them in one click where the expand switch reached them in one
+    // click and 400 px. With `expandedWidth` at 0 the module is not
+    // expandable, so the standalone header and the rack's slot bar stop
+    // offering a switch that has nothing to switch -- which is the arrangement
+    // every module but BMO DEQ already had.
+    //
+    // 500 is what the panel's four-column grid needs for its longest caption
+    // and its widest dropdown item, and it is a multiple of 20 like every
+    // other panel in the suite. `ReverbPanel`'s class comment carries the
+    // grid's own argument.
     static const ModuleDef def {
         kModuleId, kModuleName, kSchemaVersion,
-        300, juce::Colour (0xffe694e0),
+        500, juce::Colour (0xffe694e0),
         specs(), factory(),
         [] { return createDsp(); },
         [] (ui::ModuleContext ctx) -> std::unique_ptr<ui::ModulePanel>
         {
             return std::make_unique<ReverbPanel> (std::move (ctx));
         },
-        700,
+        0,
 
         // `line` spelled out only so the field after it can be. Null is BMO,
         // which is what it was defaulting to.

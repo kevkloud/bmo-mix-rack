@@ -2,6 +2,8 @@
 #include "RackEditor.h"
 #include "core/product/BusLayouts.h"
 
+#include <algorithm>
+
 namespace bmo
 {
 
@@ -418,7 +420,12 @@ double RackProcessor::totalTail() const
         if (s.engine != nullptr)
             total += s.engine->tailSeconds();
 
-    return total;
+    // And clamped at the suite's own ceiling, exactly as a module clamps its
+    // own figure: `addModule` counts slots and never looks for duplicates, so
+    // eight BMO Lingers is a legal chain and eight honest thirties is a
+    // four-minute tail rendered onto the end of every offline bounce. See
+    // `bmo::kMaxTailSeconds`, which is where both clamps get the number.
+    return std::min (total, kMaxTailSeconds);
 }
 
 void RackProcessor::handleAsyncUpdate()

@@ -268,9 +268,44 @@ value string says so, because an automation lane has nowhere else to.
 
 ## The panel
 
-**Main face:** the ER/tail display, TYPE, SIZE, PRE-DELAY, DECAY, ER, REVERB,
-MIX. The two faders are the thesis, and the tail-off depth-placement technique
-has to be reachable without expanding anything.
+**It is a paged handheld, one width, 500 px.** Frosty approved the shape on
+2026-09-21 and it replaced the compact/expanded split: a bezelled screen with a
+line of printed text under it, three round page keys, a persistent row, a
+cluster that changes with the page, a strip of three levels along the foot, and
+a raked speaker grille beside them.
+
+- **Persistent, on every page:** TYPE, SIZE, PRE-DELAY, DECAY.
+- **EARLY (8):** ER MODE, DENSITY, ER SHAPE, ER SPREAD, ER HI-CUT, VARIATION,
+  SOURCE, LINK ER.
+- **TAIL (8):** ATTACK, DECAY SHAPE, LOW x FREQ, LOW x, HIGH x FREQ, HIGH x,
+  MOD DEPTH, MOD RATE.
+- **TONE (7):** EQ LOW FREQ, EQ LOW, EQ HIGH FREQ, EQ HIGH, IN HI-CUT, WIDTH,
+  OUTPUT.
+- **Always on, at the foot:** ER, REVERB, MIX. The two faders are the thesis,
+  and the tail-off depth-placement technique has to be reachable from whatever
+  page you are on. 4 + 8 + 8 + 7 + 3 is the whole schema.
+
+**Four columns, and everything is laid out against them.** Three columns was
+the first cut and it fails on TONE: seven over three is 3 + 2 + 2, so all three
+pages grow to three rows and the screen has to lose 74 px to pay for it. Over
+four, EARLY and TAIL are 4 + 4 and TONE is 4 + 3, so the block under the keys
+does not change height when the page does — which is the one thing that would
+make paging feel like switching panels rather than turning a page. **No row
+holds one control**, and TONE's second row is three centred in the four for the
+same reason MIX stopped having a row of its own.
+
+**The page keys are round and level rather than raked.** Frosty's explicit
+call: a handheld is held at an angle and can afford a raked key block, and a
+mix panel is scanned in rows against its neighbours in the rack. The grille is
+the one raked thing on the panel, and it is texture — no control, no state,
+nothing to click. It comes out 100 x 84 px at the shipped width.
+
+**The page is UI state, not a parameter**: `ui.page=early|tail|tone` through
+`ModulePanel::setUiState`, the hook BMO Opto's meter mode and BMO DEQ's band
+already use. `specs()` is frozen at thirty with two spare host lanes, and which
+page somebody is looking at is not worth one of them and does not belong in a
+session. **An unknown value is refused rather than defaulted**, for DEQ's
+reason: a render labelled TONE that shows EARLY is worse than no render.
 
 **TYPE and ER MODE are dropdowns, and they are the only two.** "Room type makes
 no sense as a knob" — Frosty, 2026-09-21. A knob says less and more, and a list
@@ -298,24 +333,35 @@ reservations and the two taller rows that carried them are all gone.
 `ChoiceBox::setControlSide` is what keeps a dropdown's caption on the same line
 as the caption of the knob beside it.
 
-**Expanded**, three groups: **EARLY** (8), **TAIL** (6), **TONE & OUT** (9).
-BMO DEQ's precedent throughout — 300 compact, 700 full, the switch on the
-host's bar and never on the panel, and the panel choosing its layout from the
-width it is given.
+**`ModuleDef::expandedWidth` is 0 and the module is not expandable.** It was
+300 compact and 700 full on BMO DEQ's precedent, with the same face down the
+left of both. Paging removes the reason for it: eight, eight and seven controls
+never need to be on screen at once, and a key under the screen reaches them in
+one click where the expand switch reached them in one click and 400 px. The
+standalone header and the rack's slot bar stop offering a switch with nothing
+to switch, and a rack shows the same panel a standalone does. **Do not
+reintroduce a second width to make room for something** — a fourth page is what
+this shape is for.
 
-**The expanded controls are added and removed as children rather than hidden.**
-A hidden component still has bounds, and `tests/ui/LayoutTests` walks every
-child whether it is visible or not, so a hidden control with a stale or zeroed
-rectangle either escapes the panel, overlaps something, or reports a caption
-overflowing a box of width zero. Unparenting is the one state in which a
-control is genuinely not part of the layout. Parameter attachments are kept
-throughout, so nothing rebinds when the width changes.
+**The cluster's controls are added and removed as children rather than
+hidden.** A hidden component still has bounds, and `tests/ui/LayoutTests` walks
+every child whether it is visible or not, so a hidden control with a stale or
+zeroed rectangle either escapes the panel, overlaps something, or reports a
+caption overflowing a box of width zero. Unparenting is the one state in which a
+control is genuinely not part of the layout. All twenty-three keep their
+parameter attachments throughout, so turning a page costs a `resized` and
+nothing else.
 
-The three group headings are painted by the panel rather than added through
-`ModulePanel::addRule`, which draws edge to edge: at the expanded width a
-shared rule would cut a line straight through the main-face column as well as
-through the group it belongs to. `ReverbPanel::getGroupRules` is public so a
-layout test can see where they landed.
+The consequence for the suite is that **the layout tests walk this panel once
+per page**, because two thirds of it is unparented at any moment. One pass
+would check a third of the module and say nothing about the rest, and the two
+captions closest to overflowing — DECAY SHAPE and EQ HIGH FREQ — are both on
+pages the panel does not open on.
+
+There is one `ModulePanel::Rule` on the panel, LEVEL, over the strip at the
+foot. The old panel painted six headings itself because at the expanded width a
+shared rule would have cut a line through the column it did not belong to;
+there is one column now, so the suite's own edge-to-edge path is correct again.
 
 **Captions are ASCII.** The damping controls read "LOW x" and "HIGH x" and
 their values print "1.20x", not with a multiplication sign: the two display
@@ -324,28 +370,51 @@ outside ASCII is one this suite cannot promise it can draw.
 
 ## The display, and its one cross-folder dependency
 
-A static time-domain sketch: the direct impulse, the ER taps at their times
-with heights from their gains and their bearings split above and below the
-centre line, the pre-delay gap, and the tail envelope with a band between its
-fastest and slowest damped decay times.
+`LingerScreen` draws **one of three pictures**, whichever page the keys have
+selected, on a `meterFace` ground under a faint dot-matrix grid. **It draws in
+the module's accent and not in LCD green**: a second hue on one module is the
+failure the accent audit was run to find, and the dark face is a value rather
+than a hue.
 
 **Parameter-driven only. No metering, no `AnalyserTap`, none of
 `ModuleContext`'s meter callbacks.** Neither doc asks this module for a meter,
 a reverb has no gain reduction to report, and the absence is a decision rather
 than a gap to be filled in later.
 
-**Time is logarithmic, 1 ms to 30 s**, and that is a deliberate departure from
-`11` section 5's proposed 0–500 ms window. A fixed 0–500 ms window cannot show
-a 20 s decay, and DECAY reaches 20 s with a 2.0× multiplier over it; a linear
-window wide enough for the tail puts the whole early cluster inside the first
-pixel, which destroys the one thing the picture is for. On a log axis 1–100 ms
-keeps roughly half the width. The ends are chosen rather than round: 1 ms is
-where a reflection stops fusing with the direct sound, and 30 s is
-`DspCore::kMaxTailSeconds` — the ceiling on the tail this module will ever
-report to a host — so the right-hand edge is the same number the host is told.
-The direct sound at t = 0 is off a log axis entirely and is drawn hard against
-the left edge; that is the only lie in the picture, and leaving it out would
-make the pre-delay gap look like the beginning of the sound.
+**EARLY — linear time, 0 to the last tap plus a tenth.** The image-source taps
+as discrete stems from a baseline. What this replaced was a symmetric envelope
+mirrored about a centre line that bloomed and closed to a point, leaving most of
+the box empty; Frosty rejected it. The ER window is a little over one decade
+wherever SIZE puts it, so a linear axis scaled to the window itself shows the
+*spacing* of the reflections — the one thing about a tap set worth looking at.
+Stem heights are measured against **-40 dB, the ER fader's own bottom**, not
+against the tail's -72: the table spans 15 dB, and on -72 a cluster that should
+visibly decay draws as a comb of near-equal lines.
+
+**TAIL — logarithmic time, 1 ms to 30 s**, a deliberate departure from `11`
+section 5's proposed 0–500 ms window, and the old version's worst fault: it put
+a 20 s decay in a fixed 0–500 ms window and most of the box was dead. A linear
+window wide enough for the tail puts the whole 0–120 ms bloom inside the first
+two pixels. On a log axis 1–100 ms keeps 45 % of the width. The ends are chosen
+rather than round: 1 ms is where a reflection stops fusing with the direct
+sound, and 30 s is `bmo::kMaxTailSeconds` — the ceiling on the tail this module
+*and the rack it sits in* will ever report — so the right-hand edge is the same
+number the host is told.
+
+**TONE — logarithmic frequency, 20 Hz to 20 kHz**, level linear over ±24 dB.
+Drawn as a **3-node serial EQ**: the low shelf, the high shelf and the input
+high-cut summed in dB as one curve, with a marker on the curve at each of the
+three corners. The shelves are drawn first-order and the cut one-pole, and
+**neither is claimed to be the shipped filter** — `dsp/` is a placeholder and
+`10` section 2 gives the shelves no order, so a second-order curve here would
+be a guess presented as a measurement. `LingerScreen::responseDbAt` is the one
+place that changes when the filters land.
+
+**The line under the screen carries a reading for the page**: the tap count and
+the ER window, the decay and where the tail ends, or the three crossover
+points. It is ASCII, it is the only number printed anywhere on the panel, and
+`LingerScreen::readout` is public so a test can read what a page says it is
+showing.
 
 **`dsp/TapTables.h` is JUCE-free and panel-includable, and it has to stay that
 way.** The panel and the engine read one tap table, so the picture cannot
@@ -362,13 +431,23 @@ patched**, and the audits run *after* the jitter.
 
 ## What is not here yet, and where it goes
 
-- **Tail reporting.** `DspCore::tailSecondsFor` is the figure and the formula,
-  and **nothing calls it**: both processors hardcode `getTailLengthSeconds()`
-  to 0.0 and `ModuleDsp` has no tail accessor. Adding
-  `tailSecondsForParams` lands on every module's vtable, so it is `11` section
-  2(a) and milestone M5, its own reviewed commit. The arithmetic lives here now
-  so that commit has nothing left to decide. The rack will **sum** it over
-  occupied slots, never max: slots are in series.
+- **Tail reporting is done** (`11` section 2a, milestone M5).
+  `DspCore::tailSecondsFor` is the figure and the formula,
+  `ModuleDsp::tailSecondsForParams` carries it onto every module's vtable
+  defaulted to zero, and `tests/plugin/TailTests.cpp` asserts both halves
+  across the whole registry.
+
+  The rack **sums** it over occupied slots rather than taking the maximum —
+  slots are in series, so 4 s feeding 2 s rings for 6 — and **then clamps the
+  total at `bmo::kMaxTailSeconds`, the same thirty seconds a module clamps
+  itself at.** The clamp arrived 2026-09-21 with Frosty's approval, and the
+  case it exists for is the one the slot limit does not stop: `addModule`
+  counts slots and never looks for duplicates, so eight BMO Lingers is a legal
+  chain and eight honest thirties is a four-minute tail — free at transport
+  stop, where over-reporting only idles the host, and not free for an offline
+  bounce, where the figure is rendered onto the end of every export. Both
+  clamps read the one constant in `core/dsp/ModuleDsp.h`; do not write 30.0
+  anywhere else.
 - **The engine.** `11` section 1 names the headers it grows —
   `ErGenerator.h`, `TapTables.h`, `Fdn.h`, `Absorbent.h`. Milestones M2–M4.
 - **The test suite.** `tests/dsp/ReverbDspTests.cpp` asserts the frame; `11`

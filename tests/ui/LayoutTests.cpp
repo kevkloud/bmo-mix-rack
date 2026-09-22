@@ -955,18 +955,25 @@ void checkScale (const std::vector<bmo::ui::DynamicsMeter::ScalePoint>& scale,
     }
 }
 
-/** BMO Linger's panel: the main face at both widths, the three expanded
-    groups, and the ER/tail display.
+/** BMO Linger's panel: the paged handheld.
 
-    **The display is what nothing else here can see.** It has no parameter of
+    One width, three pages, and a screen that draws a different picture on each
+    of them. The panel is walked once per page, because **a page that is not
+    showing is not laid out**: its controls are unparented, so every generic
+    check in this file -- nothing escapes, nothing overlaps, every caption fits
+    -- sees only a third of the module unless it is run three times. That is
+    the whole reason the page is reachable from a test at all.
+
+    **The screen is what nothing else here can see.** It has no parameter of
     its own and paints itself, so if it stopped following the knobs every other
     check on this panel would still pass -- the blind spot BMO DEQ's
     gain-reduction bar and BMO Defang's band sketch both fell through. Its
     numbers are arithmetic rather than drawing, so this needs no render.
 
-    `expanded` is what this panel is being shown as, which decides how many
-    controls it is supposed to have. */
-void checkReverbPanel (bmo::ui::ModulePanel& panel, const juce::String& who, bool expanded)
+    The bezel, the readout line and the grille are **painted**, so they have no
+    bounds a walker can read either; `ReverbPanel` exposes them for the reason
+    `ui::ModulePanel::getRules` is public. */
+void checkReverbPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
 {
     namespace R = bmo::reverb;
 
@@ -979,305 +986,405 @@ void checkReverbPanel (bmo::ui::ModulePanel& panel, const juce::String& who, boo
 
     auto& params = panel.getContext().params;
 
-    //== The main face is the same seven controls at either width =============
+    //== The captions, page by page, written out ==============================
     //
-    // The split is 11 section 4's and it freezes with the schema: the two
-    // absolute faders are the thesis, and the depth-placement technique has to
-    // be reachable without expanding anything.
-    const char* const faceCaptions[] { "TYPE", "SIZE", "PRE-DELAY", "DECAY",
-                                       "ER", "REVERB", "MIX" };
+    // Written out here rather than read off `ReverbPanel::pageControls`: a
+    // test that took the list from the same place the panel does would agree
+    // with any list, including one that had quietly lost a control. The counts
+    // are 11 section 4's split and they add up to the schema.
+
+    const char* const alwaysOn[] { "TYPE", "SIZE", "PRE-DELAY", "DECAY",
+                                   "ER", "REVERB", "MIX" };
+
+    const char* const earlyPage[] { "ER MODE", "DENSITY", "ER SHAPE", "ER SPREAD",
+                                    "ER HI-CUT", "VARIATION", "SOURCE", "LINK ER" };
+
+    const char* const tailPage[] { "ATTACK", "DECAY SHAPE", "LOW x FREQ", "LOW x",
+                                   "HIGH x FREQ", "HIGH x", "MOD DEPTH", "MOD RATE" };
+
+    const char* const tonePage[] { "EQ LOW FREQ", "EQ LOW", "EQ HIGH FREQ", "EQ HIGH",
+                                   "IN HI-CUT", "WIDTH", "OUTPUT" };
+
+    // Seven persistent plus eight plus eight plus seven is the whole schema,
+    // and the panel is where that sum is checked: a parameter with no control
+    // anywhere is the Saturator's oversampling row, which sat on the schema
+    // and nowhere on the panel for three releases.
+    check ((int) (std::size (alwaysOn) + std::size (earlyPage)
+                    + std::size (tailPage) + std::size (tonePage)) == (int) R::Index::count,
+           "every parameter has a control on some page of the panel");
+
+    const auto captionsFor = [&] (R::Page p) -> const char* const*
     {
-        for (const auto* caption : faceCaptions)
+        return p == R::Page::early ? earlyPage : (p == R::Page::tail ? tailPage : tonePage);
+    };
+
+    const auto countFor = [&] (R::Page p)
+    {
+        return p == R::Page::tone ? (int) std::size (tonePage) : (int) std::size (earlyPage);
+    };
+
+    const auto nameFor = [] (R::Page p)
+    {
+        return p == R::Page::early ? "EARLY" : (p == R::Page::tail ? "TAIL" : "TONE");
+    };
+
+    static constexpr R::Page kPages[] { R::Page::early, R::Page::tail, R::Page::tone };
+
+    //== The bezel, the screen inside it and the line under it ================
+    {
+        const auto bezel  = reverbPanel->getBezelBox();
+        const auto glass  = reverbPanel->getScreenBox();
+        const auto line   = reverbPanel->getReadoutBox();
+
+        check (panel.getLocalBounds().contains (bezel), who + " the bezel escapes the panel");
+        check (bezel.contains (glass), who + " the screen is not inside its bezel");
+        check (bezel.contains (line), who + " the readout line is not inside the bezel");
+
+        check (line.getY() >= glass.getBottom(),
+               who + " the reading must be printed UNDER the screen, not over it");
+
+        // **Noticeably larger**, which is the word the brief uses and the thing
+        // that makes a recess read as a bezel rather than as a border. 24 px of
+        // well across and the readout's own row down.
+        check (bezel.getWidth() - glass.getWidth() >= 20,
+               who + " the bezel is only " + juce::String (bezel.getWidth() - glass.getWidth())
+                   + " px wider than the screen");
+        check (bezel.getHeight() - glass.getHeight() >= 30,
+               who + " the bezel is only " + juce::String (bezel.getHeight() - glass.getHeight())
+                   + " px taller than the screen");
+
+        if (auto* display = findNamed (panel, "DISPLAY"))
+            check (display->getBounds() == glass,
+                   who + " the screen component is at " + display->getBounds().toString()
+                       + " and the bezel put it at " + glass.toString());
+    }
+
+    //== The three page keys ==================================================
+    //
+    // Round, and **level rather than raked** -- Frosty's explicit call. A rack
+    // is scanned in rows against the slot beside it, so a sloped key block
+    // would be the one thing in the window that did not line up.
+    {
+        const auto& first = reverbPanel->getPageButton (R::Page::early);
+
+        for (const auto p : kPages)
+        {
+            const auto& key = reverbPanel->getPageButton (p);
+            const auto dot = key.dotBounds();
+
+            check (key.getName() == nameFor (p),
+                   juce::String (who) + " the " + nameFor (p) + " key is named '" + key.getName() + "'");
+
+            checkEquals (dot.getWidth(), dot.getHeight(),
+                         juce::String (who) + " the " + nameFor (p) + " key should be round");
+            checkEquals (dot.getWidth(), R::PageButton::kDotSide,
+                         juce::String (who) + " the " + nameFor (p) + " key's diameter");
+
+            check (key.labelOverflow() <= 0.0f,
+                   juce::String (who) + " page key '" + key.getName() + "' overflows its box by "
+                       + juce::String (key.labelOverflow(), 1) + " px");
+
+            checkEquals (key.getY(), first.getY(),
+                         juce::String (who) + " the " + nameFor (p)
+                             + " key's top -- the keys are level, not raked");
+            checkEquals (key.getBottom(), first.getBottom(),
+                         juce::String (who) + " the " + nameFor (p) + " key's foot");
+        }
+    }
+
+    //== LEVEL, the one rule, and the strip under it ==========================
+    {
+        const auto& rules = panel.getRules();
+
+        check (rules.size() == 1,
+               who + " should carry exactly one rule, has " + juce::String ((int) rules.size()));
+
+        if (rules.size() == 1)
+        {
+            check (rules[0].text == "LEVEL",
+                   who + " the rule should be legended LEVEL, reads '" + rules[0].text + "'");
+
+            for (const auto* caption : { "ER", "REVERB", "MIX" })
+                if (auto* c = findNamed (panel, caption))
+                    check (c->getY() >= rules[0].row.getBottom(),
+                           who + " " + caption + " should sit under the LEVEL rule");
+        }
+    }
+
+    //== The grille ===========================================================
+    //
+    // Texture and nothing else: it is painted, so it has no component, and the
+    // one thing that can go wrong with it is running under a control that then
+    // has a striped ground. Frosty asked to see it rendered before deciding
+    // whether it stays, so what is asserted here is that it is where it was
+    // asked for and that it is not in anything's way.
+    {
+        const auto grille = reverbPanel->getGrilleBox();
+
+        check (! grille.isEmpty(), who + " has no grille");
+        check (panel.getLocalBounds().contains (grille), who + " the grille escapes the panel");
+
+        check (grille.getCentreX() > panel.getWidth() / 2
+                 && grille.getCentreY() > panel.getHeight() / 2,
+               who + " the grille should sit in the bottom-right, is at " + grille.toString());
+
+        for (auto* child : panel.getChildren())
+            check (! child->getBounds().intersects (grille),
+                   who + " the grille runs under '" + child->getName() + "'");
+    }
+
+    //== Every page, laid out and walked ======================================
+    for (const auto p : kPages)
+    {
+        const juce::String where { juce::String (who) + " " + nameFor (p) };
+
+        reverbPanel->setPage (p);
+
+        check (reverbPanel->getPage() == p, where + " did not take the page");
+        check (reverbPanel->getScreen().getPage() == p,
+               where + " the screen is drawing a different page from the panel");
+
+        // One key lit, and it is this one.
+        for (const auto q : kPages)
+            check (reverbPanel->getPageButton (q).getToggleState() == (q == p),
+                   where + ": the " + nameFor (q) + " key should be "
+                         + (q == p ? "lit" : "unlit"));
+
+        // The persistent controls are on screen whatever page this is -- that
+        // is the whole claim being made about them.
+        for (const auto* caption : alwaysOn)
             check (findNamed (panel, caption) != nullptr,
-                   who + " main face has no " + caption + " control");
-    }
+                   where + " has lost the persistent control " + caption);
 
-    //== One module, one colour ===============================================
-    //
-    // **`ui::Knob::Style` says what a knob is, not where it sits.** `utility`
-    // is the pale blue of input, output and gain; `character` is the module's
-    // own accent, worn by anything that shapes the sound (LookAndFeel.h). The
-    // twenty-three group knobs went out `utility` as a block, so the module
-    // rendered violet on its face and suite azure in its expansion as though
-    // it were two plugins sharing a slot -- and every check in this file
-    // passed, because no check in this file had ever read a style.
-    //
-    // Asserted by name against a single exception rather than by counting, so
-    // a control added later in the wrong style has to fail it.
-    {
-        std::vector<bmo::ui::PlainKnob*> knobs;
-        collectKnobs (panel, knobs);
-
-        for (auto* knob : knobs)
+        // This page's cluster is present and inside the cluster block; the
+        // other two pages' controls are **not children at all**. A hidden
+        // component still has bounds, and every walker in this file reads them
+        // -- so a hidden control with a stale rectangle either escapes the
+        // panel, overlaps something, or reports a caption overflowing a box of
+        // width zero. Unparenting is the one state in which a control is
+        // genuinely not part of the layout.
         {
-            const auto* face = knobFace (*knob);
+            const auto cluster = reverbPanel->getClusterBox();
+            check (! cluster.isEmpty(), where + " has no cluster block");
 
-            if (face == nullptr)
+            const auto* const* mine = captionsFor (p);
+
+            for (int i = 0; i < countFor (p); ++i)
             {
-                check (false, who + " " + knob->getName() + " has no rotary under it");
-                continue;
+                auto* found = findNamed (panel, mine[i]);
+
+                check (found != nullptr, where + " has no " + mine[i] + " control");
+
+                if (found != nullptr)
+                    check (cluster.contains (found->getBounds()),
+                           where + " " + mine[i] + " at " + found->getBounds().toString()
+                                 + " is outside the cluster block " + cluster.toString());
             }
 
-            const auto utility = knob->getName() == "OUTPUT";
-
-            check (face->getStyle() == (utility ? bmo::ui::Knob::Style::utility
-                                                : bmo::ui::Knob::Style::character),
-                   who + " " + knob->getName() + " should draw in "
-                       + (utility ? "utility" : "character")
-                       + " -- utility is input, output and gain, and OUTPUT is the"
-                         " only one of those on this panel");
-        }
-    }
-
-    //== The two named lists are dropdowns, and they read back ================
-    //
-    // **"Room type makes no sense as a knob"** -- Frosty, 2026-09-21. TYPE and
-    // ER MODE were stepped knobs over a list of names, which is the one kind
-    // of parameter a knob cannot show: Chamber is not more than Room, so the
-    // face says nothing and the control has to be turned before it can be
-    // read. They are `ui::ChoiceBox` now, and every other control on this
-    // panel is still a knob -- including VARIATION, whose seven positions
-    // *are* an ordered amount, which is why it is a stepped float and not a
-    // choice list at all.
-    //
-    // Asserted as "is a ChoiceBox **and is not a PlainKnob**" rather than by
-    // counting: a panel that grew a third dropdown should not fail this, and a
-    // panel that quietly turned one back into a knob must.
-    {
-        for (const auto* caption : { "TYPE", "ER MODE" })
-        {
-            auto* control = findNamed (panel, caption);
-
-            if (control == nullptr)
-                continue;       // reported by the face/group checks
-
-            check (dynamic_cast<bmo::ui::ChoiceBox*> (control) != nullptr,
-                   who + " " + caption + " should be a dropdown -- a list of names on a knob"
-                         " has to be turned before it can be read");
-            check (dynamic_cast<bmo::ui::PlainKnob*> (control) == nullptr,
-                   who + " " + caption + " is still a knob");
-        }
-
-        // And it shows the position the parameter is on, at every position --
-        // which is what a knob could not do and the whole reason for the
-        // change. The strings are `params.h`'s own, written out here rather
-        // than read from the spec: a test that took the names from the same
-        // table the control does would agree with any table, including one
-        // where Cavern had quietly gone back to being Large Hall.
-        if (auto* type = dynamic_cast<bmo::ui::ChoiceBox*> (findNamed (panel, "TYPE")))
-        {
-            const char* const names[] { "Room", "Chamber", "Hall", "Cavern", "Plate", "Ambience" };
-
-            for (int i = 0; i < (int) std::size (names); ++i)
+            for (const auto q : kPages)
             {
-                params.setReal (R::Index::type, (float) i);
+                if (q == p)
+                    continue;
 
-                check (type->getSelectedText() == names[i],
-                       who + " TYPE at detent " + juce::String (i) + " should read '"
-                           + names[i] + "', reads '" + type->getSelectedText() + "'");
+                const auto* const* theirs = captionsFor (q);
+
+                for (int i = 0; i < countFor (q); ++i)
+                    check (findNamed (panel, theirs[i]) == nullptr,
+                           where + " still carries " + theirs[i] + ", which belongs to "
+                                 + nameFor (q) + " -- a page that is not showing must be"
+                                   " unparented, not hidden");
             }
-
-            params.setReal (R::Index::type, (float) R::room);
         }
 
-        if (auto* mode = dynamic_cast<bmo::ui::ChoiceBox*> (findNamed (panel, "ER MODE")))
-        {
-            const char* const names[] { "Taps", "Energy", "Blend" };
+        // Everything the generic walk does, once per page, because a page that
+        // is not showing is not laid out and would otherwise never be looked
+        // at. **This is where the MAKEUP -> MAKEU class of fault would show
+        // up** on two thirds of this module.
+        checkWithinPanel     (panel, where);
+        checkNoOverlap       (panel, where);
+        checkCaptionsFit     (panel, where);
+        checkSwitchLabelsFit (panel, where);
 
-            for (int i = 0; i < (int) std::size (names); ++i)
+        // **One module, one colour.** `ui::Knob::Style` says what a knob is,
+        // not where it sits: `utility` is the pale blue of input, output and
+        // gain, `character` is the module's own accent worn by anything that
+        // shapes the sound. Twenty-three of these went out `utility` as a
+        // block once, and the module rendered violet at the top and suite
+        // azure below as though it were two plugins sharing a slot -- while
+        // every check in this file passed, because none of them had ever read
+        // a style. Asserted by name against a single exception rather than by
+        // counting, so a control added later in the wrong style has to fail.
+        {
+            std::vector<bmo::ui::PlainKnob*> knobs;
+            collectKnobs (panel, knobs);
+
+            for (auto* knob : knobs)
             {
-                params.setReal (R::Index::ermode, (float) i);
+                const auto* face = knobFace (*knob);
 
-                check (mode->getSelectedText() == names[i],
-                       who + " ER MODE at detent " + juce::String (i) + " should read '"
-                           + names[i] + "', reads '" + mode->getSelectedText() + "'");
+                if (face == nullptr)
+                {
+                    check (false, where + " " + knob->getName() + " has no rotary under it");
+                    continue;
+                }
+
+                const auto utility = knob->getName() == "OUTPUT";
+
+                check (face->getStyle() == (utility ? bmo::ui::Knob::Style::utility
+                                                    : bmo::ui::Knob::Style::character),
+                       where + " " + knob->getName() + " should draw in "
+                             + (utility ? "utility" : "character")
+                             + " -- utility is input, output and gain, and OUTPUT is the"
+                               " only one of those on this panel");
             }
-
-            params.setReal (R::Index::ermode, (float) R::taps);
         }
-    }
 
-    //== Nothing on the face stands alone in a row ============================
-    //
-    // MIX had a row to itself, centred at half width under a pair, and a lone
-    // centred knob with two empty quarters beside it reads as a control whose
-    // partner went missing. The face is seven controls and divides 2 + 2 + 3.
-    //
-    // Level means the same top *and* the same foot: two knobs of different
-    // heights sharing a top edge are not a row, which is the other half of
-    // what a printed value line does to a pair.
-    {
-        for (const auto* caption : faceCaptions)
+        // **Nothing stands alone in a row.** That is the rule MIX broke on the
+        // old face: a lone centred knob with two empty quarters beside it
+        // reads as a control whose partner has gone missing. The screen is the
+        // one thing here that is allowed a row of its own, because it is the
+        // row.
+        //
+        // A row is a shared centre line rather than a shared top: LINK ER is a
+        // 26 px switch centred in a 74 px cell beside three knobs, and asking
+        // a switch to share a knob's top edge would mean stretching it to a
+        // knob's height, which reads as a heading for the cell next to it.
+        // Two *knobs* in one row still have to share a top and a foot, and
+        // that is asserted on top.
         {
-            auto* control = findNamed (panel, caption);
+            for (auto* child : panel.getChildren())
+            {
+                if (child->getName() == "DISPLAY")
+                    continue;
 
-            if (control == nullptr)
-                continue;           // already reported above
+                const auto mid = child->getBounds().getCentreY();
+                int alongside = 0;
 
-            int alongside = 0;
+                for (auto* other : panel.getChildren())
+                {
+                    if (other == child || other->getName() == "DISPLAY")
+                        continue;
 
-            for (const auto* other : faceCaptions)
-                if (auto* o = findNamed (panel, other))
-                    if (o != control && o->getY() == control->getY()
-                                     && o->getBottom() == control->getBottom())
-                        ++alongside;
+                    if (std::abs (other->getBounds().getCentreY() - mid) > 1)
+                        continue;
 
-            check (alongside > 0,
-                   who + " " + caption + " is the only control in its row");
+                    ++alongside;
+
+                    const auto bothAreDials =
+                        dynamic_cast<bmo::ui::SwitchButton*> (child) == nullptr
+                          && dynamic_cast<bmo::ui::SwitchButton*> (other) == nullptr;
+
+                    if (bothAreDials)
+                        check (other->getY() == child->getY()
+                                 && other->getBottom() == child->getBottom(),
+                               where + " '" + child->getName() + "' and '" + other->getName()
+                                     + "' share a row and should share a top and a foot");
+                }
+
+                check (alongside > 0,
+                       where + " '" + child->getName() + "' is the only control in its row");
+            }
+        }
+
+        // The reading under the screen says what page it is of, and it is
+        // **ASCII**: the two display faces are licensed individually and live
+        // outside this repository, so a glyph outside ASCII is one this suite
+        // cannot promise it can draw.
+        {
+            const auto text = reverbPanel->getScreen().readout();
+
+            check (text.isNotEmpty(), where + " prints no reading under the screen");
+
+            for (const auto* c = text.toRawUTF8(); *c != 0; ++c)
+                if ((unsigned char) *c < 32 || (unsigned char) *c > 126)
+                {
+                    check (false, where + " the reading '" + text + "' is not ASCII");
+                    break;
+                }
         }
     }
 
-    //== The face's own headings and brackets =================================
+    //== The page is UI state, and an unknown value is refused ================
     //
-    // Both at either width: the face is the same seven controls and the same
-    // three groups whether the panel is expanded or not.
+    // `ui.page=...`, the hook BMO Opto's meter mode and BMO DEQ's band use.
+    // **Refused rather than defaulted**, and DEQ's comment is the argument: a
+    // render labelled TONE that shows EARLY is worse than no render, and
+    // nothing downstream could tell the two apart. `tools/snapshot` treats a
+    // false here as fatal for exactly that reason.
     {
-        const auto& rules = reverbPanel->getFaceRules();
+        check (panel.setUiState ("page", "tail"), who + " should take ui.page=tail");
+        check (reverbPanel->getPage() == R::Page::tail, who + " ui.page=tail did not turn the page");
 
-        check (rules.size() == 3,
-               who + " should have three main-face headings, has "
-                   + juce::String ((int) rules.size()));
+        check (panel.setUiState ("page", "TONE"), who + " should take ui.page=TONE, case and all");
+        check (reverbPanel->getPage() == R::Page::tone, who + " ui.page=TONE did not turn the page");
 
-        for (size_t i = 1; i < rules.size(); ++i)
-            check (rules[i].getY() > rules[i - 1].getBottom(),
-                   who + " main-face headings must run down the face in order");
+        for (const auto* bad : { "middle", "1", "", "earl", "early tail", " early" })
+            check (! panel.setUiState ("page", bad),
+                   who + " should refuse ui.page=" + bad + " rather than falling back");
 
-        const auto& boxes = reverbPanel->getPairBoxes();
+        check (reverbPanel->getPage() == R::Page::tone,
+               who + " a refused page must leave the panel on the one it was showing");
 
-        for (size_t i = 0; i < boxes.size(); ++i)
-            check (! boxes[i].isEmpty(),
-                   who + " bracket box " + juce::String ((int) i) + " is empty");
-
-        // The level row's bracket joins ER and REVERB and stops short of MIX,
-        // which is what still says those two are the pair.
-        for (const auto* caption : { "ER", "REVERB" })
-            if (auto* c = findNamed (panel, caption))
-                check (boxes[2].contains (c->getBounds()),
-                       who + " " + caption + " should sit inside the level bracket");
-
-        if (auto* mix = findNamed (panel, "MIX"))
-            check (! boxes[2].intersects (mix->getBounds()),
-                   who + " MIX should sit outside the ER/REVERB bracket");
+        for (const auto* key : { "band", "meter", "view", "" })
+            check (! panel.setUiState (key, "early"),
+                   who + " should refuse the key ui." + key + ", which is not its state");
     }
 
-    //== The expanded controls exist exactly when the panel is expanded =======
-    //
-    // Added and removed as children rather than shown and hidden, because a
-    // hidden component still has bounds and every walker above reads them. A
-    // compact panel that kept them would either escape its own bounds, overlap
-    // something, or report a caption overflowing a box of width zero.
-    {
-        const char* const group[] {
-            "ER MODE", "DENSITY", "ER SHAPE", "ER SPREAD", "ER HI-CUT", "VARIATION",
-            "SOURCE", "LINK ER",
-            "ATTACK", "DECAY SHAPE", "LOW x FREQ", "LOW x", "HIGH x FREQ", "HIGH x",
-            "EQ LOW FREQ", "EQ LOW", "EQ HIGH FREQ", "EQ HIGH", "IN HI-CUT", "WIDTH",
-            "MOD DEPTH", "MOD RATE", "OUTPUT" };
-
-        check (std::size (group) == 23, "the three groups hold 23 of the 30 controls");
-
-        for (const auto* caption : group)
-        {
-            auto* found = findNamed (panel, caption);
-
-            if (expanded)
-                check (found != nullptr, who + " expanded has no " + caption + " control");
-            else
-                check (found == nullptr,
-                       who + " compact should not carry " + caption
-                           + " -- an expanded-only control must be unparented, not hidden");
-        }
-
-        // Seven on the face plus twenty-three in the groups is the whole
-        // schema, and the panel is where that sum is checked: a parameter with
-        // no control anywhere is the Saturator's oversampling row, which sat
-        // on the schema and nowhere on the panel for three releases.
-        check (7 + (int) std::size (group) == (int) R::Index::count,
-               "every parameter has a control somewhere on the panel");
-    }
-
-    //== The three group headings, and the column they live in ================
-    {
-        const auto& rules = reverbPanel->getGroupRules();
-
-        if (! expanded)
-        {
-            check (rules.empty(), who + " compact should carry no group headings");
-            check (panel.getRules().empty(),
-                   who + " should take no shared section rules at either width");
-            return;
-        }
-
-        check (rules.size() == 3,
-               who + " should have three group headings, has " + juce::String ((int) rules.size()));
-
-        // They are painted rather than placed, so this accessor is the only
-        // way to see them -- and a heading that spanned the whole panel would
-        // cut a line through the main face, which is why they are not
-        // `ModulePanel::Rule`s. Asserted as "inside the group column".
-        const auto column = reverbPanel->getGroupColumn();
-
-        check (! column.isEmpty(), who + " expanded has no group column");
-
-        for (size_t i = 0; i < rules.size(); ++i)
-        {
-            check (column.contains (rules[i]),
-                   who + " group heading " + juce::String ((int) i)
-                       + " is not inside the group column");
-
-            if (i > 0)
-                check (rules[i].getY() > rules[i - 1].getBottom(),
-                       who + " group headings must run down the column in order");
-        }
-
-        // And every group control belongs to that column rather than merely to
-        // the panel: the main face keeps its own 300 px at both widths.
-        for (const auto* caption : { "ER MODE", "ATTACK", "OUTPUT" })
-            if (auto* c = findNamed (panel, caption))
-                check (column.contains (c->getBounds()),
-                       who + " " + caption + " should sit in the group column");
-    }
-
-    //== The display draws the table the engine will play =====================
+    //== The screen's own arithmetic ==========================================
     //
     // **This is the sketch/DSP drift assertion** that 11 section 5 asks for by
     // name, and it is the whole reason `dsp/TapTables.h` is JUCE-free: the
     // panel and the engine read one table, so the picture cannot quietly stop
     // describing the sound.
     {
-        const auto& sketch = reverbPanel->getSketch();
+        reverbPanel->setPage (R::Page::early);
+
+        const auto& screen = reverbPanel->getScreen();
 
         params.setReal (R::Index::size, R::roomDefaults::kSizeM);
         params.setReal (R::Index::predelay, 0.0f);
         params.setReal (R::Index::prelink, 0.0f);
 
-        checkNear (sketch.firstTapTimeMs(),
+        checkNear (screen.firstTapTimeMs(),
                    (double) R::tapTimeMsAt (R::kReferenceTaps[0], R::roomDefaults::kSizeM), 1.0e-4,
-                   who + " the sketch's first tap is the table's first tap");
-        checkNear (sketch.lastTapTimeMs(),
+                   who + " the screen's first tap is the table's first tap");
+        checkNear (screen.lastTapTimeMs(),
                    (double) R::erSpanMsAt (R::roomDefaults::kSizeM), 1.0e-4,
-                   who + " the sketch's last tap is the table's ER span");
+                   who + " the screen's last tap is the table's ER span");
 
-        // SIZE scales the picture, which is the Size law made visible.
+        // **The EARLY axis spans the real ER window**, which is the change the
+        // stems were drawn for: the last tap has to land inside the box with a
+        // little air after it rather than on the border or halfway across.
+        check (screen.erWindowMs() > screen.lastTapTimeMs(),
+               who + " the last tap must fall inside the EARLY window, not on its edge");
+        check (screen.erWindowMs() < screen.lastTapTimeMs() * 1.5f,
+               who + " the EARLY window is " + juce::String (screen.erWindowMs(), 1)
+                   + " ms for a " + juce::String (screen.lastTapTimeMs(), 1)
+                   + " ms cluster, which leaves most of the box empty");
+
+        // SIZE scales the picture and the window with it, which is the Size
+        // law made visible.
         params.setReal (R::Index::size, R::roomDefaults::kSizeM * 2.0f);
-        checkNear (sketch.firstTapTimeMs(),
+        checkNear (screen.firstTapTimeMs(),
                    (double) R::tapTimeMsAt (R::kReferenceTaps[0], R::roomDefaults::kSizeM) * 2.0, 1.0e-3,
                    who + " twice the size is twice the first tap's time");
+        check (screen.erWindowMs() > screen.lastTapTimeMs(),
+               who + " the EARLY window follows SIZE");
         params.setReal (R::Index::size, R::roomDefaults::kSizeM);
 
         // **Pre-delay is tail-only unless LINK ER says otherwise**, which is
         // the reference behaviour and the thing the picture has to get right:
         // with the switch off the taps do not move.
-        const auto restingFirst = sketch.firstTapTimeMs();
+        const auto restingFirst = screen.firstTapTimeMs();
         params.setReal (R::Index::predelay, 120.0f);
 
-        checkNear (sketch.firstTapTimeMs(), (double) restingFirst, 1.0e-4,
+        checkNear (screen.firstTapTimeMs(), (double) restingFirst, 1.0e-4,
                    who + " pre-delay must not move the ER with LINK ER off");
-        checkNear (sketch.tailStartMs(), 120.0, 1.0e-4,
+        checkNear (screen.tailStartMs(), 120.0, 1.0e-4,
                    who + " the tail starts at the pre-delay");
 
         params.setReal (R::Index::prelink, 1.0f);
-        checkNear (sketch.firstTapTimeMs(), (double) restingFirst + 120.0, 1.0e-4,
+        checkNear (screen.firstTapTimeMs(), (double) restingFirst + 120.0, 1.0e-4,
                    who + " LINK ER moves the ER with the tail");
 
         params.setReal (R::Index::prelink, 0.0f);
@@ -1288,36 +1395,108 @@ void checkReverbPanel (bmo::ui::ModulePanel& panel, const juce::String& who, boo
         params.setReal (R::Index::decay, 2.0f);
         params.setReal (R::Index::damplo, 1.5f);
         params.setReal (R::Index::damphi, 0.4f);
-        checkNear (sketch.tailEndSeconds(), 3.0, 1.0e-3,
+        checkNear (screen.tailEndSeconds(), 3.0, 1.0e-3,
                    who + " the drawn tail reaches decay x the slowest multiplier");
 
         params.setReal (R::Index::damplo, 0.5f);
-        checkNear (sketch.tailEndSeconds(), 2.0, 1.0e-3,
+        checkNear (screen.tailEndSeconds(), 2.0, 1.0e-3,
                    who + " both multipliers under unity leaves the mid decay as the reach");
 
         // **The 21 core taps never switch off.** That is what keeps the
         // renormalising denominator bounded away from zero and so what makes
         // the density sweep continuous and click-free (10 section 3) -- so the
-        // picture must not lose taps at the bottom of the knob.
+        // picture must not lose stems at the bottom of the knob.
         params.setReal (R::Index::erdensity, 0.0f);
-        checkEquals (sketch.activeTapCount(), R::kNumReferenceTaps,
+        checkEquals (screen.activeTapCount(), R::kNumReferenceTaps,
                      who + " the core taps are all on at DENSITY zero");
 
         params.setReal (R::Index::erdensity, 100.0f);
-        checkEquals (sketch.activeTapCount(), 48,
+        checkEquals (screen.activeTapCount(), 48,
                      who + " DENSITY at the top reaches the 48-tap master sequence");
 
-        // And the window is the one the class comment argues for, which is
-        // what lets a 20 s tail and a 7 ms reflection share a picture.
-        checkNear (R::ErTailSketch::kMinMs, 1.0, 1.0e-6, who + " the display starts at 1 ms");
-        checkNear (R::ErTailSketch::kMaxSeconds,
-                   (double) bmo::reverb::DspCore::kMaxTailSeconds, 1.0e-6,
-                   who + " the display ends where the reported tail is clamped");
+        // And the reading under the screen is of the picture above it rather
+        // than of something near it: 48 taps on the knob is 48 taps in print.
+        check (reverbPanel->getScreen().readout().startsWith ("48 TAPS"),
+               who + " the EARLY reading should lead with the tap count, reads '"
+                   + reverbPanel->getScreen().readout() + "'");
 
-        // Put it back, so a later check reads a panel at its defaults.
+        // The TAIL page's window is the one the class comment argues for,
+        // which is what lets a 20 s tail and a 7 ms bloom share a picture --
+        // and its right-hand edge is the same number the host is told.
+        checkNear (R::LingerScreen::kMinMs, 1.0, 1.0e-6, who + " the TAIL axis starts at 1 ms");
+        checkNear (R::LingerScreen::kMaxSeconds, bmo::kMaxTailSeconds, 1.0e-6,
+                   who + " the TAIL axis ends where the reported tail is clamped");
+
+        // Put it back, so the TONE block below reads a panel at its defaults.
         for (const auto i : { R::Index::decay, R::Index::damplo, R::Index::damphi,
                               R::Index::erdensity })
             params.setReal (i, R::specs()[(size_t) i].def);
+    }
+
+    //== TONE: three nodes in series ==========================================
+    //
+    // Absolute figures rather than "the curve moved", which is the house rule
+    // from tests/dsp/OptoDspTests.cpp -- a relative test there passed for a
+    // whole release while both of the things it compared were broken. Every
+    // number below is a first-order response worked out by hand from the
+    // corner and the gain.
+    {
+        reverbPanel->setPage (R::Page::tone);
+
+        const auto& screen = reverbPanel->getScreen();
+
+        const auto flat = { R::Index::eqlo, R::Index::eqhi };
+
+        for (const auto i : flat)
+            params.setReal (i, 0.0f);
+
+        params.setReal (R::Index::eqlofreq, 200.0f);
+        params.setReal (R::Index::eqhifreq, 1600.0f);
+        params.setReal (R::Index::inhicut, 20000.0f);
+
+        // Both shelves at zero and the cut wide open is a flat chain, to
+        // within the cut's own third of a dB at 20 kHz.
+        checkNear (screen.responseDbAt (1000.0f), -0.0109, 1.0e-3,
+                   who + " a flat TONE page draws a flat curve");
+
+        // The one-pole cut is -3.01 dB at its own corner, which is what makes
+        // it a corner.
+        params.setReal (R::Index::inhicut, 2000.0f);
+        checkNear (screen.responseDbAt (2000.0f), -3.0103, 1.0e-3,
+                   who + " the input high-cut is 3 dB down at its corner");
+        params.setReal (R::Index::inhicut, 20000.0f);
+
+        // A first-order low shelf reaches its full gain a decade under its
+        // corner and has given nearly all of it back a decade over.
+        params.setReal (R::Index::eqlo, 6.0f);
+        checkNear (screen.responseDbAt (20.0f), 6.0 / 1.01 - 0.0000, 2.0e-3,
+                   who + " the low shelf is at its gain a decade under its corner");
+        check (screen.responseDbAt (2000.0f) < 0.15f,
+               who + " the low shelf should be spent a decade over its corner, is "
+                   + juce::String (screen.responseDbAt (2000.0f), 3) + " dB");
+        params.setReal (R::Index::eqlo, 0.0f);
+
+        // And the three nodes are the three controls, in the order the curve
+        // crosses them.
+        params.setReal (R::Index::eqlofreq, 120.0f);
+        params.setReal (R::Index::eqhifreq, 1800.0f);
+        params.setReal (R::Index::inhicut, 9000.0f);
+
+        const auto nodes = screen.nodeFrequencies();
+
+        checkNear (nodes[0], 120.0, 0.5, who + " node 0 is EQ LOW's corner");
+        checkNear (nodes[1], 1800.0, 0.5, who + " node 1 is EQ HIGH's corner");
+        checkNear (nodes[2], 9000.0, 0.5, who + " node 2 is IN HI-CUT's corner");
+
+        check (reverbPanel->getScreen().readout().contains ("9.00 KHZ"),
+               who + " the TONE reading should carry the crossover points, reads '"
+                   + reverbPanel->getScreen().readout() + "'");
+
+        for (const auto i : { R::Index::eqlofreq, R::Index::eqhifreq, R::Index::inhicut,
+                              R::Index::eqlo, R::Index::eqhi })
+            params.setReal (i, R::specs()[(size_t) i].def);
+
+        reverbPanel->setPage (R::Page::early);
     }
 }
 
@@ -1448,20 +1627,60 @@ void checkRack (juce::Component& editor)
 
 /** Prints a panel's controls and rules. `ui_layout_tests --dump` is how you
     find out what a panel actually does before writing a number down about it,
-    rather than deriving one from the constants and asserting the derivation. */
+    rather than deriving one from the constants and asserting the derivation.
+
+    **It prints each caption's margin as well as its box**, which is the number
+    `checkCaptionsFit` only reports when it has already gone negative. A
+    caption clearing its box by half a pixel passes the suite and is one type
+    size away from being the next MAKEUP, and there was no way to find that out
+    short of adding a temporary print -- which is how the last two panels were
+    sized. Negative is the overflow; positive is the room left. */
 void dump (bmo::ui::ModulePanel& panel, const juce::String& who)
 {
     std::cout << "== " << who << "  " << panel.getWidth() << "x" << panel.getHeight() << '\n';
 
+    /** The room a control has left, or nothing for one that measures none. */
+    const auto margin = [] (juce::Component* c) -> juce::String
+    {
+        if (auto* k = dynamic_cast<bmo::ui::PlainKnob*> (c))
+            return "   margin " + juce::String (-k->captionOverflow(), 1);
+
+        if (auto* b = dynamic_cast<bmo::ui::ChoiceBox*> (c))
+            return "   margin " + juce::String (-b->captionOverflow(), 1);
+
+        if (auto* s = dynamic_cast<bmo::ui::SwitchButton*> (c))
+            return "   margin " + juce::String (-s->labelOverflow(), 1);
+
+        return {};
+    };
+
     for (auto* child : panel.getChildren())
         std::cout << "   " << child->getBounds().toString()
                   << "   y " << child->getY() << ".." << (child->getBottom() - 1)
-                  << "   " << child->getName() << '\n';
+                  << "   " << child->getName() << margin (child) << '\n';
 
     for (const auto& r : panel.getRules())
         std::cout << "   rule  y " << r.row.getY() << ".." << (r.row.getBottom() - 1)
                   << "  centre " << r.row.getCentreY()
                   << (r.text.isEmpty() ? "" : "  \"" + r.text + "\"") << '\n';
+
+    // A paged panel's furniture is painted and so has no child to print. These
+    // are the rectangles a reviewer asks the size of -- "how big does the
+    // grille actually come out?" was the first question asked of this panel.
+    if (auto* paged = dynamic_cast<bmo::reverb::ReverbPanel*> (&panel))
+    {
+        const auto box = [] (const char* name, juce::Rectangle<int> r)
+        {
+            std::cout << "   " << name << "  " << r.toString()
+                      << "   " << r.getWidth() << " x " << r.getHeight() << '\n';
+        };
+
+        box ("bezel  ", paged->getBezelBox());
+        box ("screen ", paged->getScreenBox());
+        box ("readout", paged->getReadoutBox());
+        box ("cluster", paged->getClusterBox());
+        box ("grille ", paged->getGrilleBox());
+    }
 }
 
 int main (int argc, char** argv)
@@ -1493,15 +1712,13 @@ int main (int argc, char** argv)
                              return std::unique_ptr<juce::AudioProcessor> (p.release());
                          } },
 
-        // BMO Linger, twice, for the same reason: it is the second expandable
-        // module and the compact half is the one a rack shows.
+        // BMO Linger, **once**. It was here twice while it was expandable, one
+        // row per width; the panel is a paged handheld as of 2026-09-21 and
+        // has one width, so a second row would be the same 500 px panel under
+        // a different name. What replaced it is `checkReverbPanel` walking the
+        // panel once per page, which is where the other two thirds of the
+        // module now live.
         { "reverb", +[] () -> std::unique_ptr<juce::AudioProcessor> { return createReverb(); } },
-        { "reverb compact", +[] () -> std::unique_ptr<juce::AudioProcessor>
-                            {
-                                auto p = createReverb();
-                                p->setExpanded (false);
-                                return std::unique_ptr<juce::AudioProcessor> (p.release());
-                            } },
     };
 
 
@@ -1524,7 +1741,26 @@ int main (int argc, char** argv)
     if (dumping)
     {
         for (const auto& product : all)
-            withPanel (product, [&] (bmo::ui::ModulePanel& panel) { dump (panel, product.who); });
+            withPanel (product, [&] (bmo::ui::ModulePanel& panel)
+            {
+                // A paged panel is dumped once per page: two thirds of BMO
+                // Linger is unparented at any moment, so one dump would show a
+                // third of it and say nothing about the rest.
+                if (auto* paged = dynamic_cast<bmo::reverb::ReverbPanel*> (&panel))
+                {
+                    for (const auto p : { bmo::reverb::Page::early, bmo::reverb::Page::tail,
+                                          bmo::reverb::Page::tone })
+                    {
+                        paged->setPage (p);
+                        dump (panel, juce::String (product.who) + " page "
+                                       + paged->getScreen().readout());
+                    }
+
+                    return;
+                }
+
+                dump (panel, product.who);
+            });
 
         return 0;
     }
@@ -1604,21 +1840,25 @@ int main (int argc, char** argv)
     withPanel (named ("deq"), [] (bmo::ui::ModulePanel& panel) { checkEquals (panel.getWidth(), 600, "deq opens full standalone"); });
     withPanel (named ("deq compact"), [] (bmo::ui::ModulePanel& panel) { checkEquals (panel.getWidth(), 320, "deq compact width"); });
 
-    // BMO Linger. The main face at both widths, the three expanded groups, and
-    // the ER/tail display -- which no other check here can see, because it has
-    // no parameter of its own and paints itself. Its own panel each time,
-    // because this one moves parameters and every check above reads a panel
-    // that has not been touched.
+    // BMO Linger: the paged handheld, walked once per page, plus the bezel,
+    // the keys, the grille and the screen's own arithmetic -- none of which
+    // any other check here can see, because they are painted and have no
+    // parameter of their own. Its own panel, because this one moves
+    // parameters and every check above reads a panel that has not been
+    // touched.
     withPanel (named ("reverb"), [] (bmo::ui::ModulePanel& panel)
     {
-        checkEquals (panel.getWidth(), 700, "reverb opens full standalone");
-        checkReverbPanel (panel, "reverb", true);
-    });
+        // **One width, and it is the same one in a rack.** The two-width split
+        // went with the pages; `ModuleDef::expandedWidth` is 0 and
+        // `isExpandable()` is false, which is what stops the standalone header
+        // and the slot bar offering a switch with nothing to switch.
+        checkEquals (panel.getWidth(), 500, "reverb opens at its one width");
+        check (! panel.getContext().def.isExpandable(),
+               "a paged module has nothing to expand into");
+        checkEquals (panel.getContext().def.expandedWidth, 0,
+                     "reverb should declare no second width");
 
-    withPanel (named ("reverb compact"), [] (bmo::ui::ModulePanel& panel)
-    {
-        checkEquals (panel.getWidth(), 300, "reverb compact width");
-        checkReverbPanel (panel, "reverb compact", false);
+        checkReverbPanel (panel, "reverb");
     });
 
     // BMO Util reserves the output section and adopts neither half of it. This
@@ -1701,6 +1941,47 @@ int main (int argc, char** argv)
             checkEquals (deq->getWidth(), 320, "deq arrives in a rack compact");
             checkOutputRule (*deq, "rack deq");
             checkDeqPanel (*deq, "rack deq");
+        }
+
+        rack->editorBeingDeleted (editor.get());
+        editor.reset();
+    }
+
+    // BMO Linger in a rack, which is now the same panel standalone gives you.
+    // Its own block rather than a fifth module in the four-panel one above,
+    // and worth having because the *slot* is what changed: a rack used to open
+    // it at 300 with an expand switch on its bar, and now opens it at 460 with
+    // no switch at all.
+    {
+        auto rack = createRack();
+        rack->prepareToPlay (48000.0, 512);
+        rack->clearChain();
+        rack->addModule (*rack->findModule ("util"));
+        rack->addModule (*rack->findModule ("reverb"));
+
+        std::unique_ptr<juce::AudioProcessorEditor> editor (rack->createEditorAndMakeActive());
+        std::vector<bmo::ui::ModulePanel*> panels;
+        collectPanels (*editor, panels);
+
+        check (panels.size() == 2, "a util-and-reverb rack has two panels");
+
+        if (panels.size() == 2)
+        {
+            auto* linger = panels[0]->getX() > panels[1]->getX() ? panels[0] : panels[1];
+
+            checkEquals (linger->getWidth(), 500, "reverb arrives in a rack at its one width");
+            check (! rack->isSlotExpanded (1), "there is no expanded view to arrive in");
+
+            checkWithinPanel     (*linger, "rack reverb slot");
+            checkNoOverlap       (*linger, "rack reverb slot");
+            checkCaptionsFit     (*linger, "rack reverb slot");
+            checkSwitchLabelsFit (*linger, "rack reverb slot");
+
+            // And the whole paged walk, on a slot rather than on a product:
+            // the parameters underneath are generic `SlotParameter`s here, and
+            // the two dropdowns read their names off the module's own spec for
+            // exactly that reason.
+            checkReverbPanel (*linger, "rack reverb");
         }
 
         rack->editorBeingDeleted (editor.get());

@@ -72,3 +72,22 @@ by dispatched agents on AURORA, 2026-09-20, under `HANDOFF-groundwork.md`.
 **Blocking, found 2026-09-21:** `10` §3's stability premise is wrong for tape.
 The +2 dB head bump puts unity at FEEDBACK 84 %, not 97 %, and a freeze parked
 at the detent tilts into a 55 Hz boom. Bucket-brigade's compander is unchecked.
+
+## Decided (Frosty, 2026-09-21, second pass) — the table is settled
+
+17. **The schema is 32 parameters**, ids renumbered, every one inside a rack
+    slot's 32 host lanes so all are automatable everywhere. The full table is
+    in `15-lane-redesign.md` and is authoritative over `11` §3 until that is
+    rewritten.
+18. **VOICE and lane VOICE are cut.** LO CUT and HI CUT are already continuous
+    sweeps; VOICE only added resonance on top. Cutting it also retires the
+    state-variable filters and their closed-form peak normalisation.
+19. **`fx_type` loses Octave up, Octave down and Reverse**, leaving Diffuse,
+    Sweep, Pan/Tremolo and Crush. Octaves compound in a feedback loop; Reverse
+    was the only type needing a second buffer. Choice lists are append-only
+    after ship, so this was the last moment.
+20. **lane DRIVE is cut, and is the one to reconsider** if the sound wants it —
+    appends are permitted after ship.
+21. **Both FX buttons stay.** "Amount at 0 means bypassed" was considered and
+    rejected: it costs the one-click A/B, and Crush's bit depth does not read
+    zero as a no-op.

@@ -59,12 +59,15 @@ than lost quietly.
 
 ## The schema
 
-Ids 14–16 are repurposed in place (`send`, `laneGain`, `hold`); the lane's own
-voicing and FX append from 20. **`laneGain` changes type from a 3-choice to a
-float, and that is the one change that must happen before ship** — additions may
-be appended afterwards, at the cost of automation lane ordering, but a type
-change may not. The full proposed table is drafted and awaiting review; it takes
-the module from 20 parameters to roughly 35.
+**Settled at 32 parameters — see "THE PARAMETER TABLE" below**, which is
+authoritative. The ids are renumbered from the stage 1 checkpoint, which is
+permitted because nothing has shipped.
+
+Two kinds of change are not equal. **Deletions, reordering, renames and a
+parameter's TYPE are frozen at ship; additions are not** — a new parameter may
+be appended afterwards, and the only cost is that it sits at the end of the
+automation list and, past id 32, loses its host lane in a rack. That asymmetry
+is why the cuts below had to happen now and why lane DRIVE can come back later.
 
 `feedback`'s law also changes: divided by the character's peak in-loop
 magnitude, so unity lands at 97 % on every character. See below.
@@ -112,6 +115,79 @@ candidates cheapest first. Add to it:
 - Seeding on unlink must be a **UI gesture, not a side effect of the `link`
   parameter changing** — otherwise automating LINK rewrites eight parameters on
   every pass and fights the user's own automation.
+
+## THE PARAMETER TABLE — settled 2026-09-21, 32 parameters
+
+The rack gives each slot **32 host automation lanes** (`RackProcessor.h`,
+`kParamsPerSlot`). Past that, `SlotOverflow` keeps a parameter working in the
+panel, the DSP, presets and saved state, but it gets no host lane and **cannot
+be automated in a rack**. Dwell fits exactly, so every parameter stays
+automatable everywhere.
+
+Ids are renumbered from the stage 1 checkpoint, which is permitted because
+nothing has shipped. Carrying a hole where VOICE was would be worse.
+
+| id | name | range / law | default |
+|---|---|---|---|
+| 0 | `time` | 1…2000 ms, log | 375 |
+| 1 | `sync` | bool | off (ships disabled) |
+| 2 | `note` | choice, 16 | 1/8D (ships disabled) |
+| 3 | `feedback` | `g = (1.05·fb^1.6) / peak_c` | 35 |
+| 4 | `character` | Clean / Tape / Bucket | Clean |
+| 5 | `stereo` | Stereo / Ping-pong / Dual | Stereo |
+| 6 | `low_cut` | 20…1000 Hz, log | 20 |
+| 7 | `high_cut` | 1k…20k Hz, log | 20000 |
+| 8 | `mod_rate` | 0.1…8 Hz, log | 0.6 |
+| 9 | `mod_depth` | 0…100 % | 0 |
+| 10 | `drive` | 0…100 % | 0 |
+| 11 | `duck` | 0…24 dB | 0 |
+| 12 | `mix` | 0…100 % | 35 |
+| 13 | `send` | bool | off |
+| 14 | `lane_gain` | −100…+100, 0 = exact unity, sticky centre | −40 |
+| 15 | `hold` | bool | off |
+| 16 | `chop` | bool | off |
+| 17 | `fx` | bool | off |
+| 18 | `fx_type` | choice, 4 | Diffuse |
+| 19 | `fx_amount` | 0…100 % | 35 |
+| 20 | `link` | bool | on |
+| 21 | `lane_level` | −24…+24 dB | 0 |
+| 22 | `lane_time` | 1…2000 ms, log | 250 |
+| 23 | `lane_character` | Clean / Tape / Bucket | Clean |
+| 24 | `lane_stereo` | Stereo / Ping-pong / Dual | Stereo |
+| 25 | `lane_low_cut` | 20…1000 Hz, log | 20 |
+| 26 | `lane_high_cut` | 1k…20k Hz, log | 20000 |
+| 27 | `lane_mod_rate` | 0.1…8 Hz, log | 0.6 |
+| 28 | `lane_mod_depth` | 0…100 % | 0 |
+| 29 | `lane_fx` | bool | off |
+| 30 | `lane_fx_type` | choice, 4 | Diffuse |
+| 31 | `lane_fx_amount` | 0…100 % | 35 |
+
+### What was cut, and why
+
+- **VOICE and lane VOICE are gone** (Frosty, 2026-09-21). LO CUT and HI CUT are
+  already continuous log sweeps; VOICE only added *resonance* on top of them,
+  raising Q from 0.5 to 6. Cutting it also removes the reason those filters had
+  to be state-variable and peak-normalised in closed form — they are plain
+  one-poles again, and `10` §11's warning that an unnormalised Q = 6
+  self-oscillates at a third of the feedback travel no longer applies.
+- **`fx_type` loses Octave up, Octave down and Reverse**, leaving Diffuse,
+  Sweep, Pan/Tremolo and Crush. The octaves compound in a feedback loop — three
+  repeats is three octaves — and Reverse was the only type needing a second
+  buffer, which the handoff flagged must not be allocated on the audio thread.
+  That problem is now gone. Four types also tile as a 2×2 grid rather than an
+  awkward seven. Choice lists are append-only after ship, so this had to happen
+  now or never.
+- **lane DRIVE is cut, and is the one to reconsider.** Saturation is slow and
+  cumulative; a throw is one word decaying over a second or two, so it has the
+  least to work with. **If the sound turns out to want it, append it later** —
+  appends are permitted after ship. It would land past id 32 and lose rack
+  automation, which costs little for a set-and-forget amount.
+- **SYNC and NOTE are kept** even though they ship disabled, because dropping
+  drive made room.
+- **Both FX buttons are kept.** Using "amount at 0" as the bypass was considered
+  and rejected: it loses the one-click A/B that makes an effect stage usable,
+  and Crush's bit depth and Reverse's seam do not naturally read zero as a
+  no-op.
 
 ## Settled since
 

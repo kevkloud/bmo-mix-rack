@@ -137,6 +137,20 @@ const bmo::ui::Knob* knobFace (const bmo::ui::PlainKnob& knob)
     return nullptr;
 }
 
+/** Every ChoiceBox under `root`. BMO Linger's TYPE and ER MODE are the only
+    two in the suite; the walk is generic so the next one is covered the day it
+    is added rather than the day someone remembers. */
+void collectChoiceBoxes (juce::Component& root, std::vector<bmo::ui::ChoiceBox*>& out)
+{
+    for (auto* child : root.getChildren())
+    {
+        if (auto* choice = dynamic_cast<bmo::ui::ChoiceBox*> (child))
+            out.push_back (choice);
+
+        collectChoiceBoxes (*child, out);
+    }
+}
+
 /** Every SwitchButton under `root`. */
 void collectSwitches (juce::Component& root, std::vector<bmo::ui::SwitchButton*>& out)
 {
@@ -559,6 +573,25 @@ void checkCaptionsFit (bmo::ui::ModulePanel& panel, const juce::String& who)
         check (overflow <= 0.0f,
                who + " caption '" + knob->getName() + "' overflows its box by "
                    + juce::String (overflow, 1) + " px");
+    }
+
+    // A dropdown has two ways to clip and only one of them is a knob's: its
+    // caption, measured like the above, and **the widest item in its list**,
+    // which is the one nothing else here could see. A type list that fits at
+    // "Room" and clips at "Chamber" renders perfectly until somebody opens it.
+    // `ChoiceBox::captionOverflow` returns the worse of the two.
+    {
+        std::vector<bmo::ui::ChoiceBox*> boxes;
+        collectChoiceBoxes (panel, boxes);
+
+        for (auto* box : boxes)
+        {
+            const auto overflow = box->captionOverflow();
+
+            check (overflow <= 0.0f,
+                   who + " dropdown '" + box->getName() + "' overflows its box by "
+                       + juce::String (overflow, 1) + " px -- caption or widest item");
+        }
     }
 
     // A stepped dial's legend too. BMO EQ's are frequencies ("1k6"); BMO DEQ's
@@ -993,6 +1026,74 @@ void checkReverbPanel (bmo::ui::ModulePanel& panel, const juce::String& who, boo
                        + (utility ? "utility" : "character")
                        + " -- utility is input, output and gain, and OUTPUT is the"
                          " only one of those on this panel");
+        }
+    }
+
+    //== The two named lists are dropdowns, and they read back ================
+    //
+    // **"Room type makes no sense as a knob"** -- Frosty, 2026-09-21. TYPE and
+    // ER MODE were stepped knobs over a list of names, which is the one kind
+    // of parameter a knob cannot show: Chamber is not more than Room, so the
+    // face says nothing and the control has to be turned before it can be
+    // read. They are `ui::ChoiceBox` now, and every other control on this
+    // panel is still a knob -- including VARIATION, whose seven positions
+    // *are* an ordered amount, which is why it is a stepped float and not a
+    // choice list at all.
+    //
+    // Asserted as "is a ChoiceBox **and is not a PlainKnob**" rather than by
+    // counting: a panel that grew a third dropdown should not fail this, and a
+    // panel that quietly turned one back into a knob must.
+    {
+        for (const auto* caption : { "TYPE", "ER MODE" })
+        {
+            auto* control = findNamed (panel, caption);
+
+            if (control == nullptr)
+                continue;       // reported by the face/group checks
+
+            check (dynamic_cast<bmo::ui::ChoiceBox*> (control) != nullptr,
+                   who + " " + caption + " should be a dropdown -- a list of names on a knob"
+                         " has to be turned before it can be read");
+            check (dynamic_cast<bmo::ui::PlainKnob*> (control) == nullptr,
+                   who + " " + caption + " is still a knob");
+        }
+
+        // And it shows the position the parameter is on, at every position --
+        // which is what a knob could not do and the whole reason for the
+        // change. The strings are `params.h`'s own, written out here rather
+        // than read from the spec: a test that took the names from the same
+        // table the control does would agree with any table, including one
+        // where Cavern had quietly gone back to being Large Hall.
+        if (auto* type = dynamic_cast<bmo::ui::ChoiceBox*> (findNamed (panel, "TYPE")))
+        {
+            const char* const names[] { "Room", "Chamber", "Hall", "Cavern", "Plate", "Ambience" };
+
+            for (int i = 0; i < (int) std::size (names); ++i)
+            {
+                params.setReal (R::Index::type, (float) i);
+
+                check (type->getSelectedText() == names[i],
+                       who + " TYPE at detent " + juce::String (i) + " should read '"
+                           + names[i] + "', reads '" + type->getSelectedText() + "'");
+            }
+
+            params.setReal (R::Index::type, (float) R::room);
+        }
+
+        if (auto* mode = dynamic_cast<bmo::ui::ChoiceBox*> (findNamed (panel, "ER MODE")))
+        {
+            const char* const names[] { "Taps", "Energy", "Blend" };
+
+            for (int i = 0; i < (int) std::size (names); ++i)
+            {
+                params.setReal (R::Index::ermode, (float) i);
+
+                check (mode->getSelectedText() == names[i],
+                       who + " ER MODE at detent " + juce::String (i) + " should read '"
+                           + names[i] + "', reads '" + mode->getSelectedText() + "'");
+            }
+
+            params.setReal (R::Index::ermode, (float) R::taps);
         }
     }
 

@@ -28,16 +28,16 @@ namespace
     constexpr int kKnobRow  = 124;
     constexpr int kSketchHeight = 150;
 
-    /** The line a knob prints its value on: `PlainKnob::valueRow`, 11 pt at
-        1.2 plus one.
-
-        **A row with a printed value on it is this much taller, and the knobs
-        beside it reserve the same line and print nothing on it.** A value line
-        lifts a knob and its caption by its own height, so TYPE sat 8 px above
-        SIZE and the pair stopped reading as one row -- and the bracket drawn
-        under the pair then ran through "Room". BMO Dimension's BLOOM/BELOW row
-        is the precedent and the same two-part fix. */
-    constexpr int kValueRow = 14;
+    // **There is no printed-value row on this panel and there used not to be
+    // two.** TYPE and ER MODE were stepped knobs over a list of names, so both
+    // printed their choice under themselves on a 14 px line -- and because a
+    // value line lifts a knob and its caption by its own height, the knobs
+    // beside them had to reserve the same line blank or the pair stopped
+    // reading as one row and the bracket ran through "Room". Both are
+    // dropdowns now (`ui::ChoiceBox`) and print inside their own boxes, so the
+    // line, the two blank reservations and the taller rows that carried them
+    // are all gone. Kept as a note because the next control tempted to print a
+    // value inherits the whole arrangement, not just the line.
 
     /** The level row is three abreast rather than two, so its cells are a
         third of the column instead of a half and the knob has to come down
@@ -495,7 +495,13 @@ ReverbPanel::ReverbPanel (ui::ModuleContext ctx)
       // takes neither shared section in the first place. WIDTH is the other,
       // and stays `character` too -- it sets how wide the tail is made, which
       // is BMO Dimension's DIMENSION and not anybody's gain.
-      typeKnob      (context.params.param (Index::type),      "TYPE",      ui::Knob::Style::character, 0.62f, context.def.accent),
+      // **TYPE is the one control on the face that is a list of names rather
+      // than an amount, so it is the one that is not a knob.** The style
+      // argument above applies to everything that has a face to draw; a
+      // dropdown carries the module's colour on its arrow and its caption
+      // instead. See `ui::ChoiceBox`.
+      typeBox       (context.params.param (Index::type),
+                     context.params.spec  (Index::type),      "TYPE",      context.def.accent),
       sizeKnob      (context.params.param (Index::size),      "SIZE",      ui::Knob::Style::character, 0.62f, context.def.accent),
       preDelayKnob  (context.params.param (Index::predelay),  "PRE-DELAY", ui::Knob::Style::character, 0.62f, context.def.accent),
       decayKnob     (context.params.param (Index::decay),     "DECAY",     ui::Knob::Style::character, 0.62f, context.def.accent),
@@ -503,8 +509,10 @@ ReverbPanel::ReverbPanel (ui::ModuleContext ctx)
       verbLevelKnob (context.params.param (Index::verblevel), "REVERB",    ui::Knob::Style::character, 0.62f, context.def.accent),
       mixKnob       (context.params.param (Index::mix),       "MIX",       ui::Knob::Style::character, 0.62f, context.def.accent),
 
-      // EARLY.
-      erModeKnob    (context.params.param (Index::ermode),      "ER MODE",   ui::Knob::Style::character, 0.58f, context.def.accent),
+      // EARLY. ER MODE is the panel's other list of names, and its other
+      // dropdown: Energy is not more than Taps.
+      erModeBox     (context.params.param (Index::ermode),
+                     context.params.spec  (Index::ermode),      "ER MODE",   context.def.accent),
       densityKnob   (context.params.param (Index::erdensity),   "DENSITY",   ui::Knob::Style::character, 0.58f, context.def.accent),
       erShapeKnob   (context.params.param (Index::ershape),     "ER SHAPE",  ui::Knob::Style::character, 0.58f, context.def.accent),
       erSpreadKnob  (context.params.param (Index::erspread),    "ER SPREAD", ui::Knob::Style::character, 0.58f, context.def.accent),
@@ -545,7 +553,13 @@ ReverbPanel::ReverbPanel (ui::ModuleContext ctx)
 {
     addAndMakeVisible (sketch);
 
-    for (auto* k : { &typeKnob, &sizeKnob, &preDelayKnob, &decayKnob,
+    // TYPE hangs its box at the foot of the square a `kKnobSide` knob would
+    // occupy, so its caption lands on SIZE's line rather than twenty pixels
+    // off it. `ui::ChoiceBox::setControlSide` carries the argument.
+    typeBox.setControlSide (kKnobSide);
+    addAndMakeVisible (typeBox);
+
+    for (auto* k : { &sizeKnob, &preDelayKnob, &decayKnob,
                      &erLevelKnob, &verbLevelKnob, &mixKnob })
     {
         k->setKnobSide (kKnobSide);
@@ -560,31 +574,28 @@ ReverbPanel::ReverbPanel (ui::ModuleContext ctx)
         k->setCaptionSize (kTrioCaptionSize);
     }
 
-    // **The two choice knobs print their value, and they are the only two that
-    // have to.** A stepped knob over a name list has nothing on it that says
-    // which name it is on: with no number, TYPE and ER MODE are unreadable,
-    // and TYPE is the first thing anyone looks at. Every other control here is
-    // either drawn in the display above it or carries a unit that speaks for
-    // itself, which is the suite's default -- the knobs say less and more, not
-    // how much (ui::PlainKnob's class comment).
-    typeKnob.setShowsValue (true);
-    erModeKnob.setShowsValue (true);
-
-    // And the knobs sharing a row with one of them reserve the same line and
-    // print nothing on it, so the row stays level and the bracket under it
-    // clears the type. See kValueRow, and BMO Dimension's BLOOM.
-    for (auto* k : { &sizeKnob, &densityKnob, &erShapeKnob })
-    {
-        k->setShowsValue (true);
-        k->setValueFormat ([] (const juce::String&) { return juce::String(); });
-    }
+    // **Nothing on this panel prints its value any more, and the two controls
+    // that used to are the reason.** TYPE and ER MODE were stepped knobs over
+    // a list of names, which is unreadable without a printed value, so both
+    // opted in -- and their row-mates then had to reserve the same blank line
+    // to stay level with them. The dropdowns print their own choice inside the
+    // box, so the value line and the two blank ones it forced go with them,
+    // and the panel is back to the suite's default: knobs say less and more,
+    // not how much (`ui::PlainKnob`'s class comment).
 
     for (auto* c : groupControls())
+    {
         if (auto* k = dynamic_cast<ui::PlainKnob*> (c))
         {
             k->setKnobSide (kGroupKnobSide);
             k->setCaptionSize (kGroupCaptionSize);
         }
+        else if (auto* b = dynamic_cast<ui::ChoiceBox*> (c))
+        {
+            b->setControlSide (kGroupKnobSide);
+            b->setCaptionSize (kGroupCaptionSize);
+        }
+    }
 
     // Every parameter the picture is drawn from redraws it, and the list is
     // exactly `ErTailSketch::State`'s fields -- which is the thing a reader
@@ -615,7 +626,7 @@ std::vector<juce::Component*> ReverbPanel::groupControls() const
     auto* self = const_cast<ReverbPanel*> (this);
 
     return {
-        &self->erModeKnob, &self->densityKnob, &self->erShapeKnob,
+        &self->erModeBox, &self->densityKnob, &self->erShapeKnob,
         &self->erSpreadKnob, &self->erHiCutKnob, &self->variationKnob,
         &self->feedKnob, &self->linkErSwitch,
 
@@ -749,12 +760,15 @@ void ReverbPanel::resized()
 
     //== The main face =========================================================
     {
-        // Four blocks -- the display and three knob rows -- and five gaps: a
+        // Four blocks -- the display and three control rows -- and five gaps: a
         // margin above the first and below the last as well as between them,
-        // so the spacing stays even if a block's height changes later. The
-        // ROOM row is one value line taller than the other two, because TYPE
-        // prints its choice on it.
-        const auto content = kSketchHeight + kKnobRow * 2 + kValueRow + kTrioRow;
+        // so the spacing stays even if a block's height changes later.
+        //
+        // **The ROOM row was one value line taller than the others** while
+        // TYPE was a knob printing its choice under itself. TYPE is a dropdown
+        // and prints its choice inside its box, so the extra line is gone and
+        // the three rows are the plain ones again.
+        const auto content = kSketchHeight + kKnobRow * 2 + kTrioRow;
         const auto gap = juce::jmax (kSwitchGap, (face.getHeight() - content) / 5);
 
         /** A heading set *in* a gap the rhythm was going to leave anyway, so
@@ -764,7 +778,12 @@ void ReverbPanel::resized()
             faceRules.push_back (gapRow.withSizeKeepingCentre (gapRow.getWidth(), kFaceRuleRow));
         };
 
-        const auto pair = [] (juce::Rectangle<int> row, ui::PlainKnob& left, ui::PlainKnob& right)
+        // `juce::Component&` rather than `ui::PlainKnob&`: the ROOM row is a
+        // dropdown beside a knob, and both halves of a pair get the same cell
+        // whatever they are -- which is also what keeps their tops and their
+        // feet level, the thing `ui_layout_tests` reads to decide that two
+        // controls are in one row.
+        const auto pair = [] (juce::Rectangle<int> row, juce::Component& left, juce::Component& right)
         {
             const auto half = row.getWidth() / 2;
             left .setBounds (row.removeFromLeft (half));
@@ -779,8 +798,8 @@ void ReverbPanel::resized()
 
         // ROOM: what the room is.
         legendIn (face.removeFromTop (gap));
-        pairBoxes[0] = face.removeFromTop (kKnobRow + kValueRow);
-        pair (pairBoxes[0], typeKnob, sizeKnob);
+        pairBoxes[0] = face.removeFromTop (kKnobRow);
+        pair (pairBoxes[0], typeBox, sizeKnob);
 
         // TIME: when it arrives and how long it rings.
         legendIn (face.removeFromTop (gap));
@@ -831,9 +850,10 @@ void ReverbPanel::resized()
     // foot of the panel while the face column stopped short of it, and that
     // difference is most of what made the two halves look unbalanced.
     //
-    // EARLY's first row is one value line taller, for ER MODE's printed
-    // choice, exactly as the face's ROOM row is for TYPE's.
-    const auto content = kGroupRuleRow * 3 + kGroupKnobRow * 8 + kValueRow;
+    // EARLY's first row was one value line taller, for ER MODE's printed
+    // choice, exactly as the face's ROOM row was for TYPE's. Both lines went
+    // with the knobs that needed them.
+    const auto content = kGroupRuleRow * 3 + kGroupKnobRow * 8;
     const auto gap = juce::jmax (kSwitchGap, (groups.getHeight() - content) / 4);
 
     const auto heading = [&] (juce::Rectangle<int>& column)
@@ -841,23 +861,27 @@ void ReverbPanel::resized()
         groupRules.push_back (column.removeFromTop (kGroupRuleRow));
     };
 
-    /** Up to three knobs abreast, each in a third of the column. `extra` is
-        the value line a row with a printed choice on it needs. */
-    const auto row = [&] (juce::Rectangle<int>& column,
-                          std::initializer_list<ui::PlainKnob*> knobs,
-                          int extra = 0)
-    {
-        auto cells = column.removeFromTop (kGroupKnobRow + extra);
+    /** Up to three controls abreast, each in a third of the column.
 
-        for (auto* k : knobs)
-            k->setBounds (cells.removeFromLeft (cellWidth));
+        `juce::Component*` rather than `ui::PlainKnob*`, for the face's `pair`
+        reason: EARLY's first row is a dropdown beside two knobs, and a cell is
+        a cell. It used to take an `extra` for the value line ER MODE's printed
+        choice needed; the dropdown prints inside its box, so every row here is
+        now the same height. */
+    const auto row = [&] (juce::Rectangle<int>& column,
+                          std::initializer_list<juce::Component*> controls)
+    {
+        auto cells = column.removeFromTop (kGroupKnobRow);
+
+        for (auto* c : controls)
+            c->setBounds (cells.removeFromLeft (cellWidth));
     };
 
     groups.removeFromTop (gap);
 
     // EARLY: how the early cluster is made, and what feeds the tail from it.
     heading (groups);
-    row (groups, { &erModeKnob, &densityKnob, &erShapeKnob }, kValueRow);
+    row (groups, { &erModeBox, &densityKnob, &erShapeKnob });
     row (groups, { &erSpreadKnob, &erHiCutKnob, &variationKnob });
     {
         auto cells = groups.removeFromTop (kGroupKnobRow);

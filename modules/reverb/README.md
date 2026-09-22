@@ -16,7 +16,7 @@ Seven controls and a picture. Everything else is one click away.
 
 | Control | What it does |
 |---|---|
-| **TYPE** | Room, Chamber, Hall, Large Hall, Plate, Ambience. Small to large, then a plate, then Ambience — which is the one with almost no tail. |
+| **TYPE** | Room, Chamber, Hall, Cavern, Plate, Ambience. Small to large, then a plate, then Ambience — which is the one with almost no tail. **Picking a type re-sets the controls that belong to it**, every time: a type is a voicing rather than a label, so SIZE, SOURCE, the four early controls, the two modulation controls, IN HI-CUT and the ER and REVERB faders all move to what that type is. Everything else stays where you put it. |
 | **SIZE** | How big the space is, 0.5 to 80 m. It moves the reflections apart and the tail with them; it does not glide, so a held note does not bend while you turn it. |
 | **PRE-DELAY** | How long before the tail arrives, 0 to 250 ms. **The dry signal is never delayed**, so this cannot comb against what you put in. |
 | **DECAY** | How long the tail takes to die, 0.1 to 20 s. |

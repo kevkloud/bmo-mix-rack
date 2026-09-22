@@ -169,12 +169,39 @@ int main()
             return param (*proc, id).getCurrentValueAsText();
         };
 
-        check (choice (P::kType, 0.0f) == "Room", "type 0 is Room");
-        check (choice (P::kType, 1.0f) == "Chamber", "type 1 is Chamber");
-        check (choice (P::kType, 2.0f) == "Hall", "type 2 is Hall");
-        check (choice (P::kType, 3.0f) == "Large Hall", "type 3 is Large Hall");
-        check (choice (P::kType, 4.0f) == "Plate", "type 4 is Plate");
-        check (choice (P::kType, 5.0f) == "Ambience", "type 5 is Ambience");
+        // **The six names, written out, in order.** Index 3 was "Large Hall"
+        // until 2026-09-21 and is "Cavern": the late network scales with the
+        // taps under SIZE, so Large Hall was Hall at a larger Size and SIZE
+        // already covers it several times over. Cavern takes the slot and
+        // carries what the pack had reserved as Church. A rename is free --
+        // the *count* is what normalisation depends on, six is unchanged, and
+        // that is the arithmetic asserted a few lines below.
+        //
+        // Asserted twice on purpose: through the host, which is what a DAW's
+        // automation lane and `tools/snapshot`'s `type=Cavern` read, and
+        // against `kTypeNames` itself, which is the table an edit would touch.
+        // A check that went only through the host would pass a table and a
+        // spec list that had been changed together in the wrong direction.
+        const char* const kNames[] { "Room", "Chamber", "Hall", "Cavern", "Plate", "Ambience" };
+
+        static_assert (std::size (kNames) == (size_t) P::numTypes, "six types, and the count is the decision");
+
+        for (int i = 0; i < P::numTypes; ++i)
+        {
+            check (choice (P::kType, (float) i) == kNames[i],
+                   "type " + juce::String (i) + " should read '" + kNames[i] + "', reads '"
+                       + choice (P::kType, (float) i) + "'");
+
+            check (juce::String (P::kTypeNames[i]) == kNames[i],
+                   juce::String ("kTypeNames[") + juce::String (i) + "] should be '" + kNames[i]
+                       + "', is '" + P::kTypeNames[i] + "'");
+        }
+
+        // And the ordinals the rest of the module indexes by, so a name and
+        // the enumerator that reaches it cannot drift apart.
+        check (juce::String (P::kTypeNames[P::room]) == "Room", "room is index 0");
+        check (juce::String (P::kTypeNames[P::cavern]) == "Cavern", "cavern is index 3");
+        check (juce::String (P::kTypeNames[P::ambience]) == "Ambience", "ambience is index 5");
 
         check (choice (P::kErMode, 0.0f) == "Taps", "er mode 0 is Taps");
         check (choice (P::kErMode, 1.0f) == "Energy", "er mode 1 is Energy");
@@ -191,6 +218,188 @@ int main()
                     "Ambience is the top of the lane with six types");
         check (std::abs (normalisedOf (P::ambience, P::numTypes + 1) - 1.0f) > 0.1f,
                "a seventh type would move Ambience off the top of the lane");
+    }
+
+    //== A type is a voicing ==================================================
+    //
+    // Selecting a type re-applies that type's ten constants over the
+    // parameters that hold them -- **every time, not only at instantiation**.
+    // Frosty's decision, 2026-09-21; `modules/reverb/TypeVoicing.h` carries
+    // the mechanism and the automation conflict it knowingly creates.
+    //
+    // Asserted through a real `SingleModuleProcessor` rather than against the
+    // table, because the thing under test is not the table: it is that the
+    // engine builds the link at all, that the link is bound to the parameters
+    // a host is holding, and that it fires with no editor anywhere -- there is
+    // no panel in this file. Every assertion is against the constant itself,
+    // never against "bigger than it was".
+    {
+        auto proc = createReverb();
+
+        // The ten, as ids, with the constant each one takes from a type's row.
+        // Written out rather than looped over `typeSettings`, which is the
+        // thing being checked: a loop over it would agree with any list it
+        // returned, including a short one.
+        struct Stamped { const char* id; float P::TypeConstants::* field; };
+
+        const Stamped kStamped[] {
+            { P::kSize,      &P::TypeConstants::sizeM },
+            { P::kErDensity, &P::TypeConstants::erDensity },
+            { P::kErShape,   &P::TypeConstants::erShape },
+            { P::kErSpread,  &P::TypeConstants::erSpreadMs },
+            { P::kModDepth,  &P::TypeConstants::modDepthMs },
+            { P::kModRate,   &P::TypeConstants::modRateHz },
+            { P::kInHiCut,   &P::TypeConstants::inHiCutHz },
+            { P::kFeed,      &P::TypeConstants::feed },
+            { P::kErLevel,   &P::TypeConstants::erLevelDb },
+            { P::kVerbLevel, &P::TypeConstants::verbLevelDb },
+        };
+
+        check (std::size (kStamped) == 10,
+               "a type stamps ten parameters -- eight until erlevel and verblevel joined them");
+
+        // Every type, in order, each one landing on its own row from whatever
+        // the one before it left behind. Starting at Room means the first
+        // move is a real change, which is what the link requires.
+        for (int t = 0; t < P::numTypes; ++t)
+        {
+            setValue (*proc, P::kType, (float) t);
+
+            const auto& row = P::constantsFor (t);
+
+            for (const auto& s : kStamped)
+                checkClose (getValue (*proc, s.id), (double) (row.*(s.field)), 0.05,
+                            juce::String ("selecting ") + P::kTypeNames[t] + " should set '"
+                                + s.id + "' to its constant");
+        }
+
+        // **Every time, and over whatever is there.** The decision is that a
+        // type behaves as a voicing, so a knob moved away from the type's own
+        // value is stamped back the next time that type is selected -- not
+        // left alone as "the user's edit".
+        setValue (*proc, P::kType, (float) P::room);
+        setValue (*proc, P::kSize, 40.0f);
+        setValue (*proc, P::kVerbLevel, -1.0f);
+        checkClose (getValue (*proc, P::kSize), 40.0, 0.05, "SIZE moves freely inside a type");
+
+        setValue (*proc, P::kType, (float) P::ambience);
+        setValue (*proc, P::kType, (float) P::room);
+
+        checkClose (getValue (*proc, P::kSize), (double) P::roomDefaults::kSizeM, 0.05,
+                    "returning to Room stamps Room's SIZE back over the edit");
+        checkClose (getValue (*proc, P::kVerbLevel), (double) P::roomDefaults::kVerbLevelDb, 0.05,
+                    "returning to Room stamps Room's REVERB back over the edit");
+
+        // **And only the ten.** A type change is a voicing, not a preset: the
+        // twenty other parameters are the user's and stay put. This is the
+        // half of the behaviour that bounds the automation conflict -- TYPE
+        // can fight REVERB, and it cannot fight DECAY.
+        const bmo::Setting kUntouched[] {
+            { P::kPreDelay, 120.0f }, { P::kPreLink, 1.0f }, { P::kDecay, 7.5f },
+            { P::kDecayShape, 1.1f }, { P::kAttack, 12.0f },
+            { P::kDampLoFreq, 400.0f }, { P::kDampLo, 1.9f },
+            { P::kDampHiFreq, 1200.0f }, { P::kDampHi, 0.2f },
+            { P::kEqLoFreq, 120.0f }, { P::kEqLo, -9.0f },
+            { P::kEqHiFreq, 1900.0f }, { P::kEqHi, 5.0f },
+            { P::kErMode, (float) P::energy }, { P::kErHiCut, 3000.0f },
+            { P::kErVariation, 6.0f }, { P::kWidth, 175.0f },
+            { P::kMix, 33.0f }, { P::kOutput, -11.0f },
+        };
+
+        for (const auto& s : kUntouched)
+            setValue (*proc, s.id, s.value);
+
+        setValue (*proc, P::kType, (float) P::cavern);
+
+        for (const auto& s : kUntouched)
+            checkClose (getValue (*proc, s.id), (double) s.value, 0.05,
+                        juce::String ("a type change must not touch '") + s.id + "'");
+
+        // The one parameter a type change is structurally unable to write is
+        // the one that triggers it: nothing in `typeSettings` is `kType`,
+        // which is what makes the recursion unconstructible rather than
+        // guarded (`TypeVoicing.h`).
+        for (int t = 0; t < P::numTypes; ++t)
+            for (const auto& s : P::typeSettings (t))
+                check (juce::String (s.id) != P::kType,
+                       juce::String ("type ") + juce::String (t) + " must not write 'type'");
+
+        checkClose (getValue (*proc, P::kType), (double) P::cavern, 1.0e-6,
+                    "and the type it was set to is the type it is on");
+    }
+
+    //== Room's defaults are Room's constants, and the table says so ==========
+    //
+    // Ten now, not eight: `erlevel` and `verblevel` joined the per-type block
+    // on 2026-09-21, which is what makes Ambience -- "tiny tail, ER-dominant"
+    // -- expressible at all. A fresh instance opens on Room, so these are a
+    // claim about what Room *is* and not merely where the knobs start.
+    {
+        auto proc = createReverb();
+
+        const auto& roomRow = P::constantsFor (P::room);
+
+        checkClose (roomRow.sizeM,       (double) P::roomDefaults::kSizeM,       1.0e-6, "Room's SIZE");
+        checkClose (roomRow.erDensity,   (double) P::roomDefaults::kErDensity,   1.0e-6, "Room's DENSITY");
+        checkClose (roomRow.erShape,     (double) P::roomDefaults::kErShape,     1.0e-6, "Room's ER SHAPE");
+        checkClose (roomRow.erSpreadMs,  (double) P::roomDefaults::kErSpreadMs,  1.0e-6, "Room's ER SPREAD");
+        checkClose (roomRow.modDepthMs,  (double) P::roomDefaults::kModDepthMs,  1.0e-6, "Room's MOD DEPTH");
+        checkClose (roomRow.modRateHz,   (double) P::roomDefaults::kModRateHz,   1.0e-6, "Room's MOD RATE");
+        checkClose (roomRow.inHiCutHz,   (double) P::roomDefaults::kInHiCutHz,   1.0e-6, "Room's IN HI-CUT");
+        checkClose (roomRow.feed,        (double) P::roomDefaults::kFeed,        1.0e-6, "Room's SOURCE");
+        checkClose (roomRow.erLevelDb,   (double) P::roomDefaults::kErLevelDb,   1.0e-6, "Room's ER");
+        checkClose (roomRow.verbLevelDb, (double) P::roomDefaults::kVerbLevelDb, 1.0e-6, "Room's REVERB");
+
+        // And a fresh instance is on that row without anything having applied
+        // it: the spec defaults *are* Room's constants, so the link has
+        // nothing to do until the type moves.
+        checkClose (getValue (*proc, P::kType), (double) P::room, 1.0e-6, "a fresh instance is a Room");
+
+        for (const auto& s : P::typeSettings (P::room))
+            checkClose (getValue (*proc, s.id), (double) s.value, 0.05,
+                        juce::String ("a fresh instance already reads Room's '") + s.id + "'");
+
+        // Ambience is the row the change was made for, and the ordering is the
+        // one thing claimed of a CALIBRATE row: ER above REVERB, which is true
+        // of no other type.
+        const auto& ambienceRow = P::constantsFor (P::ambience);
+
+        check (ambienceRow.erLevelDb > ambienceRow.verbLevelDb,
+               "Ambience is ER-dominant -- its ER sits above its REVERB");
+
+        for (const int t : { (int) P::room, (int) P::chamber, (int) P::hall,
+                             (int) P::cavern, (int) P::plate })
+            check (P::constantsFor (t).erLevelDb <= P::constantsFor (t).verbLevelDb,
+                   juce::String (P::kTypeNames[t]) + " is not an ER-star type");
+    }
+
+    //== A type recall composes with a preset recall, in that order ===========
+    //
+    // Both go through `ParamSet::apply`/`setReal`, and `type` is index 0 in
+    // the spec list and first in every factory preset -- so a restore stamps
+    // the stored type's block and *then* overwrites it with what the file
+    // actually stored. Asserted because the ordering is load-bearing and
+    // invisible: a preset that named its type last would silently lose its own
+    // sizes and levels.
+    {
+        auto proc = createReverb();
+        juce::MemoryBlock state;
+
+        // A Cavern whose SIZE and REVERB are deliberately *not* Cavern's.
+        setValue (*proc, P::kType, (float) P::cavern);
+        setValue (*proc, P::kSize, 7.5f);
+        setValue (*proc, P::kVerbLevel, -22.0f);
+        proc->getStateInformation (state);
+
+        auto restored = createReverb();
+        restored->setStateInformation (state.getData(), (int) state.getSize());
+
+        checkClose (getValue (*restored, P::kType), (double) P::cavern, 1.0e-6,
+                    "the restored instance is on Cavern");
+        checkClose (getValue (*restored, P::kSize), 7.5, 0.05,
+                    "the file's SIZE survives the type's, because type is written first");
+        checkClose (getValue (*restored, P::kVerbLevel), -22.0, 0.05,
+                    "the file's REVERB survives the type's");
     }
 
     //== Displayed values, at both ends of every knob =========================

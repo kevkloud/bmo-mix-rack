@@ -27,6 +27,7 @@
 
 #include <cmath>
 #include <iostream>
+#include <string>
 #include <vector>
 
 using namespace bmo::reverb;
@@ -176,7 +177,9 @@ int main()
         check (typeFor (0) == Type::room, "detent 0 is Room");
         check (typeFor (1) == Type::chamber, "detent 1 is Chamber");
         check (typeFor (2) == Type::hall, "detent 2 is Hall");
-        check (typeFor (3) == Type::largeHall, "detent 3 is Large Hall");
+        // Cavern since 2026-09-21; the ordinal is unchanged, which is the whole
+        // reason index 3 was renamed rather than cut (kTypeNames).
+        check (typeFor (3) == Type::cavern, "detent 3 is Cavern");
         check (typeFor (4) == Type::plate, "detent 4 is Plate");
         check (typeFor (5) == Type::ambience, "detent 5 is Ambience");
         check (typeFor (-1) == Type::room && typeFor (99) == Type::room,
@@ -186,6 +189,72 @@ int main()
         check (erModeFor (1) == ErMode::energy, "er detent 1 is Energy");
         check (erModeFor (2) == ErMode::blend, "er detent 2 is Blend");
         check (erModeFor (7) == ErMode::taps, "an out-of-range er detent falls back to Taps");
+    }
+
+    //== The per-type table, before anything has a chance to apply it =========
+    //
+    // What a type *stamps* is asserted through a real processor in
+    // tests/plugin/ReverbTests.cpp, because the mechanism is a host-side one.
+    // What can be asserted here, with no JUCE, is that the table it stamps
+    // from is well formed -- which is the half that would still be wrong if
+    // the mechanism were perfect.
+    //
+    // Room's row is real. **The other five are CALIBRATE placeholders**, so
+    // none of their values is pinned here: pinning a placeholder makes it a
+    // decision, which is precisely what the markers in params.h say it is not.
+    // What is pinned is the shape, the reachability of every value, and the
+    // one structural guarantee the re-entrancy argument rests on.
+    {
+        check ((int) (sizeof (kTypeConstants) / sizeof (TypeConstants)) == numTypes,
+               "there is one constant row per type");
+
+        for (int t = 0; t < numTypes; ++t)
+        {
+            const auto settings = typeSettings (t);
+
+            check (settings.size() == 10,
+                   "a type writes ten parameters -- eight until the two levels joined them");
+
+            for (const auto& s : settings)
+            {
+                const auto index = indexOfParam (specs(), s.id);
+
+                if (index < 0)
+                {
+                    check (false, "a type writes a parameter that is not in the schema");
+                    continue;
+                }
+
+                const auto& spec = specs()[(size_t) index];
+
+                // **Reachable, and reachable exactly.** A constant outside its
+                // parameter's range would be silently clamped, and one off the
+                // step grid silently snapped -- so selecting a type would set
+                // something other than the table says, and no assertion about
+                // the table would notice. `clampReal` is the same arithmetic
+                // the parameter itself applies.
+                check (near (spec.clampReal (s.value), s.value),
+                       "a type's constant must survive its own parameter's range and step");
+
+                // The structural half of "a type change cannot recurse": the
+                // list simply does not contain the parameter that triggers it.
+                check (std::string (s.id) != std::string (kType),
+                       "a type must not write 'type'");
+            }
+        }
+
+        // Room's row is `roomDefaults` itself rather than a copy of it, which
+        // is what makes "Room's defaults are Room's constants" true by
+        // construction. Asserted against the schema, which is the thing that
+        // would have to be edited to break it.
+        for (const auto& s : typeSettings (room))
+        {
+            const auto index = indexOfParam (specs(), s.id);
+
+            if (index >= 0)
+                check (near (specs()[(size_t) index].def, s.value),
+                       "Room's constant is the parameter's own default");
+        }
     }
 
     //== Latency: zero, everywhere, permanently ==============================

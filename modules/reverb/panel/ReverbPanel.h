@@ -267,11 +267,22 @@ private:
     // The main face. Seven controls, and the order of the members is the order
     // they are read in: what the room is, when and how long it rings, how much
     // of each generator, and how much of the whole thing.
-    ui::PlainKnob typeKnob, sizeKnob, preDelayKnob, decayKnob;
+    /** **TYPE is a dropdown, not a knob.** A knob says less and more, and a
+        room type says neither -- Chamber is not more than Room. Frosty's call,
+        2026-09-21: "Room type makes no sense as a knob". It is the first
+        control on the face and the one a stepped dial served worst, because a
+        list of names on a knob has to be turned before it can be read.
+        `ui::ChoiceBox` carries the rest of the argument, including why
+        VARIATION stays a knob and BMO DEQ's SHAPE stays a legend ring. */
+    ui::ChoiceBox typeBox;
+
+    ui::PlainKnob sizeKnob, preDelayKnob, decayKnob;
     ui::PlainKnob erLevelKnob, verbLevelKnob, mixKnob;
 
-    // EARLY.
-    ui::PlainKnob erModeKnob, densityKnob, erShapeKnob, erSpreadKnob,
+    // EARLY. ER MODE is this panel's other list of names and its other
+    // dropdown; everything below it is an amount and stays a knob.
+    ui::ChoiceBox erModeBox;
+    ui::PlainKnob densityKnob, erShapeKnob, erSpreadKnob,
                   erHiCutKnob, variationKnob, feedKnob;
     ui::SwitchButton linkErSwitch;
 

@@ -1,4 +1,5 @@
 #include "Module.h"
+#include "modules/reverb/TypeVoicing.h"
 #include "modules/reverb/dsp/ReverbDsp.h"
 #include "modules/reverb/panel/ReverbPanel.h"
 #include "modules/reverb/params.h"
@@ -50,6 +51,18 @@ const ModuleDef& module()
             return std::make_unique<ReverbPanel> (std::move (ctx));
         },
         700,
+
+        // `line` spelled out only so the field after it can be. Null is BMO,
+        // which is what it was defaulting to.
+        nullptr,
+
+        // **The one module in the suite whose parameters write each other.**
+        // TYPE is a voicing: selecting one re-applies its ten constants over
+        // the parameters that hold them, every time. The engine owns this
+        // rather than the panel, so it happens with no editor open --
+        // `modules/reverb/TypeVoicing.h` for the whole argument, including the
+        // automation conflict it knowingly creates.
+        &createParamLink,
     };
 
     return def;

@@ -27,6 +27,15 @@ namespace bmo::reverb
     overheads ask to be left alone. Revisit them with the listening pass,
     milestone M6.
 
+    **`kType` is first in every list below, and it has to stay first.**
+    Selecting a type re-applies that type's ten constants over SIZE, DENSITY,
+    ER SHAPE, ER SPREAD, MOD DEPTH, MOD RATE, IN HI-CUT, SOURCE, ER and REVERB
+    (`modules/reverb/TypeVoicing.h`), and `ParamSet::apply` walks a list in
+    order -- so a preset that named its type last would stamp that type's block
+    over its own carefully chosen sizes and levels, and nothing would say so.
+    A preset is free to set any of the ten *after* the type; that is how it
+    departs from the voicing, which is the normal case here.
+
     **There is no preset level check here, and there will be one later.** Every
     other module's suite checks that a preset comes out at the level it went
     in, against its OUTPUT. This module has an OUTPUT, so the check belongs --
@@ -113,10 +122,17 @@ inline const std::vector<FactoryPreset>& factory()
                             { kVerbLevel, -7.0f },
                             { kEqHi, -3.0f } } },
 
-        // The long one. A large hall with the low end ringing longer than the
+        // The long one. A hall at 45 m with the low end ringing longer than the
         // top, which is what every real large room does and what the absorbent
         // filters exist to make accurate rather than approximate.
-        { "Long Hall", { { kType, (float) largeHall },
+        //
+        // **It selected Large Hall until 2026-09-21 and now selects Hall.**
+        // That is the same preset and not a smaller one: Large Hall was cut
+        // precisely because it was Hall at a larger Size, and the Size it
+        // wanted is on the next line. Cavern, which took index 3, is a
+        // different sound -- long, dense and stone -- and deserves a preset of
+        // its own rather than this one's name.
+        { "Long Hall", { { kType, (float) hall },
                          { kSize, 45.0f },
                          { kPreDelay, 60.0f },
                          { kDecay, 5.5f },

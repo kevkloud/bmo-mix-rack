@@ -11,15 +11,24 @@ namespace bmo::reverb
 
 //==============================================================================
 /** Which constant block the engine runs. Six in v1; the order is frozen with
-    the choice list in params.h, and five more append later.
+    the choice list in params.h, and four more append later.
 
     A type changes **only constants** over one shared topology: the ER tap
     table, the ER window and default density, the eight FDN delay times, the
     input-diffusion depth, damping and modulation defaults, input bandwidth,
     the default ER feed, and three reserved era fields. No audio-path branch
     beyond a table lookup, and buffers sized in `prepare()` for the largest
-    type, so switching never allocates (10 section 1). */
-enum class Type { room = 0, chamber, hall, largeHall, plate, ambience };
+    type, so switching never allocates (10 section 1).
+
+    **The engine sees none of the writing.** Ten of those constants are also
+    parameters (`kTypeConstants`), and selecting a type stamps them through the
+    parameter set before this enum ever changes -- so by the time `setParams`
+    runs, `Params` already carries the new values and there is nothing here to
+    special-case. The rest, the ones with no host lane, are this file's to hold.
+
+    `cavern` was `largeHall` until 2026-09-21. The ordinal did not move; see
+    `kTypeNames`. */
+enum class Type { room = 0, chamber, hall, cavern, plate, ambience };
 
 /** How the early cluster is generated. See `kErModeNames` in params.h for what
     Blend is: defined, reachable, and **not yet heard**. */
@@ -110,8 +119,8 @@ public:
         float width         = 1.0f;                          ///< 0..2, M/S gain on the tail only
         float inHiCutHz     = roomDefaults::kInHiCutHz;      ///< 2000..20000, ahead of both generators
 
-        float erLevelDb     = -6.0f;                         ///< -40..0; -40 is silence, not -40 dB
-        float verbLevelDb   = -6.0f;                         ///< -40..0; likewise
+        float erLevelDb     = roomDefaults::kErLevelDb;      ///< -40..0; -40 is silence, not -40 dB
+        float verbLevelDb   = roomDefaults::kVerbLevelDb;    ///< -40..0; likewise
         float mix           = 1.0f;                          ///< 0..1
         float outputDb      = 0.0f;                          ///< -24..0
     };

@@ -185,16 +185,34 @@ inline constexpr int kSchemaVersion = 1;
 // Plate. Nothing errors and nothing warns.
 //
 // So appending a type is legal for state and lossy for automation, and that is
-// the trade to make knowingly when types 7-11 arrive (10 section 1 names them:
-// Church, Shaped Hall, Pattern Room, Positional Room, Vintage Room).
+// the trade to make knowingly when types 7-10 arrive: Shaped Hall, Pattern
+// Room, Positional Room, Vintage Room. **Church is no longer among them** --
+// Cavern took index 3 on 2026-09-21 and carries its character, so it is struck
+// from the reserve rather than waiting in it (kTypeNames).
 //==============================================================================
 
-enum TypeChoice { room = 0, chamber, hall, largeHall, plate, ambience, numTypes };
+enum TypeChoice { room = 0, chamber, hall, cavern, plate, ambience, numTypes };
 
 /** Small to large, then plate, then ambience -- the reference core set, and
     the order is final. Ambience is the ER-star type: tiny tail, ER-dominant,
-    and where "tail off, distance sets depth" lands by default. */
-inline const char* const kTypeNames[] { "Room", "Chamber", "Hall", "Large Hall", "Plate", "Ambience" };
+    and where "tail off, distance sets depth" lands by default.
+
+    **Index 3 was Large Hall and is Cavern.** Settled by the owner on
+    2026-09-21; 11 section 4 carries the argument. Large Hall was cut because
+    the late network scales with the taps under SIZE -- Hall to Large Hall is
+    tau-bar 55 to 80 ms, a factor of 1.45, inside a SIZE range spanning
+    0.5-80 m -- so SIZE already covers it several times over, and its only
+    non-size residual is beta, whose own ladder is indexed by size. Reference A
+    offers two halls but nowhere states that the difference is size; that was
+    this pack's inference and it does not hold. Cavern takes the slot, carrying
+    what the pack had reserved as "Church": the long, dense, stone-reflective
+    character, named secularly, so Church is struck from the reserved list
+    rather than left waiting in it.
+
+    **Renaming a position is free at any time. The count is what normalisation
+    depends on, and six is unchanged** -- which is why this was a rename and
+    not a cut: nothing an automation lane already holds moves. */
+inline const char* const kTypeNames[] { "Room", "Chamber", "Hall", "Cavern", "Plate", "Ambience" };
 
 enum ErModeChoice { taps = 0, energy, blend, numErModes };
 
@@ -217,37 +235,241 @@ inline const char* const kErModeNames[] { "Taps", "Energy", "Blend" };
 
     A fresh instance opens on TYPE = Room, so whatever a fresh instance shows
     for `size`, `erdensity`, `ershape`, `erspread`, `moddepth`, `modrate`,
-    `inhicut` and `feed` is a claim about what Room *is*. If the DSP later
-    picks different Room constants, the panel lies about itself on the very
-    first thing a user sees.
+    `inhicut`, `feed`, `erlevel` and `verblevel` is a claim about what Room
+    *is*. If the DSP later picks different Room constants, the panel lies about
+    itself on the very first thing a user sees.
 
-    The per-type tables do not exist yet: 10 section 1 names the categories a
-    type's constant block holds -- ER tap table, ER window and default density,
-    the eight FDN times, input-diffusion depth, damping and modulation
-    defaults, input bandwidth, default ER feed, and three reserved era fields
-    -- and gives no numbers for any of them. When they are written, **Room's
-    row is pinned to these eight values** and the other five types are free.
+    **Ten, not eight.** `erlevel` and `verblevel` joined this list on
+    2026-09-21 (11 section 4). Without them Ambience was unbuildable as
+    specified: the pack describes it as "tiny tail, ER-dominant by default"
+    while the two faders were type-independent, so no type could set its own
+    balance of the two generators and the one type whose whole character *is*
+    that balance had nowhere to put it.
 
     The defaults that are *not* in this list are ordinary defaults and are
     type-independent: `type` itself, `predelay`, `prelink`, `decay`,
     `decayshape`, `attack`, the four damping and four EQ rows, `ermode`,
-    `erhicut`, `ervariation`, `width`, the two levels, `mix` and `output`. A
-    type may move the *sound* those produce; it does not move the number the
-    knob opens at.
+    `erhicut`, `ervariation`, `width`, `mix` and `output`. A type may move the
+    *sound* those produce; it does not move the number the knob opens at, and
+    selecting a type does not overwrite them.
 
     They are constants here rather than numbers inline in `specs()` so that the
-    per-type table, when it lands, can be checked against the same symbols the
-    schema was built from instead of against a second transcription. */
+    per-type table below can be checked against the same symbols the schema was
+    built from instead of against a second transcription. */
 namespace roomDefaults
 {
-    inline constexpr float kSizeM      = 12.0f;
-    inline constexpr float kErDensity  = 50.0f;    ///< per cent
-    inline constexpr float kErShape    = 1.0f;     ///< the contour exponent p
-    inline constexpr float kErSpreadMs = 80.0f;
-    inline constexpr float kModDepthMs = 0.28f;    ///< the 3-cent bound at 1 Hz
-    inline constexpr float kModRateHz  = 0.50f;
-    inline constexpr float kInHiCutHz  = 20000.0f;
-    inline constexpr float kFeed       = 70.0f;    ///< per cent
+    inline constexpr float kSizeM       = 12.0f;
+    inline constexpr float kErDensity   = 50.0f;    ///< per cent
+    inline constexpr float kErShape     = 1.0f;     ///< the contour exponent p
+    inline constexpr float kErSpreadMs  = 80.0f;
+    inline constexpr float kModDepthMs  = 0.28f;    ///< the 3-cent bound at 1 Hz
+    inline constexpr float kModRateHz   = 0.50f;
+    inline constexpr float kInHiCutHz   = 20000.0f;
+    inline constexpr float kFeed        = 70.0f;    ///< per cent
+    inline constexpr float kErLevelDb   = -6.0f;
+    inline constexpr float kVerbLevelDb = -6.0f;
+}
+
+//==============================================================================
+/** One type's block of the constants that are also **parameters**.
+
+    This is the visible half of what 10 section 1 calls a type's constant
+    block. The invisible half -- the ER tap table, the eight FDN times, the
+    input-diffusion depth, beta, the per-tap cutoff law and the three reserved
+    era fields -- has no host lane and belongs in `dsp/`, where it can be
+    retuned without touching the schema. What is here is only the part a knob
+    shows, because that is the part a type change has to *write*.
+
+    The field order is `roomDefaults`' order with the two levels appended, so
+    the two lists can be read against each other line by line. */
+struct TypeConstants
+{
+    float sizeM;
+    float erDensity;     ///< per cent
+    float erShape;       ///< the contour exponent p
+    float erSpreadMs;
+    float modDepthMs;
+    float modRateHz;
+    float inHiCutHz;
+    float feed;          ///< per cent
+    float erLevelDb;
+    float verbLevelDb;
+};
+
+//==============================================================================
+// **Room's row is real. The other five are CALIBRATE placeholders, and every
+// number in them is marked.**
+//
+// 10 section 1 names the categories a type's constant block holds and gives no
+// numbers for any of them; 10 section 7 is the table they will come from and
+// nearly every row there is already marked CALIBRATE. So there is nothing to
+// transcribe yet, and a plausible-looking number typed here and left unmarked
+// would be indistinguishable, six months from now, from one that had been
+// fitted by ear.
+//
+// **What is claimed of the placeholder rows, and it is the only thing:** the
+// ordering the type list already fixes. Room < Chamber < Hall < Cavern on
+// SIZE; Ambience is the small one; Plate has no room geometry at all and its
+// SIZE is a stand-in for a plate's dimensions rather than a room's. Nothing
+// else -- not a ratio, not a curve, not a level -- is derived from anything.
+// They exist so that selecting a type does something audible to argue with
+// during the listening pass (11 section 6, milestone M6), which is how they
+// stop being placeholders.
+//
+// **The shape is what is real.** When the fitted table lands it drops into
+// these namespaces value for value: same names, same units, same ten fields,
+// no change to `kTypeConstants`, `typeSettings` or anything that reads them.
+// Replace the numbers and delete the CALIBRATE markers as each one is heard.
+//==============================================================================
+
+namespace chamberDefaults
+{
+    inline constexpr float kSizeM       = 18.0f;      // CALIBRATE
+    inline constexpr float kErDensity   = 55.0f;      // CALIBRATE
+    inline constexpr float kErShape     = 1.0f;       // CALIBRATE
+    inline constexpr float kErSpreadMs  = 90.0f;      // CALIBRATE
+    inline constexpr float kModDepthMs  = 0.28f;      // CALIBRATE
+    inline constexpr float kModRateHz   = 0.50f;      // CALIBRATE
+    inline constexpr float kInHiCutHz   = 20000.0f;   // CALIBRATE
+    inline constexpr float kFeed        = 70.0f;      // CALIBRATE
+    inline constexpr float kErLevelDb   = -6.0f;      // CALIBRATE
+    inline constexpr float kVerbLevelDb = -6.0f;      // CALIBRATE
+}
+
+namespace hallDefaults
+{
+    inline constexpr float kSizeM       = 34.0f;      // CALIBRATE
+    inline constexpr float kErDensity   = 60.0f;      // CALIBRATE
+    inline constexpr float kErShape     = 1.20f;      // CALIBRATE
+    inline constexpr float kErSpreadMs  = 120.0f;     // CALIBRATE
+    inline constexpr float kModDepthMs  = 0.30f;      // CALIBRATE
+    inline constexpr float kModRateHz   = 0.45f;      // CALIBRATE
+    inline constexpr float kInHiCutHz   = 18000.0f;   // CALIBRATE
+    inline constexpr float kFeed        = 65.0f;      // CALIBRATE
+    inline constexpr float kErLevelDb   = -8.0f;      // CALIBRATE
+    inline constexpr float kVerbLevelDb = -5.0f;      // CALIBRATE
+}
+
+namespace cavernDefaults
+{
+    inline constexpr float kSizeM       = 55.0f;      // CALIBRATE
+    inline constexpr float kErDensity   = 70.0f;      // CALIBRATE
+    inline constexpr float kErShape     = 1.40f;      // CALIBRATE
+    inline constexpr float kErSpreadMs  = 160.0f;     // CALIBRATE
+    inline constexpr float kModDepthMs  = 0.35f;      // CALIBRATE
+    inline constexpr float kModRateHz   = 0.35f;      // CALIBRATE
+    inline constexpr float kInHiCutHz   = 14000.0f;   // CALIBRATE
+    inline constexpr float kFeed        = 60.0f;      // CALIBRATE
+    inline constexpr float kErLevelDb   = -10.0f;     // CALIBRATE
+    inline constexpr float kVerbLevelDb = -4.0f;      // CALIBRATE
+}
+
+namespace plateDefaults
+{
+    inline constexpr float kSizeM       = 22.0f;      // CALIBRATE
+    inline constexpr float kErDensity   = 85.0f;      // CALIBRATE
+    inline constexpr float kErShape     = 0.60f;      // CALIBRATE
+    inline constexpr float kErSpreadMs  = 45.0f;      // CALIBRATE
+    inline constexpr float kModDepthMs  = 0.22f;      // CALIBRATE
+    inline constexpr float kModRateHz   = 0.60f;      // CALIBRATE
+    inline constexpr float kInHiCutHz   = 20000.0f;   // CALIBRATE
+    inline constexpr float kFeed        = 40.0f;      // CALIBRATE
+    inline constexpr float kErLevelDb   = -12.0f;     // CALIBRATE
+    inline constexpr float kVerbLevelDb = -5.0f;      // CALIBRATE
+}
+
+/** Ambience, **the row the whole change was made for**. The two levels are the
+    only thing in this file that says what an ER-star type is: a loud early
+    cluster and a tail that is present but well under it. The numbers are
+    CALIBRATE like the rest of the row -- what is not CALIBRATE is that
+    `kErLevelDb` is above `kVerbLevelDb` here and below it in every other type,
+    which is the ordering the pack describes and the one to preserve if these
+    are retuned. */
+namespace ambienceDefaults
+{
+    inline constexpr float kSizeM       = 8.0f;       // CALIBRATE
+    inline constexpr float kErDensity   = 40.0f;      // CALIBRATE
+    inline constexpr float kErShape     = 0.80f;      // CALIBRATE
+    inline constexpr float kErSpreadMs  = 30.0f;      // CALIBRATE
+    inline constexpr float kModDepthMs  = 0.20f;      // CALIBRATE
+    inline constexpr float kModRateHz   = 0.55f;      // CALIBRATE
+    inline constexpr float kInHiCutHz   = 20000.0f;   // CALIBRATE
+    inline constexpr float kFeed        = 85.0f;      // CALIBRATE
+    inline constexpr float kErLevelDb   = -4.0f;      // CALIBRATE
+    inline constexpr float kVerbLevelDb = -20.0f;     // CALIBRATE
+}
+
+/** The six rows, in the frozen index order. Built from the namespaces above
+    rather than from literals, so the symbols the schema is built from and the
+    table a type change stamps cannot drift apart -- Room's row is
+    `roomDefaults` itself, which is what makes "Room's defaults are Room's
+    constants" true by construction instead of by a test. */
+inline constexpr TypeConstants kTypeConstants[numTypes]
+{
+    { roomDefaults::kSizeM,      roomDefaults::kErDensity,   roomDefaults::kErShape,
+      roomDefaults::kErSpreadMs, roomDefaults::kModDepthMs,  roomDefaults::kModRateHz,
+      roomDefaults::kInHiCutHz,  roomDefaults::kFeed,
+      roomDefaults::kErLevelDb,  roomDefaults::kVerbLevelDb },
+
+    { chamberDefaults::kSizeM,      chamberDefaults::kErDensity,  chamberDefaults::kErShape,
+      chamberDefaults::kErSpreadMs, chamberDefaults::kModDepthMs, chamberDefaults::kModRateHz,
+      chamberDefaults::kInHiCutHz,  chamberDefaults::kFeed,
+      chamberDefaults::kErLevelDb,  chamberDefaults::kVerbLevelDb },
+
+    { hallDefaults::kSizeM,      hallDefaults::kErDensity,  hallDefaults::kErShape,
+      hallDefaults::kErSpreadMs, hallDefaults::kModDepthMs, hallDefaults::kModRateHz,
+      hallDefaults::kInHiCutHz,  hallDefaults::kFeed,
+      hallDefaults::kErLevelDb,  hallDefaults::kVerbLevelDb },
+
+    { cavernDefaults::kSizeM,      cavernDefaults::kErDensity,  cavernDefaults::kErShape,
+      cavernDefaults::kErSpreadMs, cavernDefaults::kModDepthMs, cavernDefaults::kModRateHz,
+      cavernDefaults::kInHiCutHz,  cavernDefaults::kFeed,
+      cavernDefaults::kErLevelDb,  cavernDefaults::kVerbLevelDb },
+
+    { plateDefaults::kSizeM,      plateDefaults::kErDensity,  plateDefaults::kErShape,
+      plateDefaults::kErSpreadMs, plateDefaults::kModDepthMs, plateDefaults::kModRateHz,
+      plateDefaults::kInHiCutHz,  plateDefaults::kFeed,
+      plateDefaults::kErLevelDb,  plateDefaults::kVerbLevelDb },
+
+    { ambienceDefaults::kSizeM,      ambienceDefaults::kErDensity,  ambienceDefaults::kErShape,
+      ambienceDefaults::kErSpreadMs, ambienceDefaults::kModDepthMs, ambienceDefaults::kModRateHz,
+      ambienceDefaults::kInHiCutHz,  ambienceDefaults::kFeed,
+      ambienceDefaults::kErLevelDb,  ambienceDefaults::kVerbLevelDb },
+};
+
+/** A detent's row, with anything out of range reading as Room. */
+inline constexpr const TypeConstants& constantsFor (int typeIndex) noexcept
+{
+    return kTypeConstants[(size_t) (typeIndex >= 0 && typeIndex < numTypes ? typeIndex : (int) room)];
+}
+
+/** A type's block as the ten parameter writes that apply it, in real units.
+
+    **A `Setting` list and not a bespoke struct on purpose**: this is exactly
+    what a factory preset is (`FactoryPreset::settings`), so applying a type
+    goes through `ParamSet::apply` -- the same call, on the same values, in the
+    same units -- rather than through a second path that could disagree with a
+    preset recall about what writing a parameter means. See
+    `modules/reverb/TypeVoicing.h`, which is the only caller.
+
+    `type` is **not** in the list it returns, and that is load-bearing: it is
+    what makes it impossible for applying a type to select another one. */
+inline std::vector<Setting> typeSettings (int typeIndex)
+{
+    const auto& c = constantsFor (typeIndex);
+
+    return {
+        { kSize,      c.sizeM },
+        { kErDensity, c.erDensity },
+        { kErShape,   c.erShape },
+        { kErSpread,  c.erSpreadMs },
+        { kModDepth,  c.modDepthMs },
+        { kModRate,   c.modRateHz },
+        { kInHiCut,   c.inHiCutHz },
+        { kFeed,      c.feed },
+        { kErLevel,   c.erLevelDb },
+        { kVerbLevel, c.verbLevelDb },
+    };
 }
 
 //==============================================================================
@@ -421,9 +643,15 @@ inline const ParamSpecs& specs()
         // largest type, so switching never allocates. A switch may be a large
         // jump in sound but must not click: 30 ms raised-cosine dip on the wet
         // bus, tables swapped at the minimum.
+        //
+        // **And it writes ten other parameters.** A type is a voicing, so
+        // selecting one re-applies `kTypeConstants`' row for it over whatever
+        // those ten currently hold, every time and not only at instantiation.
+        // The mechanism, the re-entrancy argument and the automation conflict
+        // it creates are all in `modules/reverb/TypeVoicing.h`.
         S::choiceParam (kType, "Type",
                         { kTypeNames[room], kTypeNames[chamber], kTypeNames[hall],
-                          kTypeNames[largeHall], kTypeNames[plate], kTypeNames[ambience] },
+                          kTypeNames[cavern], kTypeNames[plate], kTypeNames[ambience] },
                         room),
 
         // 1. SIZE. Logarithmic, because equal turns should be equal ratios on
@@ -540,9 +768,13 @@ inline const ParamSpecs& specs()
 
         //== Output ============================================================
 
-        // 26/27. The two absolute trims, both off at the bottom.
-        S::textParam (kErLevel, "ER", -40.0f, 0.0f, 0.1f, -6.0f, &detail::levelText),
-        S::textParam (kVerbLevel, "Reverb", -40.0f, 0.0f, 0.1f, -6.0f, &detail::levelText),
+        // 26/27. The two absolute trims, both off at the bottom -- and both
+        // per-type since 2026-09-21, which is what makes Ambience buildable.
+        // The defaults are Room's row, like every other per-type default here.
+        S::textParam (kErLevel, "ER", -40.0f, 0.0f, 0.1f,
+                      roomDefaults::kErLevelDb, &detail::levelText),
+        S::textParam (kVerbLevel, "Reverb", -40.0f, 0.0f, 0.1f,
+                      roomDefaults::kVerbLevelDb, &detail::levelText),
 
         // 28. MIX. Defaults to 100 %, because the two faders above are the
         // wet balance and this is the dry/wet one -- a reverb used as a send,

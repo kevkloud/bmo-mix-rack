@@ -37,6 +37,21 @@ orthogonal butterfly — so it has no poles and cannot ring.
 
 ## Thirty parameters, and two spare lanes
 
+> **The control set is under review and this list is not settled.** Frosty
+> opened a trim on 2026-09-21 -- "I'm not sure all these controls will survive
+> trim" -- and it has not concluded. Nothing has shipped, so cutting an index is
+> still free. Do not read the list below as final, and do not build anything
+> that would be expensive to unpick if a control goes.
+>
+> The asymmetry that should guide the trim, verified in the code rather than
+> assumed: cutting a **float or bool is reversible**, because state is stored as
+> plain values keyed by id (`ParamSet::toXml` writes `getReal(i)`), so
+> re-appending one later costs nothing. Cutting or shortening a **choice is
+> not**, because it reaches the host as `juce::AudioParameterChoice`, which
+> normalises as index/(n-1): change the count and every recorded automation lane
+> on it remaps. Be aggressive with floats, conservative with `type` and
+> `ermode`.
+
 `type`, `size`, `predelay`, `prelink`, `decay`, `decayshape`, `attack`, `feed`,
 four damping, four EQ, `ermode`, `erdensity`, `ershape`, `erspread`, `erhicut`,
 `ervariation`, `moddepth`, `modrate`, `width`, `inhicut`, `erlevel`,
@@ -65,24 +80,152 @@ way to darken what feeds *both* generators independently of the Reverb EQ
 shelves. **Deleting index 25 before first ship is free and returns a third
 spare lane; after that it is permanent.**
 
-## Room's defaults are Room's constants, by definition
+## A type is a voicing, and it writes ten parameters
 
-The defaults for **`size`, `erdensity`, `ershape`, `erspread`, `moddepth`,
-`modrate`, `inhicut` and `feed` are Room's per-type constants**, not merely the
-values the knobs happen to open at. A fresh instance opens on TYPE = Room, so
-what it shows for those eight is a claim about what Room *is* — and if the DSP
-pass later picks different Room constants, the panel lies about itself on the
-first thing anyone sees.
+**Selecting a type re-applies that type's ten constants over the parameters
+that hold them — `size`, `erdensity`, `ershape`, `erspread`, `moddepth`,
+`modrate`, `inhicut`, `feed`, `erlevel` and `verblevel` — every time, not only
+at instantiation.** A knob moved away from its type's value is stamped back the
+next time that type is selected. Frosty took that knowingly on 2026-09-21: a
+type that applied its block once and then let the knobs drift off it is a type
+that tells you less about what you are hearing the longer you use it.
 
-The per-type tables do not exist yet. `10-dsp-spec.md` section 1 names the
-categories a type's constant block holds — ER tap table, ER window and default
-density, the eight FDN times, input-diffusion depth, damping and modulation
-defaults, input bandwidth, default ER feed, three reserved era fields — and
-gives no numbers for any of them. **When they are written, Room's row is pinned
-to these eight values** and the other five types are free. They live as named
-constants in `params.h` (`roomDefaults`) so the table can be checked against
-the same symbols the schema was built from rather than against a second
-transcription, and `tests/plugin/ReverbTests.cpp` holds them to it.
+**`erlevel` and `verblevel` joined the block the same day**, taking it from
+eight constants to ten. Without them Ambience was unbuildable as specified: the
+pack describes it as "tiny tail, ER-dominant by default" while the two faders
+were type-independent, so the one type whose whole character *is* the balance
+between the two generators had nowhere to put it. Ambience is a sound Frosty
+reaches for often, and he will bring references to the Ableton pass.
+
+### The hazard: TYPE is automatable and now writes automatable parameters
+
+Automate TYPE and REVERB together and **the two fight**. The type change stamps
+a level at the moment the host is driving it somewhere else, and which one wins
+depends on their relative order inside the block. There is no arbitration and
+there should not be — an arbiter would have to decide that one of the user's two
+automation lanes is not real. It is inherent in "a type is a voicing", it is the
+cost of the decision rather than a defect in the implementation, and it is
+written down here so the first person to hit it knows it was chosen.
+
+What *is* guaranteed is that the conflict is bounded. A type change touches
+those ten and nothing else: `predelay`, `decay`, `decayshape`, `attack`, the
+four damping rows, the four EQ rows, `ermode`, `erhicut`, `ervariation`,
+`width`, `mix` and `output` are the user's and stay put. Automating any of those
+beside TYPE is safe, and `tests/plugin/ReverbTests.cpp` asserts it.
+
+### One write path, and it is the preset recall's
+
+`typeSettings` (params.h) hands back a `std::vector<Setting>` — the same type a
+`FactoryPreset` carries — and `TypeVoicing` applies it with `ParamSet::apply`,
+which is `setReal` per id, which is `setValueNotifyingHost`. That is the call
+`PresetManager` makes to load a preset and the call `ParamSet::applyXml` makes
+for every value in a session. **There is no second path**, so a type change
+cannot come to disagree with a preset recall about what writing a parameter
+means, and a host sees an event it already knows.
+
+It also makes the two compose in the one order that works. `applyXml` resets to
+defaults and then writes the file's values in spec order, and `type` is index 0
+— so a restore applies the stored type's block first and then overwrites it with
+what the file actually stored. **Every factory preset names `kType` first for
+the same reason, and has to keep doing so**: a preset that set its type last
+would stamp that type's constants over its own sizes and levels, and nothing
+would say so.
+
+### Why it cannot recurse, and why it is not on the audio thread
+
+- **`type` is not in what a type writes.** `typeSettings` returns ten settings
+  and `kType` is not among them, so applying a type cannot select one. The
+  recursion is unconstructible rather than guarded, and both suites assert it
+  directly.
+- **An `applying` flag is the belt to those braces.** A host may write TYPE
+  again from inside one of the ten notifications, and JUCE delivers a
+  message-thread change synchronously, so a nested call is reachable even though
+  a self-triggered one is not. A nested call returns at once, so the parameters
+  never carry half of one type and half of another.
+- **A remembered detent means only a real move applies.**
+  `setValueNotifyingHost` notifies whether or not the value changed, so a preset
+  recall, a state restore and `resetToDefaults` each write `type` at least once
+  with nothing new in it.
+- **The writes land on the message thread**, because `juce::ParameterAttachment`
+  marshals a change arriving on any other one through an AsyncUpdater.
+  Automation moves TYPE from the audio thread, where `setValueNotifyingHost` has
+  no business being called — and a ramp across several detents inside one block
+  coalesces to a single apply of the detent it ended on.
+- **It does not fight the smoothers.** Nothing reaches into DSP state. Ten
+  parameter values change, `ModuleEngine` reads them once at the top of the next
+  block like any other knob move, and `DspCore`'s own machinery smooths them:
+  `kSmoothingMs` for coefficients, `kCrossfadeMs` for SIZE's tap set, the 30 ms
+  raised-cosine dip for the table swap TYPE itself causes. A type change is
+  loud, but it is loud through the path a hand on the knobs uses.
+
+### Where it lives, and the one piece of shared code it added
+
+`TypeVoicing` is owned by the **engine** and not by the panel, through a new
+`ModuleDef::createParamLink` and `core/state/ParamLink.h`. A panel is the wrong
+owner: automation runs, sessions load and renders happen with no window
+anywhere, and a link a panel owned would apply a type only while someone was
+looking at it. One `ModuleEngine` exists per running module in both products —
+the standalone's own, and one per occupied rack slot — so a single line in its
+constructor covers both. The field is last in `ModuleDef` and defaults to null,
+so no other module's def changes. BMO Linger is the only module in the suite
+whose parameters write each other, and the next one should have to make this
+argument again.
+
+## Room's constants are real; the other five rows are CALIBRATE
+
+Room's ten values in `params.h` (`roomDefaults`) are **Room's per-type
+constants, not merely the values the knobs open at**. A fresh instance opens on
+TYPE = Room, so what it shows for those ten is a claim about what Room *is* —
+and if the DSP pass later picks different Room constants, the panel lies about
+itself on the first thing anyone sees. `kTypeConstants[room]` is built from
+those symbols rather than from a second transcription, so "Room's defaults are
+Room's constants" holds by construction and not only by a test.
+
+**Every value in the other five rows is a placeholder, and every one of them is
+marked `// CALIBRATE`.** `10-dsp-spec.md` section 1 names the categories a
+type's constant block holds — ER tap table, ER window and default density, the
+eight FDN times, input-diffusion depth, damping and modulation defaults, input
+bandwidth, default ER feed, three reserved era fields — and gives no numbers for
+any of them; section 7's table is itself marked CALIBRATE almost throughout. So
+there is nothing to transcribe yet, and an unmarked plausible number would be
+indistinguishable, six months from now, from one fitted by ear.
+
+The only thing claimed of a placeholder row is the ordering the type list
+already fixes — Room < Chamber < Hall < Cavern on SIZE, Ambience small, Plate a
+stand-in because a plate has no room geometry — plus Ambience's `erlevel` above
+its `verblevel`, which is true of no other type and is the point of the row.
+**The shape is what is real:** when the fitted table lands it drops into those
+namespaces value for value, same names, same units, same ten fields, with no
+change to `kTypeConstants`, `typeSettings` or anything that reads them. The
+tests pin the shape, the reachability of every value against its own parameter's
+range and step, and Room's row; they deliberately do not pin a placeholder.
+
+Only the half of a type's block that has a **host lane** is here. The ER tap
+table, the eight FDN times, β, the per-tap cutoff law, the input-diffusion depth
+and the three reserved era fields have no parameter and belong in `dsp/`, where
+they can be retuned without touching the schema.
+
+## The six types, and why index 3 changed
+
+**Room · Chamber · Hall · Cavern · Plate · Ambience.** Index 3 was *Large Hall*
+until 2026-09-21. It was cut because the late network scales with the taps under
+SIZE: Hall → Large Hall is τ̄ 55 → 80 ms, a factor of 1.45, inside a SIZE range
+spanning 0.5–80 m. SIZE already covers it several times over, its only non-size
+residual is β whose own ladder is indexed by size, and Reference A offers two
+halls but nowhere says the difference between them is size — that was the pack's
+inference and it does not hold.
+
+**Cavern takes the slot**, carrying what had been reserved as "Church": the
+long, dense, stone-reflective character, named secularly. Church is therefore
+struck from the reserved list rather than left waiting in it; Shaped Hall,
+Pattern Room, Positional Room and Vintage Room remain — though four of those
+read as universal controls rather than as rooms, so the reserve may be emptier
+than it looks.
+
+**Renaming a position is free at any time. The count is what normalisation
+depends on, and six is unchanged**, which is why this was a rename and not a cut
+and why no automation lane moved. The factory preset "Long Hall" now selects
+Hall at 45 m, which is the same preset and not a smaller one.
 
 ## The type list is append-only for state and lossy for automation
 
@@ -96,9 +239,9 @@ to seven rescales every automation point ever written on that lane. Room stays
 at 0.0, but Ambience moves from 1.0 to 0.833 and lands on Plate. Nothing errors
 and nothing warns.
 
-So appending Church, Shaped Hall, Pattern Room, Positional Room or Vintage
-Room is legal and lossy, and that is a trade to make knowingly. The same
-applies to `ermode`. `ervariation` is deliberately **not** a choice list — its
+So appending Shaped Hall, Pattern Room, Positional Room or Vintage Room is
+legal and lossy, and that is a trade to make knowingly. The same applies to
+`ermode`. `ervariation` is deliberately **not** a choice list — its
 seven positions are an ordered amount of decorrelation rather than seven named
 behaviours, so it is a stepped float, and a stepped float normalises as
 (v − min)/(max − min), which an eighth position at the end would not disturb.
@@ -128,6 +271,32 @@ value string says so, because an automation lane has nowhere else to.
 **Main face:** the ER/tail display, TYPE, SIZE, PRE-DELAY, DECAY, ER, REVERB,
 MIX. The two faders are the thesis, and the tail-off depth-placement technique
 has to be reachable without expanding anything.
+
+**TYPE and ER MODE are dropdowns, and they are the only two.** "Room type makes
+no sense as a knob" — Frosty, 2026-09-21. A knob says less and more, and a list
+of names says neither: Chamber is not more than Room, so the face carries no
+information and the control has to be turned before it can be read. The wrapper
+is `ui::ChoiceBox` in `core/ui`, a thin binding of a `juce::ComboBox` to a
+choice parameter — the shared `BmoLookAndFeel` already themes `ComboBox` and
+`PopupMenu` against the tokens, so the only colour it sets is the arrow, which
+the scheme puts in the utility azure and which has to be the module's accent
+here for the reason the group knobs did.
+
+`ervariation` stays a knob and is deliberately not a choice list at all: its
+seven positions *are* an ordered amount of decorrelation, which is what a knob
+is for. BMO DEQ's SHAPE stays a `ConcentricBand` with a legend ring, which is a
+third thing again — a named list drawn as a dial because the five shapes sit
+inside the band they belong to. The test is whether the positions have an order
+the hand should feel.
+
+A consequence worth knowing before touching the layout: **nothing on this panel
+prints a value any more**. TYPE and ER MODE were the only two that did, and
+because a printed value line lifts a knob and its caption by its own height,
+SIZE, DENSITY and ER SHAPE each had to reserve the same line blank to stay level
+with them. The dropdowns print inside their own boxes, so the line, the three
+reservations and the two taller rows that carried them are all gone.
+`ChoiceBox::setControlSide` is what keeps a dropdown's caption on the same line
+as the caption of the knob beside it.
 
 **Expanded**, three groups: **EARLY** (8), **TAIL** (6), **TONE & OUT** (9).
 BMO DEQ's precedent throughout — 300 compact, 700 full, the switch on the

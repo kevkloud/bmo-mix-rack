@@ -298,12 +298,11 @@ what is compared is the cascade's magnitude at the corners.)
    and off block boundaries. Two assertions: (i) the **lane's contents are
    bit-identical** to a `chop`-never render at every sample — `chop` touches the
    output only, and that is provable rather than audible; (ii) no click above
-   −60 dBFS on either edge. **The acceptance band for (ii) is open** (10 §11.4):
-   a 1 ms raised cosine does not meet a broadband −60 dBFS figure on bright
-   sustained content, so this is either asserted on content band-limited to
-   5 kHz, or the fade lengthens to ~3 ms and the assertion goes broadband.
-   Frosty's choice; the test is written to whichever, and **not written to a
-   figure the fade cannot meet**.
+   −60 dBFS on either edge, **measured on content band-limited to 5 kHz**
+   (DECIDED, Frosty 2026-09-22; 10 §11.4). The fade stays at 1 ms, because
+   tightness is what a rhythmic gate is for, and the ~3 ms a broadband figure
+   would need costs sixteenths above ~160 BPM. Above 5 kHz the edge is
+   measurable; `14` records it by sweep rather than asserting it away.
 4. **Summing is bounded by the clip.** `hold` on, detent, `lane_level` 0 dB:
    `send` a full-scale burst once per lane period for 60 s, every character. The
    circulating peak converges to and stays under the clip ceiling; the increase

@@ -181,3 +181,8 @@ by dispatched agents on AURORA, 2026-09-20, under `HANDOFF-groundwork.md`.
 - **`chop`'s 1 ms fade against `11` §4's broadband −60 dBFS assertion** (`10`
   §11.4). It needs a **measurement**, not a ruling: band-limit the assertion to
   5 kHz, lengthen the fade to ~3 ms, or record the measured edge.
+34. **CHOP's acceptance is band-limited to 5 kHz** (2026-09-22), and the fade
+    stays at 1 ms. A broadband −60 dBFS assertion and a 1 ms raised-cosine gate
+    cannot both stand; tightness is what a rhythmic gate is for, and the ~3 ms
+    a broadband figure needs costs sixteenths above ~160 BPM. Above 5 kHz the
+    edge is measured and recorded by `14`, not asserted away.

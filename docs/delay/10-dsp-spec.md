@@ -500,24 +500,21 @@ rather than merely as a level (`11` §4e, test 3).
 **The fade, and the honest thing about it.** A zero-length cut clicks, and
 `11` §4 requires nothing above −60 dBFS on either edge of a toggle. The
 specified fade is **1 ms raised cosine on both edges** (CALIBRATE), per `15`'s
-"the shortest fade that does not click". **That figure and a broadband −60 dBFS
-acceptance cannot both stand as written, and this is recorded rather than
-resolved.** A raised cosine is C¹, so its splatter falls as 1/f³ and spreads
+"the shortest fade that does not click".
+
+**The acceptance is band-limited, and the fade stays at 1 ms** (DECIDED, Frosty
+2026-09-22). A raised cosine is C¹, so its splatter falls as 1/f³ and spreads
 over roughly 1/T = 1 kHz; on musical material 1 ms is click-free by ear, but on
 a sustained bright tone the first sidelobe sits on the order of 30–40 dB below
-the gated signal (CALIBRATE by sweep), not 60. **OPEN, Frosty's choice of
-three:**
+the gated signal, not 60. A broadband −60 dBFS assertion and a 1 ms gate
+therefore cannot both stand, and the gate wins: CHOP is a rhythmic gate on a
+delay tail, tightness is the feature, and lengthening the fade to the ~3 ms a
+broadband figure needs would cost tightness at sixteenths above ~160 BPM.
 
-- state the acceptance as "no click above −60 dBFS on content band-limited to
-  5 kHz", which is what the control is for and what it will be heard on; or
-- lengthen the fade to ~3 ms, which meets the broadband figure and costs
-  rhythmic tightness at sixteenths above ~160 BPM; or
-- keep 1 ms and accept a measurable but musically inaudible edge, recorded as a
-  known figure rather than an assertion.
-
-The first is the recommendation — CHOP is a rhythmic gate on a delay tail,
-tightness is the feature, and a broadband −60 dBFS assertion on a 1 ms gate is a
-test no gate of that length passes anywhere in the suite.
+So the acceptance reads: **no click above −60 dBFS on content band-limited to
+5 kHz.** That is what the control is used on and what it will be judged on.
+Above 5 kHz the edge is measurable and is recorded as a known figure rather
+than asserted away — `14` settles it by sweep at CALIBRATE.
 
 ### 11.5 What VOICE and FREEZE were, and what their removal costs
 

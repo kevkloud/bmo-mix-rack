@@ -19,6 +19,10 @@ inline ErMode erModeFor (int index) noexcept
     return index >= 0 && index < numErModes ? (ErMode) index : ErMode::taps;
 }
 
+// The third detent conversion, `eqFilterFor`, is **in `EqNodes.h`** beside the
+// mode it produces: the panel needs it as well as the engine, and the panel
+// does not include this file. Its class comment carries why.
+
 /** The adapter: it unpacks the flat parameter array into `DspCore::Params` in
     `Index` order and does nothing else.
 
@@ -86,9 +90,11 @@ public:
         p.dampHi        = v[Index::damphi];
 
         // The Reverb EQ, ten fields, and one more conversion: `eqfilter` is a
-        // bool on a float lane, so it crosses as `> 0.5f` the way every other
-        // bool in the suite does.
-        p.eqFilter      = v[Index::eqfilter] > 0.5f;
+        // choice, so it crosses as a detent index the way `type` and `ermode`
+        // do. It was a bool crossing as `> 0.5f` until 2026-09-22, and that
+        // line would still have compiled -- and would have read every one of
+        // the three cut positions as "on".
+        p.eqFilter      = eqFilterFor ((int) v[Index::eqfilter]);
         p.eqLoFreqHz    = v[Index::eqlofreq];
         p.eqLoDb        = v[Index::eqlo];
         p.eqLoQ         = v[Index::eqloq];

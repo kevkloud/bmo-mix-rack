@@ -76,31 +76,59 @@ enum class Page { early = 0, tail, eq };
 
     ## The three pages, and the axis each one needed
 
-    **EARLY -- linear time, 0 to the last tap plus a tenth of the window.** The
-    image-source taps as discrete stems from a baseline, at their times and
-    their gains. What this replaced was a symmetric envelope mirrored about a
-    centre line that bloomed and closed to a point; Frosty rejected it, and why
-    it was rejected is why the axis changed with it. The ER window is 7-79 ms
-    at the reference size and scales with SIZE, so it is a little over one
-    decade wherever it is set -- and a linear axis scaled to the window itself
-    shows the *spacing* of the reflections, which is the one thing about a tap
-    set worth looking at. A log axis here would crowd the late taps into the
-    last fifth, and a fixed window would leave most of the box empty at every
-    size but one.
+    **EARLY -- linear time, 0 to the last tap plus a tenth of the window, and
+    the stems are mirrored about a centre axis by their bearing.** The
+    image-source taps as discrete stems, at their times, their gains and
+    **their pans**: left above the axis, right below it, length still gain.
+    What this replaced was a symmetric envelope mirrored about a centre line
+    that bloomed and closed to a point; Frosty rejected it, and why it was
+    rejected is why the axis changed with it. **Mirroring the envelope and
+    mirroring the taps are not the same thing** -- the first drew a lens with
+    no event in it, and this draws one stem per reflection with its bearing in
+    the sign. The ER window is 7-79 ms at the reference size and scales with
+    SIZE, so it is a little over one decade wherever it is set -- and a linear
+    axis scaled to the window itself shows the *spacing* of the reflections,
+    which is the one thing about a tap set worth looking at. A log axis here
+    would crowd the late taps into the last fifth, and a fixed window would
+    leave most of the box empty at every size but one.
 
-    **TAIL -- logarithmic time, 1 ms to 30 s.** This is the axis argued for
-    when the display was one picture, and the argument survives the split
-    intact: a fixed 0-500 ms window -- 11 section 5's proposal -- shows the
-    onset beautifully and cannot show a 20 s decay at all, and DECAY reaches
-    20 s with a 2.0x damping multiplier over it. The old version did exactly
-    that, and most of the box was dead. A linear window wide enough for the
-    tail puts the whole 0-120 ms attack onset inside the first two pixels. On a
-    log axis 1-100 ms keeps 45 % of the width, so the onset and a 20 s tail are
-    both legible in one picture. The ends are chosen rather than round: 1 ms is
-    where a reflection stops fusing with the direct sound (05 section 1.1), and
-    30 s is `bmo::kMaxTailSeconds`, the ceiling on the tail this module -- and
-    now the rack it sits in -- will ever report, so the right-hand edge is the
-    same number the host is told rather than a second opinion about it.
+    **The sign is the bearing's side and the dash on each stem is its
+    magnitude.** A sign alone cannot tell 0.05 from 0.72, and 10 section 3's
+    lateral distribution -- target early lateral fraction 0.10-0.35, first
+    reflections near centre so the phantom centre holds -- is a question about
+    magnitudes. So every core tap also carries a short dash at `panY (pan)`,
+    which is the same arithmetic the stem's side comes from. The dash sits on
+    its own stem while the tap is loud and out past the tip while it is not,
+    and the run of dashes is the lateral scatter the section is about. `L` and
+    `R` are printed at the left-hand edge, because a mirrored picture with no
+    hand on it is a picture a reader has to guess at.
+
+    **TAIL -- logarithmic time, 1 ms to a window that follows the tail.**
+    The axis end **follows `tailEndSeconds`**, far enough past it to leave
+    `kAxisAir` of the box clear after the curve, and is clamped to
+    `kMaxSeconds`,
+    so the curve fills the box at every setting instead of finishing 60 % of
+    the way across and ruling a flat line over the rest. The old axis ran to
+    30 s at all times -- `kMaxSeconds`, which is `bmo::kMaxTailSeconds`, the
+    clamp on the tail this module and the rack report -- and 30 s is the
+    ceiling rather than a setting anybody uses: at the 1.8 s default it spent
+    40 % of a 336 px box drawing nothing.
+
+    **What that costs is comparability, and the readout is what pays it
+    back.** With the axis following the tail, turning DECAY no longer walks the
+    curve across the box -- the shape stays and the *scale under it* moves --
+    so two settings cannot be compared by eye alone. The bezel line under the
+    screen carries "DECAY 1.80 S" and "TAIL 2.16 S" in absolute seconds, and
+    the decade marks inside the box are labelled 10 MS / 100 MS / 1 S / 10 S,
+    so the length is readable in two places and neither of them is the width of
+    the drawing. The trade was taken deliberately: a shape that fills the box
+    answers "is this tail too long for the track" and a flat line does not.
+
+    The left-hand end does not move: 1 ms is where a reflection stops fusing
+    with the direct sound (05 section 1.1). Logarithmic, for the reason it
+    always was -- a linear window wide enough for the tail puts the whole
+    0-120 ms onset inside the first two pixels, and 11 section 5's proposed
+    fixed 0-500 ms window cannot show a 20 s decay at all.
 
     **EQ -- logarithmic frequency, 20 Hz to 20 kHz,** which is the only axis a
     frequency response has. Level is linear in dB over +/-`kEqRangeDb`. It was
@@ -108,11 +136,12 @@ enum class Page { early = 0, tail, eq };
 
     ## What the EQ curve is, and it is now the real filters
 
-    **Four marked nodes over one summed curve.** Three of them are the Reverb
-    EQ's -- node 1 a low shelf, node 2 a bell, node 3 a high shelf, or a low
-    cut and a high cut with FILTER on -- and they are designed by
-    `EqNodes::design`, which is `dsp::designMatched`, which is **the code the
-    engine will run**. The fourth is IN HI-CUT, which is not one of the three;
+    **Three marked nodes over one summed curve, and a curtain that is not a
+    node.** The three are the Reverb EQ's -- node 1 a low shelf, node 2 a bell,
+    node 3 a high shelf, or a low cut and a high cut with FILTER on -- and they
+    are designed by `EqNodes::design`, which is `dsp::designMatched`, which is
+    **the code the engine will run**. IN HI-CUT is in the curve, because it is
+    in the chain, but it is marked as a region rather than as a fourth node;
     see below.
 
     That closes what this comment used to own up to. The shelves were drawn
@@ -135,12 +164,19 @@ enum class Page { early = 0, tail, eq };
       Q. It darkens *the room*.
 
     The captions carry the distinction -- "IN HI-CUT" against "EQ HIGH FREQ",
-    "EQ HIGH" and "EQ HIGH Q" -- and the curve carries it too: the three EQ
-    nodes are drawn as filled circles and IN HI-CUT as an open one, because it
-    is in series with the EQ rather than part of it. Its one-pole roll-off is
-    still arithmetic in this file rather than an `EqNodes` node, and that is
-    deliberate: giving it a `Biquad` would imply an order nobody has chosen for
-    it.
+    "EQ HIGH" and "EQ HIGH Q" -- and **the picture now draws it as a different
+    kind of thing entirely**: the three EQ nodes are filled circles on the
+    curve, and IN HI-CUT is a **curtain** -- a washed region from its corner to
+    the right-hand edge of the axis, with a bright edge at the corner and a tab
+    along the top of it. It was an open circle until 2026-09-22 and that was
+    wrong twice over. A marker one stroke different from three filled ones
+    reads as a fourth node of the same EQ, which it is not; and at its default
+    of 20 kHz it sat *on* the frame and was drawn half outside the box. A
+    region is not a node at any glance, it cannot be confused for one, and
+    `inputCutRegion` is clamped inside the plot so nothing of it is ever cut
+    off by the frame. Its one-pole roll-off is still arithmetic in this file
+    rather than an `EqNodes` node, and that is deliberate: giving it a `Biquad`
+    would imply an order nobody has chosen for it.
 
     ## How FILTER reads as cuts
 
@@ -250,6 +286,56 @@ public:
         `decay * max(1, dampLo, dampHi)`, with the pre-delay in front of it. */
     float tailEndSeconds() const noexcept;
 
+    /** The right-hand end of the TAIL page's time axis, in seconds: far enough
+        past the tail that is set to leave `kAxisAir` of the width clear after
+        it, floored at `kMinWindowS` so the shortest decay still has two
+        decades to draw in, and clamped at `kMaxSeconds`.
+
+        **This is what stopped 40 % of the box being a flat line.** It is a
+        window rather than a constant, so a test asserting on it has to assert
+        a relation -- the drawn tail ends inside the axis, and not far inside
+        it -- which is what `tests/ui/LayoutTests.cpp` does. */
+    float tailWindowSeconds() const noexcept;
+
+    /** A bearing as a y inside the plot, for the EARLY page: -1 is hard left
+        and draws at the top, +1 is hard right and draws at the bottom, 0 is
+        the centre axis.
+
+        Public for the reason every other number here is: it is what the
+        picture is built from, and a test can check that a hard-panned tap
+        lands inside the box without rendering anything. `kPanReach` is why
+        +/-1 does not land *on* the frame. */
+    float panY (float pan) const noexcept;
+
+    /** The plotting area the page is drawn inside, so a test can ask whether
+        something drawn is within it. */
+    juce::Rectangle<float> plotBounds() const noexcept { return plotArea(); }
+
+    /** IN HI-CUT's curtain on the EQ page: the washed region from its corner
+        to the right-hand edge of the axis, **clamped so its bright edge is
+        inside the plot at 20 kHz** rather than half-drawn on the frame, which
+        is what the open circle it replaced was. Empty on the other two pages.
+
+        The rectangle is the whole curtain, edge included; the edge itself is
+        its left-hand `kCurtainEdge` pixels. */
+    juce::Rectangle<float> inputCutRegion() const noexcept;
+
+    /** A tick label the screen prints inside the plot, and the box it is set
+        in. `text` is ASCII, like every other string this module prints. */
+    struct AxisLabel
+    {
+        juce::String text;
+        juce::Rectangle<float> box;
+    };
+
+    /** Every label the showing page prints inside the screen: the L and R
+        hands on EARLY, the decade ticks on TAIL, none on EQ.
+
+        **The painter draws this list rather than building its own**, which is
+        `TapTables.h`'s discipline applied to text: a test that measured the
+        labels its own way could agree with a label that clips. */
+    std::vector<AxisLabel> axisLabels() const;
+
     /** How many of the table's taps DENSITY has switched on. The real bridge
         is a continuous ramp over 48 taps with a master sequence that does not
         exist yet (10 section 3); this is the 21 core taps plus the infill the
@@ -273,14 +359,24 @@ public:
         separate claims rather than as one about a sum. */
     float nodeDbAt (EqNode node, float hz) const noexcept;
 
-    /** The four marked corner frequencies, in the order they are drawn:
-        EQ LOW, EQ MID, EQ HIGH, IN HI-CUT. */
+    /** The four corner frequencies the picture marks, in the order it marks
+        them: EQ LOW, EQ MID and EQ HIGH as nodes on the curve, then IN HI-CUT,
+        which is `inputCutRegion`'s curtain rather than a fourth node. */
     std::array<float, 4> nodeFrequencies() const noexcept;
 
-    /** Whether the two outer nodes are cuts. The same bool the GAIN knobs grey
-        out on, read back through the screen so a test can check the picture
-        and the controls agree about the mode. */
-    bool isFilterMode() const noexcept { return state.eq.filter; }
+    /** Which of the two outer nodes are cuts. The same mode the GAIN knobs
+        grey out on, read back through the screen so a test can check that the
+        picture and the controls agree about it.
+
+        The mode itself and not "is it on", since 2026-09-22: with four
+        positions a bool could not tell Lo Cut from Hi Cut, and those two are
+        the pair a test most needs to be able to tell apart. */
+    EqFilter filterMode() const noexcept { return state.eq.filter; }
+
+    /** Whether *either* outer node is a cut -- what the old bool said. Kept
+        because "the screen took the mode at all" is still a claim worth
+        making on its own. */
+    bool isFilterMode() const noexcept { return state.eq.filter != EqFilter::off; }
 
     /** The line of small printed text under the screen, for whichever page is
         showing: the tap count and the ER window, the decay time and where the
@@ -294,9 +390,48 @@ public:
         read what a page says it is showing. */
     juce::String readout() const;
 
-    /** The TAIL page's window, as the class comment argues it. */
+    /** The TAIL page's window, as the class comment argues it.
+
+        `kMaxSeconds` is **the ceiling the window is clamped to and no longer
+        the axis end itself**: it is `bmo::kMaxTailSeconds`, the clamp on the
+        tail this module and the rack it sits in will ever report, so the axis
+        can never be asked to draw a tail longer than the host is told about.
+        `tailWindowSeconds` is where the axis actually ends. */
     static constexpr float kMinMs      = 1.0f;
     static constexpr float kMaxSeconds = 30.0f;
+
+    /** How much of the box is left blank after the drawn tail reaches the
+        floor, **as a fraction of the width and not as a multiple of the
+        time**.
+
+        On a logarithmic axis those are not the same thing and the difference
+        is the whole of why this constant is written this way: 15 % more time
+        after a 2.16 s tail is 1.8 % of the width, which rendered on AURORA as
+        a curve running into the right-hand frame. Eight per cent of the width
+        is eight per cent of the width at every setting, which is what
+        `erWindowMs`'s tenth already gives the EARLY page. */
+    static constexpr float kAxisAir = 0.08f;
+
+    /** The shortest window the axis will draw, in seconds. DECAY bottoms out
+        at 0.1 s, which with the headroom is 115 ms and two decades of axis;
+        this floor is what stops a future shorter decay from drawing one. */
+    static constexpr float kMinWindowS = 0.05f;
+
+    /** How far from the centre axis a hard-panned tap draws on EARLY, as a
+        fraction of the half-height. Not 1.0: the plot's own edge is where the
+        frame is, and a bearing dash sitting on the frame reads as a clipped
+        dash rather than as a hard pan. */
+    static constexpr float kPanReach = 0.92f;
+
+    /** The bright edge on IN HI-CUT's curtain, in pixels. The curtain's left
+        edge is inset by this much at 20 kHz so the whole of it stays inside
+        the plot -- which is the clipping the open circle was guilty of. */
+    static constexpr float kCurtainEdge = 2.0f;
+
+    /** The tick labels' point size. Small, and smaller than the readout's 11:
+        these sit *inside* the picture and a tick that competed with the curve
+        would be a second thing to read rather than a scale for the first. */
+    static constexpr float kTickSize = 8.0f;
 
     /** The bottom of the TAIL page's level axis, in dB. -72 rather than -60,
         so the tail's own -60 point lands inside the box with room under it
@@ -344,6 +479,12 @@ private:
 
     /** The plotting area, inset from the component. */
     juce::Rectangle<float> plotArea() const noexcept;
+
+    /** Milliseconds to x on the TAIL page, over a window that follows the
+        tail. A member and not a lambda inside `paintTail`, because the decade
+        ticks in `axisLabels` have to land on the same axis the envelope is
+        drawn against -- the same reason `eqXFor` is one. */
+    float tailXFor (float ms) const noexcept;
 
     void paintEarly (juce::Graphics&, juce::Rectangle<float> plot, juce::Colour ink) const;
     void paintTail  (juce::Graphics&, juce::Rectangle<float> plot, juce::Colour ink) const;
@@ -561,10 +702,38 @@ private:
     OUTPUT. Twelve over three is four rows, and four rows is what the cluster
     block is reserved at **on every page**, so the block under the keys does
     not change height when the page does -- the one thing that would make
-    paging feel like switching panels rather than turning a page. EARLY's and
-    TAIL's rows are centred in the reserved block rather than packed to its
-    top, so a lighter page reads as a lighter page instead of as a page with a
-    hole under it.
+    paging feel like switching panels rather than turning a page.
+
+    ### Where the two spare rows go, and it is not where they went
+
+    **EARLY and TAIL fill two of the four rows, and since 2026-09-22 they are
+    packed to the top of the block rather than centred in it.** Frosty's
+    observation, against the render: the centred arrangement drew "two large
+    voids", one above the cluster and one below it, and a reader has no way to
+    tell a deliberate space from a control that failed to appear. Packed, the
+    page's own rows sit hard under the persistent row they qualify, and the
+    whole of the leftover falls in one piece immediately above the LEVEL rule
+    -- where a gap already belongs, because every legended rule in the suite
+    has one above it. It is a larger gap than usual and it reads as separation
+    rather than as absence.
+
+    **Two alternatives were weighed and rejected.**
+
+    A **taller screen on the short pages** would absorb the rows exactly, and
+    it is the one thing that cannot be done: the screen's height is the panel's
+    one soft number, and moving it per page makes the bezel -- the biggest
+    object on the face -- resize every time a page key is pressed. A panel that
+    jumps when you turn a page is worse than any amount of air, and the page
+    keys exist to make turning cheap.
+
+    **Spreading the two rows evenly over the four** leaves no void anywhere and
+    costs more: 44 px between a page's own two rows is more than the 66 px
+    between the cluster and its neighbours *was*, so the rows stop reading as
+    one block and start reading as two unrelated pairs. A page's rows belong
+    together; the space does not belong between them.
+
+    The panel is **380 x 688 either way**. Neither the height nor the width
+    moves, because the rack slot cannot resize.
 
     **The screen paid for the two extra rows, and it is the only thing that
     could have.** A panel is 688 px of content and every block in it was

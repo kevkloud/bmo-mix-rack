@@ -165,20 +165,31 @@ inline constexpr auto kEqHiFreq  = "eqhifreq";
 inline constexpr auto kEqHi      = "eqhi";
 inline constexpr auto kEqHiQ     = "eqhiq";
 
-// **FILTER: the two outer nodes become cuts.** A bool, off by default, so a
-// fresh instance is the shelving EQ that shipped before it existed.
+// **FILTER: which of the two outer nodes are cuts.** Four positions, opening
+// on Off, so a fresh instance is the shelving EQ that shipped before it
+// existed.
 //
-// On, node 1 is a low cut and node 3 a high cut. FREQ and Q carry over
-// unchanged in both modes -- a cut's corner is a corner and a cut's Q is its
-// resonance, which is why the outer Qs stop at `kShelfMaxQ` rather than at a
-// bell's 40 (see `kEqLoQ`'s range below). **GAIN has no meaning on a cut**, so
-// `eqlo` and `eqhi` stop reaching the response and their knobs grey out; they
-// are not written, so switching FILTER off restores the shelf gains the user
-// had. Node 2's bell is untouched in both modes.
+// It was a bool -- both outer nodes or neither -- until 2026-09-22. Frosty's
+// call is that the two halves are separately useful: a tail that needs its
+// bottom taken off usually does not also want its air taken off, and a bool
+// made those one decision. The four are `kEqFilterNames` below.
 //
-// A bool and not a third position on some node's shape list, for the reason
-// above: a bool's normalisation is 0 or 1 forever, and this one is *per EQ*
-// rather than per node, which is what makes it a mode rather than a shape.
+// Whichever node is a cut: FREQ and Q carry over unchanged -- a cut's corner
+// is a corner and a cut's Q is its resonance, which is why the outer Qs stop
+// at `kShelfMaxQ` rather than at a bell's 40 (see `kEqLoQ`'s range below) --
+// and **GAIN has no meaning**, so that node's gain stops reaching the response
+// and its knob greys out. The gain is **withheld, never written**, so a trip
+// through a cut position and back restores the shelf the user had. Node 2's
+// bell is untouched in every position.
+//
+// **It costs no host lane.** Same id, same position in `Index`, same lane: the
+// schema stays at thirty with two spare. What it costs instead is the freedom
+// to change its mind about the count -- see the choice-list block below, and
+// `kEqFilterNames` for why four is permanent from first ship.
+//
+// Still one control and not a shape selector per node: it is *per EQ*, which
+// is what makes it a mode rather than a shape, and node 2 has no position in
+// it at all.
 inline constexpr auto kEqFilter  = "eqfilter";
 
 /** The widest a shelf's -- or a cut's -- Q goes, and the range the two outer
@@ -352,6 +363,49 @@ enum ErModeChoice { taps = 0, energy, blend, numErModes };
     not because the behaviour is settled. The listening pass (11 section 6) is
     where it becomes real or becomes a synonym for one of its neighbours. */
 inline const char* const kErModeNames[] { "Taps", "Energy", "Blend" };
+
+enum EqFilterChoice { eqFilterOff = 0, eqFilterLoCut, eqFilterHiCut, eqFilterBandpass, numEqFilters };
+
+/** Off, then each cut on its own, then both.
+
+    **Four, and the count and the order are permanent at first ship.** Frosty
+    confirmed four on 2026-09-22. A choice normalises as index/(n-1), so a
+    fifth position rescales every automation point ever written on this lane --
+    the same trap `kTypeNames` and `kErModeNames` carry, and the reason this
+    one had to be argued before it was built rather than after. Renaming a
+    position stays free; adding one never is.
+
+    The order is the order the two cuts arrive in on the curve, left to right,
+    with the two extremes at the ends: nothing, then the low corner, then the
+    high corner, then both. That also puts Off at index 0, which is what makes
+    the default the bottom of the lane.
+
+    **Bandpass rather than "Both".** A low cut plus a high cut *is* a bandpass;
+    naming it after the result says what the setting does to the tail, where
+    naming it after the mechanism says which two switches are down. It is also
+    the name the position would have if it had been built as one filter rather
+    than as two.
+
+    These are what a host's automation lane and the panel's readout show. The
+    ring around the control cannot set them -- see `kEqFilterLegend`. */
+inline const char* const kEqFilterNames[] { "Off", "Lo Cut", "Hi Cut", "Bandpass" };
+
+/** The same four positions as a legend, for the ring a `ui::ConcentricBand`
+    draws around a filter.
+
+    A legend label sits in a 38 x 15 px box on a small circle and "Bandpass"
+    does not fit in one; a DAW's automation lane, which has room, should not
+    say "B". So the terse forms are here and the full names are above, and
+    `ui::ConcentricBand::setLegend` is the shared method that takes one without
+    touching the other -- it exists for exactly this, BMO DEQ's SHAPE handing
+    in BELL, LS, HS, LC, HC while the host still says "Low Shelf".
+
+    OFF is spelled out where the other three are single letters because it is
+    the one position that is not a filter: L, H and B are cuts and name
+    themselves against each other, and an "O" among them would read as a fourth
+    cut. `ui::compactFrequency` already prints "Off" as OFF on a frequency
+    ring, so this is the suite's habit rather than a new one. */
+inline const char* const kEqFilterLegend[] { "OFF", "L", "H", "B" };
 
 //==============================================================================
 /** **Room's per-type constants, by definition -- not merely its defaults.**
@@ -908,9 +962,21 @@ inline const ParamSpecs& specs()
         // exactly through one, so the step is what makes a saved session come
         // back where it was saved.
 
-        // 7. FILTER. The outer two nodes become a low cut and a high cut, and
-        // their GAIN knobs grey out because a cut has no gain. See kEqFilter.
-        S::boolParam (kEqFilter, "EQ Filter", false),
+        // 7. FILTER. Which of the two outer nodes are cuts -- neither, node 1,
+        // node 3, or both -- and a node that is a cut has its GAIN knob greyed
+        // out because a cut has no gain. See kEqFilter and kEqFilterNames.
+        //
+        // **A choice on the lane a bool used to hold**: same id, same
+        // position, so the schema is still thirty with two spare. It opens on
+        // Off, and 0 meant off while it was a bool, so a default state file
+        // restores unchanged. A state file that had it **on** restores as
+        // Lo Cut rather than as both, because 1 now names the first cut --
+        // free before first ship and worth naming, since it is the one thing
+        // this change does not preserve.
+        S::choiceParam (kEqFilter, "EQ Filter",
+                        { kEqFilterNames[eqFilterOff],   kEqFilterNames[eqFilterLoCut],
+                          kEqFilterNames[eqFilterHiCut], kEqFilterNames[eqFilterBandpass] },
+                        eqFilterOff),
 
         // 8-10. Node 1: low shelf, or a low cut with FILTER on. The Q ceiling
         // is kShelfMaxQ and the knob stops there rather than travelling to a

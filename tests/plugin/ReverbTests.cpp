@@ -61,9 +61,11 @@ namespace
         { P::kDampLo,     "Low x",           0.10f,    2.00f,    1.20f,     0 },
         { P::kDampHi,     "High x",          0.10f,    2.00f,    0.40f,     0 },
 
-        // The Reverb EQ. FILTER is a bool, so it reports two steps -- the one
-        // row in this table that is not a float or a choice.
-        { P::kEqFilter,   "EQ Filter",        0.0f,     1.0f,     0.0f,     2 },
+        // The Reverb EQ. FILTER is a four-position choice as of 2026-09-22 and
+        // was a bool -- 0..1 with two steps -- before it. Same id, same
+        // position, same host lane; what changed is the range and the step
+        // count, which is exactly what this table exists to catch.
+        { P::kEqFilter,   "EQ Filter",        0.0f,     3.0f,     0.0f,     4 },
         { P::kEqLoFreq,   "EQ Low Freq",     16.0f,  1600.0f,   200.0f,     0 },
         { P::kEqLo,       "EQ Low",         -24.0f,    12.0f,     0.0f,     0 },
         { P::kEqLoQ,      "EQ Low Q",        0.10f,    2.00f,    0.71f,     0 },
@@ -111,8 +113,15 @@ int main()
     // than described, so the last two lanes cannot be spent without somebody
     // editing this line and saying why -- and Freeze, a ducking control and
     // the tempo-sync pair `syncon`/`syncdiv` are four candidates for them.
+    //
+    // **`eqfilter` going from a bool to four positions on 2026-09-22 cost
+    // nothing here**, which is the point of doing it that way: it is the same
+    // id in the same position, so the count and the spare are unmoved. A
+    // fourth position bought with a new parameter would have taken one of the
+    // two, and these lines are what would have said so.
     {
         check (P::specs().size() <= 32, "every parameter gets a rack host lane");
+        check (P::specs().size() == 30, "the four-position FILTER is still thirty parameters");
         check (32 - (int) P::specs().size() == 2,
                "exactly two host lanes are spare -- see modules/reverb/AGENTS.md");
     }
@@ -136,8 +145,44 @@ int main()
             check (bmo::indexOfParam (P::specs(), added) >= 0,
                    juce::String ("'") + added + "' is one of the six the Reverb EQ added");
 
-        check (P::specs()[P::Index::eqfilter].kind == bmo::ParamKind::Bool,
-               "eqfilter is a bool -- not a choice, whose count could never be revised");
+        // **eqfilter is a choice, and the four are permanent.** It was a bool
+        // until 2026-09-22 and this line said so, with the reason: a choice's
+        // count can never be revised, because `AudioParameterChoice`
+        // normalises as index/(n-1) and a fifth position would rescale every
+        // automation point ever written on the lane. Frosty confirmed four, so
+        // the trade is made knowingly -- and the names and their order are
+        // asserted here rather than described, which is the only thing that
+        // stops a fifth arriving quietly.
+        check (P::specs()[P::Index::eqfilter].kind == bmo::ParamKind::Choice,
+               "eqfilter is a four-position choice");
+        check (P::specs()[P::Index::eqfilter].numChoices() == 4,
+               "eqfilter has exactly four positions -- a fifth remaps recorded automation");
+
+        {
+            const char* const expected[] { "Off", "Lo Cut", "Hi Cut", "Bandpass" };
+            const auto& choices = P::specs()[P::Index::eqfilter].choices;
+
+            for (size_t i = 0; i < 4 && i < choices.size(); ++i)
+                check (juce::String (choices[i]) == expected[i],
+                       juce::String ("eqfilter position ") + juce::String ((int) i)
+                         + " is '" + expected[i] + "', reads '" + choices[i] + "'");
+        }
+
+        // The full names are what the host lane and the panel readout show;
+        // the ring around the control gets the terse ones. Two lists, and the
+        // pairing is what makes "OFF" belong to "Off".
+        {
+            const char* const legend[] { "OFF", "L", "H", "B" };
+
+            for (int i = 0; i < P::numEqFilters; ++i)
+                check (juce::String (P::kEqFilterLegend[i]) == legend[i],
+                       juce::String ("the FILTER ring's legend at ") + juce::String (i)
+                         + " is '" + legend[i] + "', reads '" + P::kEqFilterLegend[i] + "'");
+
+            check (juce::String (P::kEqFilterNames[P::eqFilterBandpass]) == "Bandpass"
+                     && juce::String (P::kEqFilterLegend[P::eqFilterBandpass]) == "B",
+                   "a 38 px legend box takes B where an automation lane takes Bandpass");
+        }
 
         // Neutral: both shelves and the bell open at 0 dB and FILTER opens
         // off, so a fresh instance's EQ is the identity. Absolutes, which is

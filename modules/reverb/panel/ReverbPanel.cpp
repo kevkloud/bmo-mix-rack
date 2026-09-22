@@ -224,8 +224,19 @@ namespace
         collides with nothing. **Do not tidy it back to BLOOM.** */
     constexpr float onsetMs (float percent) noexcept { return percent * 1.2f; }
 
-    /** The right-hand edge of the TAIL page's time axis, in milliseconds. */
-    constexpr float kMaxMs = LingerScreen::kMaxSeconds * 1000.0f;
+    /** A decade mark on the TAIL axis as a tick label: "10 MS", "1 S". ASCII
+        and as short as the number allows, because four of them share a 336 px
+        box with the picture they are the scale for.
+
+        **This is what pays for the axis following the tail.** With a fixed
+        1 ms - 30 s axis a reader could learn where a second was and never look
+        again; with a window that moves, an unlabelled decade line says only
+        "a decade happened here". */
+    juce::String decadeText (float ms)
+    {
+        return ms >= 1000.0f ? juce::String (juce::roundToInt (ms / 1000.0f)) + " S"
+                             : juce::String (juce::roundToInt (ms)) + " MS";
+    }
 
     /** A frequency for the readout line, ASCII and short: "200 HZ",
         "1.60 KHZ". Three of them have to fit one line under the screen. */
@@ -411,6 +422,41 @@ float LingerScreen::tailEndSeconds() const noexcept
     return state.preDelayMs * 0.001f + state.decaySeconds * slowest;
 }
 
+float LingerScreen::tailWindowSeconds() const noexcept
+{
+    // **The axis follows the tail.** `kMaxSeconds` is the clamp on what this
+    // module may report and not a setting anybody uses, so drawing to it at
+    // all times left the default 1.8 s tail finishing 60 % across with a flat
+    // line over the rest. See the class comment for what that costs.
+    //
+    // The air is taken in *width* and not in time -- see `kAxisAir`. Widening
+    // the axis by a fraction f of its own span means stretching the decades
+    // the tail occupies to 1 / (1 - f) of themselves, which is the exponent
+    // below and is why this is not a multiplication.
+    const auto endMs   = juce::jmax (kMinMs * 2.0f, tailEndSeconds() * 1000.0f);
+    const auto decades = std::log (endMs / kMinMs) / (1.0f - kAxisAir);
+
+    return juce::jlimit (kMinWindowS, kMaxSeconds, kMinMs * std::exp (decades) * 0.001f);
+}
+
+float LingerScreen::tailXFor (float ms) const noexcept
+{
+    const auto plot    = plotArea();
+    const auto windowMs = tailWindowSeconds() * 1000.0f;
+    const auto n = std::log (juce::jmax (kMinMs, ms) / kMinMs) / std::log (windowMs / kMinMs);
+
+    return plot.getX() + plot.getWidth() * juce::jlimit (0.0f, 1.0f, (float) n);
+}
+
+float LingerScreen::panY (float pan) const noexcept
+{
+    // -1 is hard left and draws above the axis, +1 is hard right and draws
+    // below it. `kPanReach` is why the extremes stop short of the frame.
+    const auto plot = plotArea();
+    return plot.getCentreY()
+             + plot.getHeight() * 0.5f * kPanReach * juce::jlimit (-1.0f, 1.0f, pan);
+}
+
 int LingerScreen::activeTapCount() const noexcept
 {
     // **The 21 core taps never switch off.** That is not a simplification: it
@@ -472,6 +518,92 @@ juce::Rectangle<float> LingerScreen::plotArea() const noexcept
     return getLocalBounds().toFloat().reduced (5.0f);
 }
 
+juce::Rectangle<float> LingerScreen::inputCutRegion() const noexcept
+{
+    if (page != Page::eq)
+        return {};
+
+    const auto plot = plotArea();
+
+    // **Clamped, and that is the whole point of the accessor.** IN HI-CUT's
+    // default is 20 kHz, which is the right-hand end of the axis exactly: the
+    // open circle this replaced was centred there and drawn half outside the
+    // frame. A curtain whose left edge is pulled back by its own edge width
+    // has all of itself inside the plot at every setting of the knob, and
+    // `tests/ui/LayoutTests.cpp` asserts that rather than trusting it.
+    const auto x = juce::jmin (eqXFor ((double) state.inHiCutHz),
+                               plot.getRight() - kCurtainEdge);
+
+    return { x, plot.getY(), plot.getRight() - x, plot.getHeight() };
+}
+
+std::vector<LingerScreen::AxisLabel> LingerScreen::axisLabels() const
+{
+    const auto plot = plotArea();
+    const auto font = ui::labelFont (kTickSize, true);
+    const auto row  = kTickSize + 2.0f;
+
+    std::vector<AxisLabel> out;
+
+    switch (page)
+    {
+        case Page::early:
+        {
+            // **Which way is up.** The stems are mirrored by bearing now, and
+            // a mirrored picture with no hand printed on it is one a reader
+            // has to guess at -- the guess being fifty-fifty, and wrong half
+            // the time on a control whose whole subject is lateral placement.
+            //
+            // **At the right-hand end, not the left.** The left edge is the
+            // direct sound's own full-height stem -- t = 0 -- and a letter set
+            // over it is a letter nobody can read; the window keeps a tenth of
+            // itself clear after the last tap, and that tenth is where these
+            // go. Rendered both ways on AURORA.
+            const auto w = juce::GlyphArrangement::getStringWidth (font, "R") + 2.0f;
+            const auto x = plot.getRight() - w - 1.0f;
+
+            out.push_back ({ "L", { x, plot.getY() + 1.0f, w, row } });
+            out.push_back ({ "R", { x, plot.getBottom() - row - 1.0f, w, row } });
+            break;
+        }
+
+        case Page::tail:
+        {
+            // The decades, labelled, because the axis end moves with the tail
+            // -- see `decadeText`. Along the foot: the envelope only reaches
+            // the floor at the far right of the window, where the last label
+            // has already been dropped for want of room.
+            const auto windowMs = tailWindowSeconds() * 1000.0f;
+
+            for (auto ms = 10.0f; ms < windowMs; ms *= 10.0f)
+            {
+                const auto text = decadeText (ms);
+                const auto w    = juce::GlyphArrangement::getStringWidth (font, text) + 2.0f;
+                const auto box  = juce::Rectangle<float> (tailXFor (ms) + 2.0f,
+                                                          plot.getBottom() - row - 1.0f, w, row);
+
+                // A tick that would run into the frame is not set at all. It
+                // is the last decade before the end of the window, its line is
+                // still drawn, and half a number is worse than none: this is
+                // the MAKEUP failure mode and it is refused here rather than
+                // measured after the fact.
+                if (box.getRight() <= plot.getRight())
+                    out.push_back ({ text, box });
+            }
+
+            break;
+        }
+
+        case Page::eq:
+            // Nothing: the curve has its own captions under the knobs and the
+            // readout line carries the three corners. A frequency axis is the
+            // one axis a reader already knows the shape of.
+            break;
+    }
+
+    return out;
+}
+
 float LingerScreen::eqXFor (double hz) const noexcept
 {
     const auto plot = plotArea();
@@ -528,9 +660,16 @@ juce::String LingerScreen::readout() const
             // 336 px, which does not set; the input cut has its own caption,
             // it is the open marker on the curve rather than a filled one, and
             // it is not part of the Reverb EQ. The three that are, are here.
-            return juce::String (state.eq.filter ? "LO CUT " : "LOW ") + hzText (state.eq.loFreqHz)
+            //
+            // **Per node, not per mode**, since 2026-09-22: with four
+            // positions the two outer nodes can be in different shapes at
+            // once, and a line that named the mode would have to invent a word
+            // for "one of them". `eqCutsLow` and `eqCutsHigh` are the same two
+            // predicates `eqShapeOf` branches on, so the words and the shapes
+            // cannot come apart.
+            return juce::String (eqCutsLow (state.eq.filter) ? "LO CUT " : "LOW ") + hzText (state.eq.loFreqHz)
                      + "   MID " + hzText (state.eq.midFreqHz)
-                     + (state.eq.filter ? "   HI CUT " : "   HIGH ") + hzText (state.eq.hiFreqHz);
+                     + (eqCutsHigh (state.eq.filter) ? "   HI CUT " : "   HIGH ") + hzText (state.eq.hiFreqHz);
     }
 
     return {};
@@ -581,6 +720,28 @@ void LingerScreen::paint (juce::Graphics& g)
         case Page::eq:    paintEq    (g, plot, ink); break;
     }
 
+    // **The tick labels come from `axisLabels` and are not built here.** One
+    // list, drawn by the painter and measured by the test, for the reason the
+    // taps come from one table: a check that laid the labels out its own way
+    // could pass while the drawn one clipped. They go on last so the curve
+    // cannot be drawn over a number.
+    {
+        const auto font = ui::labelFont (kTickSize, true);
+
+        for (const auto& label : axisLabels())
+        {
+            // The face is punched out under a tick for the reason it is
+            // punched out under an EQ node: a 12 s tail runs its envelope
+            // along the foot of the box, straight through where "10 S" is set,
+            // and a number with a curve drawn over it is not a number.
+            g.setColour (ui::tokens().meterFace.withAlpha (0.65f));
+            g.fillRect (label.box);
+
+            ui::drawLabel (g, label.text, label.box, juce::Justification::centredLeft, font,
+                           ink.withAlpha (0.6f));
+        }
+    }
+
     g.setColour (ui::tokens().outline);
     g.drawRoundedRectangle (bounds.reduced (0.5f), ui::Tokens::corner, ui::Tokens::hairlineWeight);
 }
@@ -589,12 +750,14 @@ void LingerScreen::paint (juce::Graphics& g)
 void LingerScreen::paintEarly (juce::Graphics& g, juce::Rectangle<float> plot,
                                juce::Colour ink) const
 {
-    // **Discrete stems from a baseline, spanning the real ER window.** The
-    // mirrored envelope this replaced bloomed and closed to a point and left
-    // most of the box empty; a tap is an event at a time with a level, and
-    // that is a stem.
-    const auto base   = plot.getBottom();
-    const auto top    = plot.getY() + 2.0f;
+    // **Discrete stems about a centre axis, spanning the real ER window.** The
+    // mirrored *envelope* this page once drew bloomed and closed to a point
+    // and left most of the box empty; a tap is an event at a time, with a
+    // level and **a bearing**, and that is a stem on one side or the other of
+    // the centre. Mirroring an envelope hides the events; mirroring the taps
+    // is what shows where they are.
+    const auto axis   = plot.getCentreY();
+    const auto reach  = plot.getHeight() * 0.5f - 2.0f;
     const auto window = erWindowMs();
 
     const auto xFor = [&] (float ms)
@@ -602,13 +765,17 @@ void LingerScreen::paintEarly (juce::Graphics& g, juce::Rectangle<float> plot,
         return plot.getX() + plot.getWidth() * juce::jlimit (0.0f, 1.0f, ms / window);
     };
 
-    /** A level in dB as a stem height in pixels, measured up from the floor --
-        against `kTapFloorDb`, the ER fader's own bottom, and not against the
-        tail's -72. See the constant for why. */
+    /** A level in dB as a stem length in pixels, measured from the centre axis
+        outward -- against `kTapFloorDb`, the ER fader's own bottom, and not
+        against the tail's -72. See the constant for why.
+
+        **Half the box per side is the cost of the bearing**, and it is paid in
+        the one axis that had slack: the 15 dB the table spans still reads as a
+        decaying comb against -40 dB, where against -72 it would not. */
     const auto heightFor = [&] (float db)
     {
         const auto n = juce::jlimit (0.0f, 1.0f, (db - kTapFloorDb) / (0.0f - kTapFloorDb));
-        return (base - top) * n;
+        return reach * n;
     };
 
     // The time marks, at a round step chosen for the window rather than fixed:
@@ -621,25 +788,35 @@ void LingerScreen::paintEarly (juce::Graphics& g, juce::Rectangle<float> plot,
                                                 ui::Tokens::hairlineWeight, plot.getHeight()));
     }
 
-    // The floor the stems stand on.
+    // The centre axis the bearings are read against: the phantom centre, and
+    // the line a tap panned dead centre would have no side of.
     g.setColour (ui::tokens().hairline.withMultipliedAlpha (0.85f));
-    g.fillRect (juce::Rectangle<float> (plot.getX(), base, plot.getWidth(),
+    g.fillRect (juce::Rectangle<float> (plot.getX(), axis, plot.getWidth(),
                                         ui::Tokens::hairlineWeight));
 
-    // The direct sound, at t = 0, full height and hard against the left edge.
-    // On this page that is honest rather than a licence: the axis is linear
-    // and starts at zero, so the left edge *is* t = 0. It is the reference
-    // every arrival here is measured from, and leaving it out would make the
-    // first reflection look like the beginning of the sound.
+    // The direct sound, at t = 0, both sides of the axis and hard against the
+    // left edge. On this page that is honest rather than a licence: the axis
+    // is linear and starts at zero, so the left edge *is* t = 0. It is the
+    // reference every arrival here is measured from -- in time and now in
+    // bearing too, since the direct sound is the centre -- and leaving it out
+    // would make the first reflection look like the beginning of the sound.
     g.setColour (ink.withAlpha (0.85f));
-    g.fillRect (juce::Rectangle<float> (plot.getX(), top, 2.0f, base - top));
+    g.fillRect (juce::Rectangle<float> (plot.getX(), axis - reach, 2.0f, reach * 2.0f));
 
     // ER at "Off" draws no taps at all, because "Off" is silence and not
     // -40 dB.
     if (state.erLevelDb <= -39.95f)
         return;
 
-    const auto drawTap = [&] (float ms, float gain, float alpha)
+    /** One tap: a stem from the axis, **up for left and down for right**, as
+        long as its gain; and, for the taps that are a real bearing rather than
+        an interpolated infill, a dash at `panY` marking how far over it is.
+
+        The sign is the side and the dash is the magnitude, which is the pair
+        of things 10 section 3's lateral distribution is about. A sign on its
+        own cannot separate the 0.05 the first tap is set to -- near centre, so
+        the phantom centre holds -- from the 0.72 of the thirteenth. */
+    const auto drawTap = [&] (float ms, float gain, float pan, float alpha, bool bearing)
     {
         if (gain <= 0.0f)
             return;
@@ -649,17 +826,38 @@ void LingerScreen::paintEarly (juce::Graphics& g, juce::Rectangle<float> plot,
         if (h <= 0.0f)
             return;
 
+        const auto x  = xFor (ms);
+        const auto up = pan < 0.0f;
+
         g.setColour (ink.withAlpha (alpha));
-        g.fillRect (juce::Rectangle<float> (xFor (ms), base - h, 2.0f, h));
+        g.fillRect (juce::Rectangle<float> (x, up ? axis - h : axis, 2.0f, h));
+
+        // The dash sits on its own stem while the tap is loud and out past the
+        // tip while it is not, which is the honest picture either way: a
+        // quiet tap hard over is still hard over.
+        //
+        // **Four pixels and dimmer than the stem.** At six and full strength
+        // it drew a cross on every stem and read as a second endpoint --
+        // rendered on AURORA and rejected. It is a bearing tick over the
+        // picture, not a mark in it.
+        if (bearing)
+        {
+            g.setColour (ink.withAlpha (alpha * 0.6f));
+            g.fillRect (juce::Rectangle<float> (x - 1.0f, panY (pan) - 0.5f, 4.0f, 1.0f)
+                            .getIntersection (plot));
+        }
     };
 
     // No shift: `kPreLinkFixed` is false, so the ER sit where the table puts
     // them whatever PRE-DELAY reads. See `firstTapTimeMs`.
 
-    // The core taps, always on, at full strength.
+    // The core taps, always on, at full strength, each on the side its bearing
+    // puts it and carrying that bearing's dash. **The pan comes off the same
+    // `Tap` row the time and the gain do**, so there is no second table to
+    // drift: the engine will play these bearings.
     for (const auto& tap : kReferenceTaps)
         drawTap (tapTimeMsAt (tap, state.sizeM),
-                 tapGainAt (tap, state.sizeM), 0.92f);
+                 tapGainAt (tap, state.sizeM), tap.pan, 0.92f, true);
 
     // The infill DENSITY spends, drawn fainter because it is the part of the
     // picture the generator has not been written for yet. Times are one per
@@ -690,7 +888,16 @@ void LingerScreen::paintEarly (juce::Graphics& g, juce::Rectangle<float> plot,
             const auto gain = tapGainAt (kReferenceTaps[0], state.sizeM) * first
                                 / juce::jmax (1.0f, ms);
 
-            drawTap (ms, gain, 0.26f + 0.34f * w);
+            // **The infill's bearings are invented and are drawn without a
+            // dash**, which is the same honesty the faint alpha already
+            // carries: the 21 core bearings come off `TapTables.h` and will be
+            // the ones the engine plays, and these are a deterministic spread
+            // about the centre standing in for a master sequence that does not
+            // exist yet (10 section 3). A dash on a made-up bearing would be a
+            // measurement drawn over a guess.
+            const auto pan = 0.8f * (float) (((i * 53) % 9) - 4) / 4.0f;
+
+            drawTap (ms, gain, pan, 0.26f + 0.34f * w, false);
         }
     }
 }
@@ -699,11 +906,14 @@ void LingerScreen::paintEarly (juce::Graphics& g, juce::Rectangle<float> plot,
 void LingerScreen::paintTail (juce::Graphics& g, juce::Rectangle<float> plot,
                               juce::Colour ink) const
 {
-    const auto xFor = [&] (float ms)
-    {
-        const auto n = std::log (juce::jmax (kMinMs, ms) / kMinMs) / std::log (kMaxMs / kMinMs);
-        return plot.getX() + plot.getWidth() * juce::jlimit (0.0f, 1.0f, (float) n);
-    };
+    // **The axis ends where the tail does**, plus `kWindowHeadroom` -- not at
+    // the 30 s clamp, which is a ceiling rather than a setting and left 40 %
+    // of the box ruled with a flat line at the default. `tailXFor` and not a
+    // lambda, because the decade ticks in `axisLabels` have to land on this
+    // same axis.
+    const auto windowMs = tailWindowSeconds() * 1000.0f;
+
+    const auto xFor = [this] (float ms) { return tailXFor (ms); };
 
     const auto yFor = [&] (float db)
     {
@@ -712,11 +922,13 @@ void LingerScreen::paintTail (juce::Graphics& g, juce::Rectangle<float> plot,
     };
 
     // Decade marks -- 10, 100 ms, 1 s, 10 s -- because a logarithmic axis with
-    // nothing on it reads as a linear one that has gone wrong.
+    // nothing on it reads as a linear one that has gone wrong, and **labelled**
+    // now that the axis end moves: the labels are drawn from `axisLabels` in
+    // `paint`, after the envelope, so nothing is drawn over a number.
     {
         g.setColour (ui::tokens().hairline.withMultipliedAlpha (0.5f));
 
-        for (auto ms = 10.0f; ms < kMaxMs; ms *= 10.0f)
+        for (auto ms = 10.0f; ms < windowMs; ms *= 10.0f)
             g.fillRect (juce::Rectangle<float> (xFor (ms), plot.getY(),
                                                 ui::Tokens::hairlineWeight, plot.getHeight()));
     }
@@ -773,9 +985,10 @@ void LingerScreen::paintTail (juce::Graphics& g, juce::Rectangle<float> plot,
 
         for (int i = 0; i <= steps; ++i)
         {
-            // Back out of the axis to the time this pixel stands for.
+            // Back out of the axis to the time this pixel stands for, over the
+            // window the tail is actually drawn in.
             const auto axis = (xAt (i) - plot.getX()) / juce::jmax (1.0f, plot.getWidth());
-            const auto ms = kMinMs * std::pow (kMaxMs / kMinMs, axis);
+            const auto ms = kMinMs * std::pow (windowMs / kMinMs, axis);
 
             out[(size_t) i] = yFor (envelopeDb (ms, t60));
         }
@@ -894,24 +1107,45 @@ void LingerScreen::paintEq (juce::Graphics& g, juce::Rectangle<float> plot,
     g.setColour (ink);
     g.strokePath (curve, juce::PathStrokeType (1.6f));
 
-    // **A marked node per control**, sitting on the summed curve rather than
-    // on its own contribution: what a serial EQ's node says is "this control's
-    // corner is here, and here is what the chain is doing at that corner".
+    // **IN HI-CUT is a curtain and not a node.** It was an open circle among
+    // three filled ones until 2026-09-22, which was wrong twice: one stroke's
+    // difference reads as a fourth node of the same EQ, and this is an *input*
+    // filter ahead of the EQ and ahead of both generators; and at its default
+    // of 20 kHz the circle sat on the right-hand frame with half of itself
+    // outside the box.
     //
-    // **Three filled and one open.** The filled three are the Reverb EQ's own
-    // nodes; the open one is IN HI-CUT, which is a different control in a
-    // different place -- ahead of the EQ, ahead of both generators, one pole,
-    // no Q. The module has two high cuts and a reader looking at one curve has
-    // to be able to tell which is which. See the class comment.
+    // A washed region from the corner to the end of the axis, with a bright
+    // edge at the corner and a tab along the top of it, is a different kind of
+    // mark at any glance -- and `inputCutRegion` clamps it so that at 20 kHz
+    // the edge is inside the plot rather than half-drawn on the frame. What it
+    // says is the true thing: everything to the right of here arrives at the
+    // room already darkened.
+    {
+        const auto curtain = inputCutRegion();
+
+        g.setColour (ink.withAlpha (0.10f));
+        g.fillRect (curtain);
+
+        // The edge, and a tab running right along the top of the curtain --
+        // both inside the region, so neither can be clipped by the frame.
+        g.setColour (ink.withAlpha (0.55f));
+        g.fillRect (curtain.withWidth (kCurtainEdge));
+        g.fillRect (curtain.withHeight (1.5f));
+    }
+
+    // **A marked node per Reverb EQ control**, sitting on the summed curve
+    // rather than on its own contribution: what a serial EQ's node says is
+    // "this control's corner is here, and here is what the chain is doing at
+    // that corner". Three of them, and the fourth frequency `nodeFrequencies`
+    // reports is the curtain above rather than a marker here.
     {
         constexpr auto radius = 3.4f;
 
         const auto frequencies = nodeFrequencies();
 
-        for (size_t i = 0; i < frequencies.size(); ++i)
+        for (size_t i = 0; i + 1 < frequencies.size(); ++i)
         {
             const auto hz = frequencies[i];
-            const auto isInput = i + 1 == frequencies.size();
 
             const auto centre = juce::Point<float> (xFor (hz), yFor (responseDbAt (hz)));
             const auto dot = juce::Rectangle<float> (radius * 2.0f, radius * 2.0f)
@@ -923,11 +1157,7 @@ void LingerScreen::paintEq (juce::Graphics& g, juce::Rectangle<float> plot,
             g.fillEllipse (dot.expanded (1.6f));
 
             g.setColour (ink);
-
-            if (isInput)
-                g.drawEllipse (dot, 1.6f);
-            else
-                g.fillEllipse (dot);
+            g.fillEllipse (dot);
         }
     }
 }
@@ -1093,6 +1323,15 @@ ReverbPanel::ReverbPanel (ui::ModuleContext ctx)
       // the accent to a switch that changes what the module *is* rather than
       // routing it, and `switchAlt` to the rest. A mode over three controls is
       // the first of those.
+      //
+      // **A switch on a four-position choice, and it is provisional.**
+      // `eqfilter` stopped being a bool on 2026-09-22 and the control that
+      // replaces this one is a `ui::ConcentricBand` with a null gain -- a
+      // filter dial, legended OFF / L / H / B off `kEqFilterLegend`, the way
+      // BMO CEQ's LO-CUT is drawn. That is the panel pass, not this one. Until
+      // then a `ButtonParameterAttachment` maps off to index 0 and on to the
+      // top of the range, which is Bandpass -- so the switch reaches exactly
+      // the two positions the bool had and cannot reach the two new ones.
       eqFilterSwitch (context.params.param (Index::eqfilter), "FILTER", context.def.accent),
 
       eqLoFreqKnob  (context.params.param (Index::eqlofreq),  "EQ LOW FREQ",  ui::Knob::Style::character, 0.58f, context.def.accent),
@@ -1356,7 +1595,7 @@ void ReverbPanel::refreshScreen()
     // The Reverb EQ, as the same `EqSettings` the engine builds in
     // `DspCore::eqSettingsFor` -- one struct, one design, so the curve and the
     // sound cannot be two transcriptions of ten numbers.
-    s.eq.filter    = context.params.getReal (Index::eqfilter) > 0.5f;
+    s.eq.filter    = eqFilterFor ((int) context.params.getReal (Index::eqfilter));
     s.eq.loFreqHz  = context.params.getReal (Index::eqlofreq);
     s.eq.loDb      = context.params.getReal (Index::eqlo);
     s.eq.loQ       = context.params.getReal (Index::eqloq);
@@ -1378,17 +1617,22 @@ void ReverbPanel::refreshScreen()
 
 void ReverbPanel::refreshFilterMode()
 {
-    // **A cut has no gain, so the two shelf GAIN knobs grey out.** The claim
-    // the greying makes is exactly `eqGainReachingDesign`'s: with FILTER on,
-    // `dsp::hasGain` is false for `Shape::lowCut` and `Shape::highCut` and the
-    // gain never reaches the design. The panel asks the same function rather
-    // than repeating the rule, so there is no way for the look and the sound
-    // to disagree about which knobs are live.
+    // **A cut has no gain, so that node's GAIN knob greys out.** The claim the
+    // greying makes is exactly `eqGainReachingDesign`'s: `dsp::hasGain` is
+    // false for `Shape::lowCut` and `Shape::highCut` and the gain never
+    // reaches the design. The panel asks the same function rather than
+    // repeating the rule, so there is no way for the look and the sound to
+    // disagree about which knobs are live.
     //
-    // FREQ and Q stay live in both modes, because a cut has a corner and a
+    // **One knob at a time since 2026-09-22**, which is the whole of what the
+    // four positions cost the panel: Lo Cut greys EQ LOW and leaves EQ HIGH
+    // alone, Hi Cut the other way about, and Bandpass greys both -- which is
+    // what the bool did in its one on position.
+    //
+    // FREQ and Q stay live in every position, because a cut has a corner and a
     // resonance and the same two knobs set them. Node 2's three are never
-    // touched -- a bell is a bell in both modes.
-    const auto filter = context.params.getReal (Index::eqfilter) > 0.5f;
+    // touched -- a bell is a bell in all four.
+    const auto filter = eqFilterFor ((int) context.params.getReal (Index::eqfilter));
 
     eqLoKnob.setKnobEnabled (eqNodeHasGain (EqNode::low, filter));
     eqHiKnob.setKnobEnabled (eqNodeHasGain (EqNode::high, filter));
@@ -1515,16 +1759,33 @@ void ReverbPanel::resized()
         for (auto* c : showing)
             addAndMakeVisible (c);
 
-        // **A short page is centred in the four reserved rows, not packed to
-        // the top.** The block is four rows on every page so that nothing
-        // below it moves when the page turns, and EARLY and TAIL are two --
-        // left at the top, the two empty rows underneath read as a page that
-        // has lost half its controls. Centred, the page reads as what it is: a
-        // lighter page than EQ.
+        // **A short page is packed to the top of the four reserved rows, and
+        // was centred in them until 2026-09-22.** The block is four rows on
+        // every page so that nothing below it moves when the page turns, and
+        // EARLY and TAIL are two of the four -- so on those two pages there
+        // are two rows of nothing to put somewhere.
+        //
+        // Centred put one of them above the page's first row and the other
+        // below its last, which is **two holes in the middle of the face**:
+        // one between the persistent row and the cluster, one between the
+        // cluster and the LEVEL rule, neither of them next to anything that
+        // explains them. Frosty's own words for it were "two large voids".
+        // Packed to the top, the page's controls sit hard under the persistent
+        // row they qualify -- which is the reading order anyway -- and the
+        // whole of the leftover falls in one piece immediately above a
+        // legended rule, where air already belongs: LEVEL has a full gap above
+        // it on every panel in the suite, and this is that gap, larger.
+        //
+        // **One void that reads as separation beats two that read as missing
+        // controls.** The two alternatives were both rejected: a screen that
+        // grows on the short pages makes the panel jump every time a page key
+        // is pressed, which is worse than any amount of air, and spreading the
+        // two rows evenly over the four pulls a page's own rows apart until
+        // they read as two unrelated groups. See `ReverbPanel`'s class
+        // comment.
         const auto rowsUsed = ((int) showing.size() + kCols - 1) / kCols;
 
-        auto block = clusterBox.withSizeKeepingCentre (clusterBox.getWidth(),
-                                                       kClusterRow * rowsUsed);
+        auto block = clusterBox.withHeight (kClusterRow * rowsUsed);
 
         for (size_t first = 0; first < showing.size(); first += (size_t) kCols)
         {

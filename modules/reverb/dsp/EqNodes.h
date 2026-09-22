@@ -28,6 +28,58 @@ namespace bmo::reverb
 {
 
 //==============================================================================
+/** Which of the two outer nodes are cuts.
+
+    The parameter's four positions, in its order and with its indices --
+    `params.h`'s `EqFilterChoice` and `kEqFilterNames` are the same four, and
+    `eqFilterFor` below is the one place a detent becomes one of these. Both
+    have to stay in step, and the test that walks all four is what holds them
+    there.
+
+    It was a `bool` until 2026-09-22, and the enum is a *widening* rather than
+    a replacement: `off` is what `false` did and `bandpass` is what `true` did,
+    exactly, so every claim the old mode made still reads. No implicit
+    conversion is offered, deliberately -- a `bool` overload here would let
+    `eqShapeOf (node, true)` keep compiling while silently meaning `bandpass`,
+    and a mode with four positions should not have a second spelling for one of
+    them. */
+enum class EqFilter { off = 0, loCut, hiCut, bandpass };
+
+inline constexpr int kNumEqFilters = 4;
+
+/** The detent as the mode it names.
+
+    **The one place an `eqfilter` detent becomes an `EqFilter`**, which is what
+    keeps this list and `params.h`'s `EqFilterChoice` from drifting apart: they
+    are tied together through this function and asserted through it, rather
+    than by two lists agreeing on paper.
+
+    Here rather than beside `typeFor` and `erModeFor` in `ReverbDsp.h`, which
+    is where the module's other two detent conversions live: the panel needs
+    this one too -- it designs the same filters the engine does, off the same
+    struct -- and the panel does not include the engine's adapter.
+
+    Out of range is Off, like its two neighbours' fallbacks, because an EQ that
+    cannot read its own mode should be the identity rather than a cut nobody
+    asked for. */
+inline constexpr EqFilter eqFilterFor (int index) noexcept
+{
+    return index >= 0 && index < kNumEqFilters ? (EqFilter) index : EqFilter::off;
+}
+
+/** Whether node 1 is a cut in this mode. */
+inline constexpr bool eqCutsLow (EqFilter f) noexcept
+{
+    return f == EqFilter::loCut || f == EqFilter::bandpass;
+}
+
+/** Whether node 3 is a cut in this mode. */
+inline constexpr bool eqCutsHigh (EqFilter f) noexcept
+{
+    return f == EqFilter::hiCut || f == EqFilter::bandpass;
+}
+
+//==============================================================================
 /** The Reverb EQ's three nodes, as the filters they actually are.
 
     **This is the one place the EQ's response is computed**, and both readers
@@ -50,11 +102,12 @@ namespace bmo::reverb
     there is no shape selector and `params.h` carries why (a choice list's
     count cannot be revised after ship without remapping automation).
 
-    `filter` turns the two outer nodes into a low cut and a high cut. It is the
-    only thing that changes a shape, it changes two of the three, and **node 2
-    is a bell in both modes**. FREQ and Q reach the design unchanged either
-    way; GAIN does not, because `dsp::hasGain` is false for a cut and the
-    prototype has nowhere to put it -- see `gainReaching`.
+    `filter` turns one or both of the outer nodes into a cut -- see `EqFilter`,
+    which was a bool until 2026-09-22. It is the only thing that changes a
+    shape, it never reaches more than two of the three, and **node 2 is a bell
+    in every position**. FREQ and Q reach the design unchanged whichever shape
+    a node is in; GAIN does not, because `dsp::hasGain` is false for a cut and
+    the prototype has nowhere to put it -- see `gainReaching`.
 
     ## IN HI-CUT is not one of these three
 
@@ -75,7 +128,7 @@ namespace bmo::reverb
 */
 struct EqSettings
 {
-    bool  filter     = false;
+    EqFilter filter  = EqFilter::off;
 
     float loFreqHz   = 200.0f;
     float loDb       = 0.0f;
@@ -104,13 +157,17 @@ inline constexpr int kNumEqNodes = 3;
 inline constexpr double kEqDesignRate = 48000.0;
 
 /** What shape a node takes in a given mode. The **only** branch `filter`
-    causes: node 2 is absent from it because a bell is a bell in both. */
-inline constexpr dsp::Shape eqShapeOf (EqNode node, bool filter) noexcept
+    causes: node 2 is absent from it because a bell is a bell in all four.
+
+    The two outer nodes read their own half of the mode -- `eqCutsLow` and
+    `eqCutsHigh` -- so Lo Cut and Hi Cut are one rule each rather than a table
+    of four rows that could disagree with itself about Bandpass. */
+inline constexpr dsp::Shape eqShapeOf (EqNode node, EqFilter filter) noexcept
 {
     switch (node)
     {
-        case EqNode::low:  return filter ? dsp::Shape::lowCut  : dsp::Shape::lowShelf;
-        case EqNode::high: return filter ? dsp::Shape::highCut : dsp::Shape::highShelf;
+        case EqNode::low:  return eqCutsLow  (filter) ? dsp::Shape::lowCut  : dsp::Shape::lowShelf;
+        case EqNode::high: return eqCutsHigh (filter) ? dsp::Shape::highCut : dsp::Shape::highShelf;
         case EqNode::mid:  break;
     }
 
@@ -156,19 +213,20 @@ inline constexpr float eqKnobGainDbOf (const EqSettings& s, EqNode node) noexcep
 
 /** The gain that actually reaches the design: the knob, or **zero for a cut**.
 
-    This is the whole of what greying out the two GAIN knobs in filter mode
-    means in the DSP, and it is here rather than in the panel so that the
-    picture and the sound cannot disagree about it. The parameter itself is
-    never written, so switching FILTER back off restores the shelf gains the
-    user had -- a mode must not eat an edit. */
+    This is the whole of what greying out a GAIN knob means in the DSP, and it
+    is here rather than in the panel so that the picture and the sound cannot
+    disagree about it. The parameter itself is never written, so a trip through
+    a cut position and back restores the shelf gain the user had -- a mode must
+    not eat an edit. With four positions that matters more than it did with
+    two: Lo Cut withholds node 1's gain while node 3 goes on using its own. */
 inline constexpr float eqGainReachingDesign (const EqSettings& s, EqNode node) noexcept
 {
     return dsp::hasGain (eqShapeOf (node, s.filter)) ? eqKnobGainDbOf (s, node) : 0.0f;
 }
 
-/** Whether a node's GAIN does anything in this mode -- false for the two outer
-    nodes with FILTER on, which is what the panel greys out on. */
-inline constexpr bool eqNodeHasGain (EqNode node, bool filter) noexcept
+/** Whether a node's GAIN does anything in this mode -- false for an outer node
+    the mode has made a cut, which is what the panel greys out on. */
+inline constexpr bool eqNodeHasGain (EqNode node, EqFilter filter) noexcept
 {
     return dsp::hasGain (eqShapeOf (node, filter));
 }

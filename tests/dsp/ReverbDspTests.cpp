@@ -90,7 +90,7 @@ int main()
         v[Index::feed]        = 40.0f;
         v[Index::damplo]      = 1.55f;
         v[Index::damphi]      = 0.65f;
-        v[Index::eqfilter]    = 1.0f;
+        v[Index::eqfilter]    = (float) eqFilterHiCut;
         v[Index::eqlofreq]    = 140.0f;
         v[Index::eqlo]        = -6.0f;
         v[Index::eqloq]       = 1.35f;
@@ -128,7 +128,12 @@ int main()
         check (near (p.eqLoDb, -6.0f), "eq low");
         check (near (p.eqHiFreqHz, 1400.0f), "eq high freq");
         check (near (p.eqHiDb, 4.5f), "eq high");
-        check (p.eqFilter, "eq filter");
+        // **A middle position, not an end one.** `eqfilter` crossed the
+        // adapter as `> 0.5f` while it was a bool, and that line would still
+        // compile against the choice -- it would read Lo Cut, Hi Cut and
+        // Bandpass all as "on". Hi Cut is index 2, so this fails on anything
+        // that still treats the lane as a switch.
+        check (p.eqFilter == EqFilter::hiCut, "eq filter");
         check (near (p.eqLoQ, 1.35f), "eq low q");
         check (near (p.eqMidFreqHz, 2600.0f), "eq mid freq");
         check (near (p.eqMidDb, -7.5f), "eq mid");
@@ -548,7 +553,7 @@ int main()
             const auto v = defaults();
             const auto fresh = DspCore::eqSettingsFor (ReverbDsp::paramsFrom (v.data(), (int) v.size()));
 
-            check (! fresh.filter, "a fresh instance opens with FILTER off");
+            check (fresh.filter == EqFilter::off, "a fresh instance opens with FILTER off");
 
             for (const auto hz : { 20.0, 50.0, 200.0, 1000.0, 1600.0, 5000.0, 20000.0 })
                 check (std::abs (db (fresh, hz)) < 1.0e-9,
@@ -569,12 +574,40 @@ int main()
         // causes, and then on the response -- so a table that agreed with
         // itself and with nothing audible would still fail.
         {
-            check (eqShapeOf (EqNode::low,  false) == bmo::dsp::Shape::lowShelf,  "node 1 is a low shelf");
-            check (eqShapeOf (EqNode::mid,  false) == bmo::dsp::Shape::bell,      "node 2 is a bell");
-            check (eqShapeOf (EqNode::high, false) == bmo::dsp::Shape::highShelf, "node 3 is a high shelf");
-            check (eqShapeOf (EqNode::low,  true)  == bmo::dsp::Shape::lowCut,    "FILTER makes node 1 a low cut");
-            check (eqShapeOf (EqNode::mid,  true)  == bmo::dsp::Shape::bell,      "node 2 is a bell in both modes");
-            check (eqShapeOf (EqNode::high, true)  == bmo::dsp::Shape::highCut,   "FILTER makes node 3 a high cut");
+            // **All four positions and all three nodes**: twelve shapes
+            // written out rather than a rule restated. Off and Bandpass are
+            // what the bool's two modes were, exactly, and Lo Cut and Hi Cut
+            // are the pair a bool could not express -- and the pair that a
+            // mode reading "any cut means both cuts" would get wrong while
+            // passing on the other two.
+            check (eqShapeOf (EqNode::low,  EqFilter::off)      == bmo::dsp::Shape::lowShelf,  "Off: node 1 is a low shelf");
+            check (eqShapeOf (EqNode::mid,  EqFilter::off)      == bmo::dsp::Shape::bell,      "Off: node 2 is a bell");
+            check (eqShapeOf (EqNode::high, EqFilter::off)      == bmo::dsp::Shape::highShelf, "Off: node 3 is a high shelf");
+
+            check (eqShapeOf (EqNode::low,  EqFilter::loCut)    == bmo::dsp::Shape::lowCut,    "Lo Cut: node 1 is a low cut");
+            check (eqShapeOf (EqNode::mid,  EqFilter::loCut)    == bmo::dsp::Shape::bell,      "Lo Cut: node 2 is a bell");
+            check (eqShapeOf (EqNode::high, EqFilter::loCut)    == bmo::dsp::Shape::highShelf, "Lo Cut leaves node 3 a high shelf");
+
+            check (eqShapeOf (EqNode::low,  EqFilter::hiCut)    == bmo::dsp::Shape::lowShelf,  "Hi Cut leaves node 1 a low shelf");
+            check (eqShapeOf (EqNode::mid,  EqFilter::hiCut)    == bmo::dsp::Shape::bell,      "Hi Cut: node 2 is a bell");
+            check (eqShapeOf (EqNode::high, EqFilter::hiCut)    == bmo::dsp::Shape::highCut,   "Hi Cut: node 3 is a high cut");
+
+            check (eqShapeOf (EqNode::low,  EqFilter::bandpass) == bmo::dsp::Shape::lowCut,    "Bandpass: node 1 is a low cut");
+            check (eqShapeOf (EqNode::mid,  EqFilter::bandpass) == bmo::dsp::Shape::bell,      "Bandpass: node 2 is a bell");
+            check (eqShapeOf (EqNode::high, EqFilter::bandpass) == bmo::dsp::Shape::highCut,   "Bandpass: node 3 is a high cut");
+
+            // The detent order the host sees is the mode the DSP runs, through
+            // the one function that converts them -- `params.h` and
+            // `EqNodes.h` each name four positions and only this ties the two
+            // lists together.
+            check (eqFilterFor (eqFilterOff)      == EqFilter::off,      "detent 0 is Off");
+            check (eqFilterFor (eqFilterLoCut)    == EqFilter::loCut,    "detent 1 is Lo Cut");
+            check (eqFilterFor (eqFilterHiCut)    == EqFilter::hiCut,    "detent 2 is Hi Cut");
+            check (eqFilterFor (eqFilterBandpass) == EqFilter::bandpass, "detent 3 is Bandpass");
+            check (eqFilterFor (-1) == EqFilter::off && eqFilterFor (numEqFilters) == EqFilter::off,
+                   "a detent outside the list is Off, not a cut nobody asked for");
+            check (numEqFilters == kNumEqFilters,
+                   "the schema's position count and the DSP's are the same four");
 
             EqSettings s;
             s.loDb = 6.0f;
@@ -607,11 +640,18 @@ int main()
             shelves.hiFreqHz = 1600.0f; shelves.hiDb = 6.0f;   shelves.hiQ = 0.71f;
 
             auto cuts = shelves;
-            cuts.filter = true;
+            cuts.filter = EqFilter::bandpass;
 
-            for (const auto hz : { 30.0, 300.0, 900.0, 4000.0, 15000.0 })
-                check (nodeDb (shelves, EqNode::mid, hz) == nodeDb (cuts, EqNode::mid, hz),
-                       "FILTER must not move node 2 by so much as a rounding bit");
+            auto loOnly = shelves;
+            loOnly.filter = EqFilter::loCut;
+
+            auto hiOnly = shelves;
+            hiOnly.filter = EqFilter::hiCut;
+
+            for (const auto& s : { shelves, loOnly, hiOnly, cuts })
+                for (const auto hz : { 30.0, 300.0, 900.0, 4000.0, 15000.0 })
+                    check (nodeDb (shelves, EqNode::mid, hz) == nodeDb (s, EqNode::mid, hz),
+                           "FILTER must not move node 2 by so much as a rounding bit");
 
             check (nodeDb (shelves, EqNode::low, 20.0) > 5.0,
                    "as a shelf, node 1 lifts below its corner");
@@ -622,11 +662,33 @@ int main()
             check (nodeDb (cuts, EqNode::high, 16000.0) < -18.0,
                    "as a cut, node 3 removes above its corner");
 
+            // **The two halves, separately.** Lo Cut has to cut node 1 and
+            // leave node 3 *bit for bit* the shelf it was, and Hi Cut the
+            // other way about -- which is the whole of what the four positions
+            // buy over the bool, and what a mode that fell back to "any cut
+            // means both" would fail on while passing everything above.
+            check (nodeDb (loOnly, EqNode::low, 20.0) < -18.0,
+                   "Lo Cut removes below node 1's corner");
+            check (nodeDb (loOnly, EqNode::high, 16000.0) == nodeDb (shelves, EqNode::high, 16000.0),
+                   "Lo Cut leaves node 3 exactly the shelf it was");
+
+            check (nodeDb (hiOnly, EqNode::high, 16000.0) < -18.0,
+                   "Hi Cut removes above node 3's corner");
+            check (nodeDb (hiOnly, EqNode::low, 20.0) == nodeDb (shelves, EqNode::low, 20.0),
+                   "Hi Cut leaves node 1 exactly the shelf it was");
+
+            // And Bandpass is the two of them at once rather than a third
+            // behaviour: each node reads exactly what its own cut position
+            // gave it.
+            check (nodeDb (cuts, EqNode::low, 20.0) == nodeDb (loOnly, EqNode::low, 20.0)
+                     && nodeDb (cuts, EqNode::high, 16000.0) == nodeDb (hiOnly, EqNode::high, 16000.0),
+                   "Bandpass is Lo Cut and Hi Cut together, node for node");
+
             // A second-order cut is 3 dB down at its own corner, which is what
             // makes a corner a corner -- and what tells a cut from a shelf
             // that happens to lean the same way.
             EqSettings butterworth;
-            butterworth.filter = true;
+            butterworth.filter = EqFilter::bandpass;
             butterworth.loFreqHz = 200.0f;  butterworth.loQ = 0.7071f;
             butterworth.hiFreqHz = 2000.0f; butterworth.hiQ = 0.7071f;
 
@@ -638,10 +700,14 @@ int main()
 
         //-- GAIN does not reach a cut, and the mode does not eat it ----------
         //
-        // The DSP half of greying the two shelf GAIN knobs out. The parameter
-        // keeps whatever the user set -- nothing writes it -- so the value
-        // survives a trip through FILTER and back, and all that changes is
-        // whether it reaches the design.
+        // The DSP half of greying a shelf's GAIN knob out. The parameter keeps
+        // whatever the user set -- nothing writes it -- so the value survives a
+        // trip through a cut position and back, and all that changes is whether
+        // it reaches the design.
+        //
+        // **Per node and per position since 2026-09-22**, because the two
+        // outer nodes can now be in different shapes at once: Lo Cut withholds
+        // node 1's gain while node 3 goes on using its own.
         {
             EqSettings s;
             s.loDb = 9.0f;
@@ -649,22 +715,89 @@ int main()
 
             check (near (eqGainReachingDesign (s, EqNode::low), 9.0f),
                    "as a shelf, node 1's GAIN reaches the design");
-            check (eqNodeHasGain (EqNode::low, false) && eqNodeHasGain (EqNode::high, false),
+            check (eqNodeHasGain (EqNode::low, EqFilter::off) && eqNodeHasGain (EqNode::high, EqFilter::off),
                    "both shelves have gain");
 
-            s.filter = true;
+            // The greying table, all four positions and both outer nodes.
+            check (eqNodeHasGain (EqNode::low, EqFilter::hiCut),
+                   "Hi Cut leaves node 1's GAIN live -- node 1 is still a shelf");
+            check (! eqNodeHasGain (EqNode::low, EqFilter::loCut),
+                   "Lo Cut takes node 1's GAIN");
+            check (eqNodeHasGain (EqNode::high, EqFilter::loCut),
+                   "Lo Cut leaves node 3's GAIN live -- node 3 is still a shelf");
+            check (! eqNodeHasGain (EqNode::high, EqFilter::hiCut),
+                   "Hi Cut takes node 3's GAIN");
+
+            for (const auto f : { EqFilter::off, EqFilter::loCut, EqFilter::hiCut, EqFilter::bandpass })
+                check (eqNodeHasGain (EqNode::mid, f),
+                       "the bell keeps its gain in every position");
+
+            // One cut at a time reaches the design: the other node's gain is
+            // still there, at the number the knob holds.
+            auto lo = s;  lo.filter = EqFilter::loCut;
+            auto hi = s;  hi.filter = EqFilter::hiCut;
+
+            check (near (eqGainReachingDesign (lo, EqNode::low), 0.0f)
+                     && near (eqGainReachingDesign (lo, EqNode::high), -9.0f),
+                   "Lo Cut withholds node 1's GAIN and lets node 3's through");
+            check (near (eqGainReachingDesign (hi, EqNode::low), 9.0f)
+                     && near (eqGainReachingDesign (hi, EqNode::high), 0.0f),
+                   "Hi Cut withholds node 3's GAIN and lets node 1's through");
+
+            s.filter = EqFilter::bandpass;
 
             check (near (eqGainReachingDesign (s, EqNode::low), 0.0f)
                      && near (eqGainReachingDesign (s, EqNode::high), 0.0f),
                    "as a cut, neither outer node's GAIN reaches the design");
-            check (! eqNodeHasGain (EqNode::low, true) && ! eqNodeHasGain (EqNode::high, true),
-                   "neither outer node has gain in filter mode -- this is what greys the knobs");
-            check (eqNodeHasGain (EqNode::mid, true),
-                   "the bell keeps its gain in filter mode");
+            check (! eqNodeHasGain (EqNode::low, EqFilter::bandpass)
+                     && ! eqNodeHasGain (EqNode::high, EqFilter::bandpass),
+                   "neither outer node has gain in Bandpass -- this is what greys the knobs");
 
             check (near (eqKnobGainDbOf (s, EqNode::low), 9.0f)
                      && near (eqKnobGainDbOf (s, EqNode::high), -9.0f),
                    "FILTER does not eat the shelf gains it is ignoring");
+
+            // **Withheld, never zeroed: the round trip.** A shelf gain set,
+            // driven through every cut position in turn and brought back to
+            // Off, has to design the same filter it did before it left -- both
+            // the knob's own value and the response it produces. A mode that
+            // wrote the parameter instead of ignoring it would pass every
+            // check above and fail this one.
+            //
+            // Through the adapter and not through a struct literal, because
+            // the parameter array is the thing a mode could write to.
+            {
+                auto v = defaults();
+                v[Index::eqlo] = 9.0f;
+                v[Index::eqhi] = -9.0f;
+
+                const auto settingsAt = [&v] (EqFilterChoice f)
+                {
+                    v[Index::eqfilter] = (float) f;
+                    return DspCore::eqSettingsFor (ReverbDsp::paramsFrom (v.data(), (int) v.size()));
+                };
+
+                const auto before = settingsAt (eqFilterOff);
+
+                for (const auto f : { eqFilterLoCut, eqFilterHiCut, eqFilterBandpass })
+                {
+                    const auto cut = settingsAt (f);
+
+                    check (near (eqKnobGainDbOf (cut, EqNode::low), 9.0f)
+                             && near (eqKnobGainDbOf (cut, EqNode::high), -9.0f),
+                           "a cut position must not write the shelf gains it is ignoring");
+                }
+
+                const auto after = settingsAt (eqFilterOff);
+
+                check (near (eqKnobGainDbOf (after, EqNode::low), 9.0f)
+                         && near (eqKnobGainDbOf (after, EqNode::high), -9.0f),
+                       "a shelf gain comes back off a trip through the cuts");
+
+                for (const auto hz : { 20.0, 200.0, 1000.0, 16000.0 })
+                    check (db (before, hz) == db (after, hz),
+                           "the EQ designs the same filter it did before the cuts");
+            }
 
             // Turning a cut's gain knob does nothing to the sound, which is
             // the claim a greyed knob makes to the eye.
@@ -694,7 +827,8 @@ int main()
             auto unstable = 0;
 
             for (const auto rate : { 44100.0, 48000.0, 96000.0, 192000.0 })
-                for (const auto filter : { false, true })
+                for (const auto filter : { EqFilter::off, EqFilter::loCut,
+                                           EqFilter::hiCut, EqFilter::bandpass })
                     for (const auto lf : ends (Index::eqlofreq))
                         for (const auto lq : ends (Index::eqloq))
                             for (const auto mf : ends (Index::eqmidfreq))

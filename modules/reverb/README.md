@@ -46,8 +46,8 @@ of them is a panel you can read.
 
 **And then the EQ grew into the room they left.** The two shelves became a
 proper three-band parametric: a **Q** on each band, a **MID** bell between
-them, and a **FILTER** key that turns the outer two into a low cut and a high
-cut. That is deliberate rather than opportunistic — the argument for taking the
+them, and a **FILTER** control that turns either or both of the outer two into
+cuts. That is deliberate rather than opportunistic — the argument for taking the
 damping frequencies off the panel was "reach for the EQ when what you want is a
 frequency", and the EQ had to be worth reaching for.
 
@@ -77,31 +77,39 @@ than `-40.0 dB`, because the bus is silent rather than quiet.
 Three pictures, one per key, and the line of print under the screen tells you
 what you are looking at.
 
-**EARLY** draws the reflections as a row of upright lines, one per reflection,
-standing where they arrive and as tall as they are loud. The window is the real
-one — the first reflection at the left and the last at the right — so it
-stretches and shrinks as you turn SIZE. Turn DENSITY up and fainter lines fill
-in between, and the ones already there do not move or change height, which is
-what stops the sweep clicking. The print says how many there are and how wide
-the window is.
+**EARLY** draws the reflections as lines standing off a centre rule, one per
+reflection, at the moment it arrives and as long as it is loud — **above the
+rule if it comes from the left and below it if it comes from the right**, with
+a short dash marking how far over it is. `L` and `R` at the right-hand end say
+which way round it is. The window is the real one — the first reflection at the
+left and the last at the right — so it stretches and shrinks as you turn SIZE.
+Turn DENSITY up and fainter lines fill in between, and the ones already there
+do not move or change length, which is what stops the sweep clicking. The print
+says how many there are and how wide the window is.
 
 **TAIL** draws the tail's shape: the swell the type gives it, then the decay
-away to nothing. The time ruler is logarithmic, from 1 ms to 30 s, because a
-onset lasts a tenth of a second and a tail can run for twenty — each vertical
-line is ten times further along than the last, and no straight ruler shows
-both. It is drawn as a band rather than a line because it does not die at one
+away to nothing. The time ruler is logarithmic — each labelled line is ten
+times further along than the last — because an onset lasts a tenth of a second
+and a tail can run for twenty, and no straight ruler shows both. **It ends just
+after your tail does**, so the shape fills the box at any setting instead of
+stopping two thirds of the way across and ruling a flat line over the rest.
+What that costs is that the curve stays roughly put as you turn DECAY while the
+scale under it moves, which is why the decades are labelled inside the box and
+why the print gives the length in seconds. It is drawn as a band rather than a
+line because it does not die at one
 rate: the band is the range between its fastest and its slowest, which is what
 **LOW x** and **HIGH x** set. A wide band means a tail that changes colour as
 it fades. The print gives the decay, the onset in milliseconds, and where the
 whole thing actually ends. **The onset is the one number on this panel with no
 knob under it** — change TYPE and watch it move.
 
-**EQ** draws the whole chain as one curve with four marks on it — the three EQ
-bands, and then the input high-cut. They are in series, so what you see is all
-four together rather than four separate lines. **The three EQ bands are solid
-dots and the input cut is a hollow one**, because it is a different control in
-a different place: it darkens what goes *into* the reverb, ahead of the EQ, and
-the EQ darkens the reverb. The area between the curve and the flat line is
+**EQ** draws the whole chain as one curve. The three EQ bands are marked on it
+as solid dots; the input high-cut is **not** a fourth dot but a **shaded area
+running from its corner off the right-hand end**, because it is a different
+control in a different place: it darkens what goes *into* the reverb, ahead of
+the EQ, where the EQ darkens the reverb. They are in series, so the curve is
+all four together rather than four separate lines. The area between the curve
+and the flat line is
 shaded, which is a gentle lens for a shelf and a pair of wedges running off the
 bottom for a cut — so **FILTER** is unmistakable at a glance. The print gives
 the three EQ frequencies and says `LO CUT` and `HI CUT` when they are cuts.
@@ -146,7 +154,7 @@ after release is worse than three bands that do one job each.
 | **EQ LOW** + FREQ + Q | A low shelf, 16 Hz to 1.6 kHz, +12 to −24 dB. At the bottom it reads `Cut`. |
 | **EQ MID** + FREQ + Q | A bell, and the wide one: **20 Hz to 20 kHz**, so it is the only band that reaches the presence region. Q goes to 40 for a notch. |
 | **EQ HIGH** + FREQ + Q | A high shelf, 1 to 2.1 kHz. |
-| **FILTER** | Turns **EQ LOW** into a low cut and **EQ HIGH** into a high cut. The frequencies and the Qs mean the same thing in both modes — a corner and a resonance — so only the two GAIN knobs change, and they grey out, because a cut has no gain to set. **They keep what you set them to**: switch FILTER back off and both shelves are where you left them. The MID bell is untouched either way. |
+| **FILTER** | Four positions: **Off**, **Lo Cut**, **Hi Cut**, **Bandpass**. Lo Cut turns **EQ LOW** into a low cut, Hi Cut turns **EQ HIGH** into a high cut, and Bandpass does both — which is what a low cut plus a high cut is. The frequencies and the Qs mean the same thing whichever shape a band is in — a corner and a resonance — so only that band's GAIN changes, and it greys out, because a cut has no gain to set. **It keeps what you set it to**: come back off the cut and the shelf is where you left it. The MID bell is untouched in all four. |
 | **IN HI-CUT** | Darkens what feeds *both* generators, ahead of the EQ. **This is not the same as EQ HIGH in filter mode**: this one is on the way in, that one is on the reverb. |
 | **OUTPUT** | Trim. |
 

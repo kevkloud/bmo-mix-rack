@@ -1402,6 +1402,71 @@ void checkReverbPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
                     break;
                 }
         }
+
+        //-- Nothing drawn inside the screen is cut off by the screen ---------
+        //
+        // **This is the IN HI-CUT failure with a walk round it.** That marker
+        // was drawn centred on 20 kHz, which is the right-hand end of the axis
+        // exactly, so half of it fell outside the plot: the panel shipped a
+        // clipped mark that every render showed and no test could see. The
+        // screen now hands out every label box and the curtain's rectangle,
+        // and both are checked against the plot on every page.
+        {
+            const auto& screen = reverbPanel->getScreen();
+            const auto  plot   = screen.plotBounds();
+
+            check (! plot.isEmpty(), where + " the screen has no plotting area");
+
+            for (const auto& label : screen.axisLabels())
+            {
+                check (label.text.isNotEmpty(),
+                       where + " the screen sets an empty tick label");
+
+                check (plot.contains (label.box),
+                       where + " the tick '" + label.text + "' is set in "
+                             + label.box.toString() + ", which is not inside the plot "
+                             + plot.toString());
+
+                for (const auto* c = label.text.toRawUTF8(); *c != 0; ++c)
+                    if ((unsigned char) *c < 32 || (unsigned char) *c > 126)
+                    {
+                        check (false, where + " the tick '" + label.text + "' is not ASCII");
+                        break;
+                    }
+            }
+
+            // The curtain is the EQ page's and nobody else's, and on that page
+            // it is inside the plot **at the top of IN HI-CUT's travel**,
+            // which is the setting that used to clip.
+            const auto curtain = screen.inputCutRegion();
+
+            if (p == R::Page::eq)
+            {
+                check (! curtain.isEmpty() && plot.contains (curtain),
+                       where + " IN HI-CUT's curtain is " + curtain.toString()
+                             + ", which is not inside the plot " + plot.toString());
+                check (curtain.getWidth() >= R::LingerScreen::kCurtainEdge,
+                       where + " IN HI-CUT's curtain is too narrow to draw its own edge");
+            }
+            else
+            {
+                check (curtain.isEmpty(),
+                       where + " draws IN HI-CUT's curtain on a page that has no EQ on it");
+            }
+
+            // A hard-panned tap draws inside the box at both ends of the
+            // bearing, and dead centre is the axis itself.
+            check (plot.contains (juce::Point<float> (plot.getCentreX(), screen.panY (-1.0f)))
+                     && plot.contains (juce::Point<float> (plot.getCentreX(), screen.panY (1.0f))),
+                   where + " a hard-panned tap draws outside the plot: L at "
+                         + juce::String (screen.panY (-1.0f), 1) + ", R at "
+                         + juce::String (screen.panY (1.0f), 1) + ", plot " + plot.toString());
+            check (screen.panY (-1.0f) < screen.panY (0.0f)
+                     && screen.panY (0.0f) < screen.panY (1.0f),
+                   where + " left should draw above the centre axis and right below it");
+            checkNear (screen.panY (0.0f), (double) plot.getCentreY(), 0.5,
+                       where + " a tap panned dead centre should sit on the centre axis");
+        }
     }
 
     //== The page is UI state, and an unknown value is refused ================
@@ -1533,11 +1598,64 @@ void checkReverbPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
                    + reverbPanel->getScreen().readout() + "'");
 
         // The TAIL page's window is the one the class comment argues for,
-        // which is what lets a 20 s tail and a 7 ms bloom share a picture --
-        // and its right-hand edge is the same number the host is told.
+        // which is what lets a 20 s tail and a 7 ms bloom share a picture, and
+        // **its right-hand end follows the tail** as of 2026-09-22.
         checkNear (R::LingerScreen::kMinMs, 1.0, 1.0e-6, who + " the TAIL axis starts at 1 ms");
         checkNear (R::LingerScreen::kMaxSeconds, bmo::kMaxTailSeconds, 1.0e-6,
-                   who + " the TAIL axis ends where the reported tail is clamped");
+                   who + " the TAIL axis is clamped where the reported tail is clamped");
+
+        //-- The axis follows the tail, and the box stops being 40 % empty ----
+        //
+        // **The defect this replaced**: a fixed 1 ms - 30 s axis put the
+        // 1.8 s default tail 60 % of the way across and ruled a flat line over
+        // the rest, and 30 s is the clamp ceiling rather than a setting
+        // anybody uses. What is asserted is the relation rather than a number,
+        // because the window is a function of the tail: the curve ends inside
+        // the axis at every setting, and not far inside it.
+        {
+            for (const auto seconds : { 0.1f, 0.5f, 1.8f, 6.0f, 20.0f })
+            {
+                params.setReal (R::Index::decay, seconds);
+
+                const auto end    = screen.tailEndSeconds();
+                const auto window = screen.tailWindowSeconds();
+
+                check (window > end,
+                       who + " a " + juce::String (seconds, 2) + " s decay ends at "
+                           + juce::String (end, 3) + " s and the axis stops at "
+                           + juce::String (window, 3) + " s -- the curve runs off the box");
+
+                // The air after the curve is taken in width, so on a log axis
+                // it is a fraction of the decades and not of the seconds.
+                // Three times the tail is the loosest this may ever be.
+                check (window < end * 3.0f,
+                       who + " the TAIL axis runs to " + juce::String (window, 2)
+                           + " s for a " + juce::String (end, 2)
+                           + " s tail, which is the dead box this was meant to fix");
+
+                check (window <= R::LingerScreen::kMaxSeconds,
+                       who + " the TAIL axis must never draw past the tail clamp");
+            }
+
+            // Longer decay, longer window: the axis is a scale that moves, not
+            // a second control that sticks.
+            params.setReal (R::Index::decay, 1.0f);
+            const auto shortWindow = screen.tailWindowSeconds();
+
+            params.setReal (R::Index::decay, 10.0f);
+            check (screen.tailWindowSeconds() > shortWindow * 2.0f,
+                   who + " the TAIL axis does not follow DECAY");
+
+            // And at the top of both controls it stops at the clamp rather
+            // than drawing a tail longer than the one the host is told about.
+            params.setReal (R::Index::decay, 20.0f);
+            params.setReal (R::Index::damplo, 2.0f);
+            checkNear (screen.tailWindowSeconds(), (double) R::LingerScreen::kMaxSeconds, 1.0e-3,
+                       who + " a 40 s tail should draw against the 30 s clamp");
+
+            params.setReal (R::Index::damplo, R::specs()[(size_t) R::Index::damplo].def);
+            params.setReal (R::Index::decay, R::specs()[(size_t) R::Index::decay].def);
+        }
 
         // Put it back, so the TONE block below reads a panel at its defaults.
         for (const auto i : { R::Index::decay, R::Index::damplo, R::Index::damphi,
@@ -1725,11 +1843,16 @@ void checkReverbPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
             for (int i = 0; i < 3; ++i)
                 midAsShelf[i] = screen.nodeDbAt (R::EqNode::mid, probes[i]);
 
-            params.setReal (R::Index::eqfilter, 1.0f);
+            // **Bandpass, which is index 3.** FILTER became a four-position
+            // choice on 2026-09-22 and 1 is Lo Cut now; the block below is the
+            // both-cuts case, so it names the position it means.
+            params.setReal (R::Index::eqfilter, (float) R::eqFilterBandpass);
 
             check (screen.isFilterMode(), who + " the screen did not take FILTER");
+            check (screen.filterMode() == R::EqFilter::bandpass,
+                   who + " the screen took FILTER as some other position than Bandpass");
 
-            // Node 2, bit for bit. A bell is a bell in both modes.
+            // Node 2, bit for bit. A bell is a bell in all four positions.
             for (int i = 0; i < 3; ++i)
                 check (screen.nodeDbAt (R::EqNode::mid, probes[i]) == midAsShelf[i],
                        who + " FILTER moved node 2 at " + juce::String (probes[i], 0)
@@ -1776,7 +1899,7 @@ void checkReverbPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
             };
 
             check (live ("EQ LOW") == 0 && live ("EQ HIGH") == 0,
-                   who + " FILTER should grey out both shelf GAIN knobs -- a cut has no gain");
+                   who + " Bandpass should grey out both shelf GAIN knobs -- a cut has no gain");
 
             // FREQ and Q carry over into filter mode, so they stay live; so
             // does the bell's gain, which FILTER does not touch.
@@ -1788,7 +1911,28 @@ void checkReverbPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
             checkNear (params.getReal (R::Index::eqlo), 6.0, 1.0e-4,
                        who + " FILTER must not write the shelf gain it is ignoring");
 
-            params.setReal (R::Index::eqfilter, 0.0f);
+            // **One knob at a time**, which is what the four positions buy the
+            // panel: the greying follows `eqNodeHasGain` per node, so Lo Cut
+            // takes EQ LOW and leaves EQ HIGH live, and Hi Cut the other way
+            // about. A panel that had kept the bool's "either cut greys both"
+            // would pass every check above and fail these two.
+            params.setReal (R::Index::eqfilter, (float) R::eqFilterLoCut);
+
+            check (live ("EQ LOW") == 0 && live ("EQ HIGH") == 1,
+                   who + " Lo Cut should grey EQ LOW alone -- node 3 is still a shelf");
+            check (screen.readout().contains ("LO CUT") && screen.readout().contains ("HIGH "),
+                   who + " the Lo Cut reading should say LO CUT and HIGH, reads '"
+                       + screen.readout() + "'");
+
+            params.setReal (R::Index::eqfilter, (float) R::eqFilterHiCut);
+
+            check (live ("EQ LOW") == 1 && live ("EQ HIGH") == 0,
+                   who + " Hi Cut should grey EQ HIGH alone -- node 1 is still a shelf");
+            check (screen.readout().contains ("LOW ") && screen.readout().contains ("HI CUT"),
+                   who + " the Hi Cut reading should say LOW and HI CUT, reads '"
+                       + screen.readout() + "'");
+
+            params.setReal (R::Index::eqfilter, (float) R::eqFilterOff);
 
             check (live ("EQ LOW") == 1 && live ("EQ HIGH") == 1,
                    who + " switching FILTER off should give the shelf GAIN knobs back");
@@ -1799,7 +1943,14 @@ void checkReverbPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
             resetEq();
         }
 
-        //-- The four marked nodes are the four controls ----------------------
+        //-- Three marked nodes and a curtain, for the four controls ----------
+        //
+        // `nodeFrequencies` still reports four corners and the fourth is still
+        // IN HI-CUT's -- what changed on 2026-09-22 is how the picture marks
+        // it. It was an open circle among three filled ones, which read as a
+        // fourth node of the same EQ and sat half outside the frame at its own
+        // default of 20 kHz; it is `inputCutRegion`'s curtain now, and the
+        // per-page walk above is what checks it is inside the box.
         {
             params.setReal (R::Index::eqlofreq, 120.0f);
             params.setReal (R::Index::eqmidfreq, 1500.0f);
@@ -1809,7 +1960,8 @@ void checkReverbPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
             const auto nodes = screen.nodeFrequencies();
 
             check (nodes.size() == 4,
-                   who + " the EQ page should mark four nodes: three EQ and the input cut");
+                   who + " the EQ page should mark four corners: three EQ nodes and the"
+                         " input cut's curtain");
             checkNear (nodes[0], 120.0, 0.5, who + " node 0 is EQ LOW's corner");
             checkNear (nodes[1], 1500.0, 0.5, who + " node 1 is EQ MID's centre");
             checkNear (nodes[2], 1800.0, 0.5, who + " node 2 is EQ HIGH's corner");
@@ -1828,11 +1980,11 @@ void checkReverbPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
             check (! shelfLine.contains ("CUT"),
                    who + " the EQ reading says CUT with FILTER off, reads '" + shelfLine + "'");
 
-            params.setReal (R::Index::eqfilter, 1.0f);
+            params.setReal (R::Index::eqfilter, (float) R::eqFilterBandpass);
             const auto cutLine = screen.readout();
 
             check (cutLine.contains ("LO CUT") && cutLine.contains ("HI CUT"),
-                   who + " with FILTER on the EQ reading should say LO CUT and HI CUT, reads '"
+                   who + " in Bandpass the EQ reading should say LO CUT and HI CUT, reads '"
                        + cutLine + "'");
             check (cutLine.contains ("MID 1.50 KHZ"),
                    who + " FILTER must not change what the reading says about the bell");

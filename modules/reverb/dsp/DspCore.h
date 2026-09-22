@@ -123,18 +123,19 @@ public:
         //== The Reverb EQ: three nodes, fixed shapes, one mode ================
         //
         // Node 1 low shelf, node 2 bell, node 3 high shelf, and `eqFilter`
-        // turns the outer two into cuts. `EqNodes.h` is the arithmetic and the
-        // argument; `eqSettings()` below is the only thing that reads these
-        // ten fields, so the engine and the panel design one set of filters.
-        bool  eqFilter      = false;                         ///< outer nodes become cuts
+        // turns one or both of the outer two into cuts. `EqNodes.h` is the
+        // arithmetic and the argument; `eqSettings()` below is the only thing
+        // that reads these ten fields, so the engine and the panel design one
+        // set of filters.
+        EqFilter eqFilter   = EqFilter::off;                 ///< which outer nodes are cuts
         float eqLoFreqHz    = 200.0f;                        ///< 16..1600
-        float eqLoDb        = 0.0f;                          ///< -24..+12; -24 is "Cut"; ignored in filter mode
+        float eqLoDb        = 0.0f;                          ///< -24..+12; -24 is "Cut"; withheld where node 1 is a cut
         float eqLoQ         = 0.71f;                         ///< 0.1..2, kShelfMaxQ
         float eqMidFreqHz   = 1000.0f;                       ///< 20..20000
         float eqMidDb       = 0.0f;                          ///< -24..+12
         float eqMidQ        = 0.71f;                         ///< 0.1..40, a bell's range
         float eqHiFreqHz    = 6000.0f;                       ///< 1000..20000
-        float eqHiDb        = 0.0f;                          ///< -24..+12; ignored in filter mode
+        float eqHiDb        = 0.0f;                          ///< -24..+12; withheld where node 3 is a cut
         float eqHiQ         = 0.71f;                         ///< 0.1..2
 
         ErMode erMode       = ErMode::taps;

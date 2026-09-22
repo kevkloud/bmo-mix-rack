@@ -93,12 +93,29 @@ after ship without remapping every automation point written on it; fixed shapes
 give a real three-band parametric with nothing permanent to regret, and BMO DEQ
 is already the module for arbitrary shapes.
 
-`eqfilter` is **a bool, and per EQ rather than per node**, which is what makes
-it a mode and not a shape. On, node 1 becomes a low cut and node 3 a high cut.
-FREQ and Q carry over unchanged in both modes — a cut has a corner and a
-resonance — so the same nine parameters serve both, and **GAIN stops reaching
-the two outer nodes**, because `dsp::hasGain` is false for a cut and the
-prototype has nowhere to put it. Node 2's bell is untouched either way.
+`eqfilter` is **a four-position choice, and per EQ rather than per node**,
+which is what makes it a mode and not a shape: `Off`, `Lo Cut`, `Hi Cut`,
+`Bandpass`. Node 1 is a low cut in Lo Cut and Bandpass, node 3 a high cut in
+Hi Cut and Bandpass, and node 2's bell is untouched in all four. FREQ and Q
+carry over unchanged whichever shape a node is in — a cut has a corner and a
+resonance — so the same nine parameters serve every position, and **GAIN stops
+reaching a node the mode has made a cut**, because `dsp::hasGain` is false for
+a cut and the prototype has nowhere to put it. The gain is withheld and never
+written, so a trip through a cut position and back restores the shelf.
+
+It was a bool until 2026-09-22, and the change **cost no host lane**: same id,
+same position in `Index`, so the schema is still thirty with two spare. What it
+cost instead is the freedom to change its mind — a choice normalises as
+index/(n−1), so a fifth position would remap every automation point ever
+written on this lane. Frosty confirmed four. `Bandpass` is named after the
+result rather than the mechanism: a low cut plus a high cut **is** a bandpass.
+
+The full names are what a host lane and the panel readout show. The ring around
+the control shows `kEqFilterLegend` — OFF / L / H / B — because a legend label
+sits in a 38 × 15 px box and "Bandpass" does not;
+`ui::ConcentricBand::setLegend` is the shared method that takes the terse list
+without touching the host's, which is how BMO DEQ's SHAPE ring reads
+BELL / LS / HS / LC / HC.
 
 Ranges follow the suite. The two outer Qs stop at `kShelfMaxQ` = 2 rather than
 travelling to a bell's 40 and doing nothing over 2 — BMO DEQ clamps to the same
@@ -467,8 +484,22 @@ TONE. That is the same argument the refusal itself rests on.
 
 **Four rows are reserved in the cluster on every page**, because EQ needs four
 and the block must not change height when the page turns. EARLY's and TAIL's
-two rows are **centred** in the reserved block rather than packed to its top: a
-lighter page should read as a lighter page, not as a page with a hole under it.
+two rows are **packed to the top of the reserved block, and were centred in it
+until 2026-09-22**. Centred, the two spare rows fell one above the page's
+controls and one below them — Frosty's words against the render were "two large
+voids", and a reader cannot tell a deliberate space from a control that failed
+to appear. Packed, the page sits hard under the persistent row it qualifies and
+the whole leftover falls in one piece above the LEVEL rule, where a gap already
+belongs.
+
+**The slack can only land inside the cluster block**, which is why those were
+the two arrangements on offer: the strip at the foot is persistent and must not
+move when a page turns, so nothing below the cluster can absorb anything. A
+screen that grew on the short pages would absorb all of it and was rejected —
+the bezel is the largest object on the face and resizing it every time a page
+key is pressed makes the panel jump, which is worse than air. Spreading the two
+rows evenly over the four was rejected too: 44 px between a page's own rows
+pulls them into two unrelated pairs.
 
 ### What the two extra cluster rows cost, and where it came from
 
@@ -501,15 +532,25 @@ so it would have bought nothing vertically and cost the foot its shape: the
 foot already holds four, and a fifth cell would put a 60 px knob and the TYPE
 dropdown in 72 px cells. Twelve fills four rows exactly.
 
-**FILTER is the only switch on this face.** LINK ER was the last one and went
-with `prelink` in the trim; this is not its replacement. It is a
-`ui::SwitchButton` at the suite's 70 × 26, centred in its cell so its middle
-lands on the line the two knobs beside it share, and tinted with the module's
-accent. While it is on, EQ LOW and EQ HIGH grey out through
-`PlainKnob::setKnobEnabled` — **the parameters are never written**, so
-switching FILTER off gives both shelves their gains back. A mode must not eat
-an edit, and `eqGainReachingDesign` is the same decision one folder over in the
-DSP, which is why the look and the sound cannot disagree about it.
+**FILTER is the only switch on this face, and it is on its way out.** LINK ER
+was the last one and went with `prelink` in the trim; this is not its
+replacement. It is a `ui::SwitchButton` at the suite's 70 × 26, centred in its
+cell so its middle lands on the line the two knobs beside it share, and tinted
+with the module's accent. A node the mode has made a cut has its GAIN knob
+greyed out through `PlainKnob::setKnobEnabled` — one knob at a time, so Lo Cut
+takes EQ LOW and leaves EQ HIGH live — and **the parameters are never
+written**, so coming back off a cut gives the shelf its gain back. A mode must
+not eat an edit, and `eqGainReachingDesign` is the same decision one folder
+over in the DSP, which is why the look and the sound cannot disagree about it.
+
+Since `eqfilter` became a four-position choice on 2026-09-22 a switch can no
+longer reach two of them: a `ButtonParameterAttachment` maps off to Off and on
+to the top of the range, which is Bandpass. **The replacement is a
+`ui::ConcentricBand` with a null gain parameter** — a filter dial, legended off
+`kEqFilterLegend`, the way BMO CEQ's LO-CUT is drawn — and its ring must match
+a knob's **cap** and not its footprint: the cluster knob is 46 px across with a
+**27.6 px cap**, and the component may be wider than the ring to give the
+legend room. That is the panel pass, not the pass that changed the parameter.
 
 ### 380, three columns, and why the numbers are exact
 
@@ -523,7 +564,8 @@ suite. Anything narrower is a caption argument; anything wider is unearned.
 
 **A fixed block on every page, which is what four columns used to buy.** It was
 two rows while EARLY was 3 + 3, TAIL 3 + 2 and TONE 3 + 3; the EQ page is
-twelve, so it is now four reserved rows and the short pages centre in them. The
+twelve, so it is now four reserved rows and the short pages pack to the top of
+them — see "Four rows are reserved" above for what that decided and why. The
 block does not change height when the page does — the one thing that would make
 paging feel like switching panels rather than turning a page.
 
@@ -685,6 +727,18 @@ foot. The old panel painted six headings itself because at the expanded width a
 shared rule would have cut a line through the column it did not belong to;
 there is one column now, so the suite's own edge-to-edge path is correct again.
 
+**ER, REVERB and MIX are faders, not knobs, and `ui::Fader` is where one comes
+from.** It was built on 2026-09-22 as a shared control in `core/ui/Controls.h`
+— BMO Dwell and BMO Defang have the same row — and **nothing uses it yet**: the
+strip still holds three `PlainKnob`s until the panel pass swaps them. The
+argument is comparison: `docs/reverb/10-dsp-spec.md` has called ER and REVERB
+"two absolute faders" since the groundwork pack, and what a user judges is the
+balance between them, which two caps on one line show and two pointers at two
+angles do not. Its travel is derived — the cell less the caption row less the
+cap — so **a 120 px row with a 15 pt caption gives 86 px, and the value line
+under the caption costs 14 px more**: a row that wants the mockup's 86 with a
+number under it wants 134. `tests/ui/ControlTests.cpp` asserts both.
+
 **Captions are ASCII.** The damping controls read "LOW x" and "HIGH x" and
 their values print "1.20x", not with a multiplication sign: the two display
 faces are licensed individually and live outside this repository, so a glyph
@@ -707,33 +761,73 @@ its curve, at the owner's request, and it is the one thing on this panel that
 is not drawn from parameters. See "The analyser is real and the signal under it
 is not yet" below.
 
-**EARLY — linear time, 0 to the last tap plus a tenth.** The image-source taps
-as discrete stems from a baseline. What this replaced was a symmetric envelope
-mirrored about a centre line that bloomed and closed to a point, leaving most of
-the box empty; Frosty rejected it. The ER window is a little over one decade
-wherever SIZE puts it, so a linear axis scaled to the window itself shows the
-*spacing* of the reflections — the one thing about a tap set worth looking at.
-Stem heights are measured against **-40 dB, the ER fader's own bottom**, not
-against the tail's -72: the table spans 15 dB, and on -72 a cluster that should
-visibly decay draws as a comb of near-equal lines.
+**EARLY — linear time, 0 to the last tap plus a tenth, mirrored about a centre
+axis by bearing.** The image-source taps as discrete stems: **left above the
+axis, right below it, length still gain**, and a short dash on each core tap at
+`panY (pan)` for how far over it actually is. Pan was dropped when the stems
+were first drawn and restored on 2026-09-22 — `10` §3's lateral distribution
+(target early lateral fraction 0.10–0.35, first reflections near centre so the
+phantom centre holds) is one of the module's core ideas and the picture was
+silent about it.
 
-**TAIL — logarithmic time, 1 ms to 30 s**, a deliberate departure from `11`
-section 5's proposed 0–500 ms window, and the old version's worst fault: it put
-a 20 s decay in a fixed 0–500 ms window and most of the box was dead. A linear
-window wide enough for the tail puts the whole 0–120 ms onset inside the first
-two pixels. On a log axis 1–100 ms keeps 45 % of the width. The ends are chosen
-rather than round: 1 ms is where a reflection stops fusing with the direct
-sound, and 30 s is `bmo::kMaxTailSeconds` — the ceiling on the tail this module
-*and the rack it sits in* will ever report — so the right-hand edge is the same
-number the host is told.
+**Mirroring the taps is not the mirrored envelope Frosty rejected.** That one
+mirrored the *envelope* and drew a lens with no event in it; this draws one stem
+per reflection and puts its bearing in the sign, so the events are still events.
+The ER window is a little over one decade wherever SIZE puts it, so a linear
+axis scaled to the window itself shows the *spacing* of the reflections — the
+one thing about a tap set worth looking at. Stem lengths are measured against
+**-40 dB, the ER fader's own bottom**, not against the tail's -72, and they have
+half the box each now: the table spans 15 dB, which still reads as a decaying
+comb against -40 and would not against -72. `L` and `R` are printed at the
+right-hand end of the axis, in the tenth of the window left clear after the last
+tap — at the left they landed on the direct sound's own full-height stem.
+
+**TAIL — logarithmic time, 1 ms to a window that follows the tail.** The
+right-hand end is `tailWindowSeconds`: far enough past `tailEndSeconds` to leave
+`kAxisAir` (8 %) of the width clear after the curve, clamped at `kMaxSeconds`.
+**It ran to 30 s at all times until 2026-09-22**, and 30 s is
+`bmo::kMaxTailSeconds` — the clamp on the tail this module *and the rack it sits
+in* report — rather than a setting anybody uses: at the 1.8 s default the curve
+finished about 60 % across and the remaining 40 % was a flat line. Note that the
+air is taken in **width and not in time**; on a log axis 15 % more seconds after
+a 2.16 s tail is 1.8 % of the box, which was rendered and rejected on AURORA.
+
+**What that costs is comparability, and the readout pays it back.** With the
+axis following the tail, turning DECAY no longer walks the curve across the box:
+the shape stays and the scale under it moves. So the decades are **labelled**
+inside the box — 10 MS / 100 MS / 1 S / 10 S, from `axisLabels`, punched out of
+the face so a long tail's envelope cannot be drawn over a number — and the bezel
+line still prints DECAY and TAIL in absolute seconds. Two absolute readings
+against 40 % of a dead box was the trade, and it was taken deliberately.
+
+Logarithmic for the reason it always was: a linear window wide enough for the
+tail puts the whole 0–120 ms onset inside the first two pixels, and `11` §5's
+proposed fixed 0–500 ms window cannot show a 20 s decay at all. 1 ms is where a
+reflection stops fusing with the direct sound.
 
 **EQ — logarithmic frequency, 20 Hz to 20 kHz**, level linear over ±24 dB.
-**Four marked nodes over one summed curve.** Three are the Reverb EQ's, drawn
-by `EqNodes::design` — which is `dsp::designMatched`, which is the code the
-engine will run — and the fourth is IN HI-CUT's one pole, which is the screen's
-own arithmetic because nobody has chosen an order for it. The three EQ nodes
-are filled markers and IN HI-CUT is open; see "Two high cuts" above for why the
-picture has to distinguish them.
+**Three marked nodes over one summed curve, and a curtain that is not a node.**
+The three are the Reverb EQ's, drawn by `EqNodes::design` — which is
+`dsp::designMatched`, which is the code the engine will run. IN HI-CUT's one
+pole is in the curve, because it is in the chain, and it is the screen's own
+arithmetic because nobody has chosen an order for it.
+
+**IN HI-CUT is drawn as a region and was an open circle until 2026-09-22.** The
+circle was wrong twice: one stroke's difference from three filled markers reads
+as a fourth node of the same EQ, when it is an *input* filter ahead of the EQ and
+ahead of both generators; and at its own default of 20 kHz it sat centred on the
+right-hand end of the axis with half of itself outside the box. It is a washed
+region from its corner to the end of the axis now, with a bright edge and a tab
+along the top, and `inputCutRegion` clamps that edge inside the plot at every
+setting of the knob. See "Two high cuts" above for why the picture has to
+distinguish them at all.
+
+**Nothing the screen draws inside itself may touch its own frame**, and that is
+a test rather than a habit: `axisLabels` hands out every tick box and
+`inputCutRegion` the curtain, and `tests/ui/LayoutTests.cpp` walks both against
+`plotBounds` on all three pages. The clipped marker shipped because a painted
+thing had no bounds anybody could read — the same argument `getBezelBox` and
+`getRules` are public for.
 
 The sketch/measurement caveat this paragraph used to carry is **closed**:
 `LingerScreen::responseDbAt` is the shipped design now, not a first-order
@@ -747,7 +841,9 @@ line is washed in — a lens either side of a shelf, a pair of wedges running to
 the floor for a cut — and it is the **same** drawing in both modes, no branch,
 so nothing has to be kept in step. And the readout prints "LO CUT" / "HI CUT"
 where it printed "LOW" / "HIGH", which is the one of the three a test can read
-without rendering.
+without rendering — **per node since 2026-09-22**, off `eqCutsLow` and
+`eqCutsHigh` rather than off the mode, because Lo Cut has to read
+"LO CUT … HIGH".
 
 **The line under the screen carries a reading for the page**: the tap count and
 the ER window; the decay, the onset and where the tail ends; or the three EQ

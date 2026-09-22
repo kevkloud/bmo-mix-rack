@@ -54,6 +54,27 @@ rack/     SlotParameter (one generic host parameter, remapped live),
 - `ConcentricBand::setLegend` puts words on a stepped dial in place of the
   spec's choices (DEQ's BELL / LS / HS / LC / HC). `legendOverflow` measures
   them against the 38 px legend box, and `ui_layout_tests` checks every dial.
+- A **choice parameter whose positions are names rather than amounts** gets
+  `ui::ChoiceBox`, a dropdown with its caption underneath: a knob says less and
+  more, and Chamber is not more than Room. BMO Linger's TYPE and ER MODE are
+  the two. `BmoLookAndFeel` already themes `juce::ComboBox` and
+  `juce::PopupMenu` against the tokens, so the wrapper sets only the arrow,
+  which the shared scheme leaves in the utility azure. `captionOverflow`
+  measures the caption *and the widest item*, and `ui_layout_tests` checks
+  every dropdown. A choice whose positions are an ordered amount stays a knob
+  — and is better off a stepped float, which normalises without the
+  index/(n−1) trap.
+- A module whose **parameters write each other** supplies a
+  `ModuleDef::createParamLink` (`state/ParamLink.h`), and `ModuleEngine` builds
+  one per running module — so it works in the standalone plugin and in every
+  rack slot, with or without an editor open. **BMO Linger's TYPE is the only
+  one**: selecting a type re-applies that type's ten constants, so a type is a
+  voicing rather than a table lookup. The writes go through `ParamSet::apply`,
+  the path a preset recall already uses, and reach the parameters on the
+  message thread through a `juce::ParameterAttachment` — never from the audio
+  thread, which is where automation delivers the change that triggers them. The
+  field is last in `ModuleDef` and null for every other module. A second one has
+  to argue for itself the way `modules/reverb/AGENTS.md` argues for the first.
 - `SlotParameter::assign` keeps a pointer into the module's static
   `specs()` vector. Never hand it a temporary.
 - A slot's `SlotOverflow` is an `AudioProcessor` only so that its

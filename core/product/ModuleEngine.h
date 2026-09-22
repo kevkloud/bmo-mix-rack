@@ -29,6 +29,19 @@ public:
           values ((size_t) d.numParams(), 0.0f)
     {
         jassert (paramSet.size() == moduleDef.numParams());
+
+        // A module whose parameters write each other gets its link here and
+        // nowhere else. **One engine exists per running module in both
+        // products** -- the standalone's own, and one per occupied rack slot
+        // -- so this single line covers both, with or without an editor open.
+        // `core/state/ParamLink.h` carries the argument for why the engine and
+        // not a panel; BMO Linger's TYPE is the only module that has one.
+        //
+        // After `paramSet` is in place, and bound to the engine's own copy: a
+        // link keeps a reference to it for the engine's whole life, which is
+        // what makes the ParamSet a member rather than something passed round.
+        if (moduleDef.createParamLink != nullptr)
+            paramLink = moduleDef.createParamLink (paramSet);
     }
 
     const ModuleDef& def() const noexcept    { return moduleDef; }
@@ -97,6 +110,11 @@ private:
 
     const ModuleDef& moduleDef;
     ParamSet paramSet;
+
+    /** Declared after `paramSet` and before everything it does not touch, so
+        it is destroyed before the parameters it is listening to go away. */
+    std::unique_ptr<ParamLink> paramLink;
+
     std::unique_ptr<ModuleDsp> dsp;
     std::vector<float> values;
     Meter outputMeter;

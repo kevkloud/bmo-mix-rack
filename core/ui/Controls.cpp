@@ -579,6 +579,123 @@ void ConcentricBand::resized()
 }
 
 //==============================================================================
+ChoiceBox::ChoiceBox (juce::RangedAudioParameter& parameter, const ParamSpec& spec,
+                      const juce::String& captionText, juce::Colour accent,
+                      juce::Colour captionColourIn)
+    : caption (captionText), captionColour (captionColourIn), accentColour (accent)
+{
+    // A component name, so a layout test can find this control by the caption
+    // a reader sees -- PlainKnob's constructor, same reason.
+    setName (captionText);
+
+    // Item IDs are 1-based because 0 means "nothing selected" to a ComboBox,
+    // so item N holds detent N-1. That is also what ComboBoxParameterAttachment
+    // assumes, and it maps by *index* rather than by id -- which is why the
+    // items have to be in the spec's own order and have to all be here before
+    // the attachment is made.
+    for (int i = 0; i < spec.numChoices(); ++i)
+        box.addItem (spec.choices[(size_t) i], i + 1);
+
+    // Centred in the text box the look and feel leaves, which stops 30 px short
+    // of the right edge for the arrow -- so centred text sits a little left of
+    // the box's own middle and the arrow is what balances it.
+    box.setJustificationType (juce::Justification::centred);
+
+    // The one colour the shared scheme cannot know. See the class comment: the
+    // scheme's arrow is `track`, the utility azure, and utility azure on a
+    // module's own control is the failure BMO Linger's groups already had.
+    box.setColour (juce::ComboBox::arrowColourId, accentColour);
+
+    addAndMakeVisible (box);
+
+    attachment = std::make_unique<juce::ComboBoxParameterAttachment> (parameter, box);
+
+    // The box prints the value, so it has to redraw when the host moves the
+    // parameter -- the attachment does that. The caption does not change, so
+    // nothing else here listens.
+}
+
+juce::Rectangle<int> ChoiceBox::captionBox() const
+{
+    return { 0, box.getBottom(), getWidth(), captionRow() - 4 };
+}
+
+void ChoiceBox::resized()
+{
+    // The square a knob of `controlSide` would be drawn in, worked out exactly
+    // as PlainKnob::resized works it out -- the area above the caption row,
+    // squared and centred, capped at the side. The box then hangs at the foot
+    // of it, which is where that knob's own bottom edge is, so the two
+    // captions land on one line. See setControlSide.
+    const auto area = getLocalBounds().withTrimmedBottom (captionRow());
+    const auto side = juce::jmin (area.getWidth(), area.getHeight(), controlSide);
+    const auto square = area.withSizeKeepingCentre (side, side);
+
+    const auto width = juce::jmin (getWidth() - kBoxMargin * 2, boxWidth);
+
+    box.setBounds (juce::Rectangle<int> (width, kBoxHeight)
+                       .withCentre ({ getWidth() / 2, square.getBottom() - kBoxHeight / 2 }));
+}
+
+void ChoiceBox::paint (juce::Graphics& g)
+{
+    // Derived here rather than cached in the constructor so that editing the
+    // theme file recolours an open panel: the editors repaint on a theme change
+    // but do not rebuild their controls. PlainKnob::paint, same reason.
+    const auto system = panelAccentFor (box, accentColour);
+    const auto ink = captionColour.isTransparent() ? system : captionColour;
+
+    drawLabel (g, caption, captionBox().toFloat(),
+               juce::Justification::centred, captionFont (captionSize),
+               box.isEnabled() ? ink : ink.withAlpha (0.4f));
+}
+
+float ChoiceBox::captionOverflow() const
+{
+    const auto name = juce::GlyphArrangement::getStringWidth (captionFont (captionSize), caption)
+                        - (float) captionBox().getWidth();
+
+    return juce::jmax (name, BmoLookAndFeel::comboTextOverflow (box));
+}
+
+juce::String ChoiceBox::getSelectedText() const
+{
+    return box.getText();
+}
+
+void ChoiceBox::setBoxEnabled (bool shouldBeEnabled)
+{
+    box.setEnabled (shouldBeEnabled);
+    repaint();
+}
+
+void ChoiceBox::setAccent (juce::Colour colour)
+{
+    accentColour = colour;
+    box.setColour (juce::ComboBox::arrowColourId, accentColour);
+    repaint();
+}
+
+void ChoiceBox::setCaptionSize (float points)
+{
+    captionSize = points;
+    resized();
+    repaint();
+}
+
+void ChoiceBox::setControlSide (int side)
+{
+    controlSide = side;
+    resized();
+}
+
+void ChoiceBox::setBoxWidth (int maxWidth)
+{
+    boxWidth = maxWidth;
+    resized();
+}
+
+//==============================================================================
 SwitchButton::SwitchButton (juce::RangedAudioParameter& parameter, const juce::String& text,
                             juce::Colour tint)
 {

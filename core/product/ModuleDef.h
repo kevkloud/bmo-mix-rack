@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/dsp/ModuleDsp.h"
+#include "core/state/ParamLink.h"
 #include "core/state/ParamSpec.h"
 #include "core/ui/Line.h"
 #include "core/ui/ModulePanel.h"
@@ -55,6 +56,25 @@ struct ModuleDef
         statics in eight translation units; resolving it at the point of use
         keeps it out of static initialisation order entirely. */
     const ui::Line* line = nullptr;
+
+    /** Makes this module's `ParamLink`, or null if it has none -- which is
+        every module but BMO Linger.
+
+        **After `line`, for the reason `line` is where it is**: these defs are
+        built by positional aggregate initialisation, so a field inserted
+        anywhere but the end silently re-binds another module's members. A
+        module that wants this has to spell out `line` as well, which is a
+        nullptr and costs nothing; a module that does not wants neither and
+        writes neither.
+
+        A plain function pointer rather than a `std::function`, like
+        `ParamSpec::textFn`: there is exactly one of these in the suite, it is
+        a free function in the module's own header, and a def is a
+        function-local static that should not be allocating at first use.
+
+        The engine calls it once, at construction, and owns what comes back.
+        See `core/state/ParamLink.h` for why an engine and not a panel. */
+    ParamLinkFactory createParamLink = nullptr;
 
     /** The line this module is drawn as -- BMO if it names none. */
     const ui::Line& lineOf() const noexcept

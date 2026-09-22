@@ -273,6 +273,127 @@ private:
 };
 
 //==============================================================================
+/** A dropdown with its name underneath, for a parameter whose positions are
+    **names rather than amounts**.
+
+    A knob says less and more. A room type says neither: Chamber is not more
+    than Room and Plate is not more than Hall. A stepped knob over a name list
+    has nothing on its face saying which name it is on, so it has to print its
+    value underneath -- and you still have to turn it to find out what else is
+    in the list. Frosty rejected that arrangement on BMO Linger's TYPE on
+    2026-09-21: "Room type makes no sense as a knob". This is what replaced it,
+    and TYPE and ER MODE are its two call sites.
+
+    **Not for every choice parameter.** `ervariation` is seven positions of an
+    ordered amount and stays a knob -- which is why it is a stepped float and
+    not a choice list at all. BMO DEQ's SHAPE stays a `ConcentricBand` with a
+    legend ring, a third thing again: a named list drawn as a dial because the
+    five shapes sit inside the band they belong to. The test is whether the
+    positions have an order the hand should feel.
+
+    ## What it is, and what it leans on
+
+    A `juce::ComboBox` and a caption, and almost nothing else. `BmoLookAndFeel`
+    already themes `juce::ComboBox` and `juce::PopupMenu` against the tokens --
+    plate background, `text1` ink, `outline` edge, popup highlight through
+    `onAccentOf` -- so the drawing is not this class's business. It sets the one
+    colour the shared scheme cannot know: the arrow, which the scheme puts in
+    `track`, the suite azure. Azure is the *utility* colour, and an azure arrow
+    beside accent-coloured knobs is the "two modules sharing a slot" failure
+    BMO Linger's panel already had once. So the arrow takes the module's accent,
+    like a knob's pointer.
+
+    The caption is `PlainKnob`'s: same face, same size, same box, derived from
+    the accent against the plate unless one is passed -- so a dropdown and a
+    knob sharing a row are named in one voice.
+
+    ## Why it lines its caption up with a knob's
+
+    `setControlSide` is the whole of it, and it exists because the first pass
+    did without it. A dropdown is 26 px tall and a knob is 84, so centring each
+    in its own cell puts the two captions twenty-odd pixels apart and the row
+    stops reading as a row. Given the side the knobs beside it draw at, this
+    hangs its box at the foot of the same square that knob occupies, so the two
+    captions sit on one line -- and go on sitting there if the row's height
+    changes. `PlainKnob::setKnobSide` is the other half of the arrangement.
+*/
+class ChoiceBox final : public juce::Component
+{
+public:
+    /** The spec and not only the parameter, for `ConcentricBand`'s reason: in
+        a rack the object underneath is a generic `SlotParameter`, and the
+        names have to come from the module's own list either way. */
+    ChoiceBox (juce::RangedAudioParameter&, const ParamSpec&, const juce::String& caption,
+               juce::Colour accent = tokens().accent, juce::Colour captionColour = {});
+
+    void paint (juce::Graphics&) override;
+    void resized() override;
+
+    void setBoxEnabled (bool);
+
+    /** Re-colours the arrow and, unless a caption colour was passed in, the
+        caption with it. See `PlainKnob::setAccent`. */
+    void setAccent (juce::Colour);
+
+    /** Point size for the name underneath. 15 unless set, as a knob's is. */
+    void setCaptionSize (float points);
+
+    /** The side of the square a knob beside this one is drawn at. The box
+        hangs at the foot of the same square, so the two captions share a line.
+        Unset, the box sits at the foot of the whole cell. */
+    void setControlSide (int side);
+
+    /** How wide the box itself may draw, leaving the rest of the cell to the
+        caption. `PlainKnob::setKnobSide`'s argument, one axis over. */
+    void setBoxWidth (int maxWidth);
+
+    /** How much wider the caption, or the widest item in the list, is than the
+        room it has -- in pixels; zero or less fits.
+
+        Both, because a dropdown has two ways to clip and only one of them is
+        the knob's. `PlainKnob::captionOverflow` is the precedent and the
+        reason: the measurement uses the same boxes and the same faces the
+        paint does, so it cannot agree with the bug it is looking for. */
+    float captionOverflow() const;
+
+    /** What the box is showing -- the host's own text for the current
+        position. For a layout test; there is nothing here a panel reads. */
+    juce::String getSelectedText() const;
+
+    /** The row a dropdown draws in: the suite's switch height, because a
+        dropdown and a switch are the same kind of object -- a small
+        rectangular control with a word in it -- and two heights for that would
+        read as two kinds of thing. */
+    static constexpr int kBoxHeight = Tokens::switchHeight;
+
+private:
+    /** Air either side of the box inside its cell, so a dropdown filling a
+        column does not butt against whatever shares the row with it. Unset,
+        `setBoxWidth` leaves the box this much narrower than the cell. */
+    static constexpr int kBoxMargin = 6;
+
+    /** Room under the box for its name. `PlainKnob::captionRow` exactly: 1.2 x
+        the point size plus four. */
+    int captionRow() const { return juce::roundToInt (captionSize * 1.2f) + 4; }
+
+    /** The box the caption is drawn in. One definition, read by `paint` and by
+        `captionOverflow`. */
+    juce::Rectangle<int> captionBox() const;
+
+    juce::String caption;
+    juce::Colour captionColour;   ///< transparent means "derive from accentColour"
+    juce::Colour accentColour;
+    float captionSize = 15.0f;
+    int controlSide = std::numeric_limits<int>::max();
+    int boxWidth = std::numeric_limits<int>::max();
+
+    juce::ComboBox box;
+    std::unique_ptr<juce::ComboBoxParameterAttachment> attachment;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ChoiceBox)
+};
+
+//==============================================================================
 class SwitchButton final : public juce::Component
 {
 public:

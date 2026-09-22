@@ -62,15 +62,20 @@ int main()
     //== The schema and the adapter agree about length ========================
     {
         check (specs().size() == (size_t) Index::count, "the Index enum matches specs()");
-        check (specs().size() == 30, "thirty parameters");
+        check (specs().size() == 24, "twenty-four parameters");
     }
 
     //== The adapter unpacks every field, and unpacks it correctly ============
     //
     // **This is the test that catches a transposed pair**, which is the one
-    // mistake a thirty-field unpack invites and the one that no amount of
+    // mistake a twenty-four-field unpack invites and the one that no amount of
     // listening would localise. Every parameter is set to a value distinct
     // from every other, and every field of Params is read back.
+    //
+    // The type is **Plate** rather than an arbitrary one, and that matters
+    // since the 2026-09-21 trim: six of `Params`' fields no longer come from
+    // the array, and Plate's row differs from Room's on the ones it can. The
+    // block after this one is what actually pins them.
     {
         ReverbDsp dsp;
         dsp.prepare (48000.0, 512, 2);
@@ -80,14 +85,9 @@ int main()
         v[Index::type]        = (float) plate;
         v[Index::size]        = 33.0f;
         v[Index::predelay]    = 72.0f;
-        v[Index::prelink]     = 1.0f;
         v[Index::decay]       = 4.25f;
-        v[Index::decayshape]  = 1.20f;
-        v[Index::attack]      = 55.0f;
         v[Index::feed]        = 40.0f;
-        v[Index::damplofreq]  = 320.0f;
         v[Index::damplo]      = 1.55f;
-        v[Index::damphifreq]  = 1900.0f;
         v[Index::damphi]      = 0.65f;
         v[Index::eqlofreq]    = 140.0f;
         v[Index::eqlo]        = -6.0f;
@@ -95,7 +95,6 @@ int main()
         v[Index::eqhi]        = 4.5f;
         v[Index::ermode]      = (float) energy;
         v[Index::erdensity]   = 82.0f;
-        v[Index::ershape]     = 2.40f;
         v[Index::erspread]    = 125.0f;
         v[Index::erhicut]     = 4500.0f;
         v[Index::ervariation] = 5.0f;
@@ -115,19 +114,14 @@ int main()
         check (p.type == Type::plate, "type");
         check (near (p.sizeM, 33.0f), "size");
         check (near (p.preDelayMs, 72.0f), "pre-delay");
-        check (p.linkEr, "link er");
         check (near (p.decaySeconds, 4.25f), "decay");
-        check (near (p.decayShape, 1.20f), "decay shape");
-        check (near (p.dampLoFreqHz, 320.0f), "low knee");
         check (near (p.dampLo, 1.55f), "low multiplier");
-        check (near (p.dampHiFreqHz, 1900.0f), "high knee");
         check (near (p.dampHi, 0.65f), "high multiplier");
         check (near (p.eqLoFreqHz, 140.0f), "eq low freq");
         check (near (p.eqLoDb, -6.0f), "eq low");
         check (near (p.eqHiFreqHz, 1400.0f), "eq high freq");
         check (near (p.eqHiDb, 4.5f), "eq high");
         check (p.erMode == ErMode::energy, "er mode");
-        check (near (p.erShape, 2.40f), "er shape");
         check (near (p.erSpreadMs, 125.0f), "er spread");
         check (near (p.erHiCutHz, 4500.0f), "er hi-cut");
         check (p.erVariation == 5, "variation");
@@ -138,16 +132,101 @@ int main()
         check (near (p.verbLevelDb, -3.5f), "reverb level");
         check (near (p.outputDb, -7.5f), "output");
 
-        // **The four conversions, which are the only places a host value is
-        // not already an engine value.** They are in the adapter and nowhere
-        // else, which is the thing worth pinning: a percentage that reached
-        // the engine as 82 instead of 0.82 would be a hundredfold error in a
+        // **The conversions, which are the only places a host value is not
+        // already an engine value.** They are in the adapter and nowhere else,
+        // which is the thing worth pinning: a percentage that reached the
+        // engine as 82 instead of 0.82 would be a hundredfold error in a
         // control that looks fine on the panel.
-        check (near (p.attack, 0.55f), "attack arrives as 0..1, not as per cent");
         check (near (p.feed, 0.40f), "source arrives as 0..1, not as per cent");
         check (near (p.erDensity, 0.82f), "density arrives as 0..1, not as per cent");
         check (near (p.mix, 0.45f), "mix arrives as 0..1, not as per cent");
         check (near (p.width, 1.45f), "width arrives as a 0..2 M/S gain, not as per cent");
+    }
+
+    //== The six fields with no host lane, and where they come from instead ===
+    //
+    // The 2026-09-21 control-set trim took ATTACK, DECAY SHAPE, ER SHAPE and
+    // the two damping knees off the schema and into `TypeConstants`, and made
+    // LINK ER a fixed constant. **So six of `Params`' fields are no longer
+    // reachable from the array the adapter is handed**, and nothing above this
+    // point would notice if they were wired to the wrong row, to Room's row
+    // always, or to nothing at all.
+    //
+    // Asserted against the type's own namespace, per type, rather than against
+    // "it changed": a check that only compared two types would pass on an
+    // adapter that read the row one index off.
+    {
+        ReverbDsp dsp;
+        dsp.prepare (48000.0, 512, 2);
+
+        struct Row { int detent; float decayShape, attack, dampLo, dampHi, erShape; };
+
+        const Row rows[] {
+            { room,     roomDefaults::kDecayShape,     roomDefaults::kAttack,
+                        roomDefaults::kDampLoFreqHz,   roomDefaults::kDampHiFreqHz,
+                        roomDefaults::kErShape },
+            { chamber,  chamberDefaults::kDecayShape,   chamberDefaults::kAttack,
+                        chamberDefaults::kDampLoFreqHz, chamberDefaults::kDampHiFreqHz,
+                        chamberDefaults::kErShape },
+            { hall,     hallDefaults::kDecayShape,     hallDefaults::kAttack,
+                        hallDefaults::kDampLoFreqHz,   hallDefaults::kDampHiFreqHz,
+                        hallDefaults::kErShape },
+            { cavern,   cavernDefaults::kDecayShape,    cavernDefaults::kAttack,
+                        cavernDefaults::kDampLoFreqHz,  cavernDefaults::kDampHiFreqHz,
+                        cavernDefaults::kErShape },
+            { plate,    plateDefaults::kDecayShape,     plateDefaults::kAttack,
+                        plateDefaults::kDampLoFreqHz,   plateDefaults::kDampHiFreqHz,
+                        plateDefaults::kErShape },
+            { ambience, ambienceDefaults::kDecayShape,  ambienceDefaults::kAttack,
+                        ambienceDefaults::kDampLoFreqHz, ambienceDefaults::kDampHiFreqHz,
+                        ambienceDefaults::kErShape },
+        };
+
+        for (const auto& row : rows)
+        {
+            auto v = defaults();
+            v[Index::type] = (float) row.detent;
+            dsp.setParams (v.data(), (int) v.size());
+
+            const auto& p = dsp.getCore().getParams();
+            const std::string who { kTypeNames[row.detent] };
+
+            check (near (p.decayShape, row.decayShape),
+                   ("decay shape is " + who + "'s constant").c_str());
+            // Per cent on the row, 0..1 at the engine -- the same conversion
+            // the knob used to go through, still in the adapter and still in
+            // one place.
+            check (near (p.attack, row.attack * 0.01f),
+                   ("attack is " + who + "'s constant, as 0..1").c_str());
+            check (near (p.dampLoFreqHz, row.dampLo),
+                   ("the low knee is " + who + "'s constant").c_str());
+            check (near (p.dampHiFreqHz, row.dampHi),
+                   ("the high knee is " + who + "'s constant").c_str());
+            check (near (p.erShape, row.erShape),
+                   ("er shape is " + who + "'s constant").c_str());
+
+            // Off, at every type. There is no value of anything that turns it
+            // on, which is the point of cutting it.
+            check (! p.linkEr, ("link er is off on " + who).c_str());
+        }
+
+        // **And the table is not flat**, or the loop above would pass against
+        // an adapter that ignored the type entirely and stamped Room. Four of
+        // the five differ across types; DECAY SHAPE deliberately does not --
+        // every row is 3.50, linear, and params.h says so -- so it is asserted
+        // as a constant rather than as a difference.
+        check (! near (plateDefaults::kAttack, roomDefaults::kAttack),
+               "Plate's attack differs from Room's, so the per-type read is not vacuous");
+        check (! near (cavernDefaults::kDampHiFreqHz, roomDefaults::kDampHiFreqHz),
+               "Cavern's high knee differs from Room's");
+        check (! near (plateDefaults::kErShape, roomDefaults::kErShape),
+               "Plate's ER shape differs from Room's");
+        check (! near (cavernDefaults::kDampLoFreqHz, roomDefaults::kDampLoFreqHz),
+               "Cavern's low knee differs from Room's");
+
+        for (int t = 0; t < numTypes; ++t)
+            check (near (constantsFor (t).decayShape, roomDefaults::kDecayShape),
+                   "every type ships DECAY SHAPE linear -- a reverb should not arrive gated");
     }
 
     //== A short array is refused rather than read past ======================
@@ -212,8 +291,12 @@ int main()
         {
             const auto settings = typeSettings (t);
 
-            check (settings.size() == 10,
-                   "a type writes ten parameters -- eight until the two levels joined them");
+            // Nine since the 2026-09-21 trim: it was ten, and ER SHAPE lost
+            // the parameter it was being written onto. The other four fields
+            // the trim added are per-type too and are likewise unwritable, so
+            // the row is fourteen wide and nine of it is a `Setting` list.
+            check (settings.size() == 9,
+                   "a type writes nine parameters -- the other five of its row have no host lane");
 
             for (const auto& s : settings)
             {
@@ -255,6 +338,16 @@ int main()
                 check (near (specs()[(size_t) index].def, s.value),
                        "Room's constant is the parameter's own default");
         }
+
+        // **The five fields a `Setting` cannot reach, named.** Without this
+        // the count above is the only thing standing between the schema and a
+        // sixth field quietly going missing from `paramsFrom` -- and a field
+        // the adapter forgot would read as Room's constant for every type,
+        // which is exactly the failure that sounds like nothing being wrong.
+        for (const auto* id : { "ershape", "decayshape", "attack",
+                                "damplofreq", "damphifreq", "prelink" })
+            check (indexOfParam (specs(), id) < 0,
+                   "the trim's six are not parameters any more");
     }
 
     //== Latency: zero, everywhere, permanently ==============================

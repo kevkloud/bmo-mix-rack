@@ -28,13 +28,22 @@ namespace bmo::reverb
     milestone M6.
 
     **`kType` is first in every list below, and it has to stay first.**
-    Selecting a type re-applies that type's ten constants over SIZE, DENSITY,
-    ER SHAPE, ER SPREAD, MOD DEPTH, MOD RATE, IN HI-CUT, SOURCE, ER and REVERB
+    Selecting a type re-applies that type's nine writable constants over SIZE,
+    DENSITY, ER SPREAD, MOD DEPTH, MOD RATE, IN HI-CUT, SOURCE, ER and REVERB
     (`modules/reverb/TypeVoicing.h`), and `ParamSet::apply` walks a list in
     order -- so a preset that named its type last would stamp that type's block
     over its own carefully chosen sizes and levels, and nothing would say so.
-    A preset is free to set any of the ten *after* the type; that is how it
+    A preset is free to set any of the nine *after* the type; that is how it
     departs from the voicing, which is the normal case here.
+
+    **And a preset can no longer ask for a bloom, a decay curve, an ER contour
+    or a damping knee.** Those went into the per-type block in the 2026-09-21
+    control-set trim, so they are not ids any more and cannot appear in a
+    `Setting` list. Three settings went with them -- Vocal Chamber's and Long
+    Hall's ATTACK, and Snare Room's DECAY SHAPE. Snare Room is the one that
+    lost something it was genuinely asking for: a Room with a harder decay
+    curve than the Room type gives. If the listening pass agrees it needs that,
+    the answer is a seventh type, not a twenty-fifth parameter.
 
     **There is no preset level check here, and there will be one later.** Every
     other module's suite checks that a preset comes out at the level it went
@@ -56,7 +65,6 @@ inline const std::vector<FactoryPreset>& factory()
                              { kSize, 18.0f },
                              { kPreDelay, 40.0f },
                              { kDecay, 1.6f },
-                             { kAttack, 45.0f },
                              { kErHiCut, 5500.0f },
                              { kErLevel, -12.0f },
                              { kVerbLevel, -9.0f },
@@ -87,7 +95,6 @@ inline const std::vector<FactoryPreset>& factory()
                           { kSize, 9.0f },
                           { kPreDelay, 12.0f },
                           { kDecay, 1.1f },
-                          { kDecayShape, 1.4f },
                           { kErDensity, 70.0f },
                           { kErHiCut, 9000.0f },
                           { kErLevel, -6.0f },
@@ -136,7 +143,6 @@ inline const std::vector<FactoryPreset>& factory()
                          { kSize, 45.0f },
                          { kPreDelay, 60.0f },
                          { kDecay, 5.5f },
-                         { kAttack, 60.0f },
                          { kDampLo, 1.40f },
                          { kDampHi, 0.35f },
                          { kErSpread, 140.0f },

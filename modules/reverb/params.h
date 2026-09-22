@@ -14,15 +14,52 @@ namespace bmo::reverb
 // The list, its order, the ranges, the steps, the defaults and both choice
 // lists *with their index order* are the table in
 // docs/reverb/11-integration-and-test-plan.md 4, which is the authoritative
-// copy; 10-dsp-spec.md 6 restates the same thirty names in the same order and
-// the two were reconciled before this file was written.
+// copy; 10-dsp-spec.md 6 restates the same names in the same order and the two
+// were reconciled before this file was written. **Both of them still list
+// thirty**, because docs/ is not this pass's to edit -- the six the trim below
+// removed are named here and in AGENTS.md instead.
 //
-// **Thirty parameters, and the count is the decision.** A rack slot shows a
-// host 32 lanes, so this fits with **two spare** and none of BMO DEQ's
-// SlotOverflow machinery is needed -- but two is all there is. A later Freeze,
-// a ducking control, or the tempo-sync pair `syncon`/`syncdiv` would exhaust
-// them between them. See AGENTS.md, which says so in the place a reader
-// proposing a thirty-first control will look.
+// **Twenty-four parameters, and the count is the decision.** It was thirty and
+// six were cut on 2026-09-21, before anything shipped. A rack slot shows a
+// host 32 lanes, so this now fits with **eight spare** where it used to fit
+// with two: a later Freeze, a ducking control and the tempo-sync pair
+// `syncon`/`syncdiv` no longer have to be argued against each other for the
+// last lane, and none of BMO DEQ's SlotOverflow machinery is needed.
+//
+// **The trim was free only because nothing has shipped.** State is stored as
+// plain values keyed by id (`ParamSet::toXml`), so any of the six re-appends
+// at the end later at no cost to a saved session if listening disagrees. That
+// is true of the five floats and the one bool that were cut, and it is **not**
+// true of a choice: `juce::AudioParameterChoice` normalises as index/(n-1), so
+// changing the count of `type` or `ermode` remaps every automation point ever
+// written on that lane. Neither was touched, and neither may be.
+//
+//== The six that were cut, and where each one went ==========================
+//
+// Every one of them is **character rather than a mix move** -- what makes a
+// Plate a Plate rather than what an engineer dials mid-session -- so each is
+// now a constant in the per-type block below, written by the type and read by
+// the engine without passing through a host lane.
+//
+//  - `attack` (was index 6), the tail's bloom contour. Owner's call,
+//    verbatim: attack should be type dependent.
+//  - `decayshape` (5), the gated/linear curve. Owner's call, same sentence.
+//  - `damplofreq` (8), the low damping crossover. Owner's call: "the
+//    frequencies should be handled by the onboard EQ". A knee is a property of
+//    a room rather than a mix decision, and `damplo` survives as a pure decay
+//    multiplier at a fixed per-type knee.
+//  - `damphifreq` (10), the high crossover, on the same argument -- and it
+//    spanned only 1000-2100 Hz, 1.07 octaves, which the trim review called a
+//    constant with a knob on it.
+//  - `ershape` (18), the early cluster's rise exponent p. **The agent's call
+//    and not the owner's**, flagged as such here and in AGENTS.md: a unitless
+//    exponent whose end-stops the spec itself records as unconfirmed, and the
+//    early cluster's contour -- the same "what kind of room is this" argument
+//    the owner used for `attack` and `decayshape`.
+//  - `prelink` (3), ER travelling with the pre-delayed tail. **Also the
+//    agent's call.** Set-and-forget: off is the reference behaviour, every
+//    type shipped it identically and nobody automates it, so it is one fixed
+//    constant (`kPreLinkFixed`) rather than a per-type one.
 //
 // **The display name and the module id differ on purpose.** `reverb` is what
 // lives in state files, rack presets and preset filenames and can never
@@ -52,24 +89,18 @@ inline constexpr auto kSize = "size";
 // timeline, which is latency, and an automatable one would thrash PDC.
 inline constexpr auto kPreDelay = "predelay";
 
-// Whether the early reflections travel with the pre-delayed tail or stay with
-// the dry signal. Off is the reference behaviour: ER with dry.
-inline constexpr auto kPreLink = "prelink";
+// **Whether the early reflections travel with the pre-delayed tail is no
+// longer a parameter.** Off -- ER with dry -- is the reference behaviour and
+// is now fixed for every type: set-and-forget, identical in all six type
+// blocks, and nobody automates it. Cut 2026-09-21 on the agent's call. It is a
+// bare `bool` and not a `TypeConstants` field because no type wanted its own
+// answer; if one ever does, move it into the struct rather than back onto a
+// host lane.
+inline constexpr bool kPreLinkFixed = false;
 
 // T_mid, the mid-band 60 dB decay time, in seconds. The damping multipliers
 // below scale it per band; they do not scale this.
 inline constexpr auto kDecay = "decay";
-
-// Decay truncation, as an envelope multiplier on the FDN output retriggered by
-// an input envelope follower. 3.5 is linear -- i.e. off, the tail decays as
-// the network does -- and the bottom of the range is a gate. One control
-// instead of separate gated and reverse algorithms (10 section 4).
-inline constexpr auto kDecayShape = "decayshape";
-
-// The tail's onset contour, a rising envelope on the FDN *input* ramping over
-// 0-120 ms, so the tail blooms behind the ER rather than arriving with it. At
-// 0 the tail is immediate, which is plate behaviour.
-inline constexpr auto kAttack = "attack";
 
 // What feeds the tail: (1-d) * direct + d * ER, tapped from the ER bus
 // *before* decorrelation and *before* the ER fader, so the two faders stay
@@ -79,14 +110,18 @@ inline constexpr auto kAttack = "attack";
 // suite and a third word beat both. The id does not change with the caption.
 inline constexpr auto kFeed = "feed";
 
-// The two absorbent-filter knees and their decay multipliers: T60 below the
-// low knee is T_mid * damplo, above the high knee T_mid * damphi. Derived from
-// a target T60(f) rather than tuned toward one, which is the whole reason the
-// late network is an FDN (10 section 1).
-inline constexpr auto kDampLoFreq = "damplofreq";
-inline constexpr auto kDampLo     = "damplo";
-inline constexpr auto kDampHiFreq = "damphifreq";
-inline constexpr auto kDampHi     = "damphi";
+// The two absorbent-filter decay multipliers: T60 below the low knee is
+// T_mid * damplo, above the high knee T_mid * damphi. Derived from a target
+// T60(f) rather than tuned toward one, which is the whole reason the late
+// network is an FDN (10 section 1).
+//
+// **The two knees themselves are per-type constants and not parameters** --
+// `TypeConstants::dampLoFreqHz` and `dampHiFreqHz`. The owner's argument is
+// that a mix reaches for the onboard EQ when it wants a frequency, and that
+// where a room stops absorbing is a property of the room. So these two survive
+// as pure multipliers over a knee the type sets.
+inline constexpr auto kDampLo = "damplo";
+inline constexpr auto kDampHi = "damphi";
 
 // The Reverb EQ: a low shelf and a high shelf, **pre both generators** rather
 // than on the wet output, which is where the reference puts it (10 section 2).
@@ -107,12 +142,17 @@ inline constexpr auto kErMode = "ermode";
 // level and energy is renormalised across the sweep.
 inline constexpr auto kErDensity = "erdensity";
 
-// Energy mode's envelope: the rise exponent p in (t/tau_r)^p, and the sigma
-// that sets how long the plateau lasts. Both are live in Taps mode too, since
-// Blend reuses the Shape/Spread envelope -- whether they grey out in Taps mode
-// or sit inert is 11 section 7's open owner-confirm question and is a panel
-// decision, not a schema one.
-inline constexpr auto kErShape  = "ershape";
+// Energy mode's envelope. The sigma that sets how long the plateau lasts is a
+// parameter; **the rise exponent p in (t/tau_r)^p is not** -- it is
+// `TypeConstants::erShape`, cut from the schema on 2026-09-21 on the agent's
+// call, because it is unitless, its end-stops are recorded as unconfirmed, and
+// the early cluster's contour is character in exactly the way ATTACK and DECAY
+// SHAPE are. It was already a per-type constant; what changed is that it is no
+// longer also a knob.
+//
+// ER SPREAD is live in Taps mode too, since Blend reuses the Shape/Spread
+// envelope -- whether it greys out in Taps mode or sits inert is 11 section
+// 7's open owner-confirm question and is a panel decision, not a schema one.
 inline constexpr auto kErSpread = "erspread";
 
 // One post-ER shelf. The main anti-boxiness tool, and the fallback if the four
@@ -156,13 +196,18 @@ inline constexpr auto kVerbLevel = "verblevel";
 inline constexpr auto kMix    = "mix";
 inline constexpr auto kOutput = "output";
 
-/** Positions in `specs()`, and in a rack slot's host lanes. Permanent. */
+/** Positions in `specs()`, and in a rack slot's host lanes. Permanent **from
+    first ship**, which has not happened -- the six the trim removed took their
+    positions with them and everything after each one closed up. The relative
+    order of the twenty-four that survived is unchanged, and the ids are
+    unchanged, which is what makes a state file written before the trim still
+    restore every parameter it still has. */
 enum Index
 {
-    type = 0, size, predelay, prelink, decay, decayshape, attack, feed,
-    damplofreq, damplo, damphifreq, damphi,
+    type = 0, size, predelay, decay, feed,
+    damplo, damphi,
     eqlofreq, eqlo, eqhifreq, eqhi,
-    ermode, erdensity, ershape, erspread, erhicut, ervariation,
+    ermode, erdensity, erspread, erhicut, ervariation,
     moddepth, modrate, width, inhicut,
     erlevel, verblevel, mix, output,
     count
@@ -234,24 +279,33 @@ inline const char* const kErModeNames[] { "Taps", "Energy", "Blend" };
 /** **Room's per-type constants, by definition -- not merely its defaults.**
 
     A fresh instance opens on TYPE = Room, so whatever a fresh instance shows
-    for `size`, `erdensity`, `ershape`, `erspread`, `moddepth`, `modrate`,
-    `inhicut`, `feed`, `erlevel` and `verblevel` is a claim about what Room
-    *is*. If the DSP later picks different Room constants, the panel lies about
-    itself on the very first thing a user sees.
+    for `size`, `erdensity`, `erspread`, `moddepth`, `modrate`, `inhicut`,
+    `feed`, `erlevel` and `verblevel` is a claim about what Room *is*. If the
+    DSP later picks different Room constants, the panel lies about itself on
+    the very first thing a user sees.
 
-    **Ten, not eight.** `erlevel` and `verblevel` joined this list on
-    2026-09-21 (11 section 4). Without them Ambience was unbuildable as
-    specified: the pack describes it as "tiny tail, ER-dominant by default"
-    while the two faders were type-independent, so no type could set its own
-    balance of the two generators and the one type whose whole character *is*
-    that balance had nowhere to put it.
+    **Fourteen, not ten**, since the 2026-09-21 control-set trim -- and nine of
+    the fourteen are still parameters. `erlevel` and `verblevel` joined earlier
+    the same day (11 section 4); without them Ambience was unbuildable as
+    specified, because no type could set its own balance of the two generators
+    and the one type whose whole character *is* that balance had nowhere to put
+    it. Then `decayshape`, `attack`, `damplofreq` and `damphifreq` arrived off
+    the schema, and `ershape` -- which was already here -- stopped being a knob
+    as well.
 
-    The defaults that are *not* in this list are ordinary defaults and are
-    type-independent: `type` itself, `predelay`, `prelink`, `decay`,
-    `decayshape`, `attack`, the four damping and four EQ rows, `ermode`,
-    `erhicut`, `ervariation`, `width`, `mix` and `output`. A type may move the
-    *sound* those produce; it does not move the number the knob opens at, and
-    selecting a type does not overwrite them.
+    **Five of the fourteen have no parameter under them**: `erShape`,
+    `decayShape`, `attack`, `dampLoFreqHz` and `dampHiFreqHz`. `typeSettings`
+    therefore returns nine settings and not fourteen: those five reach the
+    engine straight from this table in `ReverbDsp::paramsFrom`, keyed off the
+    TYPE value in the same array, because there is no host lane to stamp them
+    onto. That is the whole mechanical consequence of the trim.
+
+    The defaults that are in neither list are ordinary defaults and are
+    type-independent: `type` itself, `predelay`, `decay`, the two damping
+    multipliers, the four EQ rows, `ermode`, `erhicut`, `ervariation`, `width`,
+    `mix` and `output`. A type may move the *sound* those produce; it does not
+    move the number the knob opens at, and selecting a type does not overwrite
+    them.
 
     They are constants here rather than numbers inline in `specs()` so that the
     per-type table below can be checked against the same symbols the schema was
@@ -268,6 +322,17 @@ namespace roomDefaults
     inline constexpr float kFeed        = 70.0f;    ///< per cent
     inline constexpr float kErLevelDb   = -6.0f;
     inline constexpr float kVerbLevelDb = -6.0f;
+
+    // The four the trim brought in, and **every one of them is the number the
+    // schema already had**: these were `specs()`' own defaults until
+    // 2026-09-21, so a fresh Room sounds after the trim exactly as it did
+    // before it, and nothing about the cut is also a retune. They are marked
+    // SCHEMA rather than CALIBRATE for that reason -- a CALIBRATE number is
+    // one invented here to give an ordering, and these were not invented here.
+    inline constexpr float kDecayShape   = 3.50f;     // SCHEMA: 3.5 is linear, i.e. truncation off
+    inline constexpr float kAttack       = 30.0f;     // SCHEMA: per cent of the 0-120 ms bloom
+    inline constexpr float kDampLoFreqHz = 200.0f;    // SCHEMA
+    inline constexpr float kDampHiFreqHz = 1600.0f;   // SCHEMA
 }
 
 //==============================================================================
@@ -280,13 +345,21 @@ namespace roomDefaults
     retuned without touching the schema. What is here is only the part a knob
     shows, because that is the part a type change has to *write*.
 
-    The field order is `roomDefaults`' order with the two levels appended, so
-    the two lists can be read against each other line by line. */
+    The field order is `roomDefaults`' order exactly -- the two levels, then
+    the four the trim brought in, each appended as it arrived -- so the two
+    lists can be read against each other line by line.
+
+    **The last five fields have no parameter.** `erShape` lost its knob in the
+    trim; `decayShape`, `attack`, `dampLoFreqHz` and `dampHiFreqHz` arrived in
+    it. Nothing writes them onto a host lane, so `typeSettings` does not list
+    them and `TypeVoicing` never sees them: they reach the engine directly, in
+    `ReverbDsp::paramsFrom`, from the row the TYPE value selects. A reader
+    adding a field should decide which half it is in before adding it. */
 struct TypeConstants
 {
     float sizeM;
     float erDensity;     ///< per cent
-    float erShape;       ///< the contour exponent p
+    float erShape;       ///< the contour exponent p -- engine only, no host lane
     float erSpreadMs;
     float modDepthMs;
     float modRateHz;
@@ -294,6 +367,12 @@ struct TypeConstants
     float feed;          ///< per cent
     float erLevelDb;
     float verbLevelDb;
+
+    //== No parameter under any of these four ==================================
+    float decayShape;    ///< 0.04..3.5; 3.5 is linear, i.e. truncation off
+    float attack;        ///< per cent of the 0-120 ms bloom
+    float dampLoFreqHz;  ///< the low absorption knee
+    float dampHiFreqHz;  ///< the high absorption knee
 };
 
 //==============================================================================
@@ -316,10 +395,28 @@ struct TypeConstants
 // during the listening pass (11 section 6, milestone M6), which is how they
 // stop being placeholders.
 //
+// **The four the trim brought in claim this much and no more:**
+//
+//  - `attack`. **Plate is 0 and that one is not a guess** -- "at 0 the tail is
+//    immediate, which is plate behaviour" is the spec's own sentence, and it
+//    is the whole reason the owner said attack should be type dependent. The
+//    rest rise with the room: Ambience under Room under Chamber under Hall
+//    under Cavern, because a larger room's tail arrives later behind its ER.
+//  - `dampHiFreqHz`. It falls as the room gets larger and stonier -- Plate
+//    highest, Cavern lowest -- which is the *same* ordering `inHiCutHz`
+//    already carries in these rows, and it is claimed only because the two
+//    disagreeing would be incoherent rather than merely unfitted.
+//  - `dampLoFreqHz` and `decayShape` claim **nothing at all**. Every type
+//    ships 3.50 on the shape, which is linear, which is the truncation switched
+//    off: a reverb should not arrive gated, and no type in the pack is
+//    described as one. The low knee moves a little with the room for the same
+//    reason the high one does and should be read as unfitted.
+//
 // **The shape is what is real.** When the fitted table lands it drops into
-// these namespaces value for value: same names, same units, same ten fields,
-// no change to `kTypeConstants`, `typeSettings` or anything that reads them.
-// Replace the numbers and delete the CALIBRATE markers as each one is heard.
+// these namespaces value for value: same names, same units, same fourteen
+// fields, no change to `kTypeConstants`, `typeSettings` or anything that reads
+// them. Replace the numbers and delete the CALIBRATE markers as each one is
+// heard.
 //==============================================================================
 
 namespace chamberDefaults
@@ -334,6 +431,11 @@ namespace chamberDefaults
     inline constexpr float kFeed        = 70.0f;      // CALIBRATE
     inline constexpr float kErLevelDb   = -6.0f;      // CALIBRATE
     inline constexpr float kVerbLevelDb = -6.0f;      // CALIBRATE
+
+    inline constexpr float kDecayShape   = 3.50f;     // CALIBRATE -- linear, like every type
+    inline constexpr float kAttack       = 35.0f;     // CALIBRATE
+    inline constexpr float kDampLoFreqHz = 200.0f;    // CALIBRATE
+    inline constexpr float kDampHiFreqHz = 1600.0f;   // CALIBRATE
 }
 
 namespace hallDefaults
@@ -348,6 +450,11 @@ namespace hallDefaults
     inline constexpr float kFeed        = 65.0f;      // CALIBRATE
     inline constexpr float kErLevelDb   = -8.0f;      // CALIBRATE
     inline constexpr float kVerbLevelDb = -5.0f;      // CALIBRATE
+
+    inline constexpr float kDecayShape   = 3.50f;     // CALIBRATE -- linear, like every type
+    inline constexpr float kAttack       = 50.0f;     // CALIBRATE
+    inline constexpr float kDampLoFreqHz = 180.0f;    // CALIBRATE
+    inline constexpr float kDampHiFreqHz = 1400.0f;   // CALIBRATE
 }
 
 namespace cavernDefaults
@@ -362,6 +469,11 @@ namespace cavernDefaults
     inline constexpr float kFeed        = 60.0f;      // CALIBRATE
     inline constexpr float kErLevelDb   = -10.0f;     // CALIBRATE
     inline constexpr float kVerbLevelDb = -4.0f;      // CALIBRATE
+
+    inline constexpr float kDecayShape   = 3.50f;     // CALIBRATE -- linear, like every type
+    inline constexpr float kAttack       = 65.0f;     // CALIBRATE
+    inline constexpr float kDampLoFreqHz = 160.0f;    // CALIBRATE
+    inline constexpr float kDampHiFreqHz = 1100.0f;   // CALIBRATE
 }
 
 namespace plateDefaults
@@ -376,6 +488,15 @@ namespace plateDefaults
     inline constexpr float kFeed        = 40.0f;      // CALIBRATE
     inline constexpr float kErLevelDb   = -12.0f;     // CALIBRATE
     inline constexpr float kVerbLevelDb = -5.0f;      // CALIBRATE
+
+    inline constexpr float kDecayShape   = 3.50f;     // CALIBRATE -- linear, like every type
+    // **Zero, and this one is the spec's own sentence rather than a
+    // placeholder's ordering**: at 0 the tail is immediate, which is plate
+    // behaviour. It is still marked, because the *contour* between 0 and 100
+    // is CALIBRATE even where an end-stop is not.
+    inline constexpr float kAttack       = 0.0f;      // CALIBRATE (the value is not; the contour is)
+    inline constexpr float kDampLoFreqHz = 250.0f;    // CALIBRATE
+    inline constexpr float kDampHiFreqHz = 2000.0f;   // CALIBRATE
 }
 
 /** Ambience, **the row the whole change was made for**. The two levels are the
@@ -397,6 +518,11 @@ namespace ambienceDefaults
     inline constexpr float kFeed        = 85.0f;      // CALIBRATE
     inline constexpr float kErLevelDb   = -4.0f;      // CALIBRATE
     inline constexpr float kVerbLevelDb = -20.0f;     // CALIBRATE
+
+    inline constexpr float kDecayShape   = 3.50f;     // CALIBRATE -- linear, like every type
+    inline constexpr float kAttack       = 10.0f;     // CALIBRATE
+    inline constexpr float kDampLoFreqHz = 200.0f;    // CALIBRATE
+    inline constexpr float kDampHiFreqHz = 1800.0f;   // CALIBRATE
 }
 
 /** The six rows, in the frozen index order. Built from the namespaces above
@@ -406,35 +532,47 @@ namespace ambienceDefaults
     constants" true by construction instead of by a test. */
 inline constexpr TypeConstants kTypeConstants[numTypes]
 {
-    { roomDefaults::kSizeM,      roomDefaults::kErDensity,   roomDefaults::kErShape,
-      roomDefaults::kErSpreadMs, roomDefaults::kModDepthMs,  roomDefaults::kModRateHz,
-      roomDefaults::kInHiCutHz,  roomDefaults::kFeed,
-      roomDefaults::kErLevelDb,  roomDefaults::kVerbLevelDb },
+    { roomDefaults::kSizeM,        roomDefaults::kErDensity,   roomDefaults::kErShape,
+      roomDefaults::kErSpreadMs,   roomDefaults::kModDepthMs,  roomDefaults::kModRateHz,
+      roomDefaults::kInHiCutHz,    roomDefaults::kFeed,
+      roomDefaults::kErLevelDb,    roomDefaults::kVerbLevelDb,
+      roomDefaults::kDecayShape,   roomDefaults::kAttack,
+      roomDefaults::kDampLoFreqHz, roomDefaults::kDampHiFreqHz },
 
-    { chamberDefaults::kSizeM,      chamberDefaults::kErDensity,  chamberDefaults::kErShape,
-      chamberDefaults::kErSpreadMs, chamberDefaults::kModDepthMs, chamberDefaults::kModRateHz,
-      chamberDefaults::kInHiCutHz,  chamberDefaults::kFeed,
-      chamberDefaults::kErLevelDb,  chamberDefaults::kVerbLevelDb },
+    { chamberDefaults::kSizeM,        chamberDefaults::kErDensity,  chamberDefaults::kErShape,
+      chamberDefaults::kErSpreadMs,   chamberDefaults::kModDepthMs, chamberDefaults::kModRateHz,
+      chamberDefaults::kInHiCutHz,    chamberDefaults::kFeed,
+      chamberDefaults::kErLevelDb,    chamberDefaults::kVerbLevelDb,
+      chamberDefaults::kDecayShape,   chamberDefaults::kAttack,
+      chamberDefaults::kDampLoFreqHz, chamberDefaults::kDampHiFreqHz },
 
-    { hallDefaults::kSizeM,      hallDefaults::kErDensity,  hallDefaults::kErShape,
-      hallDefaults::kErSpreadMs, hallDefaults::kModDepthMs, hallDefaults::kModRateHz,
-      hallDefaults::kInHiCutHz,  hallDefaults::kFeed,
-      hallDefaults::kErLevelDb,  hallDefaults::kVerbLevelDb },
+    { hallDefaults::kSizeM,        hallDefaults::kErDensity,  hallDefaults::kErShape,
+      hallDefaults::kErSpreadMs,   hallDefaults::kModDepthMs, hallDefaults::kModRateHz,
+      hallDefaults::kInHiCutHz,    hallDefaults::kFeed,
+      hallDefaults::kErLevelDb,    hallDefaults::kVerbLevelDb,
+      hallDefaults::kDecayShape,   hallDefaults::kAttack,
+      hallDefaults::kDampLoFreqHz, hallDefaults::kDampHiFreqHz },
 
-    { cavernDefaults::kSizeM,      cavernDefaults::kErDensity,  cavernDefaults::kErShape,
-      cavernDefaults::kErSpreadMs, cavernDefaults::kModDepthMs, cavernDefaults::kModRateHz,
-      cavernDefaults::kInHiCutHz,  cavernDefaults::kFeed,
-      cavernDefaults::kErLevelDb,  cavernDefaults::kVerbLevelDb },
+    { cavernDefaults::kSizeM,        cavernDefaults::kErDensity,  cavernDefaults::kErShape,
+      cavernDefaults::kErSpreadMs,   cavernDefaults::kModDepthMs, cavernDefaults::kModRateHz,
+      cavernDefaults::kInHiCutHz,    cavernDefaults::kFeed,
+      cavernDefaults::kErLevelDb,    cavernDefaults::kVerbLevelDb,
+      cavernDefaults::kDecayShape,   cavernDefaults::kAttack,
+      cavernDefaults::kDampLoFreqHz, cavernDefaults::kDampHiFreqHz },
 
-    { plateDefaults::kSizeM,      plateDefaults::kErDensity,  plateDefaults::kErShape,
-      plateDefaults::kErSpreadMs, plateDefaults::kModDepthMs, plateDefaults::kModRateHz,
-      plateDefaults::kInHiCutHz,  plateDefaults::kFeed,
-      plateDefaults::kErLevelDb,  plateDefaults::kVerbLevelDb },
+    { plateDefaults::kSizeM,        plateDefaults::kErDensity,  plateDefaults::kErShape,
+      plateDefaults::kErSpreadMs,   plateDefaults::kModDepthMs, plateDefaults::kModRateHz,
+      plateDefaults::kInHiCutHz,    plateDefaults::kFeed,
+      plateDefaults::kErLevelDb,    plateDefaults::kVerbLevelDb,
+      plateDefaults::kDecayShape,   plateDefaults::kAttack,
+      plateDefaults::kDampLoFreqHz, plateDefaults::kDampHiFreqHz },
 
-    { ambienceDefaults::kSizeM,      ambienceDefaults::kErDensity,  ambienceDefaults::kErShape,
-      ambienceDefaults::kErSpreadMs, ambienceDefaults::kModDepthMs, ambienceDefaults::kModRateHz,
-      ambienceDefaults::kInHiCutHz,  ambienceDefaults::kFeed,
-      ambienceDefaults::kErLevelDb,  ambienceDefaults::kVerbLevelDb },
+    { ambienceDefaults::kSizeM,        ambienceDefaults::kErDensity,  ambienceDefaults::kErShape,
+      ambienceDefaults::kErSpreadMs,   ambienceDefaults::kModDepthMs, ambienceDefaults::kModRateHz,
+      ambienceDefaults::kInHiCutHz,    ambienceDefaults::kFeed,
+      ambienceDefaults::kErLevelDb,    ambienceDefaults::kVerbLevelDb,
+      ambienceDefaults::kDecayShape,   ambienceDefaults::kAttack,
+      ambienceDefaults::kDampLoFreqHz, ambienceDefaults::kDampHiFreqHz },
 };
 
 /** A detent's row, with anything out of range reading as Room. */
@@ -443,7 +581,18 @@ inline constexpr const TypeConstants& constantsFor (int typeIndex) noexcept
     return kTypeConstants[(size_t) (typeIndex >= 0 && typeIndex < numTypes ? typeIndex : (int) room)];
 }
 
-/** A type's block as the ten parameter writes that apply it, in real units.
+/** A type's block as the **nine** parameter writes that apply it, in real
+    units -- nine and not fourteen, because five of the row's fields have no
+    parameter to write. `erShape` lost its knob in the 2026-09-21 trim and
+    `decayShape`, `attack`, `dampLoFreqHz` and `dampHiFreqHz` arrived in it, so
+    those five reach the engine in `ReverbDsp::paramsFrom` straight from
+    `constantsFor` instead.
+
+    **That is not a gap and it does not need closing.** A `Setting` can only
+    name a parameter id; a field with no id has nothing to be set on. It does
+    mean the five are applied by the engine on the next block rather than by
+    `TypeVoicing` on the message thread -- which is strictly the safer half,
+    since nothing a host is automating can fight them.
 
     **A `Setting` list and not a bespoke struct on purpose**: this is exactly
     what a factory preset is (`FactoryPreset::settings`), so applying a type
@@ -461,7 +610,6 @@ inline std::vector<Setting> typeSettings (int typeIndex)
     return {
         { kSize,      c.sizeM },
         { kErDensity, c.erDensity },
-        { kErShape,   c.erShape },
         { kErSpread,  c.erSpreadMs },
         { kModDepth,  c.modDepthMs },
         { kModRate,   c.modRateHz },
@@ -493,36 +641,14 @@ namespace detail
         return words[i];
     }
 
-    /** "3.50 (Linear)". 3.5 is linear -- the tail decays as the network does,
-        which is the truncation switched off -- and the bottom of the travel is
-        a gate. The word is what the number means; the number is what a second
-        instance has to be set to to match. */
-    inline std::string decayShapeText (float shape)
-    {
-        static const char* const words[] { "Gated", "Steep", "Natural", "Long", "Linear" };
-
-        char buf[64];
-        std::snprintf (buf, sizeof (buf), "%.2f (%s)", (double) shape,
-                       shape >= 3.45f ? "Linear" : ladder (shape, 0.04f, 3.45f, words, 4));
-        return buf;
-    }
-
-    /** "30 % (36 ms)". The percentage is the parameter; the milliseconds are
-        the bloom it selects, over the 0-120 ms ramp 10 section 2 gives.
-
-        **The mapping is linear because the contour is CALIBRATE**, not because
-        anyone has measured it to be. 10 section 8 lists the Attack contour's
-        shape among the things that can only be settled by ear, so a curve here
-        would be a guess dressed as a figure. When the contour lands, this is
-        the one place the printed number comes from. */
-    inline std::string attackText (float percent)
-    {
-        char buf[64];
-        std::snprintf (buf, sizeof (buf), "%d %% (%d ms)",
-                       (int) std::lround (percent),
-                       (int) std::lround (percent * 1.2f));
-        return buf;
-    }
+    // **`decayShapeText` and `attackText` were here and went with the trim.**
+    // A value string exists to make a host's automation lane readable, and
+    // neither DECAY SHAPE nor ATTACK has a lane any more. The words they
+    // printed -- Gated / Steep / Natural / Long / Linear, and the bloom in
+    // milliseconds -- are not lost: the bloom is what the TAIL page's readout
+    // line prints from `TypeConstants::attack`, and the shape ladder was only
+    // ever a gloss on a number the type now owns. Restore them with the
+    // parameter if one ever comes back.
 
     /** "70 % (Mostly Early)". d = 0 feeds the tail from the direct signal --
         a unified diffuse reverb with no articulated pattern -- and d = 1 feeds
@@ -551,14 +677,10 @@ namespace detail
         return buf;
     }
 
-    /** "p 1.00" -- the rise exponent itself, named, because it has no unit and
-        a bare "1.00" beside ER SPREAD's milliseconds would read as a time. */
-    inline std::string shapeText (float p)
-    {
-        char buf[32];
-        std::snprintf (buf, sizeof (buf), "p %.2f", (double) p);
-        return buf;
-    }
+    // `shapeText` printed "p 1.00" for ER SHAPE and went with it in the trim,
+    // for `decayShapeText`'s reason. Its argument -- that a bare "1.00" beside
+    // ER SPREAD's milliseconds reads as a time -- was the clue that p was a
+    // poor knob in the first place.
 
     /** "Var 2". Seven decorrelation positions, and **Var 6 is not more of Var
         5**: it is Schroeder's complementary-comb pair, the widest setting and
@@ -644,11 +766,14 @@ inline const ParamSpecs& specs()
         // jump in sound but must not click: 30 ms raised-cosine dip on the wet
         // bus, tables swapped at the minimum.
         //
-        // **And it writes ten other parameters.** A type is a voicing, so
-        // selecting one re-applies `kTypeConstants`' row for it over whatever
-        // those ten currently hold, every time and not only at instantiation.
-        // The mechanism, the re-entrancy argument and the automation conflict
-        // it creates are all in `modules/reverb/TypeVoicing.h`.
+        // **And it writes nine other parameters, and five things that are not
+        // parameters at all.** A type is a voicing, so selecting one re-applies
+        // `kTypeConstants`' row for it over whatever those nine currently hold,
+        // every time and not only at instantiation. The mechanism, the
+        // re-entrancy argument and the automation conflict it creates are all
+        // in `modules/reverb/TypeVoicing.h`. The other five -- ER SHAPE, DECAY
+        // SHAPE, ATTACK and the two damping knees -- have no host lane since
+        // the 2026-09-21 trim and are read off the same row by the engine.
         S::choiceParam (kType, "Type",
                         { kTypeNames[room], kTypeNames[chamber], kTypeNames[hall],
                           kTypeNames[cavern], kTypeNames[plate], kTypeNames[ambience] },
@@ -667,39 +792,28 @@ inline const ParamSpecs& specs()
         // section 2), not in ratios. **The range cannot go negative.**
         S::floatParam (kPreDelay, "Pre-Delay", 0.0f, 250.0f, 0.1f, 0.0f, F::Milliseconds),
 
-        // 3. LINK ER. Off is the reference behaviour: the ER travel with dry
-        // and only the tail is delayed.
-        S::boolParam (kPreLink, "Link ER", false),
+        // LINK ER was index 3 and is now `kPreLinkFixed`; DECAY SHAPE was 5
+        // and ATTACK was 6, and both are per-type constants. See the trim
+        // block at the top of this file.
 
         //== The tail ==========================================================
 
-        // 4. DECAY, T_mid. Log, and 0.01 s of step so the low end has
+        // 3. DECAY, T_mid. Log, and 0.01 s of step so the low end has
         // resolution the top does not need.
         S::logParam (kDecay, "Decay", 0.1f, 20.0f, 0.01f, 1.8f, F::Seconds),
 
-        // 5. DECAY SHAPE. Log, over nearly two decades, so the gated end gets
-        // the travel it needs. Defaults to 3.5 -- linear, i.e. truncation off
-        // -- because a reverb should not arrive gated.
-        S::textParam (kDecayShape, "Decay Shape", 0.04f, 3.5f, 0.001f, 3.5f,
-                      &detail::decayShapeText),
-
-        // 6. ATTACK. Per cent of the 0-120 ms bloom, not the milliseconds
-        // themselves, because the contour between them is CALIBRATE and a
-        // millisecond parameter would freeze a shape nobody has heard.
-        S::textParam (kAttack, "Attack", 0.0f, 100.0f, 0.1f, 30.0f, &detail::attackText),
-
-        // 7. SOURCE. A balance, not a density knob -- see kFeed.
+        // 4. SOURCE. A balance, not a density knob -- see kFeed.
         S::textParam (kFeed, "Source", 0.0f, 100.0f, 0.1f, roomDefaults::kFeed,
                       &detail::feedText),
 
-        //== Damping: two knees, two multipliers ===============================
-        // Log on all four. The knees for the usual frequency reason; the
-        // multipliers because 0.10 to 2.00 is a 20:1 ratio and the interesting
-        // half of it is under 1.
+        //== Damping: two multipliers, over knees the type sets ================
+        // Log on both, because 0.10 to 2.00 is a 20:1 ratio and the
+        // interesting half of it is under 1. The two knees were parameters 8
+        // and 10 and are `TypeConstants::dampLoFreqHz` and `dampHiFreqHz`: the
+        // owner's call is that a frequency belongs to the onboard EQ and a
+        // knee belongs to the room.
 
-        S::logParam (kDampLoFreq, "Low x Freq", 16.0f, 1600.0f, 0.1f, 200.0f, F::Hertz),
         S::textParam (kDampLo, "Low x", 0.10f, 2.00f, 0.01f, 1.20f, &detail::multiplierText),
-        S::logParam (kDampHiFreq, "High x Freq", 1000.0f, 2100.0f, 0.1f, 1600.0f, F::Hertz),
         S::textParam (kDampHi, "High x", 0.10f, 2.00f, 0.01f, 0.40f, &detail::multiplierText),
 
         //== The Reverb EQ, pre both generators ================================
@@ -711,31 +825,31 @@ inline const ParamSpecs& specs()
 
         //== Early reflections =================================================
 
-        // 16. ER MODE. Taps is the default and the one the module is argued
-        // from; Blend is defined-but-unheard (kErModeNames).
+        // 11. ER MODE. Taps is the default and the one the module is argued
+        // from; Blend is defined-but-unheard (kErModeNames). **A choice, so
+        // the trim did not touch it**: three is what its normalisation
+        // depends on.
         S::choiceParam (kErMode, "ER Mode",
                         { kErModeNames[taps], kErModeNames[energy], kErModeNames[blend] },
                         taps),
 
-        // 17. DENSITY. Linear per cent: the activation thresholds it sweeps
+        // 12. DENSITY. Linear per cent: the activation thresholds it sweeps
         // are spread over (0,1], so the knob and the weighting share a scale.
         S::textParam (kErDensity, "Density", 0.0f, 100.0f, 0.1f,
                       roomDefaults::kErDensity, &detail::densityText),
 
-        // 18. ER SHAPE, the rise exponent p in (t/tau_r)^p. Linear: p is
-        // already an exponent, and putting a log law on one is a second
-        // exponent nobody asked for.
-        S::textParam (kErShape, "ER Shape", 0.0f, 3.0f, 0.01f,
-                      roomDefaults::kErShape, &detail::shapeText),
+        // ER SHAPE, the rise exponent p, was index 18 and is now
+        // `TypeConstants::erShape`. It was already per-type; the trim took
+        // away the knob, not the number.
 
-        // 19. ER SPREAD, the envelope's sigma. Log, as a time.
+        // 13. ER SPREAD, the envelope's sigma. Log, as a time.
         S::logParam (kErSpread, "ER Spread", 5.0f, 200.0f, 0.1f,
                      roomDefaults::kErSpreadMs, F::Milliseconds),
 
-        // 20. ER HI-CUT. Log, 1-20 kHz, defaulting to 7 kHz.
+        // 14. ER HI-CUT. Log, 1-20 kHz, defaulting to 7 kHz.
         S::logParam (kErHiCut, "ER Hi-Cut", 1000.0f, 20000.0f, 0.1f, 7000.0f, F::Hertz),
 
-        // 21. VARIATION. **Stepped, not a choice list.** Seven positions that
+        // 15. VARIATION. **Stepped, not a choice list.** Seven positions that
         // are an ordered amount of decorrelation rather than seven named
         // behaviours, so they belong on a float with a step of one: a stepped
         // float normalises as (v - min) / (max - min), which is stable if a
@@ -747,20 +861,20 @@ inline const ParamSpecs& specs()
 
         //== Modulation, width, input bandwidth ================================
 
-        // 22. MOD DEPTH. Linear over a sub-millisecond travel.
+        // 16. MOD DEPTH. Linear over a sub-millisecond travel.
         S::textParam (kModDepth, "Mod Depth", 0.1f, 0.8f, 0.01f,
                       roomDefaults::kModDepthMs, &detail::modDepthText),
 
-        // 23. MOD RATE. Log: 0.1 to 1.2 Hz is a bit over a decade and the slow
+        // 17. MOD RATE. Log: 0.1 to 1.2 Hz is a bit over a decade and the slow
         // end is where the difference between randomised and chorused lives.
         S::logParam (kModRate, "Mod Rate", 0.1f, 1.2f, 0.01f,
                      roomDefaults::kModRateHz, F::Hertz),
 
-        // 24. WIDTH. M/S gain on the tail only. 100 % is unity, 0 is mono and
+        // 18. WIDTH. M/S gain on the tail only. 100 % is unity, 0 is mono and
         // 200 is the widest the M/S law allows before it stops being one.
         S::floatParam (kWidth, "Width", 0.0f, 200.0f, 1.0f, 100.0f, F::Percent),
 
-        // 25. IN HI-CUT. Defaults wide open, so a fresh instance is not
+        // 19. IN HI-CUT. Defaults wide open, so a fresh instance is not
         // quietly darker than the signal it was given. See kInHiCut for why
         // this parameter is marked "owner confirm".
         S::logParam (kInHiCut, "In Hi-Cut", 2000.0f, 20000.0f, 0.1f,
@@ -768,7 +882,7 @@ inline const ParamSpecs& specs()
 
         //== Output ============================================================
 
-        // 26/27. The two absolute trims, both off at the bottom -- and both
+        // 20/21. The two absolute trims, both off at the bottom -- and both
         // per-type since 2026-09-21, which is what makes Ambience buildable.
         // The defaults are Room's row, like every other per-type default here.
         S::textParam (kErLevel, "ER", -40.0f, 0.0f, 0.1f,
@@ -776,14 +890,14 @@ inline const ParamSpecs& specs()
         S::textParam (kVerbLevel, "Reverb", -40.0f, 0.0f, 0.1f,
                       roomDefaults::kVerbLevelDb, &detail::levelText),
 
-        // 28. MIX. Defaults to 100 %, because the two faders above are the
+        // 22. MIX. Defaults to 100 %, because the two faders above are the
         // wet balance and this is the dry/wet one -- a reverb used as a send,
         // which is the normal case, wants the dry out of the way. **The MIX
         // law itself is 11 section 7's open owner-confirm item**; what is
         // frozen here is the range, the step and the default.
         S::floatParam (kMix, "Mix", 0.0f, 100.0f, 0.1f, 100.0f, F::Percent),
 
-        // 29. OUTPUT. Trim only, cut only.
+        // 23. OUTPUT. Trim only, cut only.
         S::floatParam (kOutput, "Output", -24.0f, 0.0f, 0.1f, 0.0f, F::Decibels),
     };
 

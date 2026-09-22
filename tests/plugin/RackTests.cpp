@@ -63,17 +63,17 @@ namespace
                     "diffuse", "rate", "depth", "rotation", "asymmetry" } },
         { "ltvcomp", { "amount", "gate", "output", "complex", "attack", "release",
                      "arc", "sidechain", "low_thru", "high_thru" } },
-        // BMO Linger. **Thirty parameters against a slot's thirty-two lanes**,
-        // so the whole schema gets a lane and none of BMO DEQ's SlotOverflow
-        // machinery is needed -- but only two lanes are left over, which is
-        // what modules/reverb/AGENTS.md says a thirty-first control would have
-        // to be argued against. The order is the table in
-        // docs/reverb/11-integration-and-test-plan.md section 4.
-        { "reverb", { "type", "size", "predelay", "prelink", "decay", "decayshape",
-                      "attack", "feed",
-                      "damplofreq", "damplo", "damphifreq", "damphi",
+        // BMO Linger. **Twenty-four parameters against a slot's thirty-two
+        // lanes**, so the whole schema gets a lane, none of BMO DEQ's
+        // SlotOverflow machinery is needed, and eight are left over. It was
+        // thirty with two spare until the 2026-09-21 control-set trim moved
+        // prelink, decayshape, attack, damplofreq, damphifreq and ershape into
+        // the per-type constants. The order of what remains is unchanged, and
+        // this list is the second copy of it.
+        { "reverb", { "type", "size", "predelay", "decay", "feed",
+                      "damplo", "damphi",
                       "eqlofreq", "eqlo", "eqhifreq", "eqhi",
-                      "ermode", "erdensity", "ershape", "erspread", "erhicut",
+                      "ermode", "erdensity", "erspread", "erhicut",
                       "ervariation", "moddepth", "modrate", "width", "inhicut",
                       "erlevel", "verblevel", "mix", "output" } },
     };

@@ -29,21 +29,22 @@ namespace
     // VARIATION's seven positions and WIDTH's 201 both come back as 0 here.
     // The stepping is real and is asserted on the range below.
     //
-    // If any of these thirty ever needs to change, this is the first thing
-    // that fails, and 11 section 4 is where the argument has to be made.
+    // If any of these twenty-four ever needs to change, this is the first
+    // thing that fails, and 11 section 4 is where the argument has to be made.
+    //
+    // **It was thirty until the 2026-09-21 control-set trim.** Six rows were
+    // deleted -- prelink, decayshape, attack, damplofreq, damphifreq and
+    // ershape -- and every surviving row is what it was, in the order it was
+    // in. That is the claim the trim makes, and this table is where it is
+    // checked: nothing that stayed was quietly retuned on the way past.
     const Expected kSchema[]
     {
         { P::kType,       "Type",             0.0f,     5.0f,     0.0f,     6 },
         { P::kSize,       "Size",             0.5f,    80.0f,    12.0f,     0 },
         { P::kPreDelay,   "Pre-Delay",        0.0f,   250.0f,     0.0f,     0 },
-        { P::kPreLink,    "Link ER",          0.0f,     1.0f,     0.0f,     2 },
         { P::kDecay,      "Decay",            0.1f,    20.0f,     1.8f,     0 },
-        { P::kDecayShape, "Decay Shape",     0.04f,     3.5f,     3.5f,     0 },
-        { P::kAttack,     "Attack",           0.0f,   100.0f,    30.0f,     0 },
         { P::kFeed,       "Source",           0.0f,   100.0f,    70.0f,     0 },
-        { P::kDampLoFreq, "Low x Freq",      16.0f,  1600.0f,   200.0f,     0 },
         { P::kDampLo,     "Low x",           0.10f,    2.00f,    1.20f,     0 },
-        { P::kDampHiFreq, "High x Freq",   1000.0f,  2100.0f,  1600.0f,     0 },
         { P::kDampHi,     "High x",          0.10f,    2.00f,    0.40f,     0 },
         { P::kEqLoFreq,   "EQ Low Freq",     16.0f,  1600.0f,   200.0f,     0 },
         { P::kEqLo,       "EQ Low",         -24.0f,    12.0f,     0.0f,     0 },
@@ -51,7 +52,6 @@ namespace
         { P::kEqHi,       "EQ High",        -24.0f,    12.0f,     0.0f,     0 },
         { P::kErMode,     "ER Mode",          0.0f,     2.0f,     0.0f,     3 },
         { P::kErDensity,  "Density",          0.0f,   100.0f,    50.0f,     0 },
-        { P::kErShape,    "ER Shape",         0.0f,     3.0f,     1.0f,     0 },
         { P::kErSpread,   "ER Spread",        5.0f,   200.0f,    80.0f,     0 },
         { P::kErHiCut,    "ER Hi-Cut",     1000.0f, 20000.0f,  7000.0f,     0 },
         { P::kErVariation,"Variation",        0.0f,     6.0f,     2.0f,     0 },
@@ -76,21 +76,49 @@ int main()
         auto proc = createReverb();
         checkSchema (*proc, kSchema);
         check (P::specs().size() == (size_t) P::Index::count, "the Index enum matches specs()");
-        check (P::specs().size() == 30, "v1 ships exactly thirty parameters");
+        check (P::specs().size() == 24, "v1 ships exactly twenty-four parameters");
     }
 
-    //== Thirty against thirty-two, and the two spare are the point ===========
+    //== Twenty-four against thirty-two, and the eight spare are the point ====
     //
-    // A rack slot shows a host 32 lanes. Thirty fits, so nothing is held off
-    // the grid and none of BMO DEQ's SlotOverflow machinery is needed -- and
-    // **two lanes is all that is left**. A later Freeze, a ducking control or
-    // the tempo-sync pair would exhaust them between them, which is why the
-    // headroom is asserted rather than described: a thirty-first parameter
-    // added without an argument fails the second line here.
+    // A rack slot shows a host 32 lanes. It was thirty with two spare until
+    // the 2026-09-21 control-set trim and is twenty-four with eight: a later
+    // Freeze, a ducking control and the tempo-sync pair no longer have to be
+    // argued against each other for the last lane. Asserted rather than
+    // described, so the headroom cannot be spent without somebody editing this
+    // line and saying why.
     {
         check (P::specs().size() <= 32, "every parameter gets a rack host lane");
-        check (32 - (int) P::specs().size() == 2,
-               "exactly two host lanes are spare -- see modules/reverb/AGENTS.md");
+        check (32 - (int) P::specs().size() == 8,
+               "exactly eight host lanes are spare -- see modules/reverb/AGENTS.md");
+    }
+
+    //== The six the trim cut, by id ==========================================
+    //
+    // **The whole trim, as six assertions.** Every one of them is a decision
+    // recorded at the top of params.h and in AGENTS.md -- four the owner's,
+    // two the agent's -- and "we cut it" and "somebody dropped it in a rebase"
+    // look identical in a parameter list.
+    //
+    // They are also the set that may be re-appended at no cost if listening
+    // disagrees, because state is plain values keyed by id: a float or a bool
+    // added at the end changes nothing a saved session refers to. That is why
+    // this is a list of ids and not a count.
+    {
+        for (const auto* cut : { "prelink", "decayshape", "attack",
+                                 "damplofreq", "damphifreq", "ershape" })
+            check (bmo::indexOfParam (P::specs(), cut) < 0,
+                   juce::String ("'") + cut + "' was cut into the per-type block on 2026-09-21");
+
+        // And none of them is a choice, which is the line the trim would not
+        // cross: `AudioParameterChoice` normalises as index/(n-1), so changing
+        // a choice's count remaps every automation point on the lane. Both
+        // choices are still here and still the same length.
+        check (bmo::indexOfParam (P::specs(), P::kType) == 0, "type is still index 0");
+        check (P::specs()[P::Index::type].choices.size() == (size_t) P::numTypes,
+               "type still has six positions, so no automation lane moved");
+        check (P::specs()[P::Index::ermode].choices.size() == (size_t) P::numErModes,
+               "er mode still has three positions");
     }
 
     //== The parameters that were considered and left out =====================
@@ -130,7 +158,6 @@ int main()
 
         checkClose (def (P::Index::size),      P::roomDefaults::kSizeM,      1.0e-4, "Room's SIZE");
         checkClose (def (P::Index::erdensity), P::roomDefaults::kErDensity,  1.0e-4, "Room's DENSITY");
-        checkClose (def (P::Index::ershape),   P::roomDefaults::kErShape,    1.0e-4, "Room's ER SHAPE");
         checkClose (def (P::Index::erspread),  P::roomDefaults::kErSpreadMs, 1.0e-4, "Room's ER SPREAD");
         checkClose (def (P::Index::moddepth),  P::roomDefaults::kModDepthMs, 1.0e-4, "Room's MOD DEPTH");
         checkClose (def (P::Index::modrate),   P::roomDefaults::kModRateHz,  1.0e-4, "Room's MOD RATE");
@@ -245,7 +272,6 @@ int main()
         const Stamped kStamped[] {
             { P::kSize,      &P::TypeConstants::sizeM },
             { P::kErDensity, &P::TypeConstants::erDensity },
-            { P::kErShape,   &P::TypeConstants::erShape },
             { P::kErSpread,  &P::TypeConstants::erSpreadMs },
             { P::kModDepth,  &P::TypeConstants::modDepthMs },
             { P::kModRate,   &P::TypeConstants::modRateHz },
@@ -255,8 +281,14 @@ int main()
             { P::kVerbLevel, &P::TypeConstants::verbLevelDb },
         };
 
-        check (std::size (kStamped) == 10,
-               "a type stamps ten parameters -- eight until erlevel and verblevel joined them");
+        // Nine since the 2026-09-21 trim: ER SHAPE was the tenth and lost the
+        // parameter it was stamped onto, while four more per-type fields
+        // arrived that never had one. Those five reach the engine through
+        // `ReverbDsp::paramsFrom` instead, which is
+        // tests/dsp/ReverbDspTests.cpp's to prove -- a `SingleModuleProcessor`
+        // cannot see them at all, and that is the point of them.
+        check (std::size (kStamped) == 9,
+               "a type stamps nine parameters -- the other five of its row have no host lane");
 
         // Every type, in order, each one landing on its own row from whatever
         // the one before it left behind. Starting at Room means the first
@@ -290,21 +322,25 @@ int main()
         checkClose (getValue (*proc, P::kVerbLevel), (double) P::roomDefaults::kVerbLevelDb, 0.05,
                     "returning to Room stamps Room's REVERB back over the edit");
 
-        // **And only the ten.** A type change is a voicing, not a preset: the
-        // twenty other parameters are the user's and stay put. This is the
+        // **And only the nine.** A type change is a voicing, not a preset: the
+        // fourteen other parameters are the user's and stay put. This is the
         // half of the behaviour that bounds the automation conflict -- TYPE
         // can fight REVERB, and it cannot fight DECAY.
         const bmo::Setting kUntouched[] {
-            { P::kPreDelay, 120.0f }, { P::kPreLink, 1.0f }, { P::kDecay, 7.5f },
-            { P::kDecayShape, 1.1f }, { P::kAttack, 12.0f },
-            { P::kDampLoFreq, 400.0f }, { P::kDampLo, 1.9f },
-            { P::kDampHiFreq, 1200.0f }, { P::kDampHi, 0.2f },
+            { P::kPreDelay, 120.0f }, { P::kDecay, 7.5f },
+            { P::kDampLo, 1.9f }, { P::kDampHi, 0.2f },
             { P::kEqLoFreq, 120.0f }, { P::kEqLo, -9.0f },
             { P::kEqHiFreq, 1900.0f }, { P::kEqHi, 5.0f },
             { P::kErMode, (float) P::energy }, { P::kErHiCut, 3000.0f },
             { P::kErVariation, 6.0f }, { P::kWidth, 175.0f },
             { P::kMix, 33.0f }, { P::kOutput, -11.0f },
         };
+
+        // Nine stamped plus fourteen untouched plus TYPE itself is the whole
+        // schema, so no parameter is missing from both lists -- which is how a
+        // control silently stops being covered here.
+        check ((int) (std::size (kStamped) + std::size (kUntouched) + 1) == (int) P::Index::count,
+               "every parameter is either stamped by a type or asserted untouched by one");
 
         for (const auto& s : kUntouched)
             setValue (*proc, s.id, s.value);
@@ -330,9 +366,10 @@ int main()
 
     //== Room's defaults are Room's constants, and the table says so ==========
     //
-    // Ten now, not eight: `erlevel` and `verblevel` joined the per-type block
-    // on 2026-09-21, which is what makes Ambience -- "tiny tail, ER-dominant"
-    // -- expressible at all. A fresh instance opens on Room, so these are a
+    // Fourteen now, not ten: `erlevel` and `verblevel` joined the per-type
+    // block on 2026-09-21, which is what makes Ambience -- "tiny tail,
+    // ER-dominant" -- expressible at all, and then the control-set trim added
+    // four more the same day. A fresh instance opens on Room, so these are a
     // claim about what Room *is* and not merely where the knobs start.
     {
         auto proc = createReverb();
@@ -349,6 +386,14 @@ int main()
         checkClose (roomRow.feed,        (double) P::roomDefaults::kFeed,        1.0e-6, "Room's SOURCE");
         checkClose (roomRow.erLevelDb,   (double) P::roomDefaults::kErLevelDb,   1.0e-6, "Room's ER");
         checkClose (roomRow.verbLevelDb, (double) P::roomDefaults::kVerbLevelDb, 1.0e-6, "Room's REVERB");
+
+        // The four the trim brought in. **They are the schema's own old
+        // defaults**, which is the claim that the cut moved no sound: a fresh
+        // Room after the trim is the fresh Room that shipped before it.
+        checkClose (roomRow.decayShape,   3.50,   1.0e-6, "Room's DECAY SHAPE is the old schema default");
+        checkClose (roomRow.attack,      30.0,    1.0e-6, "Room's ATTACK is the old schema default");
+        checkClose (roomRow.dampLoFreqHz, 200.0,  1.0e-6, "Room's low knee is the old schema default");
+        checkClose (roomRow.dampHiFreqHz, 1600.0, 1.0e-6, "Room's high knee is the old schema default");
 
         // And a fresh instance is on that row without anything having applied
         // it: the spec defaults *are* Room's constants, so the link has
@@ -469,11 +514,12 @@ int main()
         check (text (P::kEqLo, 3.0f) == "+3.0 dB",
                "EQ LOW above zero should read '+3.0 dB', got '" + text (P::kEqLo, 3.0f) + "'");
 
-        // 3.5 is linear -- the truncation switched off -- and the word is what
-        // the number means.
-        check (text (P::kDecayShape, 3.5f) == "3.50 (Linear)",
-               "DECAY SHAPE at the top should read '3.50 (Linear)', got '"
-                   + text (P::kDecayShape, 3.5f) + "'");
+        // DECAY SHAPE's "3.50 (Linear)" was checked here and went with the
+        // parameter in the 2026-09-21 trim, along with ATTACK's "30 % (36 ms)"
+        // and ER SHAPE's "p 1.00". A value string exists to make an automation
+        // lane readable and none of those three has a lane now. The bloom the
+        // type selects is still printed -- on the TAIL page's readout line,
+        // which `tests/ui/LayoutTests.cpp` reads.
 
         // VARIATION 6 is not more of VARIATION 5: it is the complementary-comb
         // pair, where the ER vanish entirely in a mono sum. The value string
@@ -589,10 +635,7 @@ int main()
             { P::kType, (float) P::hall },
             { P::kSize, 33.5f },
             { P::kPreDelay, 72.5f },
-            { P::kPreLink, 1.0f },
             { P::kDecay, 4.25f },
-            { P::kDecayShape, 1.2f },
-            { P::kAttack, 55.0f },
             { P::kFeed, 40.0f },
             { P::kDampLo, 1.55f },
             { P::kDampHi, 0.65f },
@@ -600,7 +643,6 @@ int main()
             { P::kEqHi, 4.5f },
             { P::kErMode, (float) P::energy },
             { P::kErDensity, 82.0f },
-            { P::kErShape, 2.4f },
             { P::kErSpread, 125.0f },
             { P::kErHiCut, 4500.0f },
             { P::kErVariation, 5.0f },

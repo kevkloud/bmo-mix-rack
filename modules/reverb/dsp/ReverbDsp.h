@@ -50,26 +50,37 @@ public:
         is `const`, answers from values rather than from the core, and needs
         four of these fields. Unpacking twice would have been two places for
         the per-cent-to-0..1 conversions to disagree, which is the one thing
-        the class comment above promises does not happen. */
+        the class comment above promises does not happen.
+
+        **Six fields do not come from the array**, since the 2026-09-21
+        control-set trim. `linkEr` is `kPreLinkFixed`; `decayShape`, `attack`,
+        `dampLoFreqHz`, `dampHiFreqHz` and `erShape` come from `constantsFor`
+        on the TYPE value that *is* in the array. So this is still one unpack
+        of one array and still the only place a host value becomes an engine
+        value -- the type is just read twice, once as a detent and once as a
+        row. `TypeVoicing` cannot help here: a `Setting` names a parameter id
+        and these five no longer have one. */
     static DspCore::Params paramsFrom (const float* v, int count)
     {
         DspCore::Params p;
 
         if (count < Index::count)
-            return p;                   // the schema's own defaults
+            return p;                   // the schema's own defaults, which are Room's row
+
+        const auto& c = constantsFor ((int) v[Index::type]);
 
         p.type          = typeFor ((int) v[Index::type]);
         p.sizeM         = v[Index::size];
         p.preDelayMs    = v[Index::predelay];
-        p.linkEr        = v[Index::prelink] >= 0.5f;
+        p.linkEr        = kPreLinkFixed;
         p.decaySeconds  = v[Index::decay];
-        p.decayShape    = v[Index::decayshape];
-        p.attack        = v[Index::attack] * 0.01f;
+        p.decayShape    = c.decayShape;
+        p.attack        = c.attack * 0.01f;
         p.feed          = v[Index::feed] * 0.01f;
 
-        p.dampLoFreqHz  = v[Index::damplofreq];
+        p.dampLoFreqHz  = c.dampLoFreqHz;
         p.dampLo        = v[Index::damplo];
-        p.dampHiFreqHz  = v[Index::damphifreq];
+        p.dampHiFreqHz  = c.dampHiFreqHz;
         p.dampHi        = v[Index::damphi];
 
         p.eqLoFreqHz    = v[Index::eqlofreq];
@@ -79,7 +90,7 @@ public:
 
         p.erMode        = erModeFor ((int) v[Index::ermode]);
         p.erDensity     = v[Index::erdensity] * 0.01f;
-        p.erShape       = v[Index::ershape];
+        p.erShape       = c.erShape;
         p.erSpreadMs    = v[Index::erspread];
         p.erHiCutHz     = v[Index::erhicut];
         p.erVariation   = (int) (v[Index::ervariation] + 0.5f);

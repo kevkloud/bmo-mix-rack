@@ -993,22 +993,28 @@ void checkReverbPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
     // with any list, including one that had quietly lost a control. The counts
     // are 11 section 4's split and they add up to the schema.
 
-    const char* const alwaysOn[] { "TYPE", "SIZE", "PRE-DELAY", "DECAY",
-                                   "ER", "REVERB", "MIX" };
+    // TYPE is last rather than first: it is the corner control at the foot
+    // now, not the head of the persistent row.
+    const char* const alwaysOn[] { "SIZE", "PRE-DELAY", "DECAY",
+                                   "ER", "REVERB", "MIX", "TYPE" };
 
-    const char* const earlyPage[] { "ER MODE", "DENSITY", "ER SHAPE", "ER SPREAD",
-                                    "ER HI-CUT", "VARIATION", "SOURCE", "LINK ER" };
+    const char* const earlyPage[] { "ER MODE", "DENSITY", "ER SPREAD",
+                                    "ER HI-CUT", "VARIATION", "SOURCE" };
 
-    const char* const tailPage[] { "ATTACK", "DECAY SHAPE", "LOW x FREQ", "LOW x",
-                                   "HIGH x FREQ", "HIGH x", "MOD DEPTH", "MOD RATE" };
+    const char* const tailPage[] { "LOW x", "HIGH x", "MOD DEPTH", "MOD RATE", "WIDTH" };
 
     const char* const tonePage[] { "EQ LOW FREQ", "EQ LOW", "EQ HIGH FREQ", "EQ HIGH",
-                                   "IN HI-CUT", "WIDTH", "OUTPUT" };
+                                   "IN HI-CUT", "OUTPUT" };
 
-    // Seven persistent plus eight plus eight plus seven is the whole schema,
-    // and the panel is where that sum is checked: a parameter with no control
+    // Seven persistent plus six plus five plus six is the whole schema, and
+    // the panel is where that sum is checked: a parameter with no control
     // anywhere is the Saturator's oversampling row, which sat on the schema
     // and nowhere on the panel for three releases.
+    //
+    // **This is also where the 2026-09-21 control-set trim lands on the
+    // face.** Six controls went with six parameters, and this sum is what
+    // stops one of them being deleted from the schema and left on the panel,
+    // or the other way round.
     check ((int) (std::size (alwaysOn) + std::size (earlyPage)
                     + std::size (tailPage) + std::size (tonePage)) == (int) R::Index::count,
            "every parameter has a control on some page of the panel");
@@ -1020,7 +1026,9 @@ void checkReverbPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
 
     const auto countFor = [&] (R::Page p)
     {
-        return p == R::Page::tone ? (int) std::size (tonePage) : (int) std::size (earlyPage);
+        return p == R::Page::early ? (int) std::size (earlyPage)
+             : p == R::Page::tail  ? (int) std::size (tailPage)
+                                   : (int) std::size (tonePage);
     };
 
     const auto nameFor = [] (R::Page p)
@@ -1104,33 +1112,62 @@ void checkReverbPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
             check (rules[0].text == "LEVEL",
                    who + " the rule should be legended LEVEL, reads '" + rules[0].text + "'");
 
-            for (const auto* caption : { "ER", "REVERB", "MIX" })
+            // TYPE is under it too, and deliberately: the rule says LEVEL and
+            // a type is not a level, but a rule that stopped one cell short
+            // would be a second kind of rule in the suite. The wrinkle is
+            // owned in `ReverbPanel`'s class comment, so it is asserted here
+            // rather than left to look like an accident.
+            for (const auto* caption : { "ER", "REVERB", "MIX", "TYPE" })
                 if (auto* c = findNamed (panel, caption))
                     check (c->getY() >= rules[0].row.getBottom(),
                            who + " " + caption + " should sit under the LEVEL rule");
         }
     }
 
-    //== The grille ===========================================================
+    //== TYPE has the bottom-right corner, and the grille is gone =============
     //
-    // Texture and nothing else: it is painted, so it has no component, and the
-    // one thing that can go wrong with it is running under a control that then
-    // has a striped ground. Frosty asked to see it rendered before deciding
-    // whether it stays, so what is asserted here is that it is where it was
-    // asked for and that it is not in anything's way.
+    // The grille was painted texture in the fourth column of the level strip
+    // and was cut on 2026-09-21; TYPE took the corner, which is Frosty's call
+    // and two arguments at once -- a dropdown is not knob-shaped, and the foot
+    // is where two of the nine parameters a type change stamps already are.
+    //
+    // `getGrilleBox` went with it, so there is nothing to assert the absence
+    // of directly. What is asserted is the thing that replaced it: TYPE is a
+    // real component, it is in the bottom-right quadrant, and it is to the
+    // right of MIX on MIX's own row.
     {
-        const auto grille = reverbPanel->getGrilleBox();
+        auto* type = findNamed (panel, "TYPE");
+        auto* mix  = findNamed (panel, "MIX");
 
-        check (! grille.isEmpty(), who + " has no grille");
-        check (panel.getLocalBounds().contains (grille), who + " the grille escapes the panel");
+        check (type != nullptr, who + " has no TYPE control");
 
-        check (grille.getCentreX() > panel.getWidth() / 2
-                 && grille.getCentreY() > panel.getHeight() / 2,
-               who + " the grille should sit in the bottom-right, is at " + grille.toString());
+        if (type != nullptr && mix != nullptr)
+        {
+            check (type->getBounds().getCentreX() > panel.getWidth() / 2
+                     && type->getBounds().getCentreY() > panel.getHeight() / 2,
+                   who + " TYPE should sit in the bottom-right, is at "
+                       + type->getBounds().toString());
 
-        for (auto* child : panel.getChildren())
-            check (! child->getBounds().intersects (grille),
-                   who + " the grille runs under '" + child->getName() + "'");
+            check (type->getX() >= mix->getRight(),
+                   who + " TYPE should sit beside the strip, right of MIX -- TYPE is at "
+                       + type->getBounds().toString() + " and MIX ends at "
+                       + juce::String (mix->getRight()));
+
+            checkEquals (type->getBounds().getCentreY(), mix->getBounds().getCentreY(),
+                         who + " TYPE shares the strip's row");
+
+            // And it is the corner: nothing on the panel reaches further right
+            // or further down than it does.
+            for (auto* child : panel.getChildren())
+            {
+                if (child == type)
+                    continue;
+
+                check (child->getRight() <= type->getRight() && child->getBottom() <= type->getBottom(),
+                       who + " '" + child->getName() + "' at " + child->getBounds().toString()
+                           + " reaches past TYPE's corner " + type->getBounds().toString());
+            }
+        }
     }
 
     //== Every page, laid out and walked ======================================
@@ -1343,7 +1380,6 @@ void checkReverbPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
 
         params.setReal (R::Index::size, R::roomDefaults::kSizeM);
         params.setReal (R::Index::predelay, 0.0f);
-        params.setReal (R::Index::prelink, 0.0f);
 
         checkNear (screen.firstTapTimeMs(),
                    (double) R::tapTimeMsAt (R::kReferenceTaps[0], R::roomDefaults::kSizeM), 1.0e-4,
@@ -1372,22 +1408,29 @@ void checkReverbPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
                who + " the EARLY window follows SIZE");
         params.setReal (R::Index::size, R::roomDefaults::kSizeM);
 
-        // **Pre-delay is tail-only unless LINK ER says otherwise**, which is
-        // the reference behaviour and the thing the picture has to get right:
-        // with the switch off the taps do not move.
+        // **Pre-delay is tail-only, at every setting, permanently.** It used
+        // to depend on LINK ER, and LINK ER was cut on 2026-09-21: off -- ER
+        // with dry -- is the reference behaviour and is now `kPreLinkFixed`.
+        // So there is no longer a case where the taps move with PRE-DELAY, and
+        // the assertion that used to prove the other branch is replaced by one
+        // that proves there is no other branch: the whole travel of PRE-DELAY
+        // leaves the cluster where it was.
         const auto restingFirst = screen.firstTapTimeMs();
-        params.setReal (R::Index::predelay, 120.0f);
+        const auto restingLast  = screen.lastTapTimeMs();
 
-        checkNear (screen.firstTapTimeMs(), (double) restingFirst, 1.0e-4,
-                   who + " pre-delay must not move the ER with LINK ER off");
-        checkNear (screen.tailStartMs(), 120.0, 1.0e-4,
-                   who + " the tail starts at the pre-delay");
+        for (const auto pre : { 12.0f, 120.0f, 250.0f })
+        {
+            params.setReal (R::Index::predelay, pre);
 
-        params.setReal (R::Index::prelink, 1.0f);
-        checkNear (screen.firstTapTimeMs(), (double) restingFirst + 120.0, 1.0e-4,
-                   who + " LINK ER moves the ER with the tail");
+            checkNear (screen.firstTapTimeMs(), (double) restingFirst, 1.0e-4,
+                       who + " pre-delay " + juce::String (pre, 0)
+                           + " must not move the ER -- LINK ER is gone and off is fixed");
+            checkNear (screen.lastTapTimeMs(), (double) restingLast, 1.0e-4,
+                       who + " pre-delay must not move the last tap either");
+            checkNear (screen.tailStartMs(), (double) pre, 1.0e-4,
+                       who + " the tail starts at the pre-delay");
+        }
 
-        params.setReal (R::Index::prelink, 0.0f);
         params.setReal (R::Index::predelay, 0.0f);
 
         // The tail's reach follows DECAY and the *largest* damping multiplier,
@@ -1431,6 +1474,47 @@ void checkReverbPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
         for (const auto i : { R::Index::decay, R::Index::damplo, R::Index::damphi,
                               R::Index::erdensity })
             params.setReal (i, R::specs()[(size_t) i].def);
+    }
+
+    //== The bloom follows TYPE, with no knob anywhere =========================
+    //
+    // **ATTACK has no parameter since the 2026-09-21 control-set trim**, so
+    // the only thing that moves the TAIL page's bloom is a type change -- and
+    // the only place the number appears at all is the readout line under the
+    // picture, because the knob and its value string both went. If the panel
+    // had kept reading a parameter that no longer exists, or had frozen on
+    // Room's constant, every other check in this file would still pass.
+    //
+    // Absolute figures against `TypeConstants::attack`, not "it changed": the
+    // printed number is the constant times the 1.2 ms-per-cent ramp, rounded.
+    {
+        reverbPanel->setPage (R::Page::tail);
+
+        const auto bloomFor = [&] (int detent)
+        {
+            params.setReal (R::Index::type, (float) detent);
+            return reverbPanel->getScreen().readout();
+        };
+
+        for (const auto detent : { (int) R::room, (int) R::plate, (int) R::cavern,
+                                   (int) R::ambience })
+        {
+            const auto expected = "BLOOM " + juce::String (juce::roundToInt (
+                                      R::constantsFor (detent).attack * 1.2f)) + " MS";
+
+            check (bloomFor (detent).contains (expected),
+                   who + " on " + R::kTypeNames[detent] + " the TAIL reading should carry '"
+                       + expected + "', reads '" + bloomFor (detent) + "'");
+        }
+
+        // Non-vacuous: Plate's tail is immediate and Cavern's is not, so the
+        // two readings cannot be the same string.
+        check (bloomFor (R::plate) != bloomFor (R::cavern),
+               who + " Plate and Cavern print the same bloom, so the readout is not"
+                     " following the type");
+
+        params.setReal (R::Index::type, (float) R::room);
+        reverbPanel->setPage (R::Page::early);
     }
 
     //== TONE: three nodes in series ==========================================
@@ -1665,8 +1749,9 @@ void dump (bmo::ui::ModulePanel& panel, const juce::String& who)
                   << (r.text.isEmpty() ? "" : "  \"" + r.text + "\"") << '\n';
 
     // A paged panel's furniture is painted and so has no child to print. These
-    // are the rectangles a reviewer asks the size of -- "how big does the
-    // grille actually come out?" was the first question asked of this panel.
+    // are the rectangles a reviewer asks the size of. The grille was printed
+    // here too -- "how big does the grille actually come out?" was the first
+    // question asked of this panel, and the answer is why it was cut.
     if (auto* paged = dynamic_cast<bmo::reverb::ReverbPanel*> (&panel))
     {
         const auto box = [] (const char* name, juce::Rectangle<int> r)
@@ -1679,7 +1764,6 @@ void dump (bmo::ui::ModulePanel& panel, const juce::String& who)
         box ("screen ", paged->getScreenBox());
         box ("readout", paged->getReadoutBox());
         box ("cluster", paged->getClusterBox());
-        box ("grille ", paged->getGrilleBox());
     }
 }
 
@@ -1714,7 +1798,7 @@ int main (int argc, char** argv)
 
         // BMO Linger, **once**. It was here twice while it was expandable, one
         // row per width; the panel is a paged handheld as of 2026-09-21 and
-        // has one width, so a second row would be the same 500 px panel under
+        // has one width, so a second row would be the same 380 px panel under
         // a different name. What replaced it is `checkReverbPanel` walking the
         // panel once per page, which is where the other two thirds of the
         // module now live.
@@ -1852,7 +1936,7 @@ int main (int argc, char** argv)
         // went with the pages; `ModuleDef::expandedWidth` is 0 and
         // `isExpandable()` is false, which is what stops the standalone header
         // and the slot bar offering a switch with nothing to switch.
-        checkEquals (panel.getWidth(), 500, "reverb opens at its one width");
+        checkEquals (panel.getWidth(), 380, "reverb opens at its one width");
         check (! panel.getContext().def.isExpandable(),
                "a paged module has nothing to expand into");
         checkEquals (panel.getContext().def.expandedWidth, 0,
@@ -1950,7 +2034,7 @@ int main (int argc, char** argv)
     // BMO Linger in a rack, which is now the same panel standalone gives you.
     // Its own block rather than a fifth module in the four-panel one above,
     // and worth having because the *slot* is what changed: a rack used to open
-    // it at 300 with an expand switch on its bar, and now opens it at 460 with
+    // it at 300 with an expand switch on its bar, and now opens it at 380 with
     // no switch at all.
     {
         auto rack = createRack();
@@ -1969,7 +2053,7 @@ int main (int argc, char** argv)
         {
             auto* linger = panels[0]->getX() > panels[1]->getX() ? panels[0] : panels[1];
 
-            checkEquals (linger->getWidth(), 500, "reverb arrives in a rack at its one width");
+            checkEquals (linger->getWidth(), 380, "reverb arrives in a rack at its one width");
             check (! rack->isSlotExpanded (1), "there is no expanded view to arrive in");
 
             checkWithinPanel     (*linger, "rack reverb slot");

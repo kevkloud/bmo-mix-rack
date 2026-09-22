@@ -16,12 +16,30 @@ namespace
 {
     //== The grid ==============================================================
 
-    /** Four columns, and every row on the panel is laid out against them. The
-        argument for four rather than three is in `ReverbPanel`'s class
-        comment; the short of it is that TONE's seven controls are 4 + 3 over
-        four columns and 3 + 2 + 2 over three, and the second one makes the
-        cluster three rows deep on every page. */
-    constexpr int kCols = 4;
+    /** Three columns, and the knob grid is laid out against them: the
+        persistent row, the page cluster and the page keys. It was four until
+        the 2026-09-21 control-set trim -- `ReverbPanel`'s class comment
+        carries why three works now and did not before.
+
+        The cell is `(380 - 2 * kPad) / 3 = 120` px, which is **exactly** what
+        the cell was at four columns and 500, so no caption measured against
+        the old grid can fail on the new one. */
+    constexpr int kCols = 3;
+
+    /** The foot is the one row that is not three across, because it holds four
+        controls: ER, REVERB, MIX and TYPE in the corner the grille left. Three
+        cells there would leave TYPE alone in a row, which is the fault this
+        panel will not commit.
+
+        **And its four cells are not equal.** Four equal cells at 380 are 90 px
+        and the TYPE box is 12 px narrower than its cell, which leaves 78 for a
+        list whose longest item, "Ambience", needs 90 -- it overflowed by
+        11.7 px, measured. So TYPE keeps **a whole grid cell**, 120 px, which
+        is the box it had in the persistent row and is known to fit, and the
+        three levels divide the 240 that are left. A knob is 68 px wide and its
+        captions are ER, REVERB and MIX, so 80 px a piece is comfortable where
+        120 was generous. */
+    constexpr int kFootLevels = 3;
 
     //== The bezel and its screen ==============================================
 
@@ -61,7 +79,7 @@ namespace
     constexpr int   kMainRow         = 100;
 
     /** The cluster. Smaller knobs and a smaller caption, because there are up
-        to eight of them in two rows and the captions are the panel's longest
+        to six of them in two rows and the captions are the panel's longest
         -- "EQ HIGH FREQ" is twelve characters. */
     constexpr int   kClusterKnobSide    = 54;
     constexpr float kClusterCaptionSize = 10.0f;
@@ -70,13 +88,6 @@ namespace
 
     constexpr int kStripRow = 100;
 
-    /** How far the grille is set in from the cell it is given. The cell is one
-        column of the level strip's row; what is drawn is this much smaller,
-        so the slots do not butt against MIX's caption box on one side or the
-        panel's edge on the other. */
-    constexpr int kGrilleInsetX = 10;
-    constexpr int kGrilleInsetY = 8;
-
     /** Everything above, added up, so the gap between the blocks is whatever
         is left over divided evenly rather than a number somebody has to redo
         when a block's height changes. */
@@ -84,8 +95,10 @@ namespace
                                  + kClusterRow * kClusterRows
                                  + ui::ModulePanel::kRuleRow + kStripRow;
 
-    constexpr int kSwitchWidth  = ui::Tokens::switchWidth;
-    constexpr int kSwitchHeight = ui::Tokens::switchHeight;
+    // `kSwitchWidth` and `kSwitchHeight` were here for LINK ER, which was the
+    // only switch this panel ever had and went with `prelink` in the
+    // 2026-09-21 trim. Every control on this face is now a knob or a dropdown,
+    // which is why `place` below has nothing to special-case.
 
     //== The screen's own arithmetic ===========================================
 
@@ -114,10 +127,14 @@ namespace
         return (float) (i + 1) / (float) (kMaxInfill + 1);
     }
 
-    /** The bloom ATTACK selects, in milliseconds, at `percent`. Linear,
+    /** The bloom a type's ATTACK constant selects, in milliseconds. Linear,
         because the contour is CALIBRATE (10 section 8) and a curve here would
-        be a guess drawn as a fact -- the same reason `detail::attackText`
-        prints a linear figure. */
+        be a guess drawn as a fact.
+
+        **This is the only place the bloom is printed now.** ATTACK lost its
+        knob and its value string in the 2026-09-21 trim, so the readout line
+        under the TAIL picture is where a user finds out what the selected type
+        does to the onset. */
     constexpr float bloomMs (float percent) noexcept { return percent * 1.2f; }
 
     /** The right-hand edge of the TAIL page's time axis, in milliseconds. */
@@ -165,7 +182,6 @@ void LingerScreen::setState (const State& s)
 {
     const auto same = juce::approximatelyEqual (s.sizeM, state.sizeM)
                    && juce::approximatelyEqual (s.preDelayMs, state.preDelayMs)
-                   && s.linkEr == state.linkEr
                    && juce::approximatelyEqual (s.erDensity, state.erDensity)
                    && juce::approximatelyEqual (s.erLevelDb, state.erLevelDb)
                    && juce::approximatelyEqual (s.decaySeconds, state.decaySeconds)
@@ -201,13 +217,19 @@ float LingerScreen::firstTapTimeMs() const noexcept
     // a check that re-derived this its own way could agree with the bug it
     // exists to catch. `PlainKnob::captionOverflow` is written under the same
     // discipline.
-    return tapTimeMsAt (kReferenceTaps[0], state.sizeM)
-             + (state.linkEr ? state.preDelayMs : 0.0f);
+    //
+    // **No pre-delay term any more.** `kPreLinkFixed` is false, so the ER
+    // always travel with dry and the taps never move with PRE-DELAY. The
+    // static_assert is what keeps that true: flip the constant and this stops
+    // compiling rather than quietly drawing the wrong picture.
+    static_assert (! kPreLinkFixed, "the ER stems are drawn unshifted by PRE-DELAY");
+
+    return tapTimeMsAt (kReferenceTaps[0], state.sizeM);
 }
 
 float LingerScreen::lastTapTimeMs() const noexcept
 {
-    return erSpanMsAt (state.sizeM) + (state.linkEr ? state.preDelayMs : 0.0f);
+    return erSpanMsAt (state.sizeM);
 }
 
 float LingerScreen::erWindowMs() const noexcept
@@ -399,11 +421,12 @@ void LingerScreen::paintEarly (juce::Graphics& g, juce::Rectangle<float> plot,
         g.fillRect (juce::Rectangle<float> (xFor (ms), base - h, 2.0f, h));
     };
 
-    const auto shift = state.linkEr ? state.preDelayMs : 0.0f;
+    // No shift: `kPreLinkFixed` is false, so the ER sit where the table puts
+    // them whatever PRE-DELAY reads. See `firstTapTimeMs`.
 
     // The core taps, always on, at full strength.
     for (const auto& tap : kReferenceTaps)
-        drawTap (tapTimeMsAt (tap, state.sizeM) + shift,
+        drawTap (tapTimeMsAt (tap, state.sizeM),
                  tapGainAt (tap, state.sizeM), 0.92f);
 
     // The infill DENSITY spends, drawn fainter because it is the part of the
@@ -435,7 +458,7 @@ void LingerScreen::paintEarly (juce::Graphics& g, juce::Rectangle<float> plot,
             const auto gain = tapGainAt (kReferenceTaps[0], state.sizeM) * first
                                 / juce::jmax (1.0f, ms);
 
-            drawTap (ms + shift, gain, 0.26f + 0.34f * w);
+            drawTap (ms, gain, 0.26f + 0.34f * w);
         }
     }
 }
@@ -719,51 +742,46 @@ ReverbPanel::ReverbPanel (ui::ModuleContext ctx)
       // alone is blue.
       //
       // So every knob here is `character` but `output`, the one control in
-      // this schema that is literally an output trim. The twenty-three that
-      // now live on the pages were `utility` as a block once, and the module
-      // rendered violet at the top and suite azure below as though it were two
-      // plugins sharing a slot.
+      // this schema that is literally an output trim. The cluster's knobs were
+      // `utility` as a block once, and the module rendered violet at the top
+      // and suite azure below as though it were two plugins sharing a slot.
       //
       // IN HI-CUT is the near miss and stays `character`: it is a tone control
       // on the way in rather than a level. WIDTH is the other, and stays
       // `character` too -- it sets how wide the tail is made, which is BMO
       // Dimension's DIMENSION and not anybody's gain.
-      typeBox       (context.params.param (Index::type),
-                     context.params.spec  (Index::type),      "TYPE",      context.def.accent),
       sizeKnob      (context.params.param (Index::size),      "SIZE",      ui::Knob::Style::character, 0.62f, context.def.accent),
       preDelayKnob  (context.params.param (Index::predelay),  "PRE-DELAY", ui::Knob::Style::character, 0.62f, context.def.accent),
       decayKnob     (context.params.param (Index::decay),     "DECAY",     ui::Knob::Style::character, 0.62f, context.def.accent),
+
+      // TYPE, in the corner at the foot rather than in the knob row it used to
+      // open. See the class comment.
+      typeBox       (context.params.param (Index::type),
+                     context.params.spec  (Index::type),      "TYPE",      context.def.accent),
 
       // EARLY. ER MODE is the panel's other list of names, and its other
       // dropdown: Energy is not more than Taps.
       erModeBox     (context.params.param (Index::ermode),
                      context.params.spec  (Index::ermode),      "ER MODE",   context.def.accent),
       densityKnob   (context.params.param (Index::erdensity),   "DENSITY",   ui::Knob::Style::character, 0.58f, context.def.accent),
-      erShapeKnob   (context.params.param (Index::ershape),     "ER SHAPE",  ui::Knob::Style::character, 0.58f, context.def.accent),
       erSpreadKnob  (context.params.param (Index::erspread),    "ER SPREAD", ui::Knob::Style::character, 0.58f, context.def.accent),
       erHiCutKnob   (context.params.param (Index::erhicut),     "ER HI-CUT", ui::Knob::Style::character, 0.58f, context.def.accent),
       variationKnob (context.params.param (Index::ervariation), "VARIATION", ui::Knob::Style::character, 0.58f, context.def.accent),
       feedKnob      (context.params.param (Index::feed),        "SOURCE",    ui::Knob::Style::character, 0.58f, context.def.accent),
-      // LINK ER lights in `switchAlt`, which is modules/AGENTS.md's table with
-      // no exception taken: it is neither a bypass nor mono nor a polarity
-      // flip, so it is "anything else". So the accent is on every knob that
-      // shapes the sound, on the screen and on the lit page key; what is *not*
-      // in it is this switch and the OUTPUT trim, and nothing else.
-      linkErSwitch  (context.params.param (Index::prelink), "LINK ER", ui::tokens().switchAlt),
 
-      // TAIL.
-      attackKnob     (context.params.param (Index::attack),     "ATTACK",      ui::Knob::Style::character, 0.58f, context.def.accent),
-      decayShapeKnob (context.params.param (Index::decayshape), "DECAY SHAPE", ui::Knob::Style::character, 0.58f, context.def.accent),
-      // "LOW x" and not "LOW x" with a multiplication sign: the two display
-      // faces are licensed individually and live outside this repository, so a
-      // glyph outside ASCII is one this suite cannot promise it can draw. The
-      // value strings follow, printing "1.20x".
-      dampLoFreqKnob (context.params.param (Index::damplofreq), "LOW x FREQ",  ui::Knob::Style::character, 0.58f, context.def.accent),
+      // TAIL. "LOW x" and not "LOW x" with a multiplication sign: the two
+      // display faces are licensed individually and live outside this
+      // repository, so a glyph outside ASCII is one this suite cannot promise
+      // it can draw. The value strings follow, printing "1.20x".
+      //
+      // The two knees that used to sit beside these went into the per-type
+      // block, which is why the captions are "LOW x" and not "LOW x FREQ" --
+      // there is nothing left to disambiguate them from.
       dampLoKnob     (context.params.param (Index::damplo),     "LOW x",       ui::Knob::Style::character, 0.58f, context.def.accent),
-      dampHiFreqKnob (context.params.param (Index::damphifreq), "HIGH x FREQ", ui::Knob::Style::character, 0.58f, context.def.accent),
       dampHiKnob     (context.params.param (Index::damphi),     "HIGH x",      ui::Knob::Style::character, 0.58f, context.def.accent),
       modDepthKnob   (context.params.param (Index::moddepth),   "MOD DEPTH",   ui::Knob::Style::character, 0.58f, context.def.accent),
       modRateKnob    (context.params.param (Index::modrate),    "MOD RATE",    ui::Knob::Style::character, 0.58f, context.def.accent),
+      widthKnob      (context.params.param (Index::width),      "WIDTH",       ui::Knob::Style::character, 0.58f, context.def.accent),
 
       // TONE. OUTPUT is the one `utility` knob on this panel: a trim on the
       // way out is exactly what the style is for, and it is the same knob BMO
@@ -773,7 +791,6 @@ ReverbPanel::ReverbPanel (ui::ModuleContext ctx)
       eqHiFreqKnob (context.params.param (Index::eqhifreq), "EQ HIGH FREQ", ui::Knob::Style::character, 0.58f, context.def.accent),
       eqHiKnob     (context.params.param (Index::eqhi),     "EQ HIGH",      ui::Knob::Style::character, 0.58f, context.def.accent),
       inHiCutKnob  (context.params.param (Index::inhicut),  "IN HI-CUT",    ui::Knob::Style::character, 0.58f, context.def.accent),
-      widthKnob    (context.params.param (Index::width),    "WIDTH",        ui::Knob::Style::character, 0.58f, context.def.accent),
       outputKnob   (context.params.param (Index::output),   "OUTPUT",       ui::Knob::Style::utility,   0.58f, context.def.accent),
 
       // The strip at the foot.
@@ -798,8 +815,10 @@ ReverbPanel::ReverbPanel (ui::ModuleContext ctx)
     }
 
     // TYPE hangs its box at the foot of the square a `kMainKnobSide` knob
-    // would occupy, so its caption lands on SIZE's line rather than twenty
-    // pixels off it. `ui::ChoiceBox::setControlSide` carries the argument.
+    // would occupy, so its caption lands on MIX's line rather than twenty
+    // pixels off it -- the same trick it used beside SIZE, now that it sits in
+    // the foot row instead. `ui::ChoiceBox::setControlSide` carries the
+    // argument.
     typeBox.setControlSide (kMainKnobSide);
     typeBox.setCaptionSize (kMainCaptionSize);
     addAndMakeVisible (typeBox);
@@ -843,14 +862,21 @@ ReverbPanel::ReverbPanel (ui::ModuleContext ctx)
     // exactly `LingerScreen::State`'s fields -- which is the thing a reader
     // wants to be able to check at a glance.
     {
-        const int drawn[] { Index::size, Index::predelay, Index::prelink,
+        // **TYPE is in the list and is not itself drawn.** The TAIL picture's
+        // bloom is `TypeConstants::attack`, which has no parameter since the
+        // 2026-09-21 trim, so a type change is the only thing that moves it --
+        // and without this the bloom would only redraw when some *other* knob
+        // happened to move. It is also what makes the nine the type stamps
+        // redraw as one event rather than nine.
+        const int drawn[] { Index::type,
+                            Index::size, Index::predelay,
                             Index::erdensity, Index::erlevel,
-                            Index::decay, Index::damplo, Index::damphi, Index::attack,
+                            Index::decay, Index::damplo, Index::damphi,
                             Index::verblevel,
                             Index::eqlofreq, Index::eqlo, Index::eqhifreq, Index::eqhi,
                             Index::inhicut };
 
-        static_assert (sizeof (drawn) / sizeof (int) == 15, "one attachment per drawn parameter");
+        static_assert (sizeof (drawn) / sizeof (int) == 14, "one attachment per drawn parameter");
 
         for (size_t i = 0; i < screenAttachments.size(); ++i)
             screenAttachments[i] = std::make_unique<juce::ParameterAttachment> (
@@ -878,21 +904,21 @@ std::vector<juce::Component*> ReverbPanel::pageControls (Page p) const
     {
         case Page::early:
             // Row one is how the cluster is generated; row two is what is done
-            // to it and what it is tied to. LINK ER sits last because it is
-            // the only switch here, and a switch in the middle of a row of
-            // knobs reads as a gap.
-            return { &self->erModeBox, &self->densityKnob, &self->erShapeKnob, &self->erSpreadKnob,
-                     &self->erHiCutKnob, &self->variationKnob, &self->feedKnob, &self->linkErSwitch };
+            // to it and what it is tied to. Three and three.
+            return { &self->erModeBox, &self->densityKnob, &self->erSpreadKnob,
+                     &self->erHiCutKnob, &self->variationKnob, &self->feedKnob };
 
         case Page::tail:
-            return { &self->attackKnob, &self->decayShapeKnob,
-                     &self->dampLoFreqKnob, &self->dampLoKnob,
-                     &self->dampHiFreqKnob, &self->dampHiKnob,
-                     &self->modDepthKnob, &self->modRateKnob };
+            // Three and two. WIDTH is here rather than on TONE because it is
+            // M/S gain on the tail and nothing else -- see the class comment.
+            return { &self->dampLoKnob, &self->dampHiKnob, &self->modDepthKnob,
+                     &self->modRateKnob, &self->widthKnob };
 
         case Page::tone:
-            return { &self->eqLoFreqKnob, &self->eqLoKnob, &self->eqHiFreqKnob, &self->eqHiKnob,
-                     &self->inHiCutKnob, &self->widthKnob, &self->outputKnob };
+            // Three and three: the two shelves with their corners, then the
+            // input cut and the output trim.
+            return { &self->eqLoFreqKnob, &self->eqLoKnob, &self->eqHiFreqKnob,
+                     &self->eqHiKnob, &self->inHiCutKnob, &self->outputKnob };
     }
 
     return {};
@@ -902,8 +928,8 @@ std::vector<juce::Component*> ReverbPanel::alwaysOnControls() const
 {
     auto* self = const_cast<ReverbPanel*> (this);
 
-    return { &self->typeBox, &self->sizeKnob, &self->preDelayKnob, &self->decayKnob,
-             &self->erLevelKnob, &self->verbLevelKnob, &self->mixKnob };
+    return { &self->sizeKnob, &self->preDelayKnob, &self->decayKnob,
+             &self->erLevelKnob, &self->verbLevelKnob, &self->mixKnob, &self->typeBox };
 }
 
 std::vector<juce::Component*> ReverbPanel::allPageControls() const
@@ -953,16 +979,22 @@ void ReverbPanel::refreshScreen()
 {
     LingerScreen::State s;
 
+    // **Thirteen values and one row.** ATTACK has no parameter since the
+    // 2026-09-21 trim, so the bloom the TAIL page draws comes off the selected
+    // type's constants -- through `constantsFor`, which is the same call
+    // `ReverbDsp::paramsFrom` makes, so the picture and the engine cannot come
+    // to disagree about what a Plate's onset is.
+    const auto& voicing = constantsFor ((int) context.params.getReal (Index::type));
+
     s.sizeM        = context.params.getReal (Index::size);
     s.preDelayMs   = context.params.getReal (Index::predelay);
-    s.linkEr       = context.params.getReal (Index::prelink) >= 0.5f;
     s.erDensity    = context.params.getReal (Index::erdensity);
     s.erLevelDb    = context.params.getReal (Index::erlevel);
 
     s.decaySeconds = context.params.getReal (Index::decay);
     s.dampLo       = context.params.getReal (Index::damplo);
     s.dampHi       = context.params.getReal (Index::damphi);
-    s.attack       = context.params.getReal (Index::attack);
+    s.attack       = voicing.attack;
     s.verbLevelDb  = context.params.getReal (Index::verblevel);
 
     s.eqLoFreqHz   = context.params.getReal (Index::eqlofreq);
@@ -1000,44 +1032,15 @@ void ReverbPanel::paintPanel (juce::Graphics& g)
     ui::drawLabel (g, screen.readout(), readoutBox.toFloat(), juce::Justification::centred,
                    ui::labelFont (kReadoutSize, true), ink);
 
-    //== The grille ============================================================
+    //== And that is everything this panel paints ==============================
     //
-    // **Texture, and nothing else**: no control, no state, nothing to click,
-    // and the one raked thing on a panel whose page keys are deliberately
-    // level. It sits in the fourth column of the level strip, which is the one
-    // cell on the grid that no control wanted.
-    {
-        const auto box = grilleBox.toFloat();
-
-        g.setColour (t.well);
-        g.fillRoundedRectangle (box, ui::Tokens::corner);
-
-        juce::Graphics::ScopedSaveState saved (g);
-
-        juce::Path clip;
-        clip.addRoundedRectangle (box, ui::Tokens::corner);
-        g.reduceClipRegion (clip);
-
-        // The rake is a fixed fraction of the block's height rather than an
-        // angle, so the slots keep their slope if the row ever changes height.
-        const auto rake  = box.getHeight() * 0.36f;
-        const auto slot  = 4.0f;
-        const auto pitch = 9.0f;
-
-        g.setColour (ui::tokens().hairline.withMultipliedAlpha (0.9f));
-
-        for (auto x = box.getX() - rake; x < box.getRight(); x += pitch)
-        {
-            juce::Path bar;
-            bar.startNewSubPath (x, box.getBottom());
-            bar.lineTo (x + rake, box.getY());
-            bar.lineTo (x + rake + slot, box.getY());
-            bar.lineTo (x + slot, box.getBottom());
-            bar.closeSubPath();
-
-            g.fillPath (bar);
-        }
-    }
+    // A raked speaker grille filled the fourth column of the level strip until
+    // 2026-09-21. It was texture and nothing else -- no control, no state,
+    // nothing to click -- and it stopped earning the space when the body's
+    // corners went square: rendered, it read as a flat swatch beside the
+    // knobs rather than as a grille behind them. Frosty cut it, TYPE has the
+    // corner, and the only thing painted here now is the bezel and the line
+    // of text inside it.
 }
 
 //==============================================================================
@@ -1054,19 +1057,12 @@ void ReverbPanel::resized()
     const auto gap = juce::jmax (ui::Tokens::switchGap,
                                  (area.getHeight() - kContentHeight) / 5);
 
+    // 120 px at the design width, which is what the four-column cell was at
+    // 500 -- see `kCols`.
     const auto cell = area.getWidth() / kCols;
 
-    /** One control in one cell. A switch is centred at the suite's switch size
-        rather than filling the cell: a switch is shorter than a knob, and one
-        stretched to a knob's box would read as a heading for whatever is
-        beside it. */
-    const auto place = [] (juce::Component* c, juce::Rectangle<int> box)
-    {
-        if (dynamic_cast<ui::SwitchButton*> (c) != nullptr)
-            c->setBounds (box.withSizeKeepingCentre (kSwitchWidth, kSwitchHeight));
-        else
-            c->setBounds (box);
-    };
+    // 80 px, and only the three levels at the foot use it. TYPE takes `cell`.
+    const auto levelCell = (area.getWidth() - cell) / kFootLevels;
 
     area.removeFromTop (gap);
 
@@ -1082,12 +1078,14 @@ void ReverbPanel::resized()
         screen.setBounds (screenBox);
     }
 
-    //== The three page keys, three of the four columns, centred ===============
+    //== The three page keys, one per column ===================================
+    //
+    // Three keys over three columns, so the row fills the grid exactly. It was
+    // three of four centred while the grid was four wide.
     {
         area.removeFromTop (gap);
 
         auto row = area.removeFromTop (kPageRow);
-        row = row.withSizeKeepingCentre (cell * 3, row.getHeight());
 
         for (auto& button : pageButtons)
             button->setBounds (row.removeFromLeft (cell));
@@ -1095,16 +1093,16 @@ void ReverbPanel::resized()
 
     //== The persistent row ====================================================
     //
-    // What the room is, when the tail arrives and how long it rings. Four
-    // cells, on screen at every page.
+    // What the room is, when the tail arrives and how long it rings. Three
+    // cells, on screen at every page. TYPE was the fourth and is at the foot.
     {
         area.removeFromTop (gap);
 
         auto row = area.removeFromTop (kMainRow);
 
-        for (auto* c : std::initializer_list<juce::Component*> { &typeBox, &sizeKnob,
-                                                                 &preDelayKnob, &decayKnob })
-            place (c, row.removeFromLeft (cell));
+        for (auto* c : std::initializer_list<juce::Component*> { &sizeKnob, &preDelayKnob,
+                                                                 &decayKnob })
+            c->setBounds (row.removeFromLeft (cell));
     }
 
     //== The page cluster ======================================================
@@ -1133,21 +1131,26 @@ void ReverbPanel::resized()
 
             auto cells = block.removeFromTop (kClusterRow);
 
-            // **A short row is centred in the four, not left-packed.** TONE's
-            // second row is three; left-packed, the hole in the fourth column
+            // **A short row is centred in the three, not left-packed.** TAIL's
+            // second row is two; left-packed, the hole in the third column
             // reads as a control that has gone missing rather than as a row of
-            // three, which is the same fault MIX's lone centred knob had on
-            // the old face and the reason the old EARLY group centred its
-            // last pair.
+            // two, which is the same fault MIX's lone centred knob had on the
+            // old face.
             if (n < kCols)
                 cells = cells.withSizeKeepingCentre (cell * n, cells.getHeight());
 
             for (int i = 0; i < n; ++i)
-                place (showing[first + (size_t) i], cells.removeFromLeft (cell));
+                showing[first + (size_t) i]->setBounds (cells.removeFromLeft (cell));
         }
     }
 
-    //== LEVEL, and the strip that is there whatever page you are on ===========
+    //== LEVEL, the strip, and TYPE in the corner ==============================
+    //
+    // **Four controls here and three columns above**, which is the one place
+    // this panel leaves its own grid. Three cells would put TYPE alone in a
+    // row of its own, and "no control stands alone in a row" is the older
+    // rule. TYPE keeps a full 120 px grid cell and the three levels divide
+    // what is left -- see `kFootLevels` for the measurement that forced it.
     {
         area.removeFromTop (gap);
 
@@ -1156,15 +1159,23 @@ void ReverbPanel::resized()
         // headings itself because at the expanded width a shared rule would
         // have cut a line through the column it did not belong to; there is
         // one column here, so the suite's own path is the correct one again.
+        //
+        // It is legended LEVEL and TYPE now sits under it, which is the
+        // wrinkle the class comment owns: a rule that stopped one cell short
+        // would be a second kind of rule in the suite for one corner's sake.
         addRule (area.removeFromTop (ui::ModulePanel::kRuleRow), "LEVEL");
 
         auto row = area.removeFromTop (kStripRow);
 
+        // TYPE last, in the corner the grille had, and it takes the whole of
+        // what is left rather than a fourth share -- `row` is 120 px wide by
+        // then, which is a grid cell exactly. It is a `ChoiceBox` and hangs
+        // its box at the foot of a `kMainKnobSide` square, so its caption
+        // lands on the same line as the three knobs beside it.
         for (auto* c : { &erLevelKnob, &verbLevelKnob, &mixKnob })
-            place (c, row.removeFromLeft (cell));
+            c->setBounds (row.removeFromLeft (levelCell));
 
-        // Whatever is left of the row, which is the fourth column: the grille.
-        grilleBox = row.reduced (kGrilleInsetX, kGrilleInsetY);
+        typeBox.setBounds (row);
     }
 }
 

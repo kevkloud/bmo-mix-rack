@@ -13,10 +13,11 @@ namespace bmo::reverb
 /** Which page the handheld is showing.
 
     **UI state, not a parameter**, and the distinction is the whole design of
-    it. `specs()` is frozen at thirty with two spare host lanes; which page
+    it. `specs()` is twenty-four with eight spare host lanes; which page
     somebody is looking at is not something a session should carry, not
-    something a host should be able to automate, and not worth one of the two
-    lanes left. BMO Opto's meter mode and BMO DEQ's selected band are the same
+    something a host should be able to automate, and **not worth a lane even
+    now that there are eight of them** -- the 2026-09-21 control-set trim
+    bought room for controls, not for UI state. BMO Opto's meter mode and BMO DEQ's selected band are the same
     kind of thing and reach their panels the same way -- through
     `ModulePanel::setUiState`, which is also what makes every page renderable
     headlessly. See `ReverbPanel::setUiState`. */
@@ -35,8 +36,8 @@ enum class Page { early = 0, tail, tone };
     report.
 
     **It draws in the module's accent, not in LCD green.** A second hue on one
-    module is the failure the accent audit was run to find -- the twenty-three
-    group knobs drew suite azure under a violet face, and the module read as
+    module is the failure the accent audit was run to find -- the cluster's
+    knobs drew suite azure under a violet face, and the module read as
     two plugins sharing a slot. The face underneath is `meterFace`, the token a
     needle meter's scale is printed on: a value rather than a hue, dark in both
     appearances, which is what a screen is.
@@ -101,15 +102,23 @@ public:
     explicit LingerScreen (juce::Colour accentColour);
 
     /** Everything the three pictures are drawn from, in the units `specs()`
-        uses. One struct rather than fifteen arguments, because the panel
-        refreshes all of it at once from the parameters and a partial update is
-        not a state this screen can be in. */
+        uses. One struct rather than fourteen arguments, because the panel
+        refreshes all of it at once and a partial update is not a state this
+        screen can be in.
+
+        **Thirteen of these come from a parameter and `attack` does not.** It
+        is `TypeConstants::attack` for whichever type is selected, since the
+        2026-09-21 control-set trim took its knob away -- so TYPE is one of the
+        parameters the panel redraws the screen on, and the TAIL page's bloom
+        follows a type change with no knob having moved.
+
+        `linkEr` was here and went with `prelink`: ER travel with dry, fixed,
+        so the pictures no longer have two cases to draw. */
     struct State
     {
         // EARLY.
         float sizeM        = 12.0f;
         float preDelayMs   = 0.0f;
-        bool  linkEr       = false;
         float erDensity    = 50.0f;   ///< per cent
         float erLevelDb    = -6.0f;
 
@@ -117,7 +126,7 @@ public:
         float decaySeconds = 1.8f;
         float dampLo       = 1.20f;
         float dampHi       = 0.40f;
-        float attack       = 30.0f;   ///< per cent, over the 0-120 ms bloom
+        float attack       = 30.0f;   ///< per cent of the 0-120 ms bloom, off the type's row
         float verbLevelDb  = -6.0f;
 
         // TONE.
@@ -233,7 +242,8 @@ private:
     handheld is held at an angle and can afford a raked key block, and a mix
     panel is scanned in rows against its neighbours, so a row that sloped would
     be the only thing in the window not lining up with the slot beside it. The
-    grille at the foot is the one raked thing on this panel.
+    raked grille at the foot used to be the one sloped thing here; it was cut
+    later the same day and nothing on this panel slopes now.
 
     The circle carries no text and the name sits under it, which is what every
     other control here does -- a knob and its caption, a dropdown and its
@@ -292,17 +302,35 @@ private:
 //==============================================================================
 /** BMO Linger's panel: a paged handheld.
 
-    A bezelled screen with a line of printed text under it, three page keys,
-    a persistent row that is there whatever page you are on, a cluster that
-    changes with the page, a strip of three levels along the foot and a grille
-    beside them. Frosty approved the shape on 2026-09-21, and it replaces the
-    compact/expanded two-width split BMO DEQ's precedent had given this module.
+    A bezelled screen with a line of printed text under it, three page keys, a
+    persistent row that is there whatever page you are on, a cluster that
+    changes with the page, and a foot holding the two generator levels, MIX and
+    the TYPE dropdown. Frosty approved the shape on 2026-09-21, and it replaces
+    the compact/expanded two-width split BMO DEQ's precedent had given this
+    module.
+
+    ## The speaker grille is gone, and TYPE has its corner
+
+    The grille was texture in the fourth column of the level strip, raked, the
+    one sloped thing on a panel whose keys are deliberately level. **It lost
+    its job when the corners went square** and it rendered as a flat swatch
+    rather than as texture, so it was cut on 2026-09-21 rather than retried.
+
+    **TYPE took the corner it left.** Frosty's call, and it is two arguments at
+    once: a dropdown is not knob-shaped, so it never belonged in a grid of
+    knobs, and the foot is where two of the nine parameters a type change
+    stamps already are. TYPE sits at the right-hand end of the ER / REVERB /
+    MIX row, under the LEVEL rule, which is the only wrinkle in the
+    arrangement -- TYPE is not a level, and the rule is legended as though it
+    were. The alternative was a rule that stopped short of one cell, which
+    `ModulePanel::addRule` does not draw and which would have been a second
+    kind of rule in the suite for one corner's sake.
 
     ## One width, and `expandedWidth` is gone
 
     The old arrangement was 300 compact and 700 expanded, with the same face
     down the left of both and three groups of knobs appearing in the extra
-    400 px. **Paging removes the reason for it.** Eight, eight and seven
+    400 px. **Paging removes the reason for it.** Six, five and six
     controls never need to be on screen at once; what they need is to be
     reachable, and a key under the screen reaches them in one click where the
     expand switch reached them in one click and 400 px. So
@@ -311,32 +339,54 @@ private:
     nothing to switch, and the module is the same panel everywhere -- which is
     the arrangement every module but BMO DEQ already had.
 
-    It costs the width the groups used to take. **500**, because that is what
-    the four-column grid needs for its longest caption and its widest dropdown
-    item, and it is a multiple of 20 like every other panel in the suite. A
-    rack slot is 200 px wider than it was, and 200 narrower than the expanded
-    one a rack could already be asked for.
+    It costs the width the groups used to take. It was **500** at four columns
+    and is **380** at three, since the 2026-09-21 control-set trim took the
+    schema from thirty parameters to twenty-four.
 
-    ## The grid, and why four columns
+    ## The grid, and why three columns at 380
 
-    Four columns of the content width, and every row is laid out against them:
-    the persistent row is four cells, the cluster is two rows of four, the page
-    keys take three of the four centred, and the level strip takes three with
-    the grille in the fourth.
+    Three columns of the content width for the knob grid: the persistent row is
+    three cells, the cluster is two rows of three, and the page keys take all
+    three.
 
-    Three columns was the first cut and it fails on TONE. Seven controls over
-    three is 3 + 2 + 2, so all three pages grow to three rows, the cluster
-    block goes from 148 px to 222, and the screen has to lose 74 px to pay for
-    it. Over four, EARLY and TAIL are 4 + 4 and TONE is 4 + 3 -- two rows every
-    time, so the block under the keys does not change height when the page
-    does, which is the one thing that would make paging feel like switching
-    panels rather than turning a page.
+    **380 is not "roughly right", it is the width at which nothing that fitted
+    stops fitting.** A panel insets its content by `kPad` = 10 a side, so the
+    four-column cell at 500 was (500 - 20) / 4 = 120 px, and the three-column
+    cell at 380 is (380 - 20) / 3 = 120 px -- the same number. Every caption on
+    this panel was measured against a 120 px cell and still is, "EQ HIGH FREQ"
+    at 10 pt included, so the width came down by 120 px with no caption pass
+    at all. It is also a multiple of 20, like every other panel in the suite.
+    Anything narrower is a caption argument; anything wider is unearned.
+
+    The foot is the exception and holds **four** cells at 90 px, because it
+    holds four controls: ER, REVERB, MIX and TYPE. Three there would orphan
+    TYPE in a row of its own, which is the one thing this panel does not do.
+
+    ## Two rows on every page, and what that cost
+
+    EARLY is six, TAIL five and TONE six, so the cluster is 3 + 3, 3 + 2 and
+    3 + 3 -- **two rows whatever page you are on**, so the block under the keys
+    does not change height when the page does, which is the one thing that
+    would make paging feel like switching panels rather than turning a page.
+    That property is why the old face had four columns at all.
+
+    **WIDTH moved from TONE to TAIL to buy it, and the move is right on its own
+    terms.** After the trim TONE held seven -- the four EQ rows, IN HI-CUT,
+    WIDTH and OUTPUT -- and seven over three is 3 + 2 + 2, a third row on one
+    page only. A fixed three-row block would have cost the screen 74 px of its
+    170. WIDTH is M/S gain **on the tail only** (`kWidth`), the TONE page draws
+    a frequency response of exactly three nodes and WIDTH is not one of them,
+    and TAIL had four. So TONE is six and TAIL is five, both pages read better
+    for it, and the screen keeps its height.
+
+    OUTPUT stays on TONE rather than joining the foot, which was the other way
+    to land it: the foot already has four, and a fifth cell there would put a
+    68 px knob and the TYPE dropdown in 72 px cells.
 
     **No row anywhere holds one control.** That is the rule MIX broke on the
     old face -- a lone centred knob with two empty quarters beside it reads as
-    a control whose partner has gone missing -- and TONE's second row is three
-    centred in the four for the same reason the old EARLY group's last row was
-    two centred in three.
+    a control whose partner has gone missing -- and TAIL's second row is two
+    centred in the three for the same reason.
 
     ## The cluster's controls are added and removed, not hidden
 
@@ -345,7 +395,7 @@ private:
     stale or zeroed rectangle either escapes the panel, overlaps something, or
     reports a caption overflowing a box of width zero. Unparenting is the one
     state in which a control is genuinely not part of this layout. All
-    twenty-three keep their parameter attachments throughout, so nothing is
+    seventeen keep their parameter attachments throughout, so nothing is
     rebound and nothing is rebuilt when the page turns. This is the same
     arrangement the expanded groups used, and it is the reason turning a page
     costs a `resized` and nothing else.
@@ -362,7 +412,7 @@ private:
     by construction and a slot tiles flush against its neighbours -- a rack is
     a rectangle, and a module that rounded its own corners would show four
     slivers of whatever is behind it. Everything cut *into* the plate -- the
-    bezel, the screen, the grille -- takes `Tokens::corner`, 3 px, uniformly. */
+    bezel and the screen -- takes `Tokens::corner`, 3 px, uniformly. */
 class ReverbPanel final : public ui::ModulePanel
 {
 public:
@@ -386,8 +436,8 @@ public:
         controls are **not** children of the panel. */
     std::vector<juce::Component*> pageControls (Page p) const;
 
-    /** Everything on the panel whatever the page: the four persistent controls
-        and the three levels. */
+    /** Everything on the panel whatever the page: the three persistent knobs,
+        the three levels and TYPE in the corner. */
     std::vector<juce::Component*> alwaysOnControls() const;
 
     const PageButton& getPageButton (Page p) const noexcept
@@ -397,7 +447,7 @@ public:
 
     //== Where the painted furniture landed ====================================
     //
-    // A bezel, a readout line, a rule and a grille are all *painted*, so unlike
+    // A bezel, a readout line and a rule are all *painted*, so unlike
     // every control on the panel they have no bounds anyone can read. These are
     // public for the reason `ui::ModulePanel::getRules` and
     // `ui::DynamicsMeter::vuScale` are: it is the only way a test can see them.
@@ -408,9 +458,9 @@ public:
     juce::Rectangle<int> getScreenBox() const noexcept  { return screenBox; }
     juce::Rectangle<int> getReadoutBox() const noexcept { return readoutBox; }
 
-    /** The raked speaker grille at the foot, which is texture and nothing
-        else: no control, no state, nothing to click. */
-    juce::Rectangle<int> getGrilleBox() const noexcept  { return grilleBox; }
+    // `getGrilleBox` was here. The grille was cut on 2026-09-21 and TYPE has
+    // its corner -- see the class comment. There is nothing painted at the
+    // foot any more, so there is nothing here for a test to read.
 
     /** The block the page cluster is laid out in. Two rows at every page. */
     juce::Rectangle<int> getClusterBox() const noexcept { return clusterBox; }
@@ -428,7 +478,7 @@ private:
         as one state. */
     void refreshScreen();
 
-    /** All twenty-three cluster controls at once, for the unparenting walk. */
+    /** All seventeen cluster controls at once, for the unparenting walk. */
     std::vector<juce::Component*> allPageControls() const;
 
     Page page = Page::early;
@@ -438,43 +488,49 @@ private:
     std::array<std::unique_ptr<PageButton>, 3> pageButtons;
 
     // The persistent row: what the room is, when the tail arrives and how long
-    // it rings. On screen at every page, because the other three pages are all
-    // adjustments to these four.
-    /** **TYPE is a dropdown, not a knob.** A knob says less and more, and a
-        room type says neither -- Chamber is not more than Room. Frosty's call,
-        2026-09-21: "Room type makes no sense as a knob". `ui::ChoiceBox`
+    // it rings. On screen at every page, because the three pages are all
+    // adjustments to these three.
+    ui::PlainKnob sizeKnob, preDelayKnob, decayKnob;
+
+    /** **TYPE is a dropdown, not a knob**, and since 2026-09-21 it is not in
+        the knob grid either. A knob says less and more, and a room type says
+        neither -- Chamber is not more than Room. Frosty's call: "Room type
+        makes no sense as a knob", and then that a thing which is not
+        knob-shaped should not sit in a row of knobs. It lives in the corner
+        the grille vacated, beside the two levels it stamps. `ui::ChoiceBox`
         carries the rest of the argument, including why VARIATION stays a knob
         and BMO DEQ's SHAPE stays a legend ring. */
     ui::ChoiceBox typeBox;
-    ui::PlainKnob sizeKnob, preDelayKnob, decayKnob;
 
     // EARLY. ER MODE is this panel's other list of names and its other
     // dropdown; everything else in the cluster is an amount and stays a knob.
+    // ER SHAPE was here and is a per-type constant now, and LINK ER -- the one
+    // switch this panel had -- went with `prelink`.
     ui::ChoiceBox erModeBox;
-    ui::PlainKnob densityKnob, erShapeKnob, erSpreadKnob,
-                  erHiCutKnob, variationKnob, feedKnob;
-    ui::SwitchButton linkErSwitch;
+    ui::PlainKnob densityKnob, erSpreadKnob, erHiCutKnob, variationKnob, feedKnob;
 
-    // TAIL.
-    ui::PlainKnob attackKnob, decayShapeKnob,
-                  dampLoFreqKnob, dampLoKnob, dampHiFreqKnob, dampHiKnob,
-                  modDepthKnob, modRateKnob;
+    // TAIL. ATTACK, DECAY SHAPE and the two damping knees went into the
+    // per-type block; WIDTH arrived from TONE, because it is M/S gain on the
+    // tail and the page it was on draws a frequency response it is not part
+    // of.
+    ui::PlainKnob dampLoKnob, dampHiKnob, modDepthKnob, modRateKnob, widthKnob;
 
     // TONE.
     ui::PlainKnob eqLoFreqKnob, eqLoKnob, eqHiFreqKnob, eqHiKnob,
-                  inHiCutKnob, widthKnob, outputKnob;
+                  inHiCutKnob, outputKnob;
 
     // The strip at the foot: the two absolute trims, which are the thesis of
     // the module and have to be reachable from every page, and how much of the
     // whole thing.
     ui::PlainKnob erLevelKnob, verbLevelKnob, mixKnob;
 
-    /** One per parameter the screen is drawn from. Fifteen of them, and the
-        list in the constructor is exactly `LingerScreen::State`'s fields --
-        which is the thing a reader wants to be able to check at a glance. */
-    std::array<std::unique_ptr<juce::ParameterAttachment>, 15> screenAttachments;
+    /** One per parameter the screen is drawn from. Fourteen: thirteen of
+        `LingerScreen::State`'s fields plus TYPE, which is not drawn itself but
+        carries `attack` now that the knob is gone. The list in the constructor
+        is the thing a reader wants to be able to check at a glance. */
+    std::array<std::unique_ptr<juce::ParameterAttachment>, 14> screenAttachments;
 
-    juce::Rectangle<int> bezelBox, screenBox, readoutBox, grilleBox, clusterBox;
+    juce::Rectangle<int> bezelBox, screenBox, readoutBox, clusterBox;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ReverbPanel)
 };

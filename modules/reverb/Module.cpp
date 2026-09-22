@@ -36,26 +36,35 @@ const ModuleDef& module()
     //
     // The line is left null, which means BMO (ModuleDef::lineOf).
     //
-    // **One width, 500, and `expandedWidth` is 0.**
+    // **One width, 380, and `expandedWidth` is 0.**
     //
     // It was 300 compact and 700 full, BMO DEQ's precedent, with the same face
     // down the left of both and three groups of knobs filling the extra
     // 400 px. The panel is a paged handheld as of 2026-09-21 and paging
-    // removes the reason for a second width: eight, eight and seven controls
-    // never need to be on screen at once, and a page key under the screen
-    // reaches them in one click where the expand switch reached them in one
-    // click and 400 px. With `expandedWidth` at 0 the module is not
-    // expandable, so the standalone header and the rack's slot bar stop
-    // offering a switch that has nothing to switch -- which is the arrangement
-    // every module but BMO DEQ already had.
+    // removes the reason for a second width: six, five and six controls never
+    // need to be on screen at once, and a page key under the screen reaches
+    // them in one click where the expand switch reached them in one click and
+    // 400 px. With `expandedWidth` at 0 the module is not expandable, so the
+    // standalone header and the rack's slot bar stop offering a switch that
+    // has nothing to switch -- which is the arrangement every module but BMO
+    // DEQ already had.
     //
-    // 500 is what the panel's four-column grid needs for its longest caption
-    // and its widest dropdown item, and it is a multiple of 20 like every
-    // other panel in the suite. `ReverbPanel`'s class comment carries the
-    // grid's own argument.
+    // **It was 500 for the four-column grid and is 380 for the three-column
+    // one**, since the control-set trim took the schema from thirty
+    // parameters to twenty-four later the same day. 380 is not an estimate: a
+    // panel insets its content by `kPad` = 10 a side, so (380 - 20) / 3 is
+    // 120 px, which is exactly the cell (500 - 20) / 4 gave -- every caption
+    // on this face was measured against a 120 px cell and still is. It is a
+    // multiple of 20 like every other panel in the suite. `ReverbPanel`'s
+    // class comment carries the grid's own argument.
+    //
+    // A rack slot is 80 px wider than the 300 the compact face had. **It is
+    // still the widest module in the suite** -- BMO DEQ is next at 320, and
+    // BMO Util is 160 -- which is what a screen, three page keys and a
+    // twenty-four-control schema cost. Do not read 380 as roomy.
     static const ModuleDef def {
         kModuleId, kModuleName, kSchemaVersion,
-        500, juce::Colour (0xffe694e0),
+        380, juce::Colour (0xffe694e0),
         specs(), factory(),
         [] { return createDsp(); },
         [] (ui::ModuleContext ctx) -> std::unique_ptr<ui::ModulePanel>
@@ -69,8 +78,9 @@ const ModuleDef& module()
         nullptr,
 
         // **The one module in the suite whose parameters write each other.**
-        // TYPE is a voicing: selecting one re-applies its ten constants over
-        // the parameters that hold them, every time. The engine owns this
+        // TYPE is a voicing: selecting one re-applies its nine writable
+        // constants over the parameters that hold them, every time, and the
+        // engine reads five more off the same row. The engine owns this
         // rather than the panel, so it happens with no editor open --
         // `modules/reverb/TypeVoicing.h` for the whole argument, including the
         // automation conflict it knowingly creates.

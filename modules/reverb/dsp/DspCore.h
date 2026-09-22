@@ -89,21 +89,30 @@ public:
         indices as the enums above. Everything else is already in engine units
         on the knob -- metres, milliseconds, seconds, hertz, decibels, a bare
         multiplier, a bare exponent -- which is the point of a schema written
-        in real units. */
+        in real units.
+
+        **Six of these fields no longer have a knob behind them**, since the
+        2026-09-21 control-set trim: `linkEr` is `kPreLinkFixed`, and
+        `decayShape`, `attack`, `dampLoFreqHz`, `dampHiFreqHz` and `erShape`
+        come off the selected type's row in `kTypeConstants`. The struct did
+        not change shape, because the engine still needs all six -- what
+        changed is where the adapter reads them from. The defaults below are
+        Room's row for exactly that reason, so a default-constructed `Params`
+        is a Room and not a mixture. */
     struct Params
     {
         Type  type          = Type::room;
         float sizeM         = roomDefaults::kSizeM;         ///< 0.5..80
         float preDelayMs    = 0.0f;                         ///< 0..250, tail only, never negative
-        bool  linkEr        = false;                        ///< ER travel with the tail, not with dry
+        bool  linkEr        = kPreLinkFixed;                ///< fixed: ER travel with dry
         float decaySeconds  = 1.8f;                          ///< 0.1..20, T_mid
-        float decayShape    = 3.5f;                          ///< 0.04..3.5; 3.5 is linear, i.e. off
-        float attack        = 0.30f;                         ///< 0..1 over the 0-120 ms bloom
+        float decayShape    = roomDefaults::kDecayShape;      ///< per type; 3.5 is linear, i.e. off
+        float attack        = roomDefaults::kAttack * 0.01f;  ///< per type, 0..1 over the 0-120 ms bloom
         float feed          = roomDefaults::kFeed * 0.01f;   ///< 0..1; d in (1-d)*direct + d*ER
 
-        float dampLoFreqHz  = 200.0f;                        ///< 16..1600, the low knee
+        float dampLoFreqHz  = roomDefaults::kDampLoFreqHz;   ///< per type, the low knee
         float dampLo        = 1.20f;                         ///< 0.10..2.00, T60 multiplier below it
-        float dampHiFreqHz  = 1600.0f;                       ///< 1000..2100, the high knee
+        float dampHiFreqHz  = roomDefaults::kDampHiFreqHz;   ///< per type, the high knee
         float dampHi        = 0.40f;                         ///< 0.10..2.00, T60 multiplier above it
 
         float eqLoFreqHz    = 200.0f;                        ///< 16..1600
@@ -113,7 +122,7 @@ public:
 
         ErMode erMode       = ErMode::taps;
         float erDensity     = roomDefaults::kErDensity * 0.01f;   ///< 0..1, the bridge
-        float erShape       = roomDefaults::kErShape;             ///< 0..3, the rise exponent p
+        float erShape       = roomDefaults::kErShape;             ///< per type, the rise exponent p
         float erSpreadMs    = roomDefaults::kErSpreadMs;          ///< 5..200, the envelope sigma
         float erHiCutHz     = 7000.0f;                            ///< 1000..20000, one post-ER shelf
         int   erVariation   = 2;                                  ///< 0..6; 6 is the comb pair

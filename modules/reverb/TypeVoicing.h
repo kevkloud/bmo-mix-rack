@@ -10,18 +10,28 @@ namespace bmo::reverb
 {
 
 //==============================================================================
-/** **A type is a voicing.** Selecting one re-applies that type's ten constants
-    over the parameters that hold them -- SIZE, DENSITY, ER SHAPE, ER SPREAD,
-    MOD DEPTH, MOD RATE, IN HI-CUT, SOURCE, ER and REVERB -- overwriting
-    whatever they currently read. Every time, not only when the module is
-    instantiated. Frosty chose that knowingly on 2026-09-21 (11 section 4); the
-    alternative, a type that applied its block once and then let the knobs drift
-    off it, is a type that tells you less about what you are hearing the longer
-    you use it.
+/** **A type is a voicing.** Selecting one re-applies that type's nine
+    writable constants over the parameters that hold them -- SIZE, DENSITY,
+    ER SPREAD, MOD DEPTH, MOD RATE, IN HI-CUT, SOURCE, ER and REVERB --
+    overwriting whatever they currently read. Every time, not only when the
+    module is instantiated. Frosty chose that knowingly on 2026-09-21 (11
+    section 4); the alternative, a type that applied its block once and then
+    let the knobs drift off it, is a type that tells you less about what you
+    are hearing the longer you use it.
+
+    **Nine and not fourteen, and the missing five are not this class's job.**
+    The 2026-09-21 control-set trim moved ER SHAPE, DECAY SHAPE, ATTACK and the
+    two damping knees into `TypeConstants` with no host lane under them, and a
+    `Setting` can only name a parameter id. The engine reads those five off the
+    same row in `ReverbDsp::paramsFrom`, keyed off the TYPE value it is already
+    handed, so they still change with the type -- on the audio thread's next
+    block rather than through a parameter write, which means nothing a host is
+    automating can fight them. That is the safer half of the arrangement, and
+    it is why the hazard below is smaller than it was.
 
     ## The hazard, stated rather than discovered later
 
-    **`type` is an automatable parameter that now writes ten other automatable
+    **`type` is an automatable parameter that now writes nine other automatable
     parameters.** Automate TYPE and REVERB together and the two fight: the type
     change stamps a level at the moment the host is driving it somewhere else,
     and which one wins depends on their relative order inside the block. There
@@ -30,8 +40,8 @@ namespace bmo::reverb
     inherent in "a type is a voicing", it is the cost of the decision, and the
     place to read about it is here and `modules/reverb/AGENTS.md`.
 
-    What *is* guaranteed: the conflict is confined to the ten. A type change
-    never touches PRE-DELAY, DECAY, ATTACK, the damping rows, the EQ rows, ER
+    What *is* guaranteed: the conflict is confined to the nine. A type change
+    never touches PRE-DELAY, DECAY, the two damping multipliers, the EQ rows, ER
     MODE, ER HI-CUT, VARIATION, WIDTH, MIX or OUTPUT, so automating any of those
     beside TYPE is safe.
 
@@ -58,11 +68,11 @@ namespace bmo::reverb
 
     Three things, and the first of them is the structural one:
 
-    - **`type` is not in what a type writes.** `typeSettings` returns ten
+    - **`type` is not in what a type writes.** `typeSettings` returns nine
       settings and `kType` is not among them, so applying a type can never
       select one. The recursion is not guarded against; it is unconstructible.
     - **`applying` is the belt to that braces.** A host is free to write TYPE
-      again from inside one of the ten notifications, and JUCE delivers a
+      again from inside one of the nine notifications, and JUCE delivers a
       message-thread change synchronously, so a nested call is reachable even
       though a self-triggered one is not. A nested call returns immediately and
       the outer one finishes the block it started, so the parameters never end
@@ -83,7 +93,7 @@ namespace bmo::reverb
 
     ## And it does not fight the smoothers
 
-    Nothing here touches DSP state. Ten parameter values change, `ModuleEngine`
+    Nothing here touches DSP state. Nine parameter values change, `ModuleEngine`
     reads them once at the top of the next block like any other knob move, and
     `DspCore`'s own machinery smooths them -- `kSmoothingMs` for the
     coefficients, `kCrossfadeMs` for SIZE's tap set, the 30 ms raised-cosine dip

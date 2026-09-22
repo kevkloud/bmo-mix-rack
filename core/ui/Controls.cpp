@@ -216,6 +216,12 @@ void PlainKnob::setEndMarks (Knob::EndMarks m)
     repaint();
 }
 
+void PlainKnob::setCatch (double value, double halfWidthOfTravel)
+{
+    knob.setCatch (value, halfWidthOfTravel);
+    repaint();
+}
+
 //==============================================================================
 ConcentricBand::ConcentricBand (juce::RangedAudioParameter& selector, const ParamSpec& selectorSpec,
                                 juce::RangedAudioParameter* gain, juce::Colour accent,

@@ -1,5 +1,26 @@
 # BMO Dwell (`Bdly`) — panel and UI direction
 
+> **SUPERSEDED — read `15-lane-redesign.md` and the panel as built first.**
+>
+> This document is the direction written on 2026-09-20 for a panel that was
+> **rejected three times**. Its diagnosis is in `15`: 20 parameters in a 280 px
+> column is 7.1 controls per 100 px, the densest panel in the rack. What
+> replaced it is a **nine-control face** with everything else revealed, and the
+> schema underneath it changed as well — **THROW, THROW MODE, BUILD, FREEZE and
+> VOICE do not exist**, and the lane replaced them (`10` §11).
+>
+> It is kept because three parts of it are still good and are not written down
+> anywhere else: **§6a's account of how DEQ's expansion mechanism actually
+> works** (widths, the session-only `view` flag, what is and is not a
+> parameter), **§4's caption and readout conventions**, and **§7's split
+> between what is permanent at ship and what stays free**. Everything about
+> rows, counts, widths and performance buttons is history.
+>
+> The specific corrections are marked **CORRECTED 2026-09-22** in place, so no
+> figure here can be mined without meeting the note that says it is wrong.
+> Where this document and the built panel disagree about layout, **the built
+> panel wins** and this one is not the record.
+
 Written on AURORA on 2026-09-20. Direction only, no implementation. Evidence:
 `docs/delay/00-repo-conventions.md`, `docs/delay/10-dsp-spec.md` (cited 00/10),
 `core/ui/Tokens.{h,cpp}`, `core/ui/ModulePanel.h`, `core/ui/Controls.h`,
@@ -8,18 +29,24 @@ labelled DWELL. The creative controls arrive with a matching amendment to 10.
 
 ## 1. Control hierarchy
 
-- **Performance:** THROW and FREEZE — two wide lit buttons on their own row
+**CORRECTED 2026-09-22.** The performance pair and the VOICE ring below are
+**both gone**. THROW and FREEZE were replaced by the lane's gates — SEND, HOLD,
+CHOP and the bipolar LANE GAIN (`10` §11) — and **VOICE was cut outright**
+(`15`, README item 18), so there is no resonance to hang on HIGH CUT, no
+`ui::ConcentricBand` ring, no voicing legend and no fourth-row question. The two
+cuts are plain one-poles with ordinary Hertz readouts. The face is nine
+controls; see §2's correction for what is on it.
+
+- ~~**Performance:** THROW and FREEZE — two wide lit buttons on their own row
   under the primary trio, both shipped enabled in v1 (DECIDED, Frosty
-  2026-09-20). Reachable without hunting, lit from across the room.
+  2026-09-20). Reachable without hunting, lit from across the room.~~
 - **Primary (largest faces):** TIME/NOTE, FEEDBACK, MIX. Time, how long it
-  lasts, how much you hear.
-- **Secondary (two trios):** DRIVE, MOD RATE, MOD DEPTH; then LOW CUT, HIGH
-  CUT (+ VOICE), DUCK. DUCK is the one non-loop control in the loop section.
-- **VOICE** — the creative filter voicing (10 §11's name) — rides as a `ui::ConcentricBand`
-  ring on HIGH CUT rather than taking a fourth row: the repo already hangs a
-  second value on one position that way, the voicing belongs to the cut it
-  colours, and a fourth row costs 100 px the middle lacks. Its legend prints
-  the voicing, not a number.
+  lasts, how much you hear. *(Still true.)*
+- **Secondary:** DRIVE, MOD RATE, MOD DEPTH; then LOW CUT, HIGH CUT, DUCK.
+  DUCK is the one non-loop control in the loop section. *(The "(+ VOICE)" that
+  rode on HIGH CUT is struck.)*
+- ~~**VOICE** — the creative filter voicing (10 §11's name) — rides as a
+  `ui::ConcentricBand` ring on HIGH CUT rather than taking a fourth row.~~
 - **Switch rows (`ui::SwitchButton`, `Tokens::switchWidth` 70):** CHARACTER
   (CLEAN / TAPE / BUCKET), STEREO (STEREO / PING-PONG / DUAL). Three cells is
   the row maximum here. SYNC is one switch inside the TIME cell, not a row of
@@ -34,6 +61,16 @@ labelled DWELL. The creative controls arrive with a matching amendment to 10.
 
 ## 2. Layout
 
+**CORRECTED 2026-09-22 — the eight-row compact layout below is superseded.**
+The face is **nine controls** — CHARACTER, TIME with SYNC, FEEDBACK, MIX,
+STEREO, LO CUT, HI CUT, FX — at 3.2 per 100 px against the rejected panel's 7.1
+(`15`). Everything else is **revealed, not gated**: every parameter stays live
+and is read at all times. The reveal is **three columns at 980 px**, not the
+single 460 px column §6a describes: 260 face + 260 for the main delay's depth +
+400 for the lane, with 20 px gutters and `kPad` each side, which is why 980 and
+not a round number. The rows, the performance row and the row px below are the
+rejected panel's and are kept only as the record of what was measured.
+
 Width **280** (BMO EQ's; 260 content). `ModulePanel` gives 688 design px: 94
 in, 126 out, **468 in the middle**. Slack re-centres, per `modules/sat`.
 
@@ -41,12 +78,15 @@ in, 126 out, **468 in the middle**. Slack re-centres, per `modules/sat`.
 |---|---|---|---|
 | 1 | rule | 16 | legend **DELAY** |
 | 2 | primary trio | 148 | TIME/NOTE (+ SYNC), FEEDBACK, MIX |
-| 3 | performance | 32 | THROW, FREEZE — wide lit buttons |
+| 3 | performance | 32 | THROW, FREEZE — wide lit buttons (**both cut**) |
 | 4 | switch row | 28 | CLEAN / TAPE / BUCKET |
 | 5 | rule | 16 | legend **LOOP** |
 | 6 | trio | 100 | DRIVE, MOD RATE, MOD DEPTH |
-| 7 | trio | 100 | LOW CUT, HIGH CUT (+ VOICE ring), DUCK |
+| 7 | trio | 100 | LOW CUT, HIGH CUT, DUCK (the VOICE ring is cut) |
 | 8 | switch row | 28 | STEREO / PING-PONG / DUAL |
+
+The sketch below is **the rejected panel**, kept as the record. THROW, FREEZE
+and the VOICE ring in it are all cut.
 
 ```
  ---- DELAY ------------------------
@@ -65,7 +105,15 @@ under the STEREO row, not in a tooltip.
 
 ## 3. Momentary behaviour
 
-THROW and FREEZE are ordinary bools in the permanent schema. Everything here
+**CORRECTED 2026-09-22.** THROW and FREEZE are gone; the bools this section
+describes are now **SEND (13), HOLD (15) and CHOP (16)**, and the behaviour
+below still applies to them — it was always behaviour over a plain bool. Two
+differences that matter: **HOLD is not momentary**, it latches by nature because
+switching it off *clears* the lane (`10` §11.4), and **BUILD is not a button at
+all** — it is the upper region of the bipolar LANE GAIN knob, so the travelling
+highlight described below has nothing to draw.
+
+SEND, HOLD and CHOP are ordinary bools in the permanent schema. Everything here
 is panel behaviour over that one bool.
 
 - **Mouse:** true momentary. Down sends 1, up sends 0; release also fires on
@@ -76,17 +124,21 @@ is panel behaviour over that one bool.
   panel-only, never in `PARAMS`; presets, `prepare` and bypass force 0.
 - **Lit state:** accent at full strength with a glow, not the ordinary switch
   tint — must not read as a CHARACTER/STEREO selection.
-- **BUILD:** while THROW is held, feedback ramps from the knob's value toward
-  the self-oscillation stretch and falls back on release. The knob does not
-  move (the parameter stays authoritative); the ramp shows as a travelling
-  highlight on its track.
-- **FREEZE ships enabled in v1**, its own button and slot, never folded into
-  THROW's travel (DECIDED, Frosty 2026-09-20); order is permanent.
+- ~~**BUILD:** while THROW is held, feedback ramps from the knob's value toward
+  the self-oscillation stretch and falls back on release.~~ **Struck**: BUILD is
+  the region of LANE GAIN above its detent, not a button, and it moves the
+  lane's loop gain rather than the main's FEEDBACK.
+- ~~**FREEZE ships enabled in v1**, its own button and slot.~~ **Struck**: what
+  holds is LANE GAIN's **sticky centre detent**, and what the panel has to draw
+  is that detent — the one position where the lane holds at exact unity
+  (`10` §11.2). Where the caption THROW / FREEZE / BUILD changes with the
+  region, that is a caption, not three states.
 
 ## 4. Captions and readouts
 
 `ParamFormat` covers almost everything: `Milliseconds` (TIME); `Percent`
-(FEEDBACK, MOD DEPTH, MIX, DRIVE, VOICE — DRIVE matching BMO Saturator);
+(FEEDBACK, MOD DEPTH, MIX, DRIVE — DRIVE matching BMO Saturator; **VOICE is cut
+and comes off this list**, and LANE GAIN joins it as a *bipolar* percent);
 `Hertz` (LOW CUT, HIGH CUT, MOD RATE, giving `850 Hz` / `2.10 kHz` free);
 `Decibels` (DUCK, unsigned, positive meaning more reduction — the convention
 `currentGainReductionDb` already uses). NOTE is a `choiceParam` whose strings
@@ -104,20 +156,42 @@ tick at the onset. Colour and a tick, not a word.
 
 ## 5. Visual feedback
 
+**CORRECTED 2026-09-22 — `ui::DynamicsMeter` cannot be had at this width.** It
+is a needle VU whose radius is `width/2 − 8 − 19.5`, so in the narrow lane this
+section asked for it **computes a negative radius**, and the narrowest box it
+draws anything readable in is about half the panel. The recommendation below was
+geometrically impossible, not merely tight. **What shipped is a horizontal bar,
+18 px, filling from the left with hairline quarter marks** — a scale without
+printing numbers beside a knob whose own readout is already in dB. §7 puts
+"meter scale and rate" among the things free after ship, so this is a layout
+choice and not a schema one. The 15 Hz rate below is unchanged and is what
+shipped. There is also **no BUILD ramp to carry**: BUILD is a region of LANE
+GAIN, not a ramp the panel animates.
+
 Recommended: **one GR lane for DUCK**, reusing `ui::DynamicsMeter` in its
 gain-reduction mode, right of row 7. Ducking is the only thing here you cannot
 hear as itself, and it needs no new plumbing — it reads the
 `currentGainReductionDb()` hook already on `bmo::ModuleDsp`: an atomic scalar,
-no analyser tap, no lock. The same lane can carry the BUILD ramp.
+no analyser tap, no lock.
 
 Rejected: a tap/echo-decay display. It wants a repeat model on the UI thread
 and new state crossing threads, and the tail is audible already.
 
 Cost: **15 Hz**, as `modules/opto`, `modules/util` and `modules/tune` do,
 rather than the 30 Hz in `core/ui/Controls.cpp` — half the repaints, ample for
-a 180 ms release, quick enough that a held THROW lights without lag.
+a 180 ms release, quick enough that a held SEND lights without lag.
 
 ## 6. Accent
+
+**SETTLED 2026-09-21 — the accent is the orchid `#f094e6`**, third in the table
+below. **Measured off a rendered panel rather than computed: 6.49:1 on the dark
+plate and 1.81:1 on the pale**, both mid-band (`15`, README item 16;
+`products/AGENTS.md` carries the allocation row). The olive-gold this section
+recommends was rejected outright by Frosty, and the warning below that an orchid
+"may read as EQ in a rack" was put to him with renders before he chose. The
+candidates and the arithmetic are kept as the record of what was weighed; **the
+choice is not open**, and the figures in the table are formula-derived rather
+than measured, so the two measured numbers above are the ones to quote.
 
 Dark plate `#2e2e32`, pale `#efefef`. Shipped accents run 5.87–7.19:1 dark and
 1.72–2.00:1 pale — relative luminance ≈0.41–0.49.
@@ -131,11 +205,20 @@ Dark plate `#2e2e32`, pale `#efefef`. Shipped accents run 5.87–7.19:1 dark and
 `11-integration-and-test-plan.md` §1 derives a different three (`#f0938c`,
 `#e694e0`, `#e6e278`); six candidates in all, and one accent is chosen once.
 
-**Recommend `#b2bb54`.** `core/ui/Tokens.h` rejected a gold at 1.41:1 pale —
-that was a *light* gold; darkened into the band the objection lapses. Render
-panel and rack, both appearances, THROW lit, before allocating.
+~~**Recommend `#b2bb54`.**~~ **Overruled** (Frosty, 2026-09-21: "i hate this
+color"), as was a pale gold that measured out of band. The rule the
+recommendation ended on was the right one and is what settled it: render panel
+and rack, both appearances, a gate lit, before allocating.
 
 ## 6a. The FX section, and how expansion works here
+
+> **The mechanism below is correct and is the reason this document is kept.**
+> The widths and the column are not: **CORRECTED 2026-09-22**, expansion is
+> **280 → 980 across three columns**, not 280 → 460 in one. The second width
+> has to carry the main delay's depth *and* the whole lane — two voicings, two
+> FX sections and the lane's gates — which `15` already recorded would not fit
+> 560, let alone 460. What the arrow does, what is a parameter and what is a
+> session-only flag are unchanged.
 
 **How BMO DEQ does it — read this first.** A module declares a second *width*:
 `ModuleDef::expandedWidth` (`core/product/ModuleDef.h:46`, with
@@ -171,19 +254,22 @@ it, touching no parameter.
 second *width*; there is no `expandedHeight`. So the FX section is a **right-hand
 column, not extra rows**.
 
-- **Compact 280** (§2, the rack default) keeps the eight rows exactly as drawn and
-  adds **FX** as one `ui::SwitchButton` at the right end of row 4, beside the
-  CHARACTER trio — a switch, so it reads as a state, not a knob. Lit in the accent.
-- **Expanded 460** (280 + 180, a multiple of 20 as DEQ's two widths are; the
-  standalone default) keeps rows 1–8 at their compact geometry and re-centres the
-  180 px gained into an FX column running beside rows 5–8, under its own rule and
-  legend **FX**: a vertical list of seven `ui::SwitchButton` cells for `fxType`
-  (70 px each, the row maximum does not apply down a column), then one secondary
-  64 px knob, **FX AMOUNT**, under them.
-- **Caption per type.** `Percent` is the readout throughout, with the caption line
-  naming what the percent moves: `AMOUNT (smear)` Diffuse, `(bits)` Crush,
-  `(blend)` either octave, `(seam)` Reverse, `(depth)` Pan, `(sweep)` Sweep. One
-  format, seven captions — all free later (§7).
+- **Compact 280** (the rack default) carries the **nine-control face**, FX among
+  them as one `ui::SwitchButton` — a switch, so it reads as a state, not a knob.
+  Lit in the accent. *(The "eight rows exactly as drawn" this said is §2's
+  superseded layout.)*
+- ~~**Expanded 460** (280 + 180) … an FX column running beside rows 5–8.~~
+  **CORRECTED: expanded is 980, three columns** — 260 face, 260 for the main
+  delay's depth, 400 for the lane, 20 px gutters, `kPad` each side. One FX
+  column was never going to hold two FX sections.
+- **Caption per type.** `Percent` is the readout throughout, with the caption
+  line naming what the percent moves. **CORRECTED 2026-09-22 — there are three
+  types and three captions**: `AMOUNT (smear)` Diffuse, `(depth)` Pan/Tremolo,
+  `(bits)` Crush. `(blend)` for the octaves and `(seam)` for Reverse went when
+  those were cut on 2026-09-21; **`(sweep)` went with Sweep on 2026-09-22, and
+  Sweep went because VOICE did** — it swept VOICE's resonant centre, and there
+  is no such filter any more (`10` §11a). One format, three captions — all free
+  later (§7).
 - With FX off the column greys (`setKnobEnabled`) rather than vanishing, so the
   width never changes underneath a user; the DSP stage is skipped regardless
   (10 §11a).
@@ -194,16 +280,23 @@ Permanent: plugin code, module id, bundle id, preset extension, accent (the
 `products/AGENTS.md` row), panel width, and every parameter's id, **order**,
 range, step and default — including the NOTE strings and their order (choices
 store as indices), SYNC as its own bool rather than positions inside NOTE,
-THROW and FREEZE as plain bools, and MIX's dry-held law, baked into every
-saved value.
+**SEND, HOLD and CHOP as plain bools and LANE GAIN as a bipolar float rather
+than a three-way choice** (corrected 2026-09-22 — it was THROW and FREEZE), and
+MIX's dry-held law, baked into every saved value.
 
 Free later: row heights, face sizes, captions and lifts, legends, readout
-wording, the 50 tick's label, meter scale and rate, latch behaviour, whether
-the self-oscillation stretch or the BUILD ramp is drawn, and anything derived
-from the accent.
+wording, the 50 tick's label, meter scale and rate, latch behaviour, whether the
+self-oscillation stretch is drawn, and anything derived from the accent. *(The
+BUILD ramp is not among them: there is no ramp to draw.)*
 
-## 8. Open decisions
+## 8. Open decisions — all three are closed
 
-1. VOICE as a concentric ring on HIGH CUT, or a fourth knob row (100 px + rule)?
-2. Accent `#b2bb54` — or does the de-esser get first refusal on the gold gap?
-3. Does THROW latch on modifier-click, or stay strictly momentary?
+1. ~~VOICE as a concentric ring on HIGH CUT, or a fourth knob row?~~ **Closed by
+   removal**: VOICE is cut (`15`, README item 18).
+2. ~~Accent `#b2bb54` — or does the de-esser get first refusal on the gold gap?~~
+   **Closed**: the gold was rejected, the de-esser took the rose near 4°, and
+   Dwell has the orchid `#f094e6` (§6).
+3. ~~Does THROW latch on modifier-click, or stay strictly momentary?~~ **Closed
+   by removal**: THROW is gone. The question survives in a different shape for
+   **SEND**, which is meant to be automated a word at a time, and is a panel
+   decision rather than a schema one — **flagged, not decided here**.

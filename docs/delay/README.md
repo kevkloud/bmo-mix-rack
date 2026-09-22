@@ -9,10 +9,10 @@ by dispatched agents on AURORA, 2026-09-20, under `HANDOFF-groundwork.md`.
 - `00-repo-conventions.md` — delay-specific repo delta: reusable DSP, no host tempo reaches modules today, tail and latency rules, free accent gaps.
 - `01-reference-behavior.md` — documented behaviour of tape echo, bucket-brigade, early digital and modern delays; target figures with confidence.
 - `02-design-approaches.md` — interpolation, time-change, feedback loop, stereo, ducking and character-modelling survey; neutral shortlist.
-- `10-dsp-spec.md` — the chosen topology: one loop with clean / tape / bucket-brigade modes, no oversampling, zero reported latency, dry-held-to-50% MIX law, THROW / BUILD, VOICE filters, FREEZE, and the in-loop FX stage. Owns DSP meaning and fixed values.
-- `11-integration-and-test-plan.md` — identity row, registration, the permanent parameter table (ids 0–19) and its order, and how to build the test suites. Owns ids, ranges and choice lists.
+- `10-dsp-spec.md` — the chosen topology: **two loops** (the main delay and the lane) with clean / tape / bucket-brigade modes, no oversampling, zero reported latency, dry-held-to-50% MIX law, the lane's SEND / HOLD / CHOP gates and its bipolar tail, and an in-loop FX stage per engine. Owns DSP meaning and fixed values. §11 was rewritten on 2026-09-22: THROW, BUILD, FREEZE and VOICE are gone.
+- `11-integration-and-test-plan.md` — identity row, registration, the permanent parameter table (**ids 0–31**, rewritten 2026-09-22 from `measure_dwell schema`) and its order, and how to build the test suites. Owns ids, ranges and choice lists.
 - `12-tempo-and-tail-plumbing.md` — host tempo and tail-length plumbing, processor → rack → module; can land as its own PR first.
-- `13-panel-direction.md` — control hierarchy, layout, readouts, meter, accent. Owns layout and captions.
+- `13-panel-direction.md` — **SUPERSEDED by `15` and by the panel as built**; kept for its account of DEQ's expansion mechanism, its caption and readout conventions, and its permanent-at-ship list. Its layout, performance buttons and accent recommendation are history; the specific wrongs are marked in place (2026-09-22).
 - `14-calibration-and-listening.md` — how every CALIBRATE and DECISION value gets settled, and what freezes at ship.
 - `15-lane-redesign.md` — **read before `10`, `11` and `13`**: the nine-control face, THROW rebuilt as a parallel lane, the schema changes, the tape stability bug, and what stage 2 now is.
 - `20-name-clearance.md` — name-clearance note for "Dwell": web search plus a USPTO registry search; not legal advice.
@@ -51,8 +51,9 @@ by dispatched agents on AURORA, 2026-09-20, under `HANDOFF-groundwork.md`.
     output-gated by CHOP, tail set by one bipolar knob whose sticky centre is
     unity. SEND onto an occupied lane **sums**.
 11. **The lane is a full mirror** of the main delay — its own character, stereo,
-    filters, voice, modulation, drive and FX — with **LINK**, and unlinking
-    **seeds from the main's current values**.
+    filters, modulation and FX — with **LINK**, and unlinking **seeds from the
+    main's current values**. *(Amended: the voice and drive this listed were
+    both cut, items 18 and 20, and the FX trio has its own tie, item 25.)*
 12. **This supersedes item 2**: the old bit-exact FREEZE is replaced by the
     lane's centre detent, which holds at unity but still laps the character and
     filters, so a long hold colours. The non-eroding hold is gone from v1.
@@ -71,17 +72,19 @@ by dispatched agents on AURORA, 2026-09-20, under `HANDOFF-groundwork.md`.
 
 ## Decided (Frosty, 2026-09-21, second pass) — the table is settled
 
-17. **The schema is 32 parameters**, ids renumbered, every one inside a rack
-    slot's 32 host lanes so all are automatable everywhere. The full table is
-    in `15-lane-redesign.md` and is authoritative over `11` §3 until that is
-    rewritten.
+17. **The schema is 33 parameters**, ids 0–32, renumbered. Ids 0–31 fill a rack
+    slot's 32 host lanes and are automatable everywhere; **id 32 sits outside
+    them on purpose** (item 25), so it is the one parameter that is not. The
+    full table is in `15-lane-redesign.md` and in `11` §3, rewritten from it on
+    2026-09-22.
 18. **VOICE and lane VOICE are cut.** LO CUT and HI CUT are already continuous
     sweeps; VOICE only added resonance on top. Cutting it also retires the
     state-variable filters and their closed-form peak normalisation.
 19. **`fx_type` loses Octave up, Octave down and Reverse**, leaving Diffuse,
     Sweep, Pan/Tremolo and Crush. Octaves compound in a feedback loop; Reverse
     was the only type needing a second buffer. Choice lists are append-only
-    after ship, so this was the last moment.
+    after ship, so this was the last moment. **Superseded in part by item 26:
+    Sweep went too, and the list is three.**
 20. **lane DRIVE is cut, and is the one to reconsider** if the sound wants it —
     appends are permitted after ship.
 21. **Both FX buttons stay.** "Amount at 0 means bypassed" was considered and
@@ -104,3 +107,35 @@ by dispatched agents on AURORA, 2026-09-20, under `HANDOFF-groundwork.md`.
     would add up to +3.7 dB on a 20 dB transient, in-loop, on every lap. That
     figure is **modelled, not measured — bench it**, and the clamp fallback
     remains Frosty's decision.
+
+## Decided (Frosty, 2026-09-22) — answering the spec rewrite's open questions
+
+24. **LINK ties SIX parameters**, the lane's voicing: `lane_character`,
+    `lane_stereo`, `lane_low_cut`, `lane_high_cut`, `lane_mod_rate`,
+    `lane_mod_depth` (ids 23–28). Not eight, which counted VOICE and lane DRIVE
+    before they were cut, and not nine: the FX trio is **deliberately outside
+    LINK**, because independent FX is the feature — a thrown word can be
+    crushed against a clean main delay, and folding FX in would mean unlinking
+    the voicing to get it.
+25. **`fx_link` is added at id 32**, a bool defaulting on, tying the lane's FX
+    trio (29–31) to the main's (17–19). It is **off-lane on purpose**: past
+    `kParamsPerSlot`, so `SlotOverflow` carries it — working in the panel, the
+    DSP, presets and saved state, automatable standalone, but with **no host
+    automation lane in a rack**. Frosty: *"leave this separate fx link off a
+    lane in case it needs to be cut later."* This is the one Dwell parameter
+    that is not rack-automatable, and item 17 is written accordingly.
+26. **Sweep is cut**, leaving `fx_type` at **three** — Diffuse, Pan/Tremolo,
+    Crush. **It was cut because VOICE was cut**: Sweep moved VOICE's resonant
+    centre per repeat, and replacing that with a band-pass of its own inside the
+    FX stage would reintroduce the filter item 18 had just removed. Lists are
+    append-only after ship, so this was the last moment.
+27. **The lane's build ceiling `g_max` is a CALIBRATE value**, heard in `14`
+    §3's listening round rather than fixed on paper. The safety clip bounds the
+    lane at every value in the range, so this is a musical choice, not a
+    stability one.
+
+## Still open after that pass
+
+- **`chop`'s 1 ms fade against `11` §4's broadband −60 dBFS assertion** (`10`
+  §11.4). It needs a **measurement**, not a ruling: band-limit the assertion to
+  5 kHz, lengthen the fade to ~3 ms, or record the measured edge.

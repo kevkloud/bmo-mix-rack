@@ -55,8 +55,9 @@ inline constexpr juce::uint32 kAccent = 0xfff094e6;
 const ModuleDef& module()
 {
     // Two widths, the mechanism BMO DEQ established: 280 compact, which a rack
-    // opens it at, and 460 expanded, which standalone opens it at and which
-    // carries the FX column. Both are multiples of 20.
+    // opens it at, and 980 expanded, which standalone opens it at and which
+    // carries the main delay's depth and the whole of the lane. Both are
+    // multiples of 20.
     //
     // The view is session-only -- an attribute on the saved state, never a
     // parameter and never in a preset -- so automating or preset-loading `fx`
@@ -73,17 +74,26 @@ const ModuleDef& module()
         {
             return std::make_unique<DwellPanel> (std::move (ctx));
         },
-        // **560, not docs/delay/13 §6a's 460 -- a redesign proposal, not a
-        // settled number.** 280 less the padding is a 260 px column, and this
-        // panel is laid out in whole columns: 560 is two of them with a 20 px
-        // gutter between. At 460 the second column is 168 px, too narrow for
-        // the knob trio the LOOP section is now laid out as. Still a multiple
-        // of 20, as BMO DEQ's two widths are.
+        // **980: three columns, and the arithmetic is exact rather than
+        // approximate.** 980 less `kPad` each side is 960 of content, which is
+        // 260 + 20 + 260 + 20 + 400 -- the face's own column, the main delay's
+        // depth, and a 400 px column carrying the whole of the lane. Still a
+        // multiple of 20, as BMO DEQ's two widths are.
         //
-        // docs/delay/15 takes the panel to **980** for the lane's own column;
-        // that is the redesign pass, not this one, and the schema landing
-        // ahead of it is deliberate.
-        560,
+        // 560 -- two columns -- is what this was until the lane was drawn, and
+        // 1120 (four even 260s) was the fallback if the lane overran 400. It
+        // does not. Widthwise the lane's widest row is its FX band, a 172 px
+        // 2x2 grid beside a 220 px AMOUNT whose caption measures 209 at 15 pt;
+        // heightwise it is nine bands in the 611 px under the LANE rule, which
+        // leaves 11 px of air between rows against the face's 9. 1120 would
+        // have split the lane across two columns and stopped it reading as one
+        // engine, which is the whole reason for drawing it at all.
+        //
+        // **There is exactly one of these.** Two separate reveals -- one for
+        // the main delay's depth and one for the lane -- are not available
+        // however much a composition might want them: `ModuleDef` carries a
+        // single `expandedWidth` and the view flag behind it is one bool.
+        980,
     };
 
     return def;

@@ -7,23 +7,33 @@ namespace bmo::dwell
 {
 
 //==============================================================================
-// BMO Dwell's parameter schema: **thirty-two parameters, settled 2026-09-21**.
+// BMO Dwell's parameter schema: **thirty-three parameters, 0-32, settled
+// 2026-09-22**.
 //
 // docs/delay/15-lane-redesign.md, "THE PARAMETER TABLE", is the authoritative
-// one and is what this file transcribes. **docs/delay/11 §3 is stale** -- it
-// still prints the twenty-parameter checkpoint this replaced, and is rewritten
-// in its own pass. See modules/eq/params.h for why a schema is permanent, and
-// tests/plugin/DwellTests.cpp and tests/dsp/DwellDspTests.cpp for the two
-// golden tables that pin this one.
+// one and is what this file transcribes. See modules/eq/params.h for why a
+// schema is permanent, and tests/plugin/DwellTests.cpp and
+// tests/dsp/DwellDspTests.cpp for the two golden tables that pin this one.
 //
-// **Thirty-two is the ceiling, not a coincidence.** A rack slot carries
-// `RackProcessor::kParamsPerSlot` = 32 host automation lanes. `SlotOverflow`
-// keeps anything past 32 working -- in the panel, the DSP, presets and saved
-// state -- but gives it no host lane, so it **cannot be automated in a rack**.
-// Dwell fits exactly, so every parameter here is automatable everywhere, and
-// DwellTests asserts `specs().size() <= 32` to keep it that way. Anything
-// appended after ship lands past the grid and pays that price knowingly
-// (docs/delay/15 names lane DRIVE as the candidate).
+// **Thirty-two is the rack's ceiling, and one parameter is deliberately over
+// it.** A rack slot carries `RackProcessor::kParamsPerSlot` = 32 host
+// automation lanes. `SlotOverflow` keeps anything past 32 working -- in the
+// panel, the DSP, presets and saved state, and on a host automation lane when
+// the plugin runs standalone -- but gives it no lane *in a rack*.
+//
+// Ids 0-31 all get lanes. **Id 32, `fx_link`, does not, and that is the
+// point.** Frosty, 2026-09-22: "leave this separate fx link off a lane in case
+// it needs to be cut later". It is the newest idea in the schema and the one
+// most likely to be argued with, so it is the one put where removing it costs
+// nothing: nothing below it can renumber, because there is nothing below it,
+// and no rack session can have keyed a lane to it. Everything a user would
+// reasonably automate -- every gate, every time, every tone -- is under the
+// line. A set-and-forget bool is what a rack lane is worth least on.
+//
+// DwellTests asserts exactly that shape: one parameter off-lane, it is
+// `fx_link`, and the first 32 all get lanes. Anything appended after this
+// lands past the grid too and pays the same price knowingly (docs/delay/15
+// names lane DRIVE as the next candidate).
 //
 // Three things are frozen together at ship and cannot be argued separately:
 // the ids, their **order**, and the **index order of the three choice lists**.
@@ -35,14 +45,18 @@ namespace bmo::dwell
 // appended and nothing else may move: no deletion, no reorder, no rename, no
 // change of TYPE. Nothing has shipped yet, which is the whole reason the
 // 2026-09-21 table could delete VOICE, renumber everything after it, rename
-// three rows and re-type a fourth. It is the last chance to do any of that.
+// three rows and re-type a fourth, and the reason the 22nd could cut a name
+// out of a choice list. It is the last chance to do any of that.
 //
 // What moved from the twenty-parameter checkpoint, for anyone reading an older
 // document: **VOICE is deleted** and everything after it renumbers, with no
 // hole left behind; `throw` is **`send`**; `throw_mode` is **`lane_gain`** and
 // is a bipolar float rather than a three-way choice; `freeze` is **`hold`**;
-// `chop` is new; `fx_type` drops to **four** entries; and twelve **lane**
-// parameters are appended at ids 20-31.
+// `chop` is new; and twelve **lane** parameters are appended at ids 20-31.
+//
+// What moved on 2026-09-22: `fx_type` drops from four entries to **three** --
+// Sweep is cut, see kFxTypeNames -- and **`fx_link` is appended at id 32**,
+// splitting what LINK ties. No id below 32 moved.
 //
 // `specs()` order == `enum Index` order.
 //==============================================================================
@@ -97,6 +111,9 @@ inline constexpr auto kLaneFx        = "lane_fx";
 inline constexpr auto kLaneFxType    = "lane_fx_type";
 inline constexpr auto kLaneFxAmount  = "lane_fx_amount";
 
+/** Id 32, and the only one past a rack slot's lanes. See the header comment. */
+inline constexpr auto kFxLink = "fx_link";
+
 enum Index
 {
     time, sync, note, feedback, character, stereo, lowCut, highCut,
@@ -104,11 +121,15 @@ enum Index
     fx, fxType, fxAmount,
     link, laneLevel, laneTime, laneCharacter, laneStereo, laneLowCut,
     laneHighCut, laneModRate, laneModDepth, laneFx, laneFxType, laneFxAmount,
+    fxLink,
     count
 };
 
-static_assert ((int) count == 32,
-               "docs/delay/15's table allocates ids 0-31, which is exactly a rack slot's lanes");
+/** Ids 0-31 are exactly a rack slot's lanes; `fx_link` is the one row over the
+    line, deliberately (the header comment says why, and DwellTests asserts
+    that it is the *only* one). */
+static_assert ((int) fxLink == 32, "fx_link is id 32 -- the first row past a rack slot's lanes");
+static_assert ((int) count == 33, "docs/delay/15's table allocates ids 0-32");
 
 //==============================================================================
 // Choice lists. Index order is stored in sessions -- append only after ship.
@@ -140,17 +161,28 @@ inline constexpr const char* kStereoNames[] { "Stereo", "Ping-pong", "Dual offse
 
 /** Least to most intervention, and **index 0 is Diffuse rather than Off**:
     `fx` owns off, so a corrupt state landing on 0 gives the gentlest type with
-    the stage still gated by a bool that defaults off.
+    the stage still gated by a bool that defaults off. That is the one thing
+    about this list which is not a candidate, and it survives both cuts below
+    because Diffuse has stayed index 0 through both of them.
 
-    **Four, from 2026-09-21** (docs/delay/15). Octave up and Octave down are cut
-    because they compound in a feedback loop -- three repeats is three octaves
-    -- and Reverse because it was the only type needing a second buffer, which
-    must not be allocated on the audio thread. Four also tiles as a 2x2 grid
-    rather than an awkward seven. Choice lists are append-only after ship, so
-    this had to happen now or never; it is still a candidate list until the
-    types are heard, and anything that fails listening comes *out* rather than
-    being left in as a dead index. */
-inline constexpr const char* kFxTypeNames[] { "Diffuse", "Sweep", "Pan/Tremolo", "Crush" };
+    **Seven to four on 2026-09-21** (docs/delay/15). Octave up and Octave down
+    went because they compound in a feedback loop -- three repeats is three
+    octaves -- and Reverse because it was the only type needing a second
+    buffer, which must not be allocated on the audio thread.
+
+    **Four to three on 2026-09-22.** **Sweep is cut** (DECIDED, Frosty): it was
+    specified as sweeping VOICE's resonant centre, and VOICE was deleted the
+    day before, so there is no filter left in the loop for it to sweep. LO CUT
+    and HI CUT are plain one-poles with nothing to resonate. Giving the FX
+    stage a resonant band-pass of its own purely to keep the name was weighed
+    and is not worth a filter, a parameter's worth of tuning and a second
+    thing that can self-oscillate.
+
+    Choice lists are append-only after ship, so both cuts had to happen now or
+    never. This is still a candidate list until the types are heard, and
+    anything that fails listening comes *out* rather than being left in as a
+    dead index. */
+inline constexpr const char* kFxTypeNames[] { "Diffuse", "Pan/Tremolo", "Crush" };
 
 inline constexpr int kDefaultNote = 8;   ///< "1/8D"
 
@@ -161,9 +193,16 @@ inline constexpr int kDefaultNote = 8;   ///< "1/8D"
 /** The longest delay either engine's ring is sized for, in ms (docs/delay/10
     §10; DECIDED, Frosty 2026-09-20). The buffer is allocated at `prepare` from
     this figure and never from a parameter: 2.0 s at 192 kHz rounds up to
-    524 288 samples per channel, 4.0 MB per instance. Bucket-brigade caps itself
-    lower in the DSP; the allocation does not change. TIME and LANE TIME share
-    the figure, so the lane costs a second ring of the same size. */
+    524 288 samples per channel, which is 2.0 MB a ring in stereo.
+
+    TIME and LANE TIME share the figure, so **the lane costs a second ring of
+    the same size**: two engines is **8.0 MB per instance** at 192 kHz, and
+    **16.2 MB worst case** with both engines' FX stages allocated as well. The
+    4.0 MB this comment gave until 2026-09-22 was the figure for one engine and
+    was left behind when the lane landed.
+
+    Bucket-brigade caps itself lower in the DSP; the allocation does not
+    change. */
 inline constexpr float kMaxTimeMs = 2000.0f;
 
 /** **SYNC ships disabled.** Its slot, NOTE's slot and NOTE's index order are
@@ -310,14 +349,18 @@ inline const ParamSpecs& specs()
         // character, stereo mode, filters, modulation and FX -- so that a
         // thrown word can be a different sound from the repeats it lands in.
         //
-        // 20 -- LINK, and it is the one bool on this panel that **defaults
-        // on**: a mirror nobody has asked to differ should follow the main
-        // delay, and a fresh instance is then one delay with one set of
-        // controls. Unlinking seeds the lane from the main's current values so
-        // nothing jumps -- and that seeding is a **UI gesture, not a side
-        // effect of this parameter changing**, or automating LINK would
-        // rewrite eight parameters on every pass and fight the user's own
-        // automation (docs/delay/15).
+        // 20 -- LINK, one of the two bools here that **default on**: a mirror
+        // nobody has asked to differ should follow the main delay, and a fresh
+        // instance is then one delay with one set of controls. Unlinking seeds
+        // the lane from the main's current values so nothing jumps -- and that
+        // seeding is a **UI gesture, not a side effect of this parameter
+        // changing**, or automating LINK would rewrite six parameters on every
+        // pass and fight the user's own automation (docs/delay/15).
+        //
+        // **It ties the six voicing rows and nothing else** from 2026-09-22 --
+        // `lane_character`, `lane_stereo`, the two lane cuts and the two lane
+        // modulation rows. The lane's FX trio is tied separately by `fx_link`
+        // at id 32; see it for why they are two switches rather than one.
         S::boolParam (kLink, "Link", true),
 
         // 21 -- LANE LEVEL. The lane's loudness against the main delay's wet,
@@ -363,6 +406,29 @@ inline const ParamSpecs& specs()
         S::boolParam   (kLaneFx, "Lane FX", false),
         S::choiceParam (kLaneFxType, "Lane FX Type", { std::begin (kFxTypeNames), std::end (kFxTypeNames) }, 0),
         S::floatParam  (kLaneFxAmount, "Lane FX Amount", 0.0f, 100.0f, 0.1f, 35.0f, F::Percent),
+
+        //== Id 32, and off a rack lane on purpose ============================
+        //
+        // 32 -- FX LINK, and it is the **second** bool here that defaults on.
+        //
+        // LINK (id 20) ties the lane's *voicing* -- character, stereo, both
+        // cuts, both modulation rows, six parameters. This ties its **FX
+        // trio** and nothing else. They are split because of what independent
+        // FX is for (DECIDED, Frosty 2026-09-22): a thrown word crushed
+        // against a clean main delay is the sound the lane has its own FX
+        // stage in order to make, and folding FX into LINK would mean unlinking
+        // the voicing to get it -- paying for six parameters of divergence to
+        // buy one.
+        //
+        // Default **on**, matching LINK, for the same reason LINK defaults on:
+        // a fresh instance is one delay with one set of controls, and you
+        // unlink to diverge rather than link to agree.
+        //
+        // **This is the row that is off a rack slot's lanes**, and it is the
+        // row chosen for that on purpose. See the header comment: it is the
+        // newest idea in the table, it is a set-and-forget bool, and putting
+        // it last means cutting it renumbers nothing.
+        S::boolParam (kFxLink, "FX Link", true),
     };
 
     return s;

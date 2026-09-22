@@ -49,8 +49,10 @@ is the expensive option). Read position `w − D`, real-valued.
 
 ## 3. Feedback loop and stability
 
-Per line, into the ring: `v[n] = s·x[n] + Σ_j g_ij·C(y_j[n])` — `y_j` line j's read,
-`C(·)` the character chain (§4), `g_ij` §8's matrix, `s` §11's send gate.
+Per line, into the ring: `v[n] = x[n] + Σ_j g_ij·C(y_j[n])` — `y_j` line j's read,
+`C(·)` the character chain (§4), `g_ij` §8's matrix. **The main loop has no input
+gate.** The old `s` send gate is removed, not repurposed (§11), so there is no
+mechanism by which the lane can disturb the main delay.
 
 Stability requires `|g|·|H(e^{jω})|·|I(e^{jω})|·κ < 1` for all ω — `H` the
 filter cascade, `I` the interpolator, `κ` the shaper's incremental gain.
@@ -250,6 +252,12 @@ No makeup or auto-gain (DECIDED, Frosty 2026-09-20): any trim would multiply the
 guarantee, and the safety clip is in-loop only, so the output is never clipped for
 the user. Latency is 0 and nothing is oversampled, so **no dry ring is needed**.
 
+**Those two figures are written for one wet engine** and §11 adds a second: with
+the lane running at LEVEL 0 the 50 % case is dry unity plus *two* wet unities,
+roughly +4.8 dB typical and +9.5 dB worst (§11.7). And while the output is still
+never clipped, the lane at the top of LEVEL's travel can legitimately put about
++24 dBFS on the wet bus, which no path in Dwell could before (§11.6).
+
 The null test asserts bit-exactness for **every m ≤ 0.5**, not just m = 0: with TIME
 beyond the test block so no repeat arrives, output must equal input
 sample-for-sample at m = 0, 0.1, 0.25, 0.4 and 0.5. The dry gain must therefore snap
@@ -273,63 +281,342 @@ reaches ~1.5 s, and 2 s covers a quarter note at 30 BPM). BBD caps at 1500 ms. A
 = **2.0 MB per channel, 4.0 MB per instance** (+ ~4 KB of state); 0.5 MB per channel
 at 44.1 kHz. Allocate at `prepare` from the fixed maximum, never from a parameter.
 
-## 11. Creative processing
+**That figure is per engine.** §11's lane is a second ring of the same fixed
+maximum — `lane_time` shares TIME's range — so an instance is **8.0 MB at
+192 kHz** and 2.0 MB at 44.1 kHz, plus ~0.2 MB of FX scratch across both engines
+at the top rate. Nothing else allocates: no candidate needs a second buffer now
+that Reverse is cut (§11a). Eight Dwells in a full rack at 192 kHz is ~65 MB of
+rings. `modules/dwell/params.h`'s `kMaxTimeMs` comment and `11` §4k still quote
+the one-engine figure and need the same correction.
 
-**THROW** is a send gate `s` on the input injection only; recirculation and the dry
-path are untouched, so a throw never disturbs an existing tail. Normal state is send
-open, `s = 1`. Armed, `s = 0` until THROW is held, and `s` follows a half-cosine
-ramp — 5 ms opening, 15 ms closing (CALIBRATE) — click-free but tight enough to
-catch one word. Gate timing quantises to the block boundary; no lookahead.
+## 11. The lane
 
-**BUILD**: while held, loop gain rises as `g(t) = g + (g_thr − g)(1 − e^(−t/τ_b))`,
-τ_b = 400 ms, `g_thr = max(g, 1.02)` capped at FEEDBACK's 1.05; on release it relaxes
-with τ_r = 800 ms (CALIBRATE), so the build decays rather than cuts. BUILD moves only
-`g`, so §3's bound and safety clip govern it unchanged — a held throw reaches the
-same bounded limit cycle, never divergence. Cost: one scalar ramp.
+**BMO Dwell is two delay engines running at once in one instance, not one engine
+with modes** (DECIDED, Frosty 2026-09-21; `15`). The **main delay** is §§0–10,
+unchanged and always running, ducked by the input per §6. The **lane** is a
+second engine of the same construction, with its own storage, fed only when
+asked, and never touched by the ducker.
 
-**VOICE** (the loop voicing). Replace the two one-pole cuts with one TPT state-variable filter each,
-damping `R = 1/(2Q)`, `Q = 0.5 + VOICE·5.5` (CALIBRATE). At VOICE 0 the pair is §4's
-neutral cascade; with resonance up and the cutoffs closed together it is a band-pass
-— the telephone voicing near 300 Hz / 3.4 kHz at VOICE ≈ 0.6 (CALIBRATE). **Each
-stage is peak-normalised to unit magnitude in closed form**: a resonant 2-pole peaks
-at `Q/√(1 − 1/(4Q²))` for Q > 1/√2, so divide by that. `|H| ≤ 1` then holds and §3's
-bound survives; unnormalised, Q = 6 self-oscillates at a third of the feedback travel
-and grows as `Q^k` per repeat. Filtering compounds as `|H|^k`: the peak holds while
-the skirts fall, so selectivity grows roughly as `Q√k` and the repeats narrow into a
-pitched ring by the sixth. Sample-rate invariant as in §4; two SVFs per channel,
-replacing the one-poles.
+This section previously specified THROW as a send gate with a three-way
+`throwMode`, plus BUILD, FREEZE and VOICE. **All four are gone** — the schema
+they belonged to no longer exists (`15`'s table, ids 13–16 and 20–31). What
+replaced them is below; what their removal costs is §11.5.
 
-**Ping-pong** is fully specified in §8. No WIDTH control in v1: with the dry
-bit-exact below 50% MIX the image already reads as wide wet over centred dry; if
-added later, a wet-only mid/side trim after the loop tap.
+**The main loop loses its input gate.** §3's injection is
+`v[n] = x[n] + Σ_j g_ij·C(y_j[n])` — the `s` term is **removed, not
+repurposed**. There is then no mechanism by which anything the lane does can
+disturb the main delay, and that is provable rather than argued: the main
+line's output must be **bit-identical** between a render in which SEND is held
+throughout and one in which it is never touched (`11` §4e, test 1).
 
-**FREEZE**: own button, own parameter slot (11 §3 row 17), shipped enabled in v1 —
-not folded into THROW's travel/`throwMode` (DECIDED, Frosty 2026-09-20). Send
-closed, loop gain exactly 1.0, **every in-loop stage bypassed** —
-filters, shaper, DC blocker, clip. The loop is then a bit-exact circulating buffer,
-stable indefinitely and cheaper than running; anything less erodes the held sound.
-**The latched length rounds to a whole sample so the interpolator is bypassed too** —
-at a fractional phase Hermite is below unity and the hold would darken and decay.
-Any DC present at the latch circulates undamped (blocker bypassed): bounded, but it
-offsets the held sound, so M3 logs it. Length is latched at freeze, and TIME and
-modulation are ignored while held
-(DECISION), since a length change tears the loop.
+### 11.1 Topology
+
+Let `x[n]` be the module's dry input pair, `y_main` the main loop's read and
+`y_lane` the lane's.
+
+1. **The lane taps the dry input, not the main's wet**:
+   `v_lane[n] = s_lane[n]·x[n] + g_lane·C_lane(y_lane[n])`, `s_lane` being
+   SEND's ramp (§11.4). A send should catch the source word, not the main
+   delay's already-coloured repeats; tapping the main's wet would also make the
+   lane's content depend on the main's FEEDBACK, which is the bit-identity
+   claim above running backwards. The alternative is recorded here so the
+   choice is visible, not hidden (DECISION, Frosty's to overrule).
+2. **`C_lane(·)` is the full character chain of §4 and §11a** with the lane's
+   own parameters: LOW CUT → HIGH CUT → mode filters → FX → DC blocker →
+   shaper → **safety clip**. Same code, **second instance, second state**. No
+   buffer, filter state, LFO phase, follower or crossfade is shared between the
+   engines; see §11a.
+3. **The lane's output is gated by CHOP, scaled by LEVEL, and summed into the
+   wet bus after the main's loop tap and after the ducker**:
+   `wet = GR·wet_main + chop[n]·10^(lane_level/20)·y_lane`. §6's `GR` never
+   reaches the lane (DECIDED; `15`) — the lane's whole job is to be heard.
+4. **The sum is inside MIX.** `out = d(m)·dry + w(m)·wet` is unchanged, so §9's
+   guarantees survive: the dry path is still bit-exact unity below 50 % MIX,
+   and MIX 0 still silences both engines.
+
+### 11.2 The lane's tail: one bipolar knob (`lane_gain`, id 14)
+
+**`lane_gain` is a single bipolar control, −100…+100 %, with a sticky centre.**
+Below centre the lane decays (a throw), at centre it holds (a freeze), above
+centre it grows (a build). These are **three regions of one loop gain, not
+three modes**, which is why one control covers them and why the caption —
+THROW / FREEZE / BUILD — changes with the region while nothing in the schema
+does. Default **−40**, in the throw region.
+
+With `L = lane_gain / 100 ∈ [−1, +1]`, and `P_c` the lane character's reference
+loop peak from **§3, which owns it and is not restated here**:
+
+| region | loop gain |
+|---|---|
+| `L < 0` — THROW | `g_lane = (1 + L)^1.6 / P_c` |
+| `L = 0` — FREEZE | `g_lane = 1 / P_c` **exactly**, i.e. loop peak magnitude **1.000** |
+| `L > 0` — BUILD | `g_lane = (1 + (g_max − 1)·L²) / P_c` |
+
+- **The value that is exact unity is `lane_gain = 0.0`, and only that.** The
+  0.1 step divides the travel evenly about the centre, so the host's normalised
+  lane lands on it exactly (`params.h`, id 14). At the detent the DSP uses
+  `1/P_c` as a literal and **the smoother snaps to it rather than approaching
+  it** — the same rule §9 already imposes on the dry gain below 50 % MIX, and
+  for the same reason: a smoothed approach leaves 0.9999 circulating, which is
+  a hold that quietly decays. A detent labelled FREEZE is a promise that centre
+  is unity, and §3's normalisation is the other half of that promise: without
+  it, unity would sit at a different knob position on every character.
+- **The decay region is §3's feedback law rescaled so unity sits at the top of
+  the region.** The main maps `fb ∈ [0,1]` to `1.05·fb^1.6 / P_c`; the lane maps
+  `1 + L ∈ [0,1]` to `(1+L)^1.6 / P_c`. Same exponent, same feel, same
+  resolution in the 2–8-repeat region. At the default `L = −0.4` the loop peak
+  is 0.442, about **−7.1 dB a lap**: at the default 250 ms lane time that is
+  roughly eight or nine audible repeats, gone in ~2.1 s. **That is why the
+  default sits in the throw region and not at the detent** — a first SEND must
+  echo and fade, not sustain forever.
+- **The build region is quadratic, not linear** (DECISION), so the useful
+  resolution sits just above the detent where the difference between 1.01 and
+  `g_max` lives, and so the curve leaves the detent with zero slope — which is
+  what makes the sticky centre feel like part of the travel rather than a notch
+  cut into it.
+- **`g_max`, the build ceiling, is CALIBRATE** (Frosty, 2026-09-22): it is
+  settled by ear in `14` §3's listening round, not decided on paper, because how
+  fast a build should swell is a musical judgement and the arithmetic below only
+  bounds the search. The main loop caps at 1.05 by README Decided item 4 and the
+  lane may sit higher, a violent build being the point. At 250 ms lane time:
+  1.05 gives +0.42 dB a lap, ~1.7 dB/s, about 12 s from unity to the ceiling —
+  slow for something called BUILD; 1.10 gives ~3.3 dB/s, about 6 s; 1.3 gives
+  ~10 dB/s, a violent swell. Whatever is heard, it is a *starting* gain and not
+  a bound — §11.6's clip is the bound, at every value in that range.
+
+### 11.3 What the lane mirrors: LINK (id 20) and FX LINK (id 32)
+
+**The lane is a full mirror of the main delay** (README Decided item 11): its
+own TIME, character, stereo mode, cuts, modulation and FX stage, so a thrown
+word can be a different sound from the repeats it lands in. It does **not**
+mirror FEEDBACK, DUCK, DRIVE or MIX — the first two have no counterpart in the
+lane by construction (§11.2, §11.1), lane DRIVE was cut (`15`), and MIX governs
+both engines together. `lane_time` (22) and `lane_level` (21) are never mirrored
+either: differing from the main is the point of them.
+
+**There are two ties, and they are separate on purpose** (DECIDED, Frosty
+2026-09-22):
+
+- **LINK (id 20, default on) ties the voicing: six parameters, ids 23–28** —
+  `lane_character`, `lane_stereo`, `lane_low_cut`, `lane_high_cut`,
+  `lane_mod_rate`, `lane_mod_depth`. That is the whole set; **it is six, not
+  eight and not nine**, and any earlier count came from a table that still had
+  VOICE and lane DRIVE in it.
+- **FX LINK (id 32, default on) ties the FX trio**, 29–31 to 17–19, and is a
+  parameter of its own rather than part of LINK. **The lane's FX being
+  independent is the feature**: a thrown word can be crushed against a clean
+  main delay. Folding FX into LINK would mean unlinking the whole voicing to get
+  that, which is exactly backwards. **Id 32 is deliberately off-lane** — past
+  `RackProcessor::kParamsPerSlot`, so `SlotOverflow` carries it: it works in the
+  panel, the DSP, presets and saved state, and automates standalone, but has no
+  host automation lane in a rack. Frosty's reason, recorded as he gave it:
+  *"leave this separate fx link off a lane in case it needs to be cut later."*
+  A set-and-forget tie is the cheapest thing to spend the overflow on, and
+  sitting outside the grid is what would let it be removed later without
+  renumbering anything.
+
+**While a tie is on, the lane's parameters under it are ignored, not
+overwritten**: nothing is written to them, they keep whatever they held, and the
+lane reads the main's ids directly.
+
+**Unlinking seeds the lane from the main's current values, and that seeding is a
+UI gesture, not a side effect of the parameter changing** (DECIDED; `15`) — for
+both flags. If it fired whenever the flag went false, automating it would
+rewrite its whole set on every automation pass and fight any automation the user
+had drawn on the lane's own controls. The parameter is a flag; the seed is
+something a **click** does — the same separation `11` §3 already draws between a
+click that opens the expanded view and a parameter change that must never resize
+the module. `11` §4e asserts it by counting host-visible parameter changes
+across an automation pass of each flag: the count is exactly zero.
+
+### 11.4 SEND (13), HOLD (15) and CHOP (16)
+
+**SEND gates the lane's input only.** Normal state is closed, `s_lane = 0`;
+while SEND is true `s_lane` follows a half-cosine ramp — **5 ms opening, 15 ms
+closing** (CALIBRATE, the figures the old THROW used) — click-free but tight
+enough to catch one word. Gate timing quantises to the block boundary; no
+lookahead. SEND is meant to be automated a word at a time.
+
+**SEND onto an occupied lane sums** (DECIDED; `15`): the new word is added to
+whatever is circulating, so words layer into a chord. **What bounds the
+accumulation is the lane's own in-loop safety clip** — §3's fixed tanh at 1.0,
+one instance per engine, last in `C_lane`. Every lap the circulating content
+passes through it, so the steady state cannot exceed the ceiling however many
+words are sent. Two consequences worth stating plainly:
+
+1. **Layering is bounded by saturation, not by headroom.** The fifth word laid
+   onto a full lane does not make it louder; it makes it more saturated, and the
+   character's shaper colours it. That is the only bound there is, and it is a
+   musical one.
+2. **Injection is clipped one lap late.** `x[n]` enters the ring *before* the
+   chain, so a full-scale word summed onto near-full content can momentarily
+   write above 1.0 into the ring. The ring is float, so nothing overflows; the
+   clip catches it on the next lap. The transient bound is therefore
+   `ceiling + peak(x)` and the steady-state bound is the ceiling.
+
+**HOLD gates the lane's life, and switching it off CLEARS the lane** (DECIDED;
+`15`). **It must clear rather than mute**, because a muted-but-circulating
+buffer would stack on the next SEND: the user would hear the old word reappear
+under the new one, at whatever level HOLD had hidden it. With HOLD off the lane
+accepts no input, does not circulate, and **emits exact zeros** — so SEND does
+nothing without HOLD. Clearing zeroes the ring, both filter states, the DC
+blocker, the shaper's state, the FX stage's buffers, the modulation phases and
+the time-change crossfade state. The clear is preceded by a **1 ms mute** on the
+lane's output, the same fade CHOP uses, so dropping a full lane does not click:
+the zeroing happens under silence. Turning HOLD on is instant and needs no ramp
+— the lane is empty.
+
+**CHOP gates the lane's output only, and never touches its contents** (DECIDED;
+`15`). It sits between the lane's read and LEVEL, so a stuttered hold keeps
+circulating underneath and comes back intact — testable as a **bit-identity**
+rather than merely as a level (`11` §4e, test 3).
+
+**The fade, and the honest thing about it.** A zero-length cut clicks, and
+`11` §4 requires nothing above −60 dBFS on either edge of a toggle. The
+specified fade is **1 ms raised cosine on both edges** (CALIBRATE), per `15`'s
+"the shortest fade that does not click". **That figure and a broadband −60 dBFS
+acceptance cannot both stand as written, and this is recorded rather than
+resolved.** A raised cosine is C¹, so its splatter falls as 1/f³ and spreads
+over roughly 1/T = 1 kHz; on musical material 1 ms is click-free by ear, but on
+a sustained bright tone the first sidelobe sits on the order of 30–40 dB below
+the gated signal (CALIBRATE by sweep), not 60. **OPEN, Frosty's choice of
+three:**
+
+- state the acceptance as "no click above −60 dBFS on content band-limited to
+  5 kHz", which is what the control is for and what it will be heard on; or
+- lengthen the fade to ~3 ms, which meets the broadband figure and costs
+  rhythmic tightness at sixteenths above ~160 BPM; or
+- keep 1 ms and accept a measurable but musically inaudible edge, recorded as a
+  known figure rather than an assertion.
+
+The first is the recommendation — CHOP is a rhythmic gate on a delay tail,
+tightness is the feature, and a broadband −60 dBFS assertion on a 1 ms gate is a
+test no gate of that length passes anywhere in the suite.
+
+### 11.5 What VOICE and FREEZE were, and what their removal costs
+
+**VOICE is cut** (DECIDED, Frosty 2026-09-21; `15`, README item 18), on the main
+delay and on the lane. LOW CUT and HIGH CUT are already continuous log sweeps;
+VOICE only added *resonance* on top of them, raising Q from 0.5 to 6. **The two
+cuts are plain one-poles again** — §4's cascade as written — and the
+state-variable pair, the `Q = 0.5 + VOICE·5.5` law and **the closed-form peak
+normalisation they required are retired with it**, along with the warning that
+an unnormalised Q = 6 self-oscillates at a third of the feedback travel. §3's
+`P_c` is now the only normalisation in the loop, and it is computed at run time
+rather than in closed form.
+
+**FREEZE is cut, and this supersedes README Decided item 2.** The old FREEZE
+closed the send, set loop gain to exactly 1.0 and **bypassed every in-loop
+stage** — filters, FX, DC blocker, shaper, clip — latching the length to a whole
+sample so the interpolator was bypassed too. The loop was then a **bit-exact,
+non-eroding circulating buffer**: stable indefinitely, and cheaper than running.
+
+**What that costs, said plainly:** the lane's centre detent holds at **loop
+gain** unity, but the signal still laps the character chain and the filters on
+every repeat. §3 is explicit that unity means the loop's **loudest band** holds,
+not every band — a non-flat loop cannot do the latter and stay bounded — so
+every other band decays at `|H·I| / P_c` per lap and **a long hold darkens and
+colours**: tape's rolloff and head bump, the BBD's clock-derived cuts and any FX
+all compound as `|H|^k`. **There is no bit-exact, non-eroding hold in v1.** On
+Clean with both cuts on their rails, DRIVE 0 and FX off the chain is close to
+transparent and the hold is close to bit-exact — but "close to" is the honest
+word, and on any other setting a held chord is audibly a different sound after
+thirty seconds than it was at one. That capability leaves v1 deliberately, in
+exchange for a hold that can be filtered, chopped, layered and levelled while it
+runs.
+
+**Ping-pong** is fully specified in §8 and applies to each engine independently,
+off its own `stereo` id. No WIDTH control in v1: with the dry bit-exact below
+50 % MIX the image already reads as wide wet over centred dry; if added later, a
+wet-only mid/side trim after the loop tap.
+
+### 11.6 Stability and bounds for the lane
+
+The lane **deliberately runs above unity in the build region**. This is the
+situation §3 already accepts at the main loop's top of travel, with the same
+mechanism and the same bound; §3 owns `P_c` and the clip and is not re-opened
+here.
+
+- **The bound is the in-loop safety clip**: a fixed tanh, ceiling 1.0 (0 dBFS),
+  always on regardless of DRIVE, sitting **after** the filters and the FX stage
+  and **last in `C_lane`**, one instance per engine. Its describing-function
+  gain `G(A)` falls monotonically from 1, so oscillation settles where
+  `g_lane·|H_lane|·G(A) = 1` — a limit cycle just under the ceiling, not
+  divergence. A build inherits the mode's tone because the clip is after the
+  filters, the trade `02` flags.
+- **`g_max` (§11.2) is a starting gain, not the bound.** Whatever Frosty
+  settles, the clip governs.
+- **The clip governs the lane's internal state, not the module's output.**
+  LEVEL is applied *after* the lane's loop tap, so a lane pinned at the clip
+  ceiling with `lane_level` at +24 dB puts roughly **+24 dBFS** on the wet bus.
+  Nothing clips — §9's promise that the output is never clipped for the user
+  still holds — but the module can now legitimately emit far above 0 dBFS, which
+  no path in Dwell could before. That is why the test that proves the clip
+  bounds the lane belongs at **the top of LEVEL's travel and not at unity**
+  (`15`): at unity the lane never reaches the clip, so the test would prove
+  nothing.
+- **`lane_level` is −24…+24 dB, default 0, step 0.01** (id 21; `15`), matching
+  every other level in the suite rather than inventing a range. It sets the
+  lane's **loudness** against the main delay's wet, which `lane_gain` cannot:
+  that one is the **tail**. Without it, the relative volume of a thrown word
+  would be fixed by construction, which is wrong for a feature whose whole job
+  is emphasis. Default 0 dB is unity against the main wet, and since SEND ships
+  off the module is silent at defaults either way.
+
+**Tail reporting.** §9's `tail` figure becomes **the larger of the two
+engines'**, from parameters only as `latencyForParams` is: the main's per §9;
+the lane's as `T_lane·ceil(60 / −20·log10(min(g_lane, 0.97)))` when
+`lane_gain < 0` **and HOLD is on**; and **the 30 s clamp whenever HOLD is on and
+`lane_gain ≥ 0`**, because a hold or a build does not decay. With HOLD off the
+lane contributes nothing. `11` §4j's assertion — the reported tail is never
+below the measured time to −60 dBFS — then still holds (DECISION, derived here).
+
+### 11.7 What the second engine changes elsewhere in this document
+
+Named here so they are not found by surprise; §§9 and 10 carry the corrections
+in place.
+
+- **§9's MIX 50 % arithmetic was written for one wet engine.** With the lane
+  running at LEVEL 0 on comparable content the output is dry unity **plus two**
+  wet unities: "about +3 dB typical, +6 dB worst" becomes roughly **+4.8 dB
+  typical, +9.5 dB worst**. README Decided item 5 (no auto-gain) is unchanged;
+  the figure is not.
+- **§10's memory figure is per engine** — two rings, so **8.0 MB per instance at
+  192 kHz**. **`modules/dwell/params.h`'s `kMaxTimeMs` comment still states
+  4.0 MB per instance**: that is a code comment and is flagged rather than
+  edited, this being a documentation pass.
+- **CPU doubles while HOLD is on and costs a branch while it is off**, so the
+  module at its defaults costs what the single-engine module cost. `11` §4k's
+  heaviest-case budget is marked there as needing re-measurement rather than
+  quietly changed.
 
 ## 11a. In-loop FX
 
 **Position.** One FX stage in the character chain:
 `LOW CUT → HIGH CUT → mode filters → FX → DC blocker → shaper → clip` (§4).
+**One stage per engine** (§11): the main delay's is `fx`/`fx_type`/`fx_amount`,
+the lane's is `lane_fx`/`lane_fx_type`/`lane_fx_amount`, and everything in this
+section applies to each independently. **The two stages share no state** — no
+allpass buffer, no LFO phase, no sample-and-hold counter, no quantiser state —
+so neither can disturb the other's buffers, and "FX off is bit-identical to the
+loop without the stage" is asserted **per path** (`11` §4l). **`fx_link` (id 32)
+ties the two stages' parameter *values* and never their state** (§11.3): even
+with both stages set identically they run from separate buffers, and that is
+what keeps the claim above true at every setting of the flag.
 Before the blocker, so an offset an FX introduces is removed rather than
 compounded; before the shaper and clip, so the clip stays the last thing in the
 loop and §3's bound still ends there. The stage recirculates, so every candidate
 **compounds per repeat** — the point of it, and the risk.
 
 **Bound.** Each candidate is non-expanding, `|F| ≤ 1` at every setting,
-peak-normalised in closed form where it could exceed unity (§11's VOICE rule), so
-§3's `|g| < 1` is unchanged. **FX off skips the stage** — not "amount zero" — so
-the loop is bit-identical to the pre-FX loop at no CPU cost. **FREEZE bypasses FX**
-with every other in-loop stage (§11); an FX that changed the buffer each lap would
-not be a hold. Nothing here reads ahead, so reported latency stays **0** (§0).
+peak-normalised in closed form where it could exceed unity, so §3's `|g| < 1` is
+unchanged. (That rule used to be stated as "§11's VOICE rule"; VOICE is cut, so
+the requirement stands on its own here.) **FX off skips the stage** — not
+"amount zero" — so the loop is bit-identical to the pre-FX loop at no CPU cost.
+**Nothing bypasses FX any more**: the clause that FREEZE did so goes with FREEZE
+(§11.5), and the lane's centre detent deliberately does **not** bypass the stage
+— an FX that changes the buffer each lap is, in the lane, the point rather than
+the failure. Nothing here reads ahead, so reported latency stays **0** (§0).
 
 **FX AMOUNT**: one continuous control, its meaning per type, zero always inaudible.
 
@@ -352,20 +639,31 @@ Candidates — list and order free until ship (11 §3):
 > three repeats is three octaves and the content leaves the band — and Reverse was
 > the only type needing a second buffer, +2.0 MB per channel allocated whether FX
 > was on or not, with the standing requirement that it must never be allocated on
-> the audio thread. Cutting them removes that allocation problem entirely and
-> leaves four types, which also tile as a 2×2 grid. Choice lists are append-only
-> after ship, so this was the last moment to remove them. Their specifications are
-> deleted rather than kept as dead text; the reasoning is here and in `15`.
+> the audio thread. Cutting them removes that allocation problem entirely.
+> Choice lists are append-only after ship, so this was the last moment to remove
+> them. Their specifications are deleted rather than kept as dead text; the
+> reasoning is here and in `15`. (The four that remained tiled as a 2×2 grid;
+> Sweep then went too, so the list is three — see below.)
 
 - **Pan / Tremolo** — one LFO stepped at the delay period, so each repeat gets its
   own position or level rather than a wobble inside one; equal-power law, AMOUNT is
   depth. Chops rather than pans on the mono bus (§8). Negligible cost.
-- **Sweep** — §11's VOICE centre multiplied by `2^(±AMOUNT·k/6)` per repeat (a
-  free-running LFO variant is the alternative), keeping §11's peak normalisation so
-  `|H| ≤ 1` still holds. Negligible cost above VOICE.
+> **Sweep was CUT on 2026-09-22** (Frosty), leaving **three** types: Diffuse,
+> Pan/Tremolo, Crush. **It was cut because VOICE was cut.** Sweep was specified
+> as VOICE's resonant centre being moved by `2^(±AMOUNT·k/6)` per repeat, so
+> when VOICE went (§11.5) the filter it swept went with it and the candidate had
+> nothing left to act on. The alternative was to give the FX stage its own
+> resonant band-pass, peak-normalised in closed form — which is the filter that
+> had just been deliberately removed, reappearing one section later under
+> another name. **That is the non-obvious part, and it is written down so nobody
+> re-adds a sweep without re-opening the VOICE decision first.** Choice lists
+> are append-only after ship, so this was the last moment to remove it; its
+> specification is deleted rather than kept as dead text.
 
 **CPU**: target ≤ 1.3× the FX-off loop for any one candidate at 192 kHz, ≤ 1.5×
-heaviest (DECISION; bench per 11 §4k). Only Diffuse and the octaves should measure.
+heaviest, **per engine** (DECISION; bench per 11 §4k). Only Diffuse should
+measure; two engines both on it is roughly 2.6× a single FX-off loop, which is
+why 11 §4k's heaviest-case budget is marked for re-measurement.
 
 ## 12. Fixed values to target
 
@@ -389,14 +687,19 @@ heaviest (DECISION; bench per 11 §4k). Only Diffuse and the octaves should meas
 | Max delay / latency | 2000 ms (BBD 1500) / 0 | DECIDED (Frosty, 2026-09-20) / 00 §4 |
 | Mix law | `w = sin(πm)`, `d = cos(π(m−0.5))` | DECIDED (Frosty, 2026-09-20) |
 | Dry bit-exact region | m ≤ 0.5, gain exactly 1.0 | DECIDED (Frosty, 2026-09-20) |
-| THROW ramp, BUILD | 5/15 ms; `g_thr = max(g,1.02)`, 400/800 ms | CALIBRATE, §3 cap |
-| VOICE Q, telephone | 0.5–6 peak-normalised; 300 Hz/3.4 kHz at 0.6 | CALIBRATE |
-| FREEZE | loop gain 1.0, all bypassed, whole-sample length, own button/slot | DECIDED (Frosty, 2026-09-20) |
-| FX stage position | after mode filters, before DC blocker; skipped when off, bypassed in FREEZE | DECISION |
+| SEND ramp | 5 ms open / 15 ms close, half-cosine | CALIBRATE, §11.4 |
+| Lane detent | `lane_gain` 0 ⇒ loop peak exactly 1.000 (`g = 1/P_c`), snapped not smoothed | DECIDED (Frosty, 2026-09-21); §11.2 |
+| Lane tail law | throw `(1+L)^1.6/P_c`; build `(1 + (g_max−1)L²)/P_c` | DECISION, §11.2 |
+| Lane build ceiling `g_max` | **CALIBRATE** — heard in 14 §3; 1.05 is ~12 s to the ceiling, 1.10 ~6 s, 1.3 a swell | DECIDED as CALIBRATE (Frosty, 2026-09-22) |
+| CHOP / HOLD-clear fade | 1 ms raised cosine, both edges; acceptance band **OPEN** | CALIBRATE, §11.4 |
+| Lane LEVEL | −24…+24 dB, step 0.01, default 0 | DECIDED (Frosty, 2026-09-21) |
+| FX stage position | after mode filters, before DC blocker; skipped when off; **one stage per engine**, no shared state | DECISION |
 | FX loop bound | `\|F\| ≤ 1` for every candidate, normalised in closed form | DECISION |
 | Diffuse | 6-stage allpass, 7–37 ms × AMOUNT | CALIBRATE; 00 §1 |
 | Crush | 16→3 bits, hold ÷1–32; exempt from the alias floor | CALIBRATE / DECISION |
-| Pan / Sweep | stepped once per repeat; AMOUNT is depth | CALIBRATE |
+| Pan / Tremolo | stepped once per repeat; AMOUNT is depth | CALIBRATE |
+| FX types | Diffuse, Pan/Tremolo, Crush — **three**; Sweep cut because VOICE was | DECIDED (Frosty, 2026-09-22) |
+| Lane ties | LINK (20) = the six voicing rows 23–28; FX LINK (32) = the FX trio, off-lane | DECIDED (Frosty, 2026-09-22) |
 | FX AMOUNT default | 35 % | DECISION |
 | FX CPU ceiling | ≤ 1.3× FX-off, ≤ 1.5× heaviest | DECISION |
 

@@ -70,7 +70,14 @@ public:
         /** The lane's mirror of the main delay. `link` defaults on, so an
             untouched instance is one delay with one set of controls; the
             seeding that happens when it is switched off is a UI gesture, not
-            something this struct does (docs/delay/15). */
+            something this struct does (docs/delay/15).
+
+            **`link` ties the six voicing rows only** from 2026-09-22 --
+            character, stereo, the two cuts and the two modulation rows. The
+            lane's FX trio answers to `fxLink` at the foot of this struct,
+            because independent FX is what the lane's own FX stage exists for
+            and folding it in would have cost six parameters of divergence to
+            buy one (modules/dwell/params.h, id 32). */
         bool  link              = true;
         float laneLevelDb       = 0.0f;
         float laneTimeMs        = 250.0f;
@@ -83,6 +90,12 @@ public:
         bool  laneFx            = false;
         int   laneFxTypeChoice  = 0;
         float laneFxAmountPct   = 35.0f;
+
+        /** Whether the lane's FX trio follows the main delay's. Carried here
+            for the same reason `link` is -- a value that stops arriving is a
+            value the lane could not go back to -- and, like `link`, it is the
+            later stage that acts on it. Defaults on, matching `link`. */
+        bool  fxLink            = true;
     };
 
     void prepare (double newSampleRate, int newMaxBlockSize, int newNumChannels) noexcept

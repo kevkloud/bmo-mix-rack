@@ -66,6 +66,12 @@ public:
         p.laneFxTypeChoice      = (int) v[Index::laneFxType];
         p.laneFxAmountPct       = v[Index::laneFxAmount];
 
+        // Id 32, past a rack slot's automation lanes and carried exactly like
+        // every row under it: SlotOverflow's whole job is that a parameter
+        // over the line still reaches the DSP, presets and saved state. See
+        // modules/dwell/params.h for why this is the row that went over it.
+        p.fxLink                = v[Index::fxLink] > 0.5f;
+
         core.setParams (p);
     }
 

@@ -75,11 +75,18 @@ a. Delay line, clean mode, feedback law, the dry-held-to-50% MIX law (dry path
    nulls bit-exactly at MIX 0, 25 and 50%), 2000 ms maximum.
 b. Time-change laws, tape and bucket-brigade modes, in-loop LOW CUT / HIGH CUT,
    DC blocker, shaper, safety clip; self-oscillation bounded above ~97%.
-c. THROW, BUILD and FREEZE; then ducking; then VOICE; then stereo modes.
-d. In-loop FX candidates, cheapest first (Diffuse, Crush, Pan/Tremolo, Sweep,
-   then Octave up/down, then Reverse). FX off must be bit-identical to the loop
-   without the FX stage. Reverse's second buffer must not be allocated on the
-   audio thread; say how it is handled.
+c. **The lane** — a second engine with its own TIME, SEND gating its input, HOLD
+   gating its life (off **clears**), CHOP gating its output, the bipolar LANE
+   GAIN and LANE LEVEL, LINK and FX LINK; then ducking; then stereo modes.
+   **Corrected 2026-09-22: THROW, BUILD, FREEZE and VOICE are cut** (`15`,
+   `10` §11) — the main loop loses its `s` input gate entirely, and the proof
+   test is that its output is bit-identical between a throw-held and a
+   throw-never render.
+d. In-loop FX candidates, cheapest first (Crush, Pan/Tremolo, then Diffuse),
+   **one stage per engine, no shared state**. FX off must be bit-identical to
+   the loop without the FX stage, **per path**. **Corrected 2026-09-22: Octave
+   up, Octave down and Reverse were cut on 2026-09-21 and Sweep on 2026-09-22**,
+   so nothing allocates a second buffer and the list is three.
 Each step: build exits 0, tests green, sample-rate (44.1–192 kHz) and
 block-size invariance, denormal / NaN / silence robustness, one local commit.
 
@@ -90,7 +97,8 @@ machine name.
 
 STAGE 4 — calibration and listening
 Run `14`: measurements first, then blind, level-matched rounds. Every FX
-candidate is heard against Off; failures are removed from `fxType` before ship.
+candidate is heard against Off, **per engine**; failures are removed from
+`fx_type` before ship.
 Freeze the values `14` §5 lists. Nothing here is "heard" until Frosty has heard
 it on a named machine.
 

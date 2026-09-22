@@ -99,7 +99,7 @@ const Row kSchema[]
     { 15, "hold",       0.0f,    1.0f,     0.0f,  0 },
     { 16, "chop",       0.0f,    1.0f,     0.0f,  0 },
     { 17, "fx",         0.0f,    1.0f,     0.0f,  0 },
-    { 18, "fx_type",    0.0f,    3.0f,     0.0f,  4 },
+    { 18, "fx_type",    0.0f,    2.0f,     0.0f,  3 },
     { 19, "fx_amount",  0.0f,  100.0f,    35.0f,  0 },
     // The lane, ids 20-31. LINK is the one bool in this schema that defaults
     // **on**: a mirror nobody has asked to differ follows the main delay.
@@ -113,24 +113,33 @@ const Row kSchema[]
     { 27, "lane_mod_rate",   0.1f,     8.0f,     0.6f,  0 },
     { 28, "lane_mod_depth",  0.0f,   100.0f,     0.0f,  0 },
     { 29, "lane_fx",         0.0f,     1.0f,     0.0f,  0 },
-    { 30, "lane_fx_type",    0.0f,     3.0f,     0.0f,  4 },
+    { 30, "lane_fx_type",    0.0f,     2.0f,     0.0f,  3 },
     { 31, "lane_fx_amount",  0.0f,   100.0f,    35.0f,  0 },
+    // Id 32, the one row deliberately past a rack slot's 32 host lanes.
+    // SlotOverflow carries it everywhere but a rack automation lane; see
+    // modules/dwell/params.h, and testSchemaIsWhatItWillAlwaysBe below for
+    // the assertion that it is the only one.
+    { 32, "fx_link",          0.0f,     1.0f,     1.0f,  0 },
 };
 
 void testSchemaIsWhatItWillAlwaysBe()
 {
     const auto& specs = P::specs();
 
-    check (specs.size() == 32, "thirty-two parameters, ids 0-31");
+    check (specs.size() == 33, "thirty-three parameters, ids 0-32");
     check (specs.size() == (size_t) P::Index::count, "the Index enum matches specs()");
-    check ((int) P::Index::count == 32, "Index::count is 32");
+    check ((int) P::Index::count == 33, "Index::count is 33");
 
-    // The same ceiling tests/plugin/DwellTests.cpp asserts, checked here too
-    // because this is the suite a DSP-only container runs: past 32 a parameter
-    // keeps working but gets no host lane in a rack (SlotOverflow).
-    check (specs.size() <= 32, "every parameter still fits a rack slot's 32 host lanes");
+    // The same shape tests/plugin/DwellTests.cpp asserts, checked here too
+    // because this is the suite a DSP-only container runs. **Not "everything
+    // fits" any more**: past 32 a parameter keeps working everywhere but a
+    // rack automation lane (SlotOverflow), and `fx_link` is deliberately the
+    // one row over that line. Exactly one, and exactly that one.
+    check (specs.size() == 33, "exactly one parameter sits past a rack slot's 32 host lanes");
+    check (std::string (specs[32].id) == P::kFxLink,
+           "the one parameter with no rack automation lane is fx_link, deliberately");
 
-    if (specs.size() != 32)
+    if (specs.size() != 33)
         return;
 
     for (const auto& row : kSchema)
@@ -200,17 +209,19 @@ void testChoiceListsKeepTheirOrder()
         check (std::string (stereo.choices[(size_t) i]) == expectedStereo[i],
                std::string ("stereo index ") + std::to_string (i) + " is " + expectedStereo[i]);
 
-    // The candidate list, **four entries from 2026-09-21**: Octave up, Octave
-    // down and Reverse are cut (docs/delay/15), and a cut is only possible
-    // before ship. Its contents may still change until then; that index 0 is a
-    // type and not "Off" may not -- `fx` owns off, and a corrupt state landing
-    // on 0 has to give the gentlest type with the stage still gated by a bool
-    // that defaults off.
-    const char* expectedFx[] { "Diffuse", "Sweep", "Pan/Tremolo", "Crush" };
+    // The candidate list, **three entries from 2026-09-22**. Octave up, Octave
+    // down and Reverse went on the 21st; **Sweep went on the 22nd**, because
+    // it swept VOICE's resonant centre and VOICE was deleted the day before,
+    // which left no filter in the loop for it to sweep. A cut is only possible
+    // before ship, and the contents may still change until then -- but that
+    // index 0 is a type and not "Off" may not, and has survived both cuts:
+    // `fx` owns off, and a corrupt state landing on 0 has to give the gentlest
+    // type with the stage still gated by a bool that defaults off.
+    const char* expectedFx[] { "Diffuse", "Pan/Tremolo", "Crush" };
     const auto& fxType = specs[(size_t) P::Index::fxType];
-    check (fxType.numChoices() == 4, "four FX candidates");
+    check (fxType.numChoices() == 3, "three FX candidates");
     check (fxType.def == 0.0f, "the default FX type is index 0");
-    for (int i = 0; i < fxType.numChoices() && i < 4; ++i)
+    for (int i = 0; i < fxType.numChoices() && i < 3; ++i)
         check (std::string (fxType.choices[(size_t) i]) == expectedFx[i],
                std::string ("FX type index ") + std::to_string (i) + " is " + expectedFx[i]);
     for (int i = 0; i < fxType.numChoices(); ++i)
@@ -258,7 +269,7 @@ void testEveryParameterIsWiredToItsOwnValue()
     v[P::Index::hold]      = 1.0f;
     v[P::Index::chop]      = 1.0f;
     v[P::Index::fx]        = 1.0f;
-    v[P::Index::fxType]    = 2.0f;
+    v[P::Index::fxType]    = 1.0f;
     v[P::Index::fxAmount]  = 12.0f;
 
     v[P::Index::link]          = 0.0f;   // the only one whose default is on
@@ -271,8 +282,14 @@ void testEveryParameterIsWiredToItsOwnValue()
     v[P::Index::laneModRate]   = 4.3f;
     v[P::Index::laneModDepth]  = 56.0f;
     v[P::Index::laneFx]        = 1.0f;
-    v[P::Index::laneFxType]    = 3.0f;
+    v[P::Index::laneFxType]    = 2.0f;
     v[P::Index::laneFxAmount]  = 88.0f;
+
+    // Id 32. Past a rack slot's lanes and wired like every row under it --
+    // SlotOverflow's whole point is that it still reaches here. Set to the
+    // opposite of its default, as `link` above is, because a bool that
+    // defaults on is one a forgotten assignment would still read correctly.
+    v[P::Index::fxLink]        = 0.0f;
 
     dsp.setParams (v.data(), (int) v.size());
     const auto& p = dsp.getCore().getParams();
@@ -294,7 +311,7 @@ void testEveryParameterIsWiredToItsOwnValue()
     check (p.hold,                       "HOLD reaches the core");
     check (p.chop,                       "CHOP reaches the core");
     check (p.fx,                         "FX reaches the core");
-    check (p.fxTypeChoice    == 2,       "FX TYPE reaches the core");
+    check (p.fxTypeChoice    == 1,       "FX TYPE reaches the core");
     check (p.fxAmountPct     == 12.0f,   "FX AMOUNT reaches the core");
 
     check (! p.link,                            "LINK reaches the core");
@@ -307,8 +324,9 @@ void testEveryParameterIsWiredToItsOwnValue()
     check (p.laneModRateHz       == 4.3f,       "LANE MOD RATE reaches the core");
     check (p.laneModDepthPct     == 56.0f,      "LANE MOD DEPTH reaches the core");
     check (p.laneFx,                            "LANE FX reaches the core");
-    check (p.laneFxTypeChoice    == 3,          "LANE FX TYPE reaches the core");
+    check (p.laneFxTypeChoice    == 2,          "LANE FX TYPE reaches the core");
     check (p.laneFxAmountPct     == 88.0f,      "LANE FX AMOUNT reaches the core");
+    check (! p.fxLink,                          "FX LINK reaches the core");
 
     // The lane's twelve are a mirror of the main delay's rows and the pairs
     // sit next to each other in this struct, which is exactly the shape a

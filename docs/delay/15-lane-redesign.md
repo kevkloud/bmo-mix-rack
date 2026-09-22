@@ -47,9 +47,12 @@ own storage, so:
   shortest fade that does not click, for rhythmic stuttering of a held note.
 - **SEND onto an occupied lane sums**, so words layer into a chord.
 - **The lane is a full mirror of the main delay** — its own character, stereo
-  mode, filters, voice, modulation, drive and FX — with a **LINK** switch that
-  makes it follow the main. Unlinking **seeds the lane from the main's current
-  values**, so nothing jumps.
+  mode, filters, modulation and FX — with **two** switches that make it follow
+  the main. **LINK** ties the **voicing: six parameters, ids 23–28**.
+  **FX LINK** (id 32) ties the **FX trio** separately, because independent FX is
+  the feature — a thrown word can be crushed against a clean main delay, and
+  folding FX into LINK would mean unlinking the voicing to get it. Unlinking
+  either **seeds the lane from the main's current values**, so nothing jumps.
 
 **This supersedes README Decided item 2.** The old FREEZE bypassed every in-loop
 stage to give a bit-exact, non-eroding hold. The lane's centre detent holds at
@@ -59,9 +62,11 @@ than lost quietly.
 
 ## The schema
 
-**Settled at 32 parameters — see "THE PARAMETER TABLE" below**, which is
-authoritative. The ids are renumbered from the stage 1 checkpoint, which is
-permitted because nothing has shipped.
+**Settled at 33 parameters, ids 0–32 — see "THE PARAMETER TABLE" below**, which
+is authoritative. The ids are renumbered from the stage 1 checkpoint, which is
+permitted because nothing has shipped. Ids 0–31 fill a rack slot's host lanes
+exactly; **id 32, `fx_link`, is deliberately outside them** (2026-09-22) and is
+the one parameter with no host automation lane in a rack.
 
 Two kinds of change are not equal. **Deletions, reordering, renames and a
 parameter's TYPE are frozen at ship; additions are not** — a new parameter may
@@ -127,17 +132,19 @@ candidates cheapest first. Add to it:
 - The feedback normalisation above lands before anything depends on unity.
 - A test that the main loop is bit-identical with and without throws.
 - A test that unity actually holds at the detent, per character.
-- Seeding on unlink must be a **UI gesture, not a side effect of the `link`
-  parameter changing** — otherwise automating LINK rewrites eight parameters on
-  every pass and fights the user's own automation.
+- Seeding on unlink must be a **UI gesture, not a side effect of the `link` or
+  `fx_link` parameter changing** — otherwise automating a tie rewrites its whole
+  set on every pass and fights the user's own automation.
 
-## THE PARAMETER TABLE — settled 2026-09-21, 32 parameters
+## THE PARAMETER TABLE — settled 2026-09-21, amended 2026-09-22, 33 parameters
 
 The rack gives each slot **32 host automation lanes** (`RackProcessor.h`,
 `kParamsPerSlot`). Past that, `SlotOverflow` keeps a parameter working in the
 panel, the DSP, presets and saved state, but it gets no host lane and **cannot
-be automated in a rack**. Dwell fits exactly, so every parameter stays
-automatable everywhere.
+be automated in a rack**. **Ids 0–31 fill the grid exactly, and `fx_link` at id
+32 sits outside it on purpose** — so it is the one parameter that is not
+rack-automatable, and "every parameter stays automatable everywhere" is true of
+0–31 only.
 
 Ids are renumbered from the stage 1 checkpoint, which is permitted because
 nothing has shipped. Carrying a hole where VOICE was would be worse.
@@ -162,9 +169,9 @@ nothing has shipped. Carrying a hole where VOICE was would be worse.
 | 15 | `hold` | bool | off |
 | 16 | `chop` | bool | off |
 | 17 | `fx` | bool | off |
-| 18 | `fx_type` | choice, 4 | Diffuse |
+| 18 | `fx_type` | choice, 3 | Diffuse |
 | 19 | `fx_amount` | 0…100 % | 35 |
-| 20 | `link` | bool | on |
+| 20 | `link` | bool — ties the six voicing rows 23–28 | on |
 | 21 | `lane_level` | −24…+24 dB | 0 |
 | 22 | `lane_time` | 1…2000 ms, log | 250 |
 | 23 | `lane_character` | Clean / Tape / Bucket | Clean |
@@ -174,8 +181,9 @@ nothing has shipped. Carrying a hole where VOICE was would be worse.
 | 27 | `lane_mod_rate` | 0.1…8 Hz, log | 0.6 |
 | 28 | `lane_mod_depth` | 0…100 % | 0 |
 | 29 | `lane_fx` | bool | off |
-| 30 | `lane_fx_type` | choice, 4 | Diffuse |
+| 30 | `lane_fx_type` | choice, 3 | Diffuse |
 | 31 | `lane_fx_amount` | 0…100 % | 35 |
+| 32 | `fx_link` | bool — ties the FX trio 29–31 to 17–19. **Off-lane: `SlotOverflow`, no rack automation lane** | on |
 
 ### What was cut, and why
 
@@ -189,20 +197,34 @@ nothing has shipped. Carrying a hole where VOICE was would be worse.
   Sweep, Pan/Tremolo and Crush. The octaves compound in a feedback loop — three
   repeats is three octaves — and Reverse was the only type needing a second
   buffer, which the handoff flagged must not be allocated on the audio thread.
-  That problem is now gone. Four types also tile as a 2×2 grid rather than an
-  awkward seven. Choice lists are append-only after ship, so this had to happen
-  now or never.
+  That problem is now gone. Choice lists are append-only after ship, so this had
+  to happen now or never.
+- **`fx_type` then loses Sweep too** (Frosty, 2026-09-22), leaving **Diffuse,
+  Pan/Tremolo and Crush — three**. **It was cut because VOICE was cut**: Sweep
+  was specified as VOICE's resonant centre being moved per repeat, so removing
+  VOICE left it with no filter to act on. The alternative was to give the FX
+  stage its own resonant band-pass — the filter that had just been removed,
+  returning one section later under another name — so the candidate goes
+  instead. That is the non-obvious part, and it is recorded because anyone
+  reading only the list will see a gap where a sweep belongs. Again: lists are
+  append-only after ship, so this was the last moment.
 - **lane DRIVE is cut, and is the one to reconsider.** Saturation is slow and
   cumulative; a throw is one word decaying over a second or two, so it has the
   least to work with. **If the sound turns out to want it, append it later** —
-  appends are permitted after ship. It would land past id 32 and lose rack
-  automation, which costs little for a set-and-forget amount.
+  appends are permitted after ship. It would land at id 33, past the grid beside
+  `fx_link`, and lose rack automation, which costs little for a set-and-forget
+  amount.
 - **SYNC and NOTE are kept** even though they ship disabled, because dropping
   drive made room.
 - **Both FX buttons are kept.** Using "amount at 0" as the bypass was considered
   and rejected: it loses the one-click A/B that makes an effect stage usable,
-  and Crush's bit depth and Reverse's seam do not naturally read zero as a
-  no-op.
+  and Crush's bit depth does not naturally read zero as a no-op.
+- **A third FX control is added rather than cut**: `fx_link` (id 32), which ties
+  the lane's FX trio to the main's and is **off-lane on purpose** — *"leave this
+  separate fx link off a lane in case it needs to be cut later"* (Frosty,
+  2026-09-22). It is the one Dwell parameter with no rack automation lane, and
+  sitting outside the grid is what would let it be removed later without
+  renumbering anything.
 
 ## Settled since
 
@@ -231,9 +253,11 @@ bounds the lane should be run at the top of LEVEL's travel, not at unity.
 
 ## Still open
 
-- The lane's **build ceiling**: the main loop caps at 1.05 by Decided item 4.
-  Does the lane's build region cap there too, or higher because a violent build
-  is the point?
+- **`chop`'s fade against `11` §4's −60 dBFS assertion.** A 1 ms raised cosine
+  is click-free by ear but does not meet a broadband figure on bright sustained
+  content. This needs a **measurement**, not a ruling: band-limit the assertion
+  to 5 kHz, lengthen the fade to ~3 ms, or record the measured edge (`10`
+  §11.4).
 - The **lit-state glow on the pale plate**. It reads by fill rather than by
   glow: the bloom peaks at 1.37:1 against `#efefef` versus 2.49:1 on the dark
   plate, because a bloom brightens and there is little room to brighten against
@@ -241,3 +265,9 @@ bounds the lane should be run at the top of LEVEL's travel, not at unity.
   for pale-plate legends at 4.6:1.
 - The **expanded width**. Two mirrored voicings plus two FX sections will not
   fit the built 560.
+
+**Settled on 2026-09-22, and no longer open**: the lane's **build ceiling
+`g_max` is a CALIBRATE value**, heard in `14` §3's listening round rather than
+decided on paper — 1.05 is about 12 s from unity to the ceiling at 250 ms lane
+time, 1.10 about 6 s, 1.3 a violent swell, and the safety clip bounds every one
+of them. **LINK ties six**, the voicing rows 23–28. **Sweep is cut.**

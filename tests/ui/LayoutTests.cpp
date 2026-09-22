@@ -775,88 +775,90 @@ void checkDeqBandToggle (bmo::ui::ModulePanel& panel, const juce::String& who)
 
 //== BMO Dwell =================================================================
 //
-// **These numbers are the settled panel's, not docs/delay/13 §2's.** The panel
-// §2 draws literally was built and rejected, and so were two more after it --
-// "too busy and not intuitive", Frosty 2026-09-21. What is measured here is
-// the eleven-control face and the column that opens beside it; `13` is not
-// rewritten until the rest of the module is settled, so this file and that
-// document disagree on purpose until it is.
+// **The nine-control face and the three-column reveal**, which is the settled
+// panel from 2026-09-22. `docs/delay/13` §2 draws an earlier one literally,
+// and it was built and rejected, as were two more after it -- "too busy and
+// not intuitive", Frosty 2026-09-21. `13` is not rewritten until the rest of
+// the module is settled, so this file and that document disagree on purpose.
 //
-// Absolutes, not comparisons. The face is nine rows and a foot -- 28, 16, 152,
-// 122, 20, 28, 16, 108, 40, and the 28 px foot taken off the bottom -- which
-// is 558 px of the 676 px the content area is once a 4 px foot margin is
-// reserved. Neither the input nor the output section is taken, so the 118 px
-// over is laid on as one 9 px unit of air above every row and a **double**
-// unit at each of the three section breaks, the odd 10 px going to the first
-// of them. That puts the DELAY rule at 77 and the TONE rule at 460.
+// Absolutes, not comparisons.
+//
+// **The face is nine rows and a foot** -- 28, 16, 152, 122, 20, 28, 16, 108,
+// 40, and the 28 px foot taken off the bottom -- which is 558 px of the 676 px
+// the content area is once a 4 px foot margin is reserved. Neither the input
+// nor the output section is taken, so the 118 px over is laid on as one 9 px
+// unit of air above every row and a **double** unit at each of the three
+// section breaks, the odd 10 px going to the first of them. That puts the
+// DELAY rule at 77 and the TONE rule at 460.
+//
+// **Those are the same two numbers the eleven-control face had**, and that is
+// the point of the swap that made this face nine. SEND and HOLD came off it --
+// "send does nothing if no hold is applied, and hold is a complex control",
+// Frosty 2026-09-21 -- and their 40 px band was taken over by FX, which had
+// been a 56 px switch sharing the foot with the arrow. Two controls left, one
+// moved, and not one of the panel's lines moved with them, so the depth column
+// that is cut on those lines did not have to be re-laid.
 //
 // Four of those row heights carry the **15 pt captions** -- the suite standard
 // that ui::PlainKnob defaults to and that every earlier attempt at this panel
 // had to give up. A caption row is round(15 * 1.2) + 4 = 22 px rather than the
-// 18 that 12 pt cost, and the face pays for it out of its air. Eleven controls
-// laid out in pairs is what makes it affordable: a caption gets a 130 px cell
-// instead of the 86 a three-knob primary row could cut, and "FEEDBACK" needs
-// 125 at 15 pt. No word on this panel was shortened to buy it.
+// 18 that 12 pt cost. Laying the face out in pairs is what makes it
+// affordable: a caption gets a 130 px cell instead of the 86 a three-knob row
+// would cut, and "FEEDBACK" needs 125 at 15 pt.
 //
-// The wide view adds two more rules and keeps every one of those rows exactly
-// where the compact one has them. The second column is laid out **between the
-// face's two rules**: its LOOP rule shares row 77 and its FX rule shares row
-// 460, with its own LANE rule in between at 320. Two columns whose rules
-// miss each other by a dozen pixels read as a failed alignment rather than as
-// two sections, so the column is cut on those lines rather than laid out as
-// one run and hoped over. What is left bare above it is the CHARACTER band --
-// that is the point: the trio sits over both columns.
+// **The wide view is three columns**: 260 + 20 + 260 + 20 + 400, which with
+// `kPad` either side is the 980 in modules/dwell/Module.cpp. All three strike
+// their first rule on **row 77** -- DELAY, LOOP and LANE -- which is the
+// assertion that catches a column drifting off the others by a few pixels.
 //
-// **320, where the THROW rule used to be at 395**, because the 32-parameter
-// schema of 2026-09-21 (docs/delay/15) took VOICE out of the column and made
-// the three-way THROW MODE row one knob. The LOOP section is a trio in one
-// row instead of two pairs, so the segment carries one row fewer and spends
-// the 88 px on air; the face's own two rules do not move, which is the
-// assertion that matters.
+// Below that they diverge on purpose, and the difference is itself asserted:
 //
-// **The first row is CHARACTER, above the first rule.** Frosty, 2026-09-21:
-// "so users know it affects the delay as a whole". CLEAN / TAPE / BUCKET
-// voices the repeats, the loop and the FX section alike, and under the DELAY
-// rule it read as one more row of that section. The assertion below is what
-// keeps it out: if a later change puts the trio back between the rules, this
-// is what should be argued with first.
+//   - the **depth column** shares the face's second line too, its FX rule on
+//     row 460 with the face's TONE rule. It is laid out in two segments cut on
+//     that line rather than as one run and hoped over, so the alignment is
+//     exact by construction.
+//   - the **lane column** runs its own rhythm under its own rules, at 300 and
+//     547. There is nothing for them to be exact *to*, and a rule struck a
+//     dozen pixels off a face rule reads as a failed alignment rather than as
+//     two sections -- so what is asserted about them is that they are **clear**
+//     of 460 rather than near it.
+//
+// What is left bare above the depth column is the CHARACTER band, and that is
+// deliberate: the trio voices the whole delay and what sits under it is that
+// delay's own depth. The lane's band up there is not bare -- it carries the
+// three gates, above the LANE rule for the same reason CHARACTER sits above
+// the DELAY rule.
 
-constexpr int kDwellDelayRule = 77;    ///< and the LOOP rule of the second column
-constexpr int kDwellToneRule  = 460;   ///< and the FX rule of the second column
-constexpr int kDwellLaneRule  = 320;   ///< the second column's own, and only there
+constexpr int kDwellDelayRule = 77;    ///< and the LOOP and LANE rules beside it
+constexpr int kDwellToneRule  = 460;   ///< and the depth column's FX rule
+constexpr int kDwellVoiceRule = 300;   ///< the lane's own, and only there
+constexpr int kDwellLaneFxRule = 547;  ///< the lane's own FX rule
 
-/** The face, at either width. The wide view keeps its ten bands exactly where
-    the compact one has them and adds a column beside them, so every number
+/** How far a lane rule has to stay from the line the other two columns share
+    before it stops reading as an alignment that missed. Half the height of a
+    knob row: nearer than that and the eye tries to line them up. */
+constexpr int kDwellRuleClearance = 54;
+
+/** The face, at either width. The wide view keeps its bands exactly where the
+    compact one has them and adds two columns beside them, so every number
     here is the same in both. */
 void checkDwellFace (bmo::ui::ModulePanel& panel, const juce::String& who, bool expanded)
 {
-    checkEquals ((int) ruleCentres (panel).size(), expanded ? 5 : 2, who + " rule count");
+    // Two rules on the face; the depth column adds LOOP and FX, and the lane
+    // adds LANE, VOICE and its own FX.
+    checkEquals ((int) ruleCentres (panel).size(), expanded ? 7 : 2, who + " rule count");
     checkHasRuleAt (panel, kDwellDelayRule, who);
     checkHasRuleAt (panel, kDwellToneRule, who);
 
-    // The second column shares both of the face's lines and adds one of its
-    // own. Five rules and three rows between them, which is the assertion that
-    // catches the column drifting off the face by a few pixels -- the failure
-    // this layout is cut in two segments to make impossible.
-    if (expanded)
-        checkHasRuleAt (panel, kDwellLaneRule, who);
-
-    // **Eleven controls, and these are they.** The count is the whole redesign:
-    // three attempts carried eighteen down a 280 px strip and all three read as
-    // dense. LO CUT, HI CUT and the rest are what the panel prints -- a caption
-    // is not schema (WORKFLOWS.md's control audit).
+    // **Nine controls, and these are they.** The count is the redesign: three
+    // attempts carried eighteen down a 280 px strip and all three read as
+    // dense, eleven fixed that, and nine is what is left once the lane's two
+    // gates went to the lane. LO CUT, HI CUT and the rest are what the panel
+    // prints -- a caption is not schema (WORKFLOWS.md's control audit).
     for (const auto* name : { "TIME", "FEEDBACK", "MIX", "LO CUT", "HI CUT",
-                              "SYNC", "SEND", "HOLD", "FX" })
+                              "SYNC", "FX" })
         check (findNamed (panel, name) != nullptr,
                who + " has no " + juce::String (name));
-
-    // **CHOP, LINK and the lane's twelve are not drawn** and that is the
-    // settled state of this panel until the 980 px redesign: the schema landed
-    // first, deliberately (docs/delay/15). They are live parameters meanwhile,
-    // which is what the plugin and DSP suites check; here the only claim is
-    // that nobody quietly wedged a third performance switch into a pair.
-    check (findNamed (panel, "CHOP") == nullptr, who + " draws CHOP before the redesign does");
-    check (findNamed (panel, "LINK") == nullptr, who + " draws LINK before the redesign does");
 
     // The two trios, by a cell each, because a ChoiceRow's buttons are laid out
     // in the row's own coordinates and only the row knows where it sits.
@@ -876,25 +878,23 @@ void checkDwellFace (bmo::ui::ModulePanel& panel, const juce::String& who, bool 
     auto* sync = findNamed (panel, "SYNC");
     auto* mix  = findNamed (panel, "MIX");
     auto* hiCut = findNamed (panel, "HI CUT");
-    auto* hold = findNamed (panel, "HOLD");
     auto* fx = findNamed (panel, "FX");
 
     // The CHARACTER trio is above the DELAY rule; the two cuts are below the
-    // TONE rule; the performance pair and FX are below both.
+    // TONE rule; FX is below both.
     if (auto* clean = findNamed (panel, "CLEAN"); clean != nullptr)
         if (auto* row = clean->getParentComponent(); row != nullptr)
             check (row->getBottom() <= kDwellDelayRule,
                    who + " the CHARACTER trio is not above the DELAY rule");
 
     if (time != nullptr && sync != nullptr && mix != nullptr
-        && hiCut != nullptr && hold != nullptr && fx != nullptr)
+        && hiCut != nullptr && fx != nullptr)
     {
         check (time->getY() >= kDwellDelayRule, who + " TIME is above the DELAY rule");
         check (time->getBottom() <= mix->getY(), who + " TIME and MIX are out of order");
         check (mix->getBottom() <= kDwellToneRule, who + " MIX runs past the TONE rule");
         check (hiCut->getY() >= kDwellToneRule, who + " HI CUT is above the TONE rule");
-        check (hold->getY() >= hiCut->getBottom(), who + " HOLD is not below the tone pair");
-        check (fx->getY() >= hold->getBottom(), who + " FX is not at the foot");
+        check (fx->getY() >= hiCut->getBottom(), who + " FX is not below the tone pair");
 
         // **TIME is the hero and it is on the column's centre line.** SYNC
         // sits beside it rather than under it, which is what buys the band;
@@ -906,98 +906,235 @@ void checkDwellFace (bmo::ui::ModulePanel& panel, const juce::String& who, bool 
         check (sync->getBounds().getCentreY() < time->getBounds().getCentreY(),
                who + " SYNC is level with TIME's caption rather than its face");
 
-        // **FX is centred on its column**, not hung off one side of the foot
-        // (Frosty, 2026-09-21). The left column's centre is the same number at
-        // both widths -- kPad + 260/2 -- because the wide view only ever adds
-        // a second column to the right of the first.
+        // **FX is centred on its column** and has a band of its own now, which
+        // is what it bought by SEND and HOLD leaving. The left column's centre
+        // is the same number at both widths -- kPad + 260/2 -- because the
+        // wide view only ever adds columns to the right of the first.
         checkEquals (fx->getBounds().getCentreX(), bmo::ui::ModulePanel::kPad + 130,
                      who + " FX is not centred on its column");
     }
 
-    // The expand arrow is *not* centred with it: it moves no parameter and is
+    // The expand arrow has the foot to itself. It moves no parameter and is
     // the same view affordance as the host bar's own, which sits at an edge
-    // throughout the suite. Centring the pair would put FX off centre, which
-    // is the look the change above removes.
+    // throughout the suite -- so it sits at one, under everything else on the
+    // face rather than beside the last control on it.
     if (auto* expand = findNamed (panel, "expand"); expand != nullptr && fx != nullptr)
-        check (expand->getX() > fx->getRight(),
-               who + " the expand arrow is not at the right edge of the foot");
+    {
+        check (expand->getY() >= fx->getBottom(),
+               who + " the expand arrow is not below the FX band");
+        check (expand->getRight() >= 280 - bmo::ui::ModulePanel::kPad - 1,
+               who + " the expand arrow is not at the right edge of the face's foot");
+    }
 }
 
-/** The revealed section is there in the wide view and gone in the compact one
-    -- gone rather than hidden, because a control left parented with no bounds
-    passes every overlap check and fails no caption check while being
-    invisible.
+/** The two revealed columns: the main delay's depth, and the lane.
+
+    They are there in the wide view and gone in the compact one -- gone rather
+    than hidden, because a control left parented with no bounds passes every
+    overlap check and fails no caption check while being invisible.
 
     **It is a visibility split and nothing else.** Every one of these
     parameters stays live and is read by the DSP whichever width the panel is
-    at; there is no gate. That goes double for the thirteen the 32-parameter
-    schema added or kept that this panel does not draw at all -- CHOP, LINK and
-    the lane's twelve are live and automatable, and the panel drawing them is
-    the 980 px redesign's job. Nothing here asserts on the sound, because
-    nothing about the sound changes. */
+    at; there is no gate. Nothing here asserts on the sound, because nothing
+    about the sound changes.
+
+    **Every one of the thirty-three is now drawn**: ten on the face, six in the
+    depth column and seventeen in the lane. Until 2026-09-22 thirteen of them
+    were live, automatable and on no panel at all, which is what this file's
+    previous version asserted and what the redesign exists to end. */
 void checkDwellRevealed (bmo::ui::ModulePanel& panel, const juce::String& who, bool expanded)
 {
-    // DUCK is in this list while `kDuckHome` says `revealed`, which is where
-    // it sits today and is explicitly still under investigation. If it is
-    // promoted to the face, it moves from here to checkDwellFace and nothing
-    // else in this file changes.
-    // **VOICE is gone from the schema** (docs/delay/15) and TAIL stands where
-    // the THROW MODE trio did -- `lane_gain` is a bipolar float now, so no row
-    // of cells could have carried it. DRIVE, RATE and DEPTH are one trio
-    // rather than a pair and a half-empty row.
-    const juce::StringArray hidden { "DRIVE", "RATE", "DEPTH", "DUCK", "GR",
-                                     "TAIL", "AMOUNT (SMEAR)" };
+    // The depth column, by caption. DUCK's GR bar is named for what it reads.
+    const juce::StringArray depth { "DRIVE", "RATE", "DEPTH", "DUCK", "GR",
+                                    "AMOUNT (SMEAR)" };
 
-    for (const auto& name : hidden)
-    {
-        const auto* found = findNamed (panel, name);
+    // The lane, by component name. Its knobs print the *same words* the main
+    // delay's print -- TIME, LEVEL, LO CUT, RATE, DEPTH -- because a mirror
+    // that renamed everything would read as a bin of leftovers, so the lane's
+    // components carry a LANE prefix and `findNamed` walks that. See
+    // ChoiceRow's namePrefix in modules/dwell/panel/DwellPanel.cpp.
+    const juce::StringArray lane { "SEND", "HOLD", "CHOP", "LINK",
+                                   "LANE TAIL", "LANE TIME", "LANE LEVEL",
+                                   "LANE LO CUT", "LANE HI CUT",
+                                   "LANE RATE", "LANE DEPTH",
+                                   "LANE FX", "FX LINK", "LANE AMOUNT (SMEAR)" };
 
-        if (expanded)
-            check (found != nullptr, who + " wide has no " + name);
-        else
-            check (found == nullptr, who + " compact still carries " + name);
-    }
+    for (const auto& name : { depth, lane })
+        for (const auto& control : name)
+        {
+            const auto* found = findNamed (panel, control);
 
-    // The FX grid, **four cells in a 2x2** since the octaves and Reverse were
-    // cut: a 260 px column gives each of them 126 px rather than the 82 that
-    // three across of seven did, and there is no short line to centre.
+            if (expanded)
+                check (found != nullptr, who + " wide has no " + control);
+            else
+                check (found == nullptr, who + " compact still carries " + control);
+        }
+
+    // **Three cells apiece, and two different shapes**, since Sweep went on
+    // 2026-09-22 and three no longer tile as the 2x2 four did. The shape
+    // follows the slot: the depth column lays them across a row because its
+    // AMOUNT caption needs the whole 260, the lane stacks them in a column
+    // because its AMOUNT sits beside them and leaves a 172 px slot that three
+    // across would cut to 52. The depth column's cells keep the plain names;
+    // the lane's are prefixed, for the same reason its knobs are.
     const auto* fxCell = findNamed (panel, "DIFFUSE");
     const auto* crushCell = findNamed (panel, "CRUSH");
+    const auto* laneFxCell = findNamed (panel, "LANE.DIFFUSE");
+    const auto* laneCrushCell = findNamed (panel, "LANE.CRUSH");
 
     // The types that came out. A cell for one of these is a choice list that
-    // grew back, which is the schema moving rather than a layout slip.
-    for (const auto* gone : { "OCT UP", "OCT DN", "REVERSE" })
+    // grew back, which is the schema moving rather than a layout slip. **SWEEP
+    // is on this list from 2026-09-22**: it swept VOICE's resonant centre and
+    // VOICE was deleted the day before.
+    for (const auto* gone : { "OCT UP", "OCT DN", "REVERSE", "SWEEP" })
+    {
         check (findNamed (panel, gone) == nullptr,
                who + " still has an " + juce::String (gone) + " cell");
+        check (findNamed (panel, juce::String ("LANE.") + gone) == nullptr,
+               who + " the lane still has an " + juce::String (gone) + " cell");
+    }
 
     if (expanded)
     {
         check (fxCell != nullptr, who + " wide has no FX type cells");
         check (crushCell != nullptr, who + " wide has no CRUSH cell");
+        check (laneFxCell != nullptr, who + " wide has no lane FX type cells");
+        check (laneCrushCell != nullptr, who + " wide has no lane CRUSH cell");
 
-        // Two rows of two: CRUSH is the fourth, so it sits below DIFFUSE and
-        // to the right of it -- which is the whole claim the 2x2 makes.
+        // **The depth column's three are a row**: CRUSH is the third, so it is
+        // to the right of DIFFUSE and level with it.
         if (fxCell != nullptr && crushCell != nullptr)
         {
-            check (crushCell->getY() > fxCell->getY(), who + " the FX grid is one row, not 2x2");
-            check (crushCell->getX() > fxCell->getX(), who + " the FX grid is one column, not 2x2");
+            check (crushCell->getX() > fxCell->getX(),
+                   who + " the depth column's FX cells are not laid out across");
+            checkEquals (crushCell->getY(), fxCell->getY(),
+                         who + " the depth column's FX cells are not on one line");
         }
 
-        // Everything the section carries is to the right of the face's own
-        // column, which is what "the module can only grow sideways" means.
-        for (const auto& name : hidden)
-            if (const auto* found = findNamed (panel, name))
-                check (found->getX() >= 280 - bmo::ui::ModulePanel::kPad,
-                       who + " " + name + " is not in the column beside the face");
+        // **The lane's three are a column**: CRUSH is below DIFFUSE and on the
+        // same left edge, and each cell has the full width of the slot.
+        if (laneFxCell != nullptr && laneCrushCell != nullptr)
+        {
+            check (laneCrushCell->getY() > laneFxCell->getY(),
+                   who + " the lane's FX cells are not stacked");
+            checkEquals (laneCrushCell->getX(), laneFxCell->getX(),
+                         who + " the lane's FX cells are not on one left edge");
+            checkEquals (laneCrushCell->getWidth(), laneFxCell->getWidth(),
+                         who + " the lane's FX cells are not one width");
+        }
+
+        // **The columns, and which side of the panel each one is on.** The
+        // depth column starts where the face ends and the lane starts where
+        // the depth column ends, which is what "the module can only grow
+        // sideways" means with three of them.
+        constexpr int kDepthLeft = 280 - bmo::ui::ModulePanel::kPad;
+        constexpr int kLaneLeft  = kDepthLeft + 260 + 20;
+
+        for (const auto& control : depth)
+            if (const auto* found = findNamed (panel, control))
+            {
+                check (found->getX() >= kDepthLeft,
+                       who + " " + control + " is not in the column beside the face");
+                check (found->getRight() <= kLaneLeft,
+                       who + " " + control + " has run into the lane's column");
+            }
+
+        for (const auto& control : lane)
+            if (const auto* found = findNamed (panel, control))
+                check (found->getX() >= kLaneLeft,
+                       who + " " + control + " is not in the lane's column");
 
         if (fxCell != nullptr && fxCell->getParentComponent() != nullptr)
-            check (fxCell->getParentComponent()->getX() >= 280 - bmo::ui::ModulePanel::kPad,
-                   who + " the FX cells are not in the second column");
+            check (fxCell->getParentComponent()->getX() >= kDepthLeft,
+                   who + " the FX cells are not in the depth column");
+
+        if (laneFxCell != nullptr && laneFxCell->getParentComponent() != nullptr)
+            check (laneFxCell->getParentComponent()->getX() >= kLaneLeft,
+                   who + " the lane's FX cells are not in the lane's column");
+
+        //== The rules, which is where the three columns agree and disagree ===
+        //
+        // All three on row 77, then the depth column alone on 460 with the
+        // face, and the lane's two on lines of its own that are *clear* of it.
+        // See the section comment: near is the failure, not different.
+        checkHasRuleAt (panel, kDwellVoiceRule, who);
+        checkHasRuleAt (panel, kDwellLaneFxRule, who);
+
+        for (const auto lineOfTheLane : { kDwellVoiceRule, kDwellLaneFxRule })
+            check (std::abs (lineOfTheLane - kDwellToneRule) >= kDwellRuleClearance,
+                   who + " the lane rule at " + juce::String (lineOfTheLane)
+                       + " is close enough to the shared line at "
+                       + juce::String (kDwellToneRule) + " to read as a missed alignment");
+
+        //== The lane's tail, which is the control the redesign is about ======
+        //
+        // TIME, TAIL and LEVEL share one row and one caption line. They are
+        // three different knob sizes in three cells, and PlainKnob centres its
+        // knob in its own box, so left to itself the 86 px pair would have put
+        // its captions fifteen pixels above the 116 px hero's. The boxes are
+        // cut by hand to stop that, and this is what watches it.
+        auto* tail = findNamed (panel, "LANE TAIL");
+        auto* laneTime = findNamed (panel, "LANE TIME");
+        auto* laneLevel = findNamed (panel, "LANE LEVEL");
+
+        if (tail != nullptr && laneTime != nullptr && laneLevel != nullptr)
+        {
+            checkEquals (laneTime->getBottom(), tail->getBottom(),
+                         who + " the lane's TIME and TAIL do not share a caption line");
+            checkEquals (laneLevel->getBottom(), tail->getBottom(),
+                         who + " the lane's LEVEL and TAIL do not share a caption line");
+
+            check (laneTime->getRight() <= tail->getX(),
+                   who + " the lane's TIME is not left of its TAIL");
+            check (laneLevel->getX() >= tail->getRight(),
+                   who + " the lane's LEVEL is not right of its TAIL");
+        }
+
+        // The gates sit above the LANE rule, the way CHARACTER sits above the
+        // DELAY rule. If a later change drops them into the section, this is
+        // what should be argued with first.
+        for (const auto* gate : { "SEND", "HOLD", "CHOP" })
+            if (const auto* found = findNamed (panel, gate))
+                check (found->getBottom() <= kDwellDelayRule,
+                       who + " the lane's " + juce::String (gate)
+                           + " gate is not above the LANE rule");
+
+        //== Two links, drawn the same way ====================================
+        //
+        // LINK (id 20) ties the lane's six voicing rows; FX LINK (id 32) ties
+        // its FX trio, and they are separate because independent FX is the
+        // sound the lane's own FX stage exists to make. What is asserted here
+        // is that they are drawn *alike* -- same size, same right-hand edge,
+        // one per rule -- because that is what lets a reader work out the
+        // second from the first. FX LINK is below LINK because the FX section
+        // is below the voicing.
+        auto* voiceLink = findNamed (panel, "LINK");
+        auto* theFxLink = findNamed (panel, "FX LINK");
+        auto* laneFxGate = findNamed (panel, "LANE FX");
+
+        if (voiceLink != nullptr && theFxLink != nullptr)
+        {
+            checkEquals (theFxLink->getRight(), voiceLink->getRight(),
+                         who + " the two links are not on one right-hand edge");
+            checkEquals (theFxLink->getWidth(), voiceLink->getWidth(),
+                         who + " the two links are not the same size");
+            check (theFxLink->getY() > voiceLink->getY(),
+                   who + " FX LINK is not below the voicing's LINK");
+        }
+
+        // **The link is the rightmost thing on its rule**, on both of them, so
+        // the eye reads a column of links rather than hunting for which switch
+        // on a rule is which. The lane's FX gate sits inside its link.
+        if (theFxLink != nullptr && laneFxGate != nullptr)
+            check (laneFxGate->getRight() <= theFxLink->getX(),
+                   who + " the lane's FX gate is outside its link, not inside it");
     }
     else
     {
         check (fxCell == nullptr, who + " compact still carries the FX type cells");
         check (crushCell == nullptr, who + " compact still carries the FX type cells");
+        check (laneFxCell == nullptr, who + " compact still carries the lane's FX type cells");
+        check (laneCrushCell == nullptr, who + " compact still carries the lane's FX type cells");
     }
 }
 
@@ -1403,15 +1540,15 @@ int main (int argc, char** argv)
     withPanel (named ("deq"), [] (bmo::ui::ModulePanel& panel) { checkEquals (panel.getWidth(), 600, "deq opens full standalone"); });
     withPanel (named ("deq compact"), [] (bmo::ui::ModulePanel& panel) { checkEquals (panel.getWidth(), 320, "deq compact width"); });
 
-    // BMO Dwell: the eleven-control face at both widths, and the revealed
-    // section only at the wide one. 560 rather than docs/delay/13 §6a's 460 --
-    // two 260 px columns and a gutter -- because at 460 the second column
-    // cannot hold a switch grid three cells across and the seven FX types have
-    // to stack seven deep, which makes the wide view busier than the face it
-    // was meant to relieve. See modules/dwell/Module.cpp.
+    // BMO Dwell: the nine-control face at both widths, and the two revealed
+    // columns only at the wide one. 980 rather than the 560 two columns took --
+    // 260 for the face, 260 for the main delay's depth and 400 for the lane,
+    // with 20 px gutters -- because the lane is a second delay carrying sixteen
+    // controls, and 400 is the width at which it fits without shortening a
+    // caption or stacking a grid. See modules/dwell/Module.cpp.
     withPanel (named ("dwell"), [] (bmo::ui::ModulePanel& panel)
     {
-        checkEquals (panel.getWidth(), 560, "dwell opens wide standalone");
+        checkEquals (panel.getWidth(), 980, "dwell opens wide standalone");
         checkDwellFace     (panel, "dwell", true);
         checkDwellRevealed (panel, "dwell", true);
         check (findNamed (panel, "expand") != nullptr,
@@ -1471,7 +1608,7 @@ int main (int argc, char** argv)
                     arrow->onClick();
 
                 check (proc->isExpanded(), "dwell's arrow did not open the FX column");
-                checkEquals (panel.getWidth(), 560, "dwell's width after the arrow opened it");
+                checkEquals (panel.getWidth(), 980, "dwell's width after the arrow opened it");
 
                 // It closes it again, and `fx` never moved either way.
                 if (arrow->onClick)

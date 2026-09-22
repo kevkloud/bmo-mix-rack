@@ -260,6 +260,33 @@ void BmoLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int widt
             g.fillEllipse (juce::Rectangle<float> (5.0f, 5.0f).withCentre (at (restAngle, track)));
         }
 
+        // **The catch**, where a knob has one -- see Knob::setCatch. A radial
+        // stroke across the dotted track rather than another dot, because the
+        // rest dot is already a dot and the two mean different things: the dot
+        // is where the control *came from* (its default, and where a
+        // double-click puts it back), the stroke is where a drag will *stop*.
+        // On BMO Dwell's lane gain they are 40 % of the travel apart, and a
+        // second dot would have read as a second default.
+        //
+        // Drawn even where it would sit under the pointer: it is the one mark
+        // on the knob that says a position is findable by hand, and hiding it
+        // at exactly the moment the control is sitting on it would be the
+        // wrong way round.
+        if (knob != nullptr && knob->hasCatch())
+        {
+            const auto catchPos = (float) juce::jlimit (0.0, 1.0,
+                                      slider.valueToProportionOfLength (knob->getCatchValue()));
+            const auto catchAngle = startAngle + catchPos * (endAngle - startAngle);
+
+            juce::Path tick;
+            tick.startNewSubPath (at (catchAngle, track - 4.0f));
+            tick.lineTo (at (catchAngle, track + 4.0f));
+
+            g.setColour (dim (accent));
+            g.strokePath (tick, juce::PathStrokeType (2.0f, juce::PathStrokeType::curved,
+                                                      juce::PathStrokeType::rounded));
+        }
+
         // Drawn rather than set. Neither panel face has a minus sign that
         // matches its plus, and two strokes and a bar are the one case where
         // drawing beats setting: they match each other exactly, at any size,

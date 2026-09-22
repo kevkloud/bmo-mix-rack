@@ -44,6 +44,12 @@ public:
         Forwards to Knob::setRestMark; see it for why. */
     void setRestMark (bool);
 
+    /** A single value a drag settles onto, with a mark on the track saying so.
+        Forwards to Knob::setCatch; see it for what it touches and, more to the
+        point, what it does not. Opt-in: a knob that never calls this drags
+        exactly as it did. */
+    void setCatch (double value, double halfWidthOfTravel);
+
     /** Draws the caption this many pixels higher, into the air a knob carries
         under its face.
 

@@ -34,11 +34,13 @@ inline float feedbackGainFor (float feedbackPercent, double loopPeak) noexcept
 //==============================================================================
 /** BMO Dwell's audio core.
 
-    **This is stage 2a: the delay engine, clean only.** The ring, the
-    fractional read, §3's feedback law with its computed `P_c`, §9's MIX law
-    and both engines live here now. The characters, the modulation, the
-    ducker, the stereo matrix, the FX stage and the lane's gates are 2b and 2c,
-    per docs/delay/10-dsp-spec.md.
+    **This is stage 2b: the three characters.** The ring, the fractional read,
+    §3's feedback law with its computed `P_c`, §9's MIX law and both engines
+    came from 2a; 2b adds the characters themselves -- the wired cuts, tape,
+    bucket-brigade with its compander, the DRIVE shaper and §5's modulation --
+    all of them inside `DelayEngine` and all of them parameters rather than
+    branches on which engine is running. The ducker, the stereo matrix, the FX
+    stage and the lane's gates are 2c, per docs/delay/10-dsp-spec.md.
 
     **One delay engine, instantiated twice** -- the main delay and the lane --
     rather than one bespoke dual engine with the lane written into it (10
@@ -158,6 +160,7 @@ public:
         dryGain.prepare (sampleRate, 20.0);
         laneLevel.prepare (sampleRate, 20.0);
         gainsPrimed = false;
+        parametersSeen = false;
 
         applyParams (true);
         reset();
@@ -173,10 +176,22 @@ public:
         for (auto& b : laneFeed) std::fill (b.begin(), b.end(), 0.0f);
     }
 
+    /** **The first parameter set after `prepare` snaps; every one after it
+        moves under §2's law.**
+
+        This is not a convenience. §2 rate-limits tape's and bucket-brigade's
+        glide to 0.25 samples/sample, which is seconds for a large jump -- so a
+        session recalled at TIME 1500 ms on tape would spend ten seconds
+        sliding up from the default 375 ms it was never set to. `prepare` is
+        handed the defaults, so the host's opening push is the one that says
+        what the instance actually is, and an instance arriving at the setting
+        it was saved at is the same rule `setFeedbackGain` and DRIVE already
+        follow. */
     void setParams (const Params& p) noexcept
     {
         params = p;
-        applyParams (false);
+        applyParams (! parametersSeen);
+        parametersSeen = true;
     }
 
     const Params& getParams() const noexcept { return params; }
@@ -231,18 +246,31 @@ private:
         sweep landed on. */
     void applyParams (bool snapNow) noexcept
     {
-        DelayEngine::Params mainParams;
-        mainParams.timeMs    = params.timeMs;
-        mainParams.character = params.characterChoice;
-        mainEngine.setParams (mainParams, snapNow);
+        // **One voicing, two engines** (10 §12, DECIDED 2026-09-23). Every row
+        // below is filled from the same field for both engines, and there are
+        // no lane copies of them to keep in step -- which is most of the point
+        // of an engine that cannot ask which one it is. What differs between
+        // the two calls is TIME, and in 2c the lane's own FX trio. Nothing
+        // else, and nothing about the sound.
+        const auto voiceOf = [this] (float engineTimeMs)
+        {
+            DelayEngine::Params p;
+            p.timeMs      = engineTimeMs;
+            p.character   = params.characterChoice;
+            p.lowCutHz    = params.lowCutHz;
+            p.highCutHz   = params.highCutHz;
+            p.modRateHz   = params.modRateHz;
+            p.modDepthPct = params.modDepthPct;
+            p.drivePct    = params.drivePct;
+            return p;
+        };
+
+        mainEngine.setParams (voiceOf (params.timeMs), snapNow);
         mainEngine.setFeedbackGain (feedbackGainFor (params.feedbackPct,
                                                      mainEngine.referenceLoopPeak()),
                                     snapNow);
 
-        DelayEngine::Params laneParams;
-        laneParams.timeMs    = params.laneTimeMs;
-        laneParams.character = params.characterChoice;
-        laneEngine.setParams (laneParams, snapNow);
+        laneEngine.setParams (voiceOf (params.laneTimeMs), snapNow);
 
         // 10 §11.2's bipolar law -- throw, freeze and build off one knob --
         // arrives with the gates in 2c, together with the `g_max` figure it
@@ -335,7 +363,7 @@ private:
     std::array<std::vector<float>, DelayEngine::kMaxChannels> wetMain, wetLane, laneFeed;
 
     Smoother wetGain, dryGain, laneLevel;
-    bool dryIsBitExact = true, gainsPrimed = false;
+    bool dryIsBitExact = true, gainsPrimed = false, parametersSeen = false;
 
     double sampleRate  = 48000.0;
     int maxBlockSize   = 512;

@@ -1066,6 +1066,1007 @@ void testProcessAllocatesNothing()
                + std::to_string (allocationsWhileArmed) + " allocations)");
 }
 
+//==============================================================================
+// Stage 2b: the three characters, the in-loop tone controls, the shaper and
+// the modulation. docs/delay/11 §4 b, c, d, f and k, per character.
+//==============================================================================
+
+const char* characterName (int c)
+{
+    return c == 0 ? "clean" : (c == 1 ? "tape" : "bucket-brigade");
+}
+
+/** A Hann-windowed DFT at one frequency, normalised so that a pure sine of
+    amplitude A reads A.
+
+    Broadband RMS cannot carry the unity assertion below, because unity is a
+    claim about **the loudest band** and nothing else (docs/delay/10 §3): on
+    tape and bucket-brigade every other band is decaying by design, so an RMS
+    window would measure the colour draining out of a burst rather than
+    whether the peak held. */
+double magnitudeAt (const std::vector<float>& v, int from, int count, double freqHz, double rate)
+{
+    auto re = 0.0, im = 0.0, weight = 0.0;
+
+    for (int i = 0; i < count; ++i)
+    {
+        const auto w = 0.5 - 0.5 * std::cos (2.0 * P::kPiD * (double) i / (double) count);
+        const auto x = (double) v[(size_t) (from + i)] * w;
+        const auto phase = 2.0 * P::kPiD * freqHz * (double) i / rate;
+
+        re += x * std::cos (phase);
+        im -= x * std::sin (phase);
+        weight += w;
+    }
+
+    return 2.0 * std::sqrt (re * re + im * im) / std::max (weight, 1.0);
+}
+
+/** A DC meter: three cascaded 1 Hz one-poles, read over the last second.
+
+    A plain mean cannot make this measurement. Under broadband excitation the
+    mean of N samples of the programme itself is around `rms / sqrt(N)`, which
+    at these levels is a thousand times the -80 dBFS the assertion is about --
+    so a mean would be measuring the noise and calling it offset. Three poles
+    put a 33 Hz component (the lowest comb tooth in these renders) 90 dB down
+    while passing DC at unity, which is what makes the number mean what it
+    says. */
+double dcLevel (const std::vector<float>& v, double rate)
+{
+    P::TptOnePole a, b, c;
+    a.setCutoff (1.0, rate);
+    b.setCutoff (1.0, rate);
+    c.setCutoff (1.0, rate);
+
+    const auto n = (int) v.size();
+    const auto from = std::max (0, n - (int) rate);
+    auto worst = 0.0;
+
+    for (int i = 0; i < n; ++i)
+    {
+        const auto y = c.lowPass (b.lowPass (a.lowPass ((double) v[(size_t) i])));
+
+        if (i >= from)
+            worst = std::max (worst, std::abs (y));
+    }
+
+    return worst;
+}
+
+/** The defaults with `time`, `feedback`, `mix` and `character` set. */
+std::vector<float> settings (int character, float timeMs, float feedback, float mix)
+{
+    auto v = defaults();
+    v[P::Index::time]      = timeMs;
+    v[P::Index::feedback]  = feedback;
+    v[P::Index::mix]       = mix;
+    v[P::Index::character] = (float) character;
+    return v;
+}
+
+/** **`P_c` is swept per character, and each one lands where 10 §3 expects.**
+
+    Clean's reference chain is the 20 Hz LOW CUT rail, the 18 kHz HIGH CUT cap
+    and the 10 Hz blocker with a sinc that is a pure delay at whole samples, so
+    its peak sits just under unity. **Tape's is above it**, deliberately: the
+    +2 dB shelf at 55 Hz is the only in-loop stage whose magnitude exceeds 1,
+    its asymptote is cut away by the blocker and the 20 Hz rail, and what
+    survives is the +0.45 dB near 63 Hz that §3's normalisation divides out.
+    Bucket-brigade's Butterworth pair is monotonic with |H| <= 1, so its peak
+    is just under unity and **moves with TIME**, because its corner comes from
+    a clock that does.
+
+    All three are asserted against the spec's own expected figures rather than
+    against whatever this build happens to produce, which is the only way this
+    test can fail usefully. */
+void testTheLoopPeakIsSweptPerCharacter()
+{
+    for (const auto rate : { 44100.0, 48000.0, 96000.0, 192000.0 })
+    {
+        for (int c = 0; c < 3; ++c)
+        {
+            P::DwellDsp dsp;
+            dsp.prepare (rate, 512, 2);
+
+            auto v = settings (c, 375.0f, 35.0f, 35.0f);
+            dsp.setParams (v.data(), (int) v.size());
+
+            const auto& engine = dsp.getCore().getMainEngine();
+            const auto pc = engine.referenceLoopPeak();
+            const auto hz = engine.referencePeakHz();
+
+            const auto where = std::string (characterName (c)) + " at "
+                             + std::to_string ((int) rate) + " Hz (P_c "
+                             + std::to_string (pc) + " at " + std::to_string ((int) hz) + " Hz)";
+
+            if (rate == 48000.0)
+                std::printf ("      P_c %-15s at 48 kHz: %.5f, peak %7.2f Hz\n",
+                             characterName (c), pc, hz);
+
+            if (c == P::kClean)
+            {
+                check (std::abs (pc - 0.9992) < 0.0012, "clean's P_c is just under unity, " + where);
+                check (hz > 300.0 && hz < 1200.0, "clean's peak sits in the low band, " + where);
+            }
+            else if (c == P::kTape)
+            {
+                // 10 §4's figure for the pole convention, which is the one
+                // `kHeadBumpHz` takes: 1.054 at 63 Hz.
+                check (std::abs (pc - 1.054) < 0.006, "tape's P_c is the head bump, " + where);
+                check (hz > 45.0 && hz < 90.0, "tape's peak sits at the head bump, " + where);
+            }
+            else
+            {
+                check (pc > 0.985 && pc < 0.9995, "bucket-brigade's P_c is just under unity, " + where);
+                check (hz > 80.0 && hz < 900.0, "bucket-brigade's peak sits below its clock, " + where);
+            }
+        }
+    }
+
+    // And it moves with TIME on bucket-brigade alone, because only its mode
+    // filters are derived from one (10 §4's `f_clk = N / 2T`).
+    P::DwellDsp dsp;
+    dsp.prepare (48000.0, 512, 2);
+
+    const auto peakAt = [&dsp] (int character, float timeMs)
+    {
+        auto v = settings (character, timeMs, 35.0f, 35.0f);
+        dsp.setParams (v.data(), (int) v.size());
+        return dsp.getCore().getMainEngine().referenceLoopPeak();
+    };
+
+    check (std::abs (peakAt (P::kTape, 120.0f) - peakAt (P::kTape, 1200.0f)) < 1.0e-6,
+           "tape's P_c does not move with TIME");
+
+    check (std::abs (peakAt (P::kBucketBrigade, 120.0f) - peakAt (P::kBucketBrigade, 1200.0f)) > 1.0e-4,
+           "bucket-brigade's P_c moves with TIME, because its clock does");
+}
+
+/** **Bucket-brigade's filters are a clock, not a curve** (10 §4).
+
+    `f_clk = N / 2T` with N = 4096 and `f_c = 0.6 f_clk / 2`, clamped to
+    [800 Hz, 16 kHz]. 01's datasheet pair is the 205 ms row: f_clk near 10 kHz,
+    corner near 3 kHz. Clean and tape have no clock and report none. */
+void testTheBucketBrigadeClockFollowsTime()
+{
+    P::DwellDsp dsp;
+    dsp.prepare (48000.0, 512, 2);
+
+    const auto corner = [&dsp] (int character, float timeMs)
+    {
+        auto v = settings (character, timeMs, 35.0f, 35.0f);
+        dsp.setParams (v.data(), (int) v.size());
+        return dsp.getCore().getMainEngine().modeCutoffHz();
+    };
+
+    const auto datasheet = corner (P::kBucketBrigade, 205.0f);
+
+    check (std::abs (datasheet - 2997.0) < 5.0,
+           "at 205 ms the corner is 01's 3 kHz (" + std::to_string (datasheet) + " Hz)");
+
+    check (corner (P::kBucketBrigade, 1.0f) == 16000.0, "the corner clamps at 16 kHz on the short end");
+    check (corner (P::kBucketBrigade, 2000.0f) == 800.0, "the corner clamps at 800 Hz on the long end");
+
+    check (corner (P::kBucketBrigade, 500.0f) < corner (P::kBucketBrigade, 200.0f),
+           "the corner falls as TIME lengthens, which is the darkening");
+
+    check (corner (P::kClean, 205.0f) == 0.0 && corner (P::kTape, 205.0f) == 0.0,
+           "clean and tape have no clock to report");
+}
+
+/** **THE HEADLINE: unity lands at FEEDBACK 97.0 % on all three characters.**
+
+    §3's law puts the loop's peak magnitude at `1.05 . 0.97^1.6 = 1.0001` once
+    the character's own `P_c` has been divided out, and unity is a claim about
+    **the loudest band**: a non-flat loop cannot hold every band and stay
+    bounded. So the tone is placed at the frequency the engine's own sweep
+    found its peak at -- 63 Hz on tape, a few hundred on clean and
+    bucket-brigade -- and measured there rather than by RMS.
+
+    This is the test the whole `P_c` normalisation exists for. Without it tape
+    reaches unity nearer 84 %, and the lane's centre detent -- which the panel
+    will label as a hold -- would not hold. A build that hardcoded one constant
+    for all three fails this twice over.
+
+    A burst rather than a sustained input, because at unity a sustained input
+    accumulates without bound and would reach the safety clip, which would be
+    measuring the clip instead.
+
+    **TIME is nudged by a sample or two per character, and that is a property
+    of the measurement rather than of the delay.** A feedback ring is a comb:
+    the only frequencies it can sustain are multiples of `f_s / D`, so a tone
+    placed at the swept peak but *between* two teeth decays at the gain of the
+    nearer tooth instead of at the peak's. On tape the nearest tooth to 63.4 Hz
+    at a round 100 ms sits 3.4 Hz low, which is -0.003 dB a lap -- half a
+    decibel over this render, and nothing at all to do with `P_c`. So `D` is
+    chosen so that a tooth lands on the peak, after which the two agree to a
+    hundredth of a decibel. */
+void testUnityLandsAtNinetySevenPercentOnEveryCharacter()
+{
+    constexpr auto rate = 48000.0;
+    constexpr int laps = 210;
+
+    for (int c = 0; c < 3; ++c)
+    {
+        // Find a lap length whose comb has a tooth on this character's peak.
+        // Bucket-brigade's peak moves with TIME, so the two are solved
+        // together -- three passes is ample, and the residual is asserted.
+        auto lap = (int) std::lround (rate * 0.1);
+        auto tooth = 0.0;
+
+        for (int pass = 0; pass < 3; ++pass)
+        {
+            P::DwellDsp probe;
+            probe.prepare (rate, 512, 2);
+
+            auto p = settings (c, (float) ((double) lap * 1000.0 / rate), 97.0f, 100.0f);
+            probe.setParams (p.data(), (int) p.size());
+
+            const auto fPeak = probe.getCore().getMainEngine().referencePeakHz();
+            const auto k = std::max (1.0, std::round (fPeak * (double) lap / rate));
+
+            lap = (int) std::lround (k * rate / fPeak);
+            tooth = k * rate / (double) lap;
+        }
+
+        P::DwellDsp dsp;
+        dsp.prepare (rate, 512, 2);
+
+        auto v = settings (c, (float) ((double) lap * 1000.0 / rate), 97.0f, 100.0f);   // wet only
+        dsp.setParams (v.data(), (int) v.size());
+
+        const auto fPeak = dsp.getCore().getMainEngine().referencePeakHz();
+
+        check (std::abs (tooth - fPeak) < 0.01 * fPeak,
+               std::string ("a comb tooth lands on ") + characterName (c) + "'s swept peak ("
+                   + std::to_string (tooth) + " Hz against " + std::to_string (fPeak) + " Hz)");
+
+        const auto n = lap * laps;
+        Block block { n };
+
+        // One lap of Hann-windowed tone on that tooth, at 0.002: small enough
+        // that the safety clip is linear to a part in a million.
+        for (int i = 0; i < lap; ++i)
+        {
+            const auto w = 0.5 - 0.5 * std::cos (2.0 * P::kPiD * (double) i / (double) lap);
+            const auto s = (float) (0.002 * w * std::sin (2.0 * P::kPiD * tooth * (double) i / rate));
+            block.left[(size_t) i]  = s;
+            block.right[(size_t) i] = s;
+        }
+
+        renderInChunks (dsp, block, n, 512);
+
+        const auto window = 8 * lap;
+        const auto early = magnitudeAt (block.left,  12 * lap, window, tooth, rate);
+        const auto late  = magnitudeAt (block.left, 198 * lap, window, tooth, rate);
+
+        check (early > 1.0e-6,
+               std::string ("the loop is still ringing twelve laps in on ") + characterName (c));
+
+        const auto drift = 20.0 * std::log10 (std::max (late, 1.0e-30) / std::max (early, 1.0e-30));
+
+        std::printf ("      unity at FEEDBACK 97 %%, %-15s %7.2f Hz, D = %d: %+.3f dB over 186 laps\n",
+                     characterName (c), tooth, lap, drift);
+
+        check (std::abs (drift) <= 0.3,
+               std::string ("at FEEDBACK 97 % the loudest band neither grows nor decays on ")
+                   + characterName (c) + ": " + std::to_string (drift) + " dB over 186 laps");
+    }
+}
+
+/** **The compander is unity through a transient, and it discriminates.**
+
+    10 §4 makes the delayed-gain construction a stability requirement: the
+    compressor's gain is written to a control ring beside the audio and read at
+    the same fractional position, and the expander applies its exact
+    reciprocal, so the pair is unity at every instant including through a
+    transient. It also quotes 0.184 dB per dB of envelope step for the
+    re-detecting alternative -- **modelled, not measured**, and flagged in the
+    spec as needing a bench before it is quoted.
+
+    This is that bench. Two assertions and one measurement:
+
+    1. Through the engine at FEEDBACK 0 the wet output is one delayed copy of
+       the input and the compander is the only thing between them, so a 20 dB
+       envelope step must come back out unchanged -- not close, unchanged.
+    2. In the loop at FEEDBACK 90, a transient's per-lap peak must not grow.
+    3. A re-detecting pair built from **the same detector class at the same
+       5 / 50 ms ballistics** runs beside it and its net gain is reported. The
+       spec's figure is confirmed or refuted by that number, not by this
+       comment. */
+void testTheCompanderIsUnityThroughATransient()
+{
+    constexpr auto rate = 48000.0;
+
+    // 1. The delayed-gain pair, straight through.
+    {
+        P::DwellDsp dsp;
+        dsp.prepare (rate, 512, 2);
+
+        auto v = settings (P::kBucketBrigade, 50.0f, 0.0f, 100.0f);
+        dsp.setParams (v.data(), (int) v.size());
+
+        const auto delay = (int) (rate * 0.05);      // 2400, a whole number
+        const auto n = (int) (rate * 1.0);
+        Block block { n };
+
+        // |x| is constant within each half, so what the detector sees is a
+        // clean 20 dB envelope step and not a waveform ripple.
+        for (int i = 0; i < n; ++i)
+        {
+            const auto a = i < n / 2 ? 0.01f : 0.1f;
+            const auto s = (i & 1) ? a : -a;
+            block.left[(size_t) i]  = s;
+            block.right[(size_t) i] = s;
+        }
+
+        const auto in = block.left;
+        renderInChunks (dsp, block, n, 512);
+
+        auto worst = 0.0;
+
+        for (int i = delay + 1; i < n; ++i)
+            worst = std::max (worst, std::abs ((double) block.left[(size_t) i]
+                                               - (double) in[(size_t) (i - delay)]));
+
+        check (worst < 1.0e-6,
+               "the compander returns a 20 dB step unchanged: worst error "
+                   + std::to_string (worst));
+    }
+
+    // 2. The same transient in the loop: no gain per lap.
+    {
+        P::DwellDsp dsp;
+        dsp.prepare (rate, 512, 2);
+
+        auto v = settings (P::kBucketBrigade, 100.0f, 90.0f, 100.0f);
+        dsp.setParams (v.data(), (int) v.size());
+
+        const auto lap = (int) (rate * 0.1);
+        const auto n = lap * 24;
+        Block block { n };
+
+        // A quiet bed with a 20 dB step in it: the envelope jump is what a
+        // re-detecting pair would overshoot on, once per lap, for ever.
+        for (int i = 0; i < lap; ++i)
+        {
+            const auto a = i < lap / 2 ? 0.02 : 0.2;
+            const auto s = (float) (a * std::sin (2.0 * P::kPiD * 700.0 * (double) i / rate));
+            block.left[(size_t) i]  = s;
+            block.right[(size_t) i] = s;
+        }
+
+        renderInChunks (dsp, block, n, 512);
+
+        auto previous = 0.0f;
+        auto grew = false;
+
+        for (int k = 2; k < 22; ++k)
+        {
+            auto peak = 0.0f;
+
+            for (int i = k * lap; i < (k + 1) * lap; ++i)
+                peak = std::max (peak, std::abs (block.left[(size_t) i]));
+
+            if (k > 2 && peak > previous * 1.001f)
+                grew = true;
+
+            previous = peak;
+        }
+
+        check (! grew, "a transient's per-lap peak never grows with the delayed-gain compander");
+    }
+
+    // 3. The bench: what a re-detecting pair actually does.
+    {
+        P::LevelDetectorDb compressor, expander;
+        compressor.prepare (rate, P::DelayEngine::kCompanderAttackMs, P::DelayEngine::kCompanderReleaseMs);
+        expander  .prepare (rate, P::DelayEngine::kCompanderAttackMs, P::DelayEngine::kCompanderReleaseMs);
+
+        const auto n = (int) (rate * 1.0);
+        const auto stepAt = n / 2;
+
+        auto overshootDb = 0.0;
+        auto settledDb = 0.0;
+
+        for (int i = 0; i < n; ++i)
+        {
+            const auto a = i < stepAt ? 0.01 : 0.1;          // a 20 dB step
+
+            const auto e = compressor.tick (P::LevelDetectorDb::levelDb (a));
+            const auto compressorGain = P::companderGainFor (e);
+
+            // The re-detecting half: a second detector of the same ballistics
+            // on the compressed signal, expanding 2:1. In steady state it is
+            // the compressor's exact inverse; through the step it is not.
+            const auto f = expander.tick (P::LevelDetectorDb::levelDb (a * compressorGain));
+            const auto expanderGain = std::pow (10.0, f / 20.0);
+
+            const auto netDb = 20.0 * std::log10 (compressorGain * expanderGain);
+
+            if (i == stepAt - 1)
+                settledDb = netDb;
+
+            if (i >= stepAt)
+                overshootDb = std::max (overshootDb, netDb);
+        }
+
+        std::printf ("      re-detecting compander: %+.2f dB on a 20 dB step (%.3f dB per dB)\n",
+                     overshootDb, overshootDb / 20.0);
+
+        check (std::abs (settledDb) < 0.01,
+               "the re-detecting pair is unity in steady state, which is why the fault hides");
+
+        check (overshootDb > 3.0,
+               "a re-detecting pair overshoots by more than 3 dB on a 20 dB step ("
+                   + std::to_string (overshootDb)
+                   + " dB), so the assertion above discriminates rather than passing on anything");
+    }
+}
+
+/** **The alias floor: <= -60 dBFS after 10 repeats at maximum DRIVE**
+    (10 §4's acceptance, `11` §4f), measured FX-off.
+
+    A 9 kHz tone at 48 kHz: the third harmonic lands at 27 kHz, above Nyquist,
+    and folds to 21 kHz, where nothing legitimate can appear. The burst is half
+    a lap long so repeats do not overlap, and repeat 10 is gated on its own.
+
+    Measured at an input of 0.25 (-12 dBFS), which is **stated rather than
+    assumed**: 10 §4 sets the acceptance without setting the level it is
+    measured at, and the figure moves with it, because the in-loop safety clip
+    -- a plain `tanh`, on regardless of DRIVE and *not* anti-aliased -- is a
+    second source of folded content at high circulating levels.
+
+    Clean carries the assertion, because it is the only character with a 9 kHz
+    band left by repeat 10; tape and bucket-brigade remove it in the loop,
+    which is what their mode filters are for. That is asserted too, so this
+    cannot pass vacuously. */
+void testTheAliasFloor()
+{
+    constexpr auto rate = 48000.0;
+    constexpr auto toneHz = 9000.0;
+    constexpr auto imageHz = 21000.0;
+    const auto lap = (int) (rate * 0.1);
+    const auto burst = lap / 2;
+
+    for (int c = 0; c < 3; ++c)
+    {
+        P::DwellDsp dsp;
+        dsp.prepare (rate, 512, 2);
+
+        auto v = settings (c, 100.0f, 97.0f, 100.0f);
+        v[P::Index::drive] = 100.0f;
+        v[P::Index::fx]    = 0.0f;
+        dsp.setParams (v.data(), (int) v.size());
+
+        const auto n = lap * 13;
+        Block block { n };
+
+        for (int i = 0; i < burst; ++i)
+        {
+            const auto w = 0.5 - 0.5 * std::cos (2.0 * P::kPiD * (double) i / (double) burst);
+            const auto s = (float) (0.25 * w * std::sin (2.0 * P::kPiD * toneHz * (double) i / rate));
+            block.left[(size_t) i]  = s;
+            block.right[(size_t) i] = s;
+        }
+
+        renderInChunks (dsp, block, n, 512);
+
+        const auto image = magnitudeAt (block.left, 10 * lap, burst, imageHz, rate);
+        const auto tone  = magnitudeAt (block.left, 10 * lap, burst, toneHz, rate);
+
+        const auto imageDb = 20.0 * std::log10 (std::max (image, 1.0e-30));
+        const auto toneDb  = 20.0 * std::log10 (std::max (tone, 1.0e-30));
+
+        std::printf ("      alias floor %-15s repeat 10: image %8.1f dBFS, fundamental %8.1f dBFS\n",
+                     characterName (c), imageDb, toneDb);
+
+        check (imageDb <= -60.0,
+               std::string ("the folded image is at or below -60 dBFS after 10 repeats at max DRIVE on ")
+                   + characterName (c) + " (" + std::to_string (imageDb) + " dBFS)");
+
+        if (c == P::kClean)
+            check (toneDb > -60.0,
+                   "clean still carries the 9 kHz band at repeat 10, so the floor above is a real "
+                   "measurement (" + std::to_string (toneDb) + " dBFS)");
+    }
+}
+
+/** **§2's glide** (`11` §4b).
+
+    Tape and bucket-brigade bend pitch: a rate-limited exponential, tau 120 ms,
+    capped at 0.25 samples/sample so that `rho = 1 - dD/dn` stays inside
+    [0.75, 1.25]. Clean crossfades instead and 2a already runs it.
+
+    The cap is asserted **from the delay itself** rather than inferred from the
+    audio, because that is the quantity §2 bounds. The click assertion is the
+    weaker one it can honestly be: under a glide the waveform's own slope rises
+    with the pitch, up to 1.25x, so what is checked is that the largest
+    sample-to-sample step through the move stays inside that plus a margin. A
+    discontinuity would be orders out, not a quarter. */
+void testTheGlideIsRateLimited()
+{
+    constexpr auto rate = 48000.0;
+    constexpr int chunk = 64;
+
+    for (int c = 1; c < 3; ++c)
+    {
+        P::DwellDsp dsp;
+        dsp.prepare (rate, 512, 2);
+
+        auto v = settings (c, 300.0f, 50.0f, 100.0f);
+        dsp.setParams (v.data(), (int) v.size());
+
+        const auto& engine = dsp.getCore().getMainEngine();
+
+        check (std::abs (engine.currentDelaySamples() - 0.3 * rate) < 1.0,
+               std::string ("the opening push snaps rather than gliding on ") + characterName (c));
+
+        const auto n = (int) (rate * 8.0);
+        Block block { n };
+
+        for (int i = 0; i < n; ++i)
+        {
+            const auto s = (float) (0.3 * std::sin (2.0 * P::kPiD * 1000.0 * (double) i / rate));
+            block.left[(size_t) i]  = s;
+            block.right[(size_t) i] = s;
+        }
+
+        // A 300 -> 150 ms step, deliberately off a block boundary.
+        const auto stepAt = (int) (rate * 2.0) + 37;
+
+        auto worstRate = 0.0;
+        auto previousDelay = engine.currentDelaySamples();
+        auto stepped = false;
+
+        for (int offset = 0; offset < n; )
+        {
+            if (! stepped && offset >= stepAt)
+            {
+                v[P::Index::time] = 150.0f;
+                dsp.setParams (v.data(), (int) v.size());
+                stepped = true;
+            }
+
+            const auto count = std::min (chunk, n - offset);
+            float* channels[] { block.left.data() + offset, block.right.data() + offset };
+            dsp.process (channels, 2, count);
+            offset += count;
+
+            const auto now = engine.currentDelaySamples();
+            worstRate = std::max (worstRate, std::abs (now - previousDelay) / (double) count);
+            previousDelay = now;
+        }
+
+        check (worstRate <= 0.25 + 1.0e-9,
+               std::string ("the glide is rate-limited to 0.25 samples/sample on ")
+                   + characterName (c) + " (" + std::to_string (worstRate) + ")");
+
+        check (std::abs (engine.currentDelaySamples() - 0.15 * rate) < 1.0,
+               std::string ("the glide arrives at the new time on ") + characterName (c));
+
+        const auto slope = [&block] (int from, int count)
+        {
+            auto worst = 0.0f;
+
+            for (int i = from + 1; i < from + count; ++i)
+                worst = std::max (worst, std::abs (block.left[(size_t) i] - block.left[(size_t) (i - 1)]));
+
+            return worst;
+        };
+
+        const auto steady = slope ((int) (rate * 1.0), (int) (rate * 0.5));
+        const auto across = slope (stepAt - 2400, 9600);
+
+        check (across <= steady * 1.5f,
+               std::string ("the time step gives no discontinuity on ") + characterName (c)
+                   + " (" + std::to_string (across) + " against " + std::to_string (steady) + ")");
+
+        auto finite = true;
+
+        for (int i = 0; i < n; ++i)
+            finite = finite && std::isfinite (block.left[(size_t) i]);
+
+        check (finite, std::string ("nothing non-finite comes out of a time move on ") + characterName (c));
+    }
+}
+
+/** **Tape's character floor is modulation, never gain** (DECIDED, Frosty
+    2026-09-23; not yet in 10 §5).
+
+    Three claims, because a floor is the kind of addition that is easy to get
+    subtly wrong:
+
+    1. It **moves the read position** at MOD DEPTH 0, so tape at the defaults
+       is not dead steady. Asserted against clean and bucket-brigade at the
+       same settings, which must be exactly steady -- bucket-brigade gets no
+       floor by decision, its signature being the clock darkening and the
+       compander breathing rather than pitch movement.
+    2. **Silence in is still exact zeros out.** The floor is modulation rather
+       than an additive noise source, so a zeroed ring read at any fractional
+       position is still zero, and there is no gate to get wrong.
+    3. MOD DEPTH **adds on top of it** rather than replacing it. */
+void testTheTapeCharacterFloor()
+{
+    constexpr auto rate = 48000.0;
+
+    // 1 and 3: the floor is audible as movement, and the knob adds to it.
+    const auto spread = [] (int character, float modDepth)
+    {
+        P::DwellDsp dsp;
+        dsp.prepare (rate, 512, 2);
+
+        auto v = settings (character, 300.0f, 0.0f, 100.0f);
+        v[P::Index::modDepth] = modDepth;
+        dsp.setParams (v.data(), (int) v.size());
+
+        const auto n = (int) (rate * 4.0);
+        Block block { n };
+
+        for (int i = 0; i < n; ++i)
+        {
+            const auto s = (float) (0.3 * std::sin (2.0 * P::kPiD * 1000.0 * (double) i / rate));
+            block.left[(size_t) i]  = s;
+            block.right[(size_t) i] = s;
+        }
+
+        renderInChunks (dsp, block, n, 512);
+
+        // A steady delay reproduces the tone in one bin; a wowing one spreads
+        // it, so what is measured is how much energy has left 1 kHz.
+        const auto from = (int) (rate * 1.0);
+        const auto count = (int) (rate * 2.0);
+        const auto bin = magnitudeAt (block.left, from, count, 1000.0, rate);
+        const auto total = rms (block.left, from, count) * std::sqrt (2.0);
+
+        return 1.0 - std::min (bin / std::max (total, 1.0e-12), 1.0);
+    };
+
+    const auto cleanFlat = spread (P::kClean, 0.0f);
+    const auto bbdFlat   = spread (P::kBucketBrigade, 0.0f);
+    const auto tapeFloor = spread (P::kTape, 0.0f);
+    const auto tapeFull  = spread (P::kTape, 100.0f);
+
+    std::printf ("      wow spread at MOD DEPTH 0: clean %.5f, bbd %.5f, tape %.5f; tape at 100 %%: %.5f\n",
+                 cleanFlat, bbdFlat, tapeFloor, tapeFull);
+
+    check (tapeFloor > cleanFlat + 1.0e-3,
+           "tape at MOD DEPTH 0 is not dead steady -- the character floor is running");
+
+    check (bbdFlat < cleanFlat + 1.0e-3,
+           "bucket-brigade has no floor, by decision rather than by omission");
+
+    check (tapeFull > tapeFloor,
+           "MOD DEPTH adds on top of the floor rather than replacing it");
+
+    // 2: silence is still silence, on every character, with the modulation at
+    // full travel.
+    for (int c = 0; c < 3; ++c)
+    {
+        P::DwellDsp dsp;
+        dsp.prepare (rate, 512, 2);
+
+        auto v = settings (c, 40.0f, 60.0f, 100.0f);
+        v[P::Index::modDepth] = 100.0f;
+        dsp.setParams (v.data(), (int) v.size());
+
+        const auto n = (int) (rate * 5.0);
+        Block block { n };
+        Noise noise;
+
+        for (int i = 0; i < (int) rate / 2; ++i)
+        {
+            block.left[(size_t) i]  = 0.5f * noise.next();
+            block.right[(size_t) i] = 0.5f * noise.next();
+        }
+
+        renderInChunks (dsp, block, n, 512);
+
+        auto zeroed = true;
+
+        for (int i = n - 4096; i < n; ++i)
+            zeroed = zeroed && block.left[(size_t) i] == 0.0f && block.right[(size_t) i] == 0.0f;
+
+        check (zeroed, std::string ("silence in gives exact zeros out with the modulation running on ")
+                           + characterName (c));
+    }
+}
+
+/** **Sample-rate invariance, per character** (`11` §4k).
+
+    Every coefficient in the loop depends only on `f_c / f_s` -- including
+    bucket-brigade's, whose corner comes from TIME and N and is then prewarped
+    like any other -- and the rings are sized from a time, so the same settings
+    must give the same delay in *seconds* and the same decay per lap at every
+    rate the suite supports. */
+void testSampleRateInvariancePerCharacter()
+{
+    struct Measured { double echoSeconds = 0.0, lapDb = 0.0, pc = 0.0; };
+
+    const auto measure = [] (double rate, int character)
+    {
+        P::DwellDsp dsp;
+        dsp.prepare (rate, 512, 2);
+
+        auto v = settings (character, 100.0f, 60.0f, 100.0f);
+        dsp.setParams (v.data(), (int) v.size());
+
+        const auto n = (int) (rate * 0.5);
+        Block block { n };
+
+        const auto burst = (int) (rate * 0.02);
+
+        for (int i = 0; i < burst; ++i)
+        {
+            const auto w = 0.5 - 0.5 * std::cos (2.0 * P::kPiD * (double) i / (double) burst);
+            const auto s = (float) (0.25 * w * std::sin (2.0 * P::kPiD * 500.0 * (double) i / rate));
+            block.left[(size_t) i]  = s;
+            block.right[(size_t) i] = s;
+        }
+
+        renderInChunks (dsp, block, n, 512);
+
+        // The echo's arrival is taken as the **energy centroid** of the first
+        // repeat rather than as its largest sample. A Hann-windowed burst is
+        // flat across its top, so the largest sample hops a whole cycle of the
+        // tone between one sample rate and the next -- which is a property of
+        // `argmax` and not of the delay. The centroid moves with the group
+        // delay, which is the thing this is asserting is invariant.
+        auto weighted = 0.0, energy = 0.0;
+
+        for (int i = (int) (rate * 0.05); i < (int) (rate * 0.15); ++i)
+        {
+            const auto e = (double) block.left[(size_t) i] * (double) block.left[(size_t) i];
+            weighted += e * (double) i;
+            energy += e;
+        }
+
+        const auto window = (int) (rate * 0.03);
+
+        Measured m;
+        m.echoSeconds = weighted / std::max (energy, 1.0e-30) / rate;
+        m.lapDb = 20.0 * std::log10 (std::max (rms (block.left, (int) (rate * 0.20), window), 1.0e-30)
+                                     / std::max (rms (block.left, (int) (rate * 0.10), window), 1.0e-30));
+        m.pc = dsp.getCore().getMainEngine().referenceLoopPeak();
+        return m;
+    };
+
+    for (int c = 0; c < 3; ++c)
+    {
+        const auto reference = measure (48000.0, c);
+
+        for (const auto rate : { 44100.0, 88200.0, 96000.0, 176400.0, 192000.0 })
+        {
+            const auto m = measure (rate, c);
+            const auto name = std::string (characterName (c)) + " at " + std::to_string ((int) rate) + " Hz";
+
+            check (std::abs (m.echoSeconds - reference.echoSeconds) < 1.0e-4,
+                   "the echo arrives at the same time, " + name);
+
+            check (std::abs (m.lapDb - reference.lapDb) < 0.2,
+                   "the decay per lap matches 48 kHz, " + name + " ("
+                       + std::to_string (m.lapDb - reference.lapDb) + " dB)");
+
+            check (std::abs (m.pc - reference.pc) < 0.002,
+                   "P_c matches 48 kHz, " + name);
+        }
+    }
+}
+
+/** **Block-size invariance, per character** (`11` §4k).
+
+    Everything 2b added advances per sample -- the glide, both LFO phases, the
+    wear noise, the compander's detector and the shaper's ADAA state -- and a
+    build that advanced any of them per block would pass every other test in
+    this file and fail this one. The wear noise is seeded rather than clocked,
+    which is what makes the comparison meaningful instead of flaky. */
+void testBlockSizeInvariancePerCharacter()
+{
+    constexpr auto rate = 48000.0;
+    constexpr int n = 48000;
+
+    const auto render = [] (int character, int chunk, bool randomise)
+    {
+        P::DwellDsp dsp;
+        dsp.prepare (rate, 2048, 2);
+
+        auto v = settings (character, 37.0f, 70.0f, 50.0f);
+        v[P::Index::modDepth] = 80.0f;
+        v[P::Index::modRate]  = 3.0f;
+        v[P::Index::drive]    = 55.0f;
+        v[P::Index::lowCut]   = 120.0f;
+        v[P::Index::highCut]  = 6000.0f;
+        dsp.setParams (v.data(), (int) v.size());
+
+        Block block { n };
+        Noise noise;
+
+        for (int i = 0; i < n; ++i)
+        {
+            block.left[(size_t) i]  = 0.3f * noise.next();
+            block.right[(size_t) i] = 0.3f * noise.next();
+        }
+
+        if (! randomise)
+        {
+            renderInChunks (dsp, block, n, chunk);
+        }
+        else
+        {
+            Noise sizes;
+
+            for (int offset = 0; offset < n; )
+            {
+                const auto want = 1 + (int) (std::abs ((double) sizes.next()) * 700.0);
+                const auto count = std::min (want, n - offset);
+                float* channels[] { block.left.data() + offset, block.right.data() + offset };
+                dsp.process (channels, 2, count);
+                offset += count;
+            }
+        }
+
+        return block.left;
+    };
+
+    for (int c = 0; c < 3; ++c)
+    {
+        const auto reference = render (c, n, false);
+
+        const auto compare = [&reference, c] (const std::vector<float>& got, const std::string& what)
+        {
+            auto worst = 0.0f;
+
+            for (int i = 0; i < n; ++i)
+                worst = std::max (worst, std::abs (got[(size_t) i] - reference[(size_t) i]));
+
+            check (worst < 1.0e-6f,
+                   what + " gives the same audio as one call on " + characterName (c));
+        };
+
+        for (const auto chunk : { 1, 32, 64, 512, 1023 })
+            compare (render (c, chunk, false), "blocks of " + std::to_string (chunk));
+
+        compare (render (c, 0, true), "a random block schedule");
+    }
+}
+
+/** **Denormals, NaN and the extremes, per character** (`11` §4k, §4d).
+
+    Nothing non-finite may ever leave, whatever arrives -- a NaN that reached a
+    feedback ring would circulate for the life of the instance -- and the loop
+    has to still be bounded afterwards rather than diverging or stuck. Run at
+    the extremes of everything 2b wired: both cuts at both ends, DRIVE at the
+    top, MOD DEPTH at the top and FEEDBACK past unity, where the safety clip is
+    the only thing holding the loop. */
+void testRobustnessPerCharacter()
+{
+    constexpr auto rate = 48000.0;
+
+    for (int c = 0; c < 3; ++c)
+    {
+        for (const auto corners : { 0, 1 })
+        {
+            P::DwellDsp dsp;
+            dsp.prepare (rate, 512, 2);
+
+            auto v = settings (c, 30.0f, 100.0f, 100.0f);
+            v[P::Index::lowCut]   = corners ? 1000.0f : 20.0f;
+            v[P::Index::highCut]  = corners ? 1000.0f : 20000.0f;
+            v[P::Index::drive]    = 100.0f;
+            v[P::Index::modDepth] = 100.0f;
+            dsp.setParams (v.data(), (int) v.size());
+
+            const auto n = (int) (rate * 3.0);
+            Block block { n };
+
+            // A tone rather than noise, and the reason is the DC assertion
+            // below: white noise carries its own energy right down to DC, so
+            // a render driven by it reads about -56 dBFS on any DC meter
+            // narrow enough to be worth having -- the *input's* low band, not
+            // an offset. A 537 Hz tone has nothing below 537 Hz to confuse it,
+            // and 537 is deliberately not a tooth of this 30 ms comb.
+            for (int i = 0; i < n; ++i)
+            {
+                const auto s = (float) (0.4 * std::sin (2.0 * P::kPiD * 537.0 * (double) i / rate));
+                block.left[(size_t) i]  = s;
+                block.right[(size_t) i] = s;
+            }
+
+            block.left[100]   = std::numeric_limits<float>::quiet_NaN();
+            block.right[512]  = std::numeric_limits<float>::infinity();
+            block.left[1023]  = -std::numeric_limits<float>::infinity();
+            block.right[4097] = 1.0e-42f;
+
+            renderInChunks (dsp, block, n, 512);
+
+            auto finite = true;
+            auto peak = 0.0f;
+
+            for (int i = 0; i < n; ++i)
+            {
+                finite = finite && std::isfinite (block.left[(size_t) i])
+                                && std::isfinite (block.right[(size_t) i]);
+                peak = std::max (peak, std::abs (block.left[(size_t) i]));
+            }
+
+            const auto where = std::string (characterName (c))
+                             + (corners ? " with the cuts closed" : " with the cuts open");
+
+            check (finite, "nothing non-finite ever leaves, " + where);
+
+            check (peak < 4.0f,
+                   "the safety clip bounds the loop at FEEDBACK 100 %, " + where
+                       + " (peak " + std::to_string (peak) + ")");
+
+            // The shaper is asymmetric by design and sits **after** the 10 Hz
+            // blocker (10 §4), so one pass of its offset does reach the ring
+            // -- and is then cut by the blocker and the 20 Hz rail on the next
+            // lap rather than compounding. This is the assertion that it does
+            // not compound.
+            const auto dc = dcLevel (block.left, rate);
+
+            std::printf ("      DC %-32s %.2e (%.1f dBFS)\n", where.c_str(), dc,
+                         20.0 * std::log10 (std::max (dc, 1.0e-30)));
+
+            check (dc < 1.0e-4, "DC stays at or below -80 dBFS, " + where);
+        }
+    }
+}
+
+/** **The cuts and DRIVE can only shorten the tail** (10 §3, §4).
+
+    §3 fixes `P_c` at the user stages' neutral limits on purpose and does not
+    track them live, so every setting of LOW CUT, HIGH CUT and DRIVE is at or
+    below the reference: a cut costs tail rather than re-normalising it. Tape's
+    0.84 dB a lap at LOW CUT 200 Hz is the figure §3 quotes; what is asserted
+    here is the direction, which is the part that must never invert. */
+void testTheCutsOnlyShortenTheTail()
+{
+    constexpr auto rate = 48000.0;
+    const auto lap = (int) (rate * 0.1);
+
+    const auto tail = [lap] (int character, float lowCut, float highCut, float drive)
+    {
+        P::DwellDsp dsp;
+        dsp.prepare (rate, 512, 2);
+
+        auto v = settings (character, 100.0f, 90.0f, 100.0f);
+        v[P::Index::lowCut]  = lowCut;
+        v[P::Index::highCut] = highCut;
+        v[P::Index::drive]   = drive;
+        dsp.setParams (v.data(), (int) v.size());
+
+        const auto n = lap * 30;
+        Block block { n };
+        Noise noise;
+
+        for (int i = 0; i < lap / 2; ++i)
+        {
+            block.left[(size_t) i]  = 0.2f * noise.next();
+            block.right[(size_t) i] = 0.2f * noise.next();
+        }
+
+        renderInChunks (dsp, block, n, 512);
+
+        return rms (block.left, 20 * lap, lap);
+    };
+
+    for (int c = 0; c < 3; ++c)
+    {
+        const auto open = tail (c, 20.0f, 20000.0f, 0.0f);
+
+        check (tail (c, 200.0f, 20000.0f, 0.0f) < open,
+               std::string ("LOW CUT at 200 Hz shortens the tail on ") + characterName (c));
+
+        check (tail (c, 20.0f, 2000.0f, 0.0f) < open,
+               std::string ("HIGH CUT at 2 kHz shortens the tail on ") + characterName (c));
+
+        check (tail (c, 20.0f, 20000.0f, 100.0f) < open,
+               std::string ("DRIVE shortens the tail rather than lengthening it on ")
+                   + characterName (c));
+    }
+}
+
 } // namespace
 
 //==============================================================================
@@ -1088,6 +2089,19 @@ int main()
     testBlockSizeInvariance();
     testSilenceDenormalsAndNaN();
     testProcessAllocatesNothing();
+
+    // Stage 2b.
+    testTheLoopPeakIsSweptPerCharacter();
+    testTheBucketBrigadeClockFollowsTime();
+    testUnityLandsAtNinetySevenPercentOnEveryCharacter();
+    testTheCompanderIsUnityThroughATransient();
+    testTheAliasFloor();
+    testTheGlideIsRateLimited();
+    testTheTapeCharacterFloor();
+    testSampleRateInvariancePerCharacter();
+    testBlockSizeInvariancePerCharacter();
+    testRobustnessPerCharacter();
+    testTheCutsOnlyShortenTheTail();
 
     std::printf ("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

@@ -705,6 +705,15 @@ int ConcentricBand::inkHalfWidth() const
     return juce::roundToInt (geometry().maxRadius + kLegendBoxWidth * 0.5f);
 }
 
+float ConcentricBand::capDiameter() const noexcept
+{
+    // `geometry().ringRadius` doubled, and written out rather than called so
+    // that the arithmetic a panel has to size for is visible in one line: the
+    // cell's **smaller** side times the ring's face scale. A band handed a
+    // whole cell draws whatever that cell happened to be.
+    return (float) juce::jmin (getWidth(), getHeight()) * ring.getFaceScale();
+}
+
 void ConcentricBand::setDialOffset (int dx)
 {
     if (dialOffset == dx)
@@ -844,24 +853,38 @@ ChoiceBox::ChoiceBox (juce::RangedAudioParameter& parameter, const ParamSpec& sp
 
 juce::Rectangle<int> ChoiceBox::captionBox() const
 {
+    // Hard against the box on whichever side it is set, so the 4 px of air in
+    // `captionRow` falls at the outside edge of the component either way --
+    // which is what makes a caption above and a caption below read as the same
+    // distance from the control they name. See setCaptionAbove.
+    if (captionAbove)
+        return { 0, box.getY() - (captionRow() - 4), getWidth(), captionRow() - 4 };
+
     return { 0, box.getBottom(), getWidth(), captionRow() - 4 };
 }
 
 void ChoiceBox::resized()
 {
     // The square a knob of `controlSide` would be drawn in, worked out exactly
-    // as PlainKnob::resized works it out -- the area above the caption row,
+    // as PlainKnob::resized works it out -- the area clear of the caption row,
     // squared and centred, capped at the side. The box then hangs at the foot
     // of it, which is where that knob's own bottom edge is, so the two
     // captions land on one line. See setControlSide.
-    const auto area = getLocalBounds().withTrimmedBottom (captionRow());
+    //
+    // With the caption above, the whole arrangement is the other way up: the
+    // row is trimmed off the top and the box hangs at the square's own top, so
+    // the name still sits hard against the control rather than floating.
+    const auto area = captionAbove ? getLocalBounds().withTrimmedTop (captionRow())
+                                   : getLocalBounds().withTrimmedBottom (captionRow());
     const auto side = juce::jmin (area.getWidth(), area.getHeight(), controlSide);
     const auto square = area.withSizeKeepingCentre (side, side);
 
     const auto width = juce::jmin (getWidth() - kBoxMargin * 2, boxWidth);
+    const auto centreY = captionAbove ? square.getY() + kBoxHeight / 2
+                                      : square.getBottom() - kBoxHeight / 2;
 
     box.setBounds (juce::Rectangle<int> (width, kBoxHeight)
-                       .withCentre ({ getWidth() / 2, square.getBottom() - kBoxHeight / 2 }));
+                       .withCentre ({ getWidth() / 2, centreY }));
 }
 
 void ChoiceBox::paint (juce::Graphics& g)
@@ -920,6 +943,16 @@ void ChoiceBox::setBoxWidth (int maxWidth)
 {
     boxWidth = maxWidth;
     resized();
+}
+
+void ChoiceBox::setCaptionAbove (bool shouldBeAbove)
+{
+    if (captionAbove == shouldBeAbove)
+        return;
+
+    captionAbove = shouldBeAbove;
+    resized();
+    repaint();
 }
 
 //==============================================================================

@@ -12,19 +12,24 @@ have one without the other. No latency.
 
 ## The shape of it
 
-It is built like a handheld: a screen in a recess at the top with a line of
-print under it, three round keys — **EARLY**, **TAIL**, **EQ** — and then the
-controls. The keys change two things at once: what the screen is drawing, and
-which five, six or twelve controls are on the panel under it.
+It is built like a handheld. A big screen in a recess at the top, and **the page
+menu is on the screen** — **EARLY**, **TAIL**, **EQ** across the top of the
+display, the one you are on lit. Tapping one changes two things at once: what the
+screen is drawing, and which six controls are on the panel under it.
 
-Three controls never move, whatever key you are on — **SIZE**, **PRE-DELAY**,
-**DECAY** — and four more sit along the foot: **ER**, **REVERB**, **MIX**, and
-the **TYPE** menu in the bottom-right corner. Those are the ones you reach for
-without thinking about which part of the reverb you are in.
+Under the screen there is a line of print, then a **row of segments** — but only
+on two of the three pages. On EARLY it is **ER MODE**; on EQ it is **LOW**,
+**MID**, **HIGH**, which chooses which band the three EQ knobs under it are
+holding. TAIL has nothing there, and that is the point: if there are segments,
+there is something on this page to pick between.
 
-There is one size of window: three columns of knobs, 120 px narrower than it
-used to be. The module does not expand, because there is nothing to expand
-into.
+Five controls never move, whatever page you are on: **ER**, **REVERB** and
+**MIX** as three faders along the foot, and **TYPE** over **DECAY** in the corner
+beside them. Those are the ones you reach for without thinking about which part
+of the reverb you are in.
+
+There is one size of window. The module does not expand, because there is nothing
+to expand into — a fourth page is what this shape is for.
 
 ## Six controls left, and six others arrived
 
@@ -56,9 +61,7 @@ frequency", and the EQ had to be worth reaching for.
 | Control | What it does |
 |---|---|
 | **TYPE** | Room, Chamber, Hall, Cavern, Plate, Ambience. Small to large, then a plate, then Ambience — which is the one with almost no tail. **Picking a type re-sets the controls that belong to it**, every time: a type is a voicing rather than a label, so SIZE, SOURCE, DENSITY, ER SPREAD, the two modulation controls, IN HI-CUT and the ER and REVERB faders all move to what that type is — and so do the five settings that no longer have a knob at all. Everything else stays where you put it. It is a menu rather than a knob, and it sits in the corner rather than in the grid, because a menu is not knob-shaped. |
-| **SIZE** | How big the space is, 0.5 to 80 m. It moves the reflections apart and the tail with them; it does not glide, so a held note does not bend while you turn it. |
-| **PRE-DELAY** | How long before the tail arrives, 0 to 250 ms. **The dry signal is never delayed**, so this cannot comb against what you put in. |
-| **DECAY** | How long the tail takes to die, 0.1 to 20 s. |
+| **DECAY** | How long the tail takes to die, 0.1 to 20 s. It is the one knob on the panel that prints its own number, because the three faders beside it print theirs. |
 | **ER** | How loud the early reflections are, or **Off**. |
 | **REVERB** | How loud the tail is, or **Off**. |
 | **MIX** | Dry against the two of them together. |
@@ -74,42 +77,53 @@ than `-40.0 dB`, because the bus is silent rather than quiet.
 
 ## The screen
 
-Three pictures, one per key, and the line of print under the screen tells you
+Three pictures, one per page, and the line of print under the screen tells you
 what you are looking at.
 
-**EARLY** draws the reflections as lines standing off a centre rule, one per
-reflection, at the moment it arrives and as long as it is loud — **above the
-rule if it comes from the left and below it if it comes from the right**, with
-a short dash marking how far over it is. `L` and `R` at the right-hand end say
-which way round it is. The window is the real one — the first reflection at the
-left and the last at the right — so it stretches and shrinks as you turn SIZE.
-Turn DENSITY up and fainter lines fill in between, and the ones already there
-do not move or change length, which is what stops the sweep clicking. The print
+**EARLY** scatters the reflections across the box: **left to right is when each
+one arrives, top to bottom is where it comes from** — top is hard left, bottom is
+hard right — **and the size of the dot is how loud it is**. `L` and `R` at the
+right-hand end say which way round it is, and the ringed dot at the far left on
+the centre line is the dry sound everything else is measured from.
+
+Turn **VARIATION** and the whole cluster fans open or closes toward the middle,
+which is the one thing that control does. Turn **SIZE** and the window stretches
+and shrinks with it — the first reflection stays at the left and the last at the
+right. Turn **DENSITY** up and faint vertical lines fill in between the dots:
+they are lines rather than dots because those extra reflections do not have a
+direction picked out for them yet, and a dot would be claiming one. The print
 says how many there are and how wide the window is.
 
-**TAIL** draws the tail's shape: the swell the type gives it, then the decay
-away to nothing. The time ruler is logarithmic — each labelled line is ten
-times further along than the last — because an onset lasts a tenth of a second
-and a tail can run for twenty, and no straight ruler shows both. **It ends just
-after your tail does**, so the shape fills the box at any setting instead of
-stopping two thirds of the way across and ruling a flat line over the rest.
-What that costs is that the curve stays roughly put as you turn DECAY while the
-scale under it moves, which is why the decades are labelled inside the box and
-why the print gives the length in seconds. It is drawn as a band rather than a
-line because it does not die at one
-rate: the band is the range between its fastest and its slowest, which is what
-**LOW x** and **HIGH x** set. A wide band means a tail that changes colour as
-it fades. The print gives the decay, the onset in milliseconds, and where the
-whole thing actually ends. **The onset is the one number on this panel with no
-knob under it** — change TYPE and watch it move.
+**TAIL** draws **three curves — low, mid and high** — because a tail does not die
+at one rate. The heavy one in the middle is what **DECAY** says; the two light
+ones either side of it are what **LOW x** and **HIGH x** do to it. Spread them
+apart and you have a tail that changes colour as it fades; bring them together
+and it fades evenly. Each one starts with the swell the type gives it and then
+decays away to nothing.
 
-**EQ** draws the whole chain as one curve. The three EQ bands are marked on it
-as solid dots; the input high-cut is **not** a fourth dot but a **shaded area
-running from its corner off the right-hand end**, because it is a different
-control in a different place: it darkens what goes *into* the reverb, ahead of
-the EQ, where the EQ darkens the reverb. They are in series, so the curve is
-all four together rather than four separate lines. The area between the curve
-and the flat line is
+The time ruler is logarithmic — each labelled line is ten times further along
+than the last — because an onset lasts a tenth of a second and a tail can run for
+twenty, and no straight ruler shows both. **It ends just after your tail does**,
+so the shape fills the box at any setting instead of stopping two thirds of the
+way across and ruling a flat line over the rest. What that costs is that the
+curves stay roughly put as you turn DECAY while the scale under them moves, which
+is why the decades are labelled inside the box and why the print gives the two
+outer times in seconds. The print also gives the onset in milliseconds, and
+**that is the one number on this panel with no knob under it** — change TYPE and
+watch it move.
+
+**EQ** draws the whole chain as one curve. The three EQ bands are marked on it,
+and **each marker says two things at once**: it is **filled** when that band is
+actually doing something, and it has a **ring round it** when it is the band the
+three knobs are holding. So you can see at a glance which band you are about to
+move and which bands are shaping the sound, and the two are not the same
+question.
+
+The input high-cut is **not** a fourth marker but a **shaded area running from
+its corner off the right-hand end**, because it is a different control in a
+different place: it darkens what goes *into* the reverb, ahead of the EQ, where
+the EQ darkens the reverb. They are in series, so the curve is all four together
+rather than four separate lines. The area between the curve and the flat line is
 shaded, which is a gentle lens for a shelf and a pair of wedges running off the
 bottom for a cut — so **FILTER** is unmistakable at a glance. The print gives
 the three EQ frequencies and says `LO CUT` and `HI CUT` when they are cuts.
@@ -126,12 +140,13 @@ audio; EARLY and TAIL are drawn from the controls alone and cost nothing.
 
 | Control | What it does |
 |---|---|
-| **ER MODE** | **Taps** places reflections where a room would. **Energy** replaces them with a shaped cloud. **Blend** is the two ideas at once — and it is the one setting nobody has listened to yet. |
+| **ER MODE** (the segments) | **Taps** places reflections where a room would. **Energy** replaces them with a shaped cloud. **Blend** is the two ideas at once — and it is the one setting nobody has listened to yet. |
 | **DENSITY** | From a handful of distinct reflections to a dense early wash, with no step in between and no level change across the sweep. |
 | **ER SPREAD** | How long the early cloud sustains for, 5 to 200 ms. |
 | **ER HI-CUT** | Takes the top off the reflections. **This is the boxiness control.** |
-| **VARIATION** | Seven different reflection patterns, narrow to wide. **Var 6 is the widest — and the reflections disappear completely if the track is summed to mono.** Every other position survives a mono sum. |
+| **VARIATION** | Seven different reflection patterns, narrow to wide — and the screen fans open and shut as you turn it. **Var 6 is the widest — and the reflections disappear completely if the track is summed to mono.** Every other position survives a mono sum. |
 | **SOURCE** | What feeds the tail: the dry signal at one end, the early reflections at the other. Turn it up and the tail inherits the room's own timing and colour. |
+| **SIZE** | How big the space is, 0.5 to 80 m. It moves the reflections apart and the tail with them; it does not glide, so a held note does not bend while you turn it. It is on this page because it is what the picture's own ruler is made of. |
 
 ## TAIL — how it behaves once it is there
 
@@ -139,22 +154,34 @@ audio; EARLY and TAIL are drawn from the controls alone and cost nothing.
 |---|---|
 | **LOW x** | Below the type's low crossover, the tail decays this much faster or slower than DECAY says. Over 1.00x the low end rings longer, which is what a large room does. |
 | **HIGH x** | The same above the high crossover. Under 1.00x the top dies first, which is also what a real room does. |
-| **MOD DEPTH / MOD RATE** | A slow random movement in the tail that stops it ringing on one note. It is random rather than a sweep, so it should not sound like a chorus. |
+| **MOD DEPTH / MOD RATE** | A slow random movement in the tail that stops it ringing on one note. It is random rather than a sweep, so it should not sound like a chorus. Neither of these two shows on the screen yet. |
 | **WIDTH** | How wide the tail is. The reflections have their own width; this does not touch them. |
+| **PRE-DELAY** | How long before the tail arrives, 0 to 250 ms. **The dry signal is never delayed**, and neither are the reflections — this moves the tail and only the tail, which is why it is on this page. |
 
 ## EQ — what goes into the reverb, and what comes out
 
-Three bands on what feeds the reverb, each with a frequency, a gain and a Q,
-one band per row. The shapes are fixed — low shelf, bell, high shelf — and
-there is no shape menu, on purpose: a menu whose length can never change again
-after release is worse than three bands that do one job each.
+Three bands on what feeds the reverb, each with a frequency, a gain and a Q. The
+shapes are fixed — low shelf, bell, high shelf — and there is no shape menu, on
+purpose: a menu whose length can never change again after release is worse than
+three bands that do one job each.
+
+**There is one set of FREQ, GAIN and Q, and the LOW / MID / HIGH segments above
+them choose which band they are holding.** All three bands are always live and a
+host can automate all nine; the panel shows you one at a time and the marker with
+the ring round it on the screen is the one you are on.
+
+**The three knobs are not the same control on each band**, and the print under
+the screen is what keeps you honest about it: FREQ reaches 1.6 kHz on the low
+shelf, the whole band on the bell and from 1 kHz up on the high shelf, and Q
+stops at 2.0 on the two shelves where it runs to 40 on the bell. Same angle,
+different number.
 
 | Control | What it does |
 |---|---|
-| **EQ LOW** + FREQ + Q | A low shelf, 16 Hz to 1.6 kHz, +12 to −24 dB. At the bottom it reads `Cut`. |
-| **EQ MID** + FREQ + Q | A bell, and the wide one: **20 Hz to 20 kHz**, so it is the only band that reaches the presence region. Q goes to 40 for a notch. |
-| **EQ HIGH** + FREQ + Q | A high shelf, 1 to 2.1 kHz. |
-| **FILTER** | Four positions: **Off**, **Lo Cut**, **Hi Cut**, **Bandpass**. Lo Cut turns **EQ LOW** into a low cut, Hi Cut turns **EQ HIGH** into a high cut, and Bandpass does both — which is what a low cut plus a high cut is. The frequencies and the Qs mean the same thing whichever shape a band is in — a corner and a resonance — so only that band's GAIN changes, and it greys out, because a cut has no gain to set. **It keeps what you set it to**: come back off the cut and the shelf is where you left it. The MID bell is untouched in all four. |
+| **LOW** + FREQ + GAIN + Q | A low shelf, 16 Hz to 1.6 kHz, +12 to −24 dB. At the bottom it reads `Cut`. |
+| **MID** + FREQ + GAIN + Q | A bell, and the wide one: **20 Hz to 20 kHz**, so it reaches anywhere. Q goes to 40 for a notch. |
+| **HIGH** + FREQ + GAIN + Q | A high shelf, **1 to 20 kHz**, so it reaches air. |
+| **FILTER** | A dial with the four positions written round it — **OFF**, **L**, **H**, **B**. L turns **LOW** into a low cut, H turns **HIGH** into a high cut, and B does both — which is what a low cut plus a high cut is. The frequencies and the Qs mean the same thing whichever shape a band is in — a corner and a resonance — so only that band's GAIN changes, and it greys out when you are on that band, because a cut has no gain to set. **It keeps what you set it to**: come back off the cut and the shelf is where you left it. The MID bell is untouched in all four. |
 | **IN HI-CUT** | Darkens what feeds *both* generators, ahead of the EQ. **This is not the same as EQ HIGH in filter mode**: this one is on the way in, that one is on the reverb. |
 | **OUTPUT** | Trim. |
 

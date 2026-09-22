@@ -401,6 +401,21 @@ public:
         mid bell it belongs to. */
     int inkHalfWidth() const;
 
+    /** The diameter of the knob cap this band draws, in pixels.
+
+        **Not the component's own width or height**, which is the confusion
+        this exists to end: the cap is `jmin (width, height)` times the ring's
+        face scale, so a band handed a whole cell draws a cap of whatever that
+        cell happened to be. BMO Linger's FILTER was sized by its 66 px cluster
+        cell once and came out at 23 px beside 26.7 px knobs, and the row
+        visibly stepped when the page turned. A panel that wants a particular
+        cap has to size the box for it and then check.
+
+        `PlainKnob::captionOverflow`'s discipline: the number a test asserts on
+        is read off the same face `paint` draws from, so the assertion cannot
+        agree with the bug it is looking for. */
+    float capDiameter() const noexcept;
+
 private:
     /** How far a band's fan stops short of 12 and 6 o'clock -- or runs past
         them, when the band is outset. 15 degrees. */
@@ -537,6 +552,24 @@ public:
         caption. `PlainKnob::setKnobSide`'s argument, one axis over. */
     void setBoxWidth (int maxWidth);
 
+    /** Sets the name **above** the box instead of under it.
+
+        Off everywhere but one place, and the place is what it is for: BMO
+        Linger's strip stacks TYPE over DECAY in one column, and with both
+        names underneath the upper one fell between the two controls. A label
+        between two controls binds downward -- it read as DECAY's second
+        caption -- and the column stopped being two controls and started being
+        one with two names. Above and below, each label sits outside the pair
+        and points inward at the thing it names.
+
+        A caption under a control is still the suite's default and every other
+        call site keeps it: this is not an arrangement to reach for, it is what
+        a stacked pair needs. The box hangs at the **top** of the square
+        `setControlSide` describes rather than at its foot, which is the same
+        trick the other way up. */
+    void setCaptionAbove (bool shouldBeAbove);
+    bool isCaptionAbove() const noexcept { return captionAbove; }
+
     /** How much wider the caption, or the widest item in the list, is than the
         room it has -- in pixels; zero or less fits.
 
@@ -576,6 +609,7 @@ private:
     float captionSize = 15.0f;
     int controlSide = std::numeric_limits<int>::max();
     int boxWidth = std::numeric_limits<int>::max();
+    bool captionAbove = false;
 
     juce::ComboBox box;
     std::unique_ptr<juce::ComboBoxParameterAttachment> attachment;

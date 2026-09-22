@@ -24,46 +24,50 @@ namespace bmo::reverb
     `ModulePanel::setUiState`, which is also what makes every page renderable
     headlessly. See `ReverbPanel::setUiState`.
 
-    **The third page is EQ and was TONE.** Frosty's call, 2026-09-21, when the
-    two shelves became a three-node parametric: TONE named a vague direction
-    and the page is now an equaliser. The `ui.page` key moved with the label --
-    `ui.page=early|tail|eq` -- because a render key that said `tone` for a page
-    captioned EQ is the kind of drift a reader has to hold in their head. */
+    **The keys are inside the screen as of 2026-09-22.** They were three round
+    buttons on the plate under the bezel, with a PAGE rule under them; they are
+    a menu band drawn in the display's own ink now, which is what a handheld
+    with a screen actually does. See `LingerScreen::kMenuBand`. */
 enum class Page { early = 0, tail, eq };
 
 //==============================================================================
-/** The screen: a small dark display inside the bezel, drawing one of three
-    pictures depending on the page the handheld is on.
+/** The screen: a dark display inside the bezel, carrying its own page menu and
+    drawing one of three pictures under it.
+
+    **The top 26 px is the menu, and it is part of what the display is
+    showing.** Three divided segments -- EARLY / TAIL / EQ -- in the screen's
+    own ink, the selected one as inverted video, a hairline between each pair
+    and a rule under the band. It is not a row of buttons on the bezel: a
+    handheld's page keys live on its screen, and the plate under the bezel is
+    worth more to the controls than to three keys that were duplicating what
+    the picture already says. The 232 px under the band is the drawing area,
+    and `plotBounds` is inside that rather than inside the whole component.
+
+    The band takes clicks -- `onPageChosen` -- which is why this component
+    intercepts them at all. Everything below the band ignores them.
 
     **EARLY and TAIL are static: no tap, no FFT, no timer, no audio path.**
     They redraw when one of the parameters they draw from moves, and when the
     page changes, and at no other time.
 
-    **The EQ page is not, as of 2026-09-21.** The owner asked for a spectrum
-    analyser behind its response curve, which overrides what this comment said
-    -- "the display is parameter-driven only" -- for that one page. So the
-    screen owns a `Spectrum` and a timer, and **the timer runs only while the
-    EQ page is showing**: turning to EARLY or TAIL stops it, so those two pages
-    cost exactly what they cost before. `core/dsp/AnalyserTap.h` is why the
-    tap itself cannot change the sound or the latency.
+    **The EQ page is not.** The owner asked for a spectrum analyser behind its
+    response curve, so the screen owns a `Spectrum` and a timer, and **the
+    timer runs only while the EQ page is showing**: turning to EARLY or TAIL
+    stops it, so those two pages cost exactly what they cost before.
+    `core/dsp/AnalyserTap.h` is why the tap itself cannot change the sound or
+    the latency.
 
-    It still reads none of `ModuleContext`'s meter callbacks, and that part is
-    unchanged: a reverb has no gain reduction to report.
-
-    **What the spectrum is showing is the dry input**, because
-    `dsp/DspCore.h` is a marked pass-through and there is no reverb under it
-    yet. The tap is at the point the Reverb EQ acts on -- pre both generators,
-    which is where 10 section 2 puts the EQ -- so the wiring is already right
-    and only the signal is missing. It is honest rather than broken, and it is
-    marked at the tap site, here, and in AGENTS.md so that nobody "fixes" a
-    working analyser.
+    **What the spectrum is showing is the dry input**, because `dsp/DspCore.h`
+    is a marked pass-through and there is no reverb under it yet. The tap is at
+    the point the Reverb EQ acts on -- pre both generators, which is where 10
+    section 2 puts the EQ -- so the wiring is already right and only the signal
+    is missing. It is honest rather than broken, and it is marked at the tap
+    site, here, and in AGENTS.md so that nobody "fixes" a working analyser.
 
     **It draws in the module's accent, not in LCD green.** A second hue on one
-    module is the failure the accent audit was run to find -- the cluster's
-    knobs drew suite azure under a violet face, and the module read as
-    two plugins sharing a slot. The face underneath is `meterFace`, the token a
-    needle meter's scale is printed on: a value rather than a hue, dark in both
-    appearances, which is what a screen is.
+    module is the failure the accent audit was run to find. The face underneath
+    is `meterFace`, the token a needle meter's scale is printed on: a value
+    rather than a hue, dark in both appearances, which is what a screen is.
 
     It draws the taps from `TapTables.h`, which is **the same table the engine
     will play**. 11 section 5 names sketch/DSP drift as the display's one real
@@ -74,119 +78,77 @@ enum class Page { early = 0, tail, eq };
     rather than pixels it happens to land on, so a test can read them without
     rendering anything.
 
-    ## The three pages, and the axis each one needed
+    ## The three pages, and the picture each one needed
 
-    **EARLY -- linear time, 0 to the last tap plus a tenth of the window, and
-    the stems are mirrored about a centre axis by their bearing.** The
-    image-source taps as discrete stems, at their times, their gains and
-    **their pans**: left above the axis, right below it, length still gain.
-    What this replaced was a symmetric envelope mirrored about a centre line
-    that bloomed and closed to a point; Frosty rejected it, and why it was
-    rejected is why the axis changed with it. **Mirroring the envelope and
-    mirroring the taps are not the same thing** -- the first drew a lens with
-    no event in it, and this draws one stem per reflection with its bearing in
-    the sign. The ER window is 7-79 ms at the reference size and scales with
-    SIZE, so it is a little over one decade wherever it is set -- and a linear
-    axis scaled to the window itself shows the *spacing* of the reflections,
-    which is the one thing about a tap set worth looking at. A log axis here
-    would crowd the late taps into the last fifth, and a fixed window would
-    leave most of the box empty at every size but one.
+    **EARLY -- a time x pan scatter.** x is arrival, linear over the real ER
+    window; y is bearing, hard left at the top and hard right at the bottom;
+    and **the radius of the dot is the tap's gain**. What this replaced was a
+    set of mirrored stems with a bearing dash on each, and before that a
+    symmetric envelope. The scatter is the third and the right one, and the
+    argument is VARIATION: it is a lateral-spread control, so the picture it
+    belongs in is one where lateral spread is an axis. Turning it fans the
+    cluster open and shut vertically, which is a thing a reader sees without
+    being told what to look at; on stems it moved twenty-one short dashes a few
+    pixels each.
 
-    **The sign is the bearing's side and the dash on each stem is its
-    magnitude.** A sign alone cannot tell 0.05 from 0.72, and 10 section 3's
-    lateral distribution -- target early lateral fraction 0.10-0.35, first
-    reflections near centre so the phantom centre holds -- is a question about
-    magnitudes. So every core tap also carries a short dash at `panY (pan)`,
-    which is the same arithmetic the stem's side comes from. The dash sits on
-    its own stem while the tap is loud and out past the tip while it is not,
-    and the run of dashes is the lateral scatter the section is about. `L` and
-    `R` are printed at the left-hand edge, because a mirrored picture with no
-    hand on it is a picture a reader has to guess at.
+    **The three marks are three different claims.** A filled dot is a core tap:
+    a real time, a real gain and a real bearing, all three off the same `Tap`
+    row the engine will play. The direct sound is that dot with a ring around
+    it, at t = 0 on the centre line -- it is not a reflection and it is what
+    every arrival here is measured from. And **an infill tap is a faint
+    full-height line, because its bearing is invented**: the 21 core bearings
+    come off `TapTables.h` and the infill stands in for a master sequence that
+    does not exist yet (10 section 3), so drawing it as a dot would put a made-
+    up bearing on the one axis this page exists to show. A line at a time makes
+    the claim that is true -- a tap arrives here -- and none of the claim that
+    is not.
 
-    **TAIL -- logarithmic time, 1 ms to a window that follows the tail.**
-    The axis end **follows `tailEndSeconds`**, far enough past it to leave
-    `kAxisAir` of the box clear after the curve, and is clamped to
-    `kMaxSeconds`,
-    so the curve fills the box at every setting instead of finishing 60 % of
-    the way across and ruling a flat line over the rest. The old axis ran to
-    30 s at all times -- `kMaxSeconds`, which is `bmo::kMaxTailSeconds`, the
-    clamp on the tail this module and the rack report -- and 30 s is the
-    ceiling rather than a setting anybody uses: at the 1.8 s default it spent
-    40 % of a 336 px box drawing nothing.
+    **TAIL -- three decay curves, low, mid and high.** The page's controls are
+    LOW x, HIGH x, MOD DEPTH and MOD RATE, and the single envelope this
+    replaced showed none of them: LOW x could be swept end to end with nothing
+    on the screen moving, because the envelope was drawn at the mid decay and
+    the multipliers only ever moved the shaded band behind it. Three curves
+    make the two multipliers the subject. The mid curve is the heaviest -- it
+    is what DECAY says -- and the outer two are lighter.
 
-    **What that costs is comparability, and the readout is what pays it
-    back.** With the axis following the tail, turning DECAY no longer walks the
-    curve across the box -- the shape stays and the *scale under it* moves --
-    so two settings cannot be compared by eye alone. The bezel line under the
-    screen carries "DECAY 1.80 S" and "TAIL 2.16 S" in absolute seconds, and
-    the decade marks inside the box are labelled 10 MS / 100 MS / 1 S / 10 S,
-    so the length is readable in two places and neither of them is the width of
-    the drawing. The trade was taken deliberately: a shape that fills the box
-    answers "is this tail too long for the track" and a flat line does not.
-
-    The left-hand end does not move: 1 ms is where a reflection stops fusing
-    with the direct sound (05 section 1.1). Logarithmic, for the reason it
-    always was -- a linear window wide enough for the tail puts the whole
-    0-120 ms onset inside the first two pixels, and 11 section 5's proposed
-    fixed 0-500 ms window cannot show a 20 s decay at all.
+    The axis is unchanged and so is the reason: logarithmic, 1 ms to a window
+    that follows the tail. 1 ms is where a reflection stops fusing with the
+    direct sound (05 section 1.1), and the end **follows `tailEndSeconds`** so
+    the curves fill the box at every setting instead of finishing 60 % of the
+    way across. The decade marks are labelled because a window that moves makes
+    an unlabelled decade line say only "a decade happened here".
 
     **EQ -- logarithmic frequency, 20 Hz to 20 kHz,** which is the only axis a
-    frequency response has. Level is linear in dB over +/-`kEqRangeDb`. It was
-    captioned TONE until 2026-09-21; see `Page`.
+    frequency response has. Level is linear in dB over +/-`kEqRangeDb`.
 
-    ## What the EQ curve is, and it is now the real filters
+    ## What the EQ curve is, and it is the real filters
 
     **Three marked nodes over one summed curve, and a curtain that is not a
     node.** The three are the Reverb EQ's -- node 1 a low shelf, node 2 a bell,
     node 3 a high shelf, or a low cut and a high cut with FILTER on -- and they
     are designed by `EqNodes::design`, which is `dsp::designMatched`, which is
     **the code the engine will run**. IN HI-CUT is in the curve, because it is
-    in the chain, but it is marked as a region rather than as a fourth node;
-    see below.
+    in the chain, but it is marked as a region rather than as a fourth node.
 
-    That closes what this comment used to own up to. The shelves were drawn
-    first-order and the cut one-pole, marked as "not claimed to be the shipped
-    filter" because `dsp/DspCore.h` was a marked placeholder and there was no
-    shipped filter to be wrong about. Reproducing the matched-Z design into
-    `core/dsp` gave the module one, so the sketch became a measurement. 11
-    section 5 names sketch/DSP drift as the display's one real risk and asks
-    for one source of truth; `TapTables.h` is that answer for the ER picture
-    and `EqNodes.h` is now that answer for this one.
+    ### The four node states, and they compose
 
-    ## The two high cuts, and how the picture tells them apart
+    A marker says two independent things and says them with two independent
+    strokes, which is what lets it say all four combinations:
 
-    This module has **two** and they are different controls:
+    - **A ring means the knobs edit this node.** FREQ, GAIN and Q are one set
+      repointed by the LOW / MID / HIGH segments, so at any moment two of the
+      three nodes on the curve are not the one the knobs are holding. Without
+      the ring a reader turning FREQ has to look away from the picture to find
+      out which corner is about to move.
+    - **A fill means this node is shaping the sound.** Gain off zero, or a
+      shape that removes without a gain at all -- a cut is always doing
+      something. An unfilled marker is a node sitting at unity.
 
-    - **IN HI-CUT** (`inhicut`), the input high-cut, ahead of the EQ and ahead
-      of both generators, on top of a fixed 20 Hz high-pass. No Q, no gain, one
-      pole. It darkens *what the room is given*.
-    - **EQ HIGH with FILTER on**, node 3 of the Reverb EQ, second-order with a
-      Q. It darkens *the room*.
-
-    The captions carry the distinction -- "IN HI-CUT" against "EQ HIGH FREQ",
-    "EQ HIGH" and "EQ HIGH Q" -- and **the picture now draws it as a different
-    kind of thing entirely**: the three EQ nodes are filled circles on the
-    curve, and IN HI-CUT is a **curtain** -- a washed region from its corner to
-    the right-hand edge of the axis, with a bright edge at the corner and a tab
-    along the top of it. It was an open circle until 2026-09-22 and that was
-    wrong twice over. A marker one stroke different from three filled ones
-    reads as a fourth node of the same EQ, which it is not; and at its default
-    of 20 kHz it sat *on* the frame and was drawn half outside the box. A
-    region is not a node at any glance, it cannot be confused for one, and
-    `inputCutRegion` is clamped inside the plot so nothing of it is ever cut
-    off by the frame. Its one-pole roll-off is still arithmetic in this file
-    rather than an `EqNodes` node, and that is deliberate: giving it a `Biquad`
-    would imply an order nobody has chosen for it.
-
-    ## How FILTER reads as cuts
-
-    Three things at once, so it cannot be mistaken for a shelf at a lot of
-    gain. The nodes really are `Shape::lowCut` and `Shape::highCut`, so the
-    curve dives off the bottom of the +/-24 dB axis at each end instead of
-    levelling onto a shelf. The area between the curve and the 0 dB line is
-    washed in, which is a lens either side of a shelf and a pair of wedges
-    running to the floor for a cut. And the readout line prints "LO CUT" and
-    "HI CUT" where it printed "LOW" and "HIGH". */
+    So: ringed and filled is the node you are editing and it is doing
+    something; ringed and hollow is the node you are editing and it is flat;
+    filled alone is a node working that the knobs are not on; hollow alone is a
+    node at rest. `nodeMark` is the one place that is decided and a layout test
+    reads it there. */
 class LingerScreen final : public juce::Component,
                            private juce::Timer
 {
@@ -199,14 +161,11 @@ public:
         refreshes all of it at once and a partial update is not a state this
         screen can be in.
 
-        **Nineteen of these come from a parameter and `attack` does not.** It
-        is `TypeConstants::attack` for whichever type is selected, since the
+        **Twenty of these come from a parameter and `attack` does not.** It is
+        `TypeConstants::attack` for whichever type is selected, since the
         2026-09-21 control-set trim took its knob away -- so TYPE is one of the
         parameters the panel redraws the screen on, and the TAIL page's onset
         follows a type change with no knob having moved.
-
-        `linkEr` was here and went with `prelink`: ER travel with dry, fixed,
-        so the pictures no longer have two cases to draw.
 
         The EQ block is an `EqSettings` and not ten loose fields, because that
         is the struct `EqNodes::design` takes and the same struct the engine
@@ -219,6 +178,7 @@ public:
         float preDelayMs   = 0.0f;
         float erDensity    = 50.0f;   ///< per cent
         float erLevelDb    = -6.0f;
+        float variation    = 2.0f;    ///< 0-6, the lateral-spread step
 
         // TAIL.
         float decaySeconds = 1.8f;
@@ -247,9 +207,7 @@ public:
 
         Polled rather than read once: a matched-Z design is rate-dependent by
         construction, and a host can re-prepare a plugin with its editor open.
-        BMO DEQ drew the 48 kHz design at every rate until 2026-09-15, which
-        was up to a dB out in the top octave at 44.1 and 96 k. Null, or
-        returning 0, means "not prepared yet" and leaves the curve on
+        Null, or returning 0, means "not prepared yet" and leaves the curve on
         `kEqDesignRate`. */
     void setHostRate (std::function<double()>);
 
@@ -261,7 +219,40 @@ public:
     void setPage (Page);
     Page getPage() const noexcept { return page; }
 
+    /** Which node's marker wears the ring: the one the FREQ / GAIN / Q knobs
+        are pointed at. UI state, handed down by the panel. */
+    void setSelectedNode (EqNode);
+    EqNode getSelectedNode() const noexcept { return selectedNode; }
+
+    /** A click on the menu band asked for a page. Null does nothing, which is
+        what a screen rendered headlessly wants. */
+    std::function<void (Page)> onPageChosen;
+
     void paint (juce::Graphics&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+
+    //== The menu band ========================================================
+
+    /** The band across the top of the display, in this component's pixels. */
+    juce::Rectangle<float> menuBandBounds() const noexcept;
+
+    /** One page's segment of the band, dividers included. Public so a layout
+        test can assert the three tile the band and that each one's word fits
+        inside its own segment. */
+    juce::Rectangle<float> menuSegment (Page) const noexcept;
+
+    /** How much wider a page's name is than the room it has inside its
+        segment; zero or less fits, and the negative of it is the margin.
+
+        Here rather than in the test, for `ui::PlainKnob::captionOverflow`'s
+        reason: it uses the same box and the same face `paint` does, so it
+        cannot agree with the bug it is looking for. MAKEUP -> MAKEU is the
+        failure, and a menu is the place it hides best -- nothing else on a
+        panel walks text drawn inside a picture. */
+    float menuLabelOverflow (Page) const;
+
+    /** The word printed in a page's segment. */
+    static juce::String menuLabel (Page) noexcept;
 
     //== Arithmetic, public so a test can assert it without rendering ==========
 
@@ -274,8 +265,8 @@ public:
     float lastTapTimeMs() const noexcept;
 
     /** The right-hand edge of the EARLY page's own time axis: the last tap
-        with a tenth of the window left after it, so the last stem is a stem
-        and not the border. */
+        with a tenth of the window left after it, so the last dot is a dot and
+        not the border. */
     float erWindowMs() const noexcept;
 
     /** When the tail's first sample arrives: the pre-delay, which is tail-only
@@ -286,39 +277,98 @@ public:
         `decay * max(1, dampLo, dampHi)`, with the pre-delay in front of it. */
     float tailEndSeconds() const noexcept;
 
+    /** The three decay times the TAIL page draws, in seconds: low, mid, high.
+
+        Mid is DECAY itself and the outer two are DECAY times their own
+        multiplier, which is what makes the two outer curves the picture of
+        LOW x and HIGH x. Public because it is what the three curves *are*, and
+        a test that re-derived them its own way could agree with a picture
+        drawing one curve three times. */
+    std::array<float, 3> decayTimesSeconds() const noexcept;
+
     /** The right-hand end of the TAIL page's time axis, in seconds: far enough
         past the tail that is set to leave `kAxisAir` of the width clear after
         it, floored at `kMinWindowS` so the shortest decay still has two
-        decades to draw in, and clamped at `kMaxSeconds`.
-
-        **This is what stopped 40 % of the box being a flat line.** It is a
-        window rather than a constant, so a test asserting on it has to assert
-        a relation -- the drawn tail ends inside the axis, and not far inside
-        it -- which is what `tests/ui/LayoutTests.cpp` does. */
+        decades to draw in, and clamped at `kMaxSeconds`. */
     float tailWindowSeconds() const noexcept;
 
     /** A bearing as a y inside the plot, for the EARLY page: -1 is hard left
         and draws at the top, +1 is hard right and draws at the bottom, 0 is
-        the centre axis.
+        the centre axis. `kPanReach` is why +/-1 does not land *on* the frame.
 
-        Public for the reason every other number here is: it is what the
-        picture is built from, and a test can check that a hard-panned tap
-        lands inside the box without rendering anything. `kPanReach` is why
-        +/-1 does not land *on* the frame. */
+        **The bearing handed in is the table's, and the scatter draws it
+        through `lateralSpread`** -- see that function for what VARIATION does
+        to it and for the marking that says how much of it is real. */
     float panY (float pan) const noexcept;
 
-    /** The plotting area the page is drawn inside, so a test can ask whether
-        something drawn is within it. */
+    /** How much of a tap's tabulated bearing VARIATION lets through, 0 to 1.
+
+        **A stand-in, and marked as one.** 10 section 3 gives VARIATION as
+        per-channel tap permutations plus a lateral-spread scalar, and the
+        scalar itself is CALIBRATE -- there is no generator to read it off.
+        What is real is the direction: more variation is more lateral spread,
+        the bottom of the travel is not zero because the first reflections stay
+        near centre at every setting anyway, and position 6 is a different
+        construction whose ER vanish in mono, which this does not attempt to
+        draw. When the generator lands, this is the one function that changes.
+
+        Public so the layout test can assert the fan opens with the knob
+        without reading pixels. */
+    float lateralSpread() const noexcept;
+
+    /** The plotting area the page is drawn inside -- **under the menu band**,
+        so a test can ask whether something drawn is within it. */
     juce::Rectangle<float> plotBounds() const noexcept { return plotArea(); }
+
+    /** Where a core tap's dot is drawn and how big it is, on the EARLY page.
+
+        The centre is (arrival, bearing) and **the radius is the gain**, which
+        is the third axis the scatter has and the stems did not. Empty radius
+        means the tap is below the floor and is not drawn at all. */
+    struct TapDot
+    {
+        juce::Point<float> centre;
+        float radius = 0.0f;
+    };
+
+    /** Core tap `index`'s dot, 0-based into `kReferenceTaps`. */
+    TapDot tapDot (int index) const noexcept;
+
+    /** The direct sound's dot: t = 0, dead centre, full gain, pushed in by its
+        own radius so no part of it is drawn on the frame. */
+    TapDot directDot() const noexcept;
 
     /** IN HI-CUT's curtain on the EQ page: the washed region from its corner
         to the right-hand edge of the axis, **clamped so its bright edge is
-        inside the plot at 20 kHz** rather than half-drawn on the frame, which
-        is what the open circle it replaced was. Empty on the other two pages.
+        inside the plot at 20 kHz** rather than half-drawn on the frame. Empty
+        on the other two pages.
 
         The rectangle is the whole curtain, edge included; the edge itself is
         its left-hand `kCurtainEdge` pixels. */
     juce::Rectangle<float> inputCutRegion() const noexcept;
+
+    /** How one EQ node's marker is drawn: where, how big, and the two
+        independent strokes. See the class comment for what the two mean and
+        why they have to compose. */
+    struct NodeMark
+    {
+        juce::Point<float> centre;
+        float radius = 0.0f;
+        bool ringed = false;   ///< the FREQ / GAIN / Q knobs are pointed here
+        bool filled = false;   ///< this node is shaping the sound
+    };
+
+    NodeMark nodeMark (EqNode) const noexcept;
+
+    /** Whether a node is shaping the sound: a gain off zero, or a shape that
+        removes without having a gain at all.
+
+        **A cut counts whatever its GAIN knob reads**, which is the whole
+        reason this is a function rather than a comparison at the call site:
+        `eqNodeHasGain` is false for a cut, the knob is greyed, and the node is
+        very much doing something. Reading the gain alone would draw a 24 dB
+        low cut as a node at rest. */
+    bool nodeIsActive (EqNode) const noexcept;
 
     /** A tick label the screen prints inside the plot, and the box it is set
         in. `text` is ASCII, like every other string this module prints. */
@@ -344,13 +394,7 @@ public:
 
     /** The whole EQ chain at `hz`, in dB: the three designed nodes plus the
         input high-cut, summed. This is what the curve is drawn from and what a
-        test should assert against.
-
-        The three nodes are `dsp::designMatched`, the engine's own design, so
-        at the defaults every one of them is that function's exact unity case
-        and the three contribute **0.0 dB and not nearly zero**. The only
-        approximation left in the number is IN HI-CUT's one pole, which is a
-        third of a dB at 20 kHz with the knob wide open. */
+        test should assert against. */
     float responseDbAt (float hz) const noexcept;
 
     /** One Reverb EQ node's own contribution at `hz`, in dB -- without its two
@@ -364,23 +408,16 @@ public:
         which is `inputCutRegion`'s curtain rather than a fourth node. */
     std::array<float, 4> nodeFrequencies() const noexcept;
 
-    /** Which of the two outer nodes are cuts. The same mode the GAIN knobs
-        grey out on, read back through the screen so a test can check that the
-        picture and the controls agree about it.
-
-        The mode itself and not "is it on", since 2026-09-22: with four
-        positions a bool could not tell Lo Cut from Hi Cut, and those two are
-        the pair a test most needs to be able to tell apart. */
+    /** Which of the two outer nodes are cuts. The same mode the GAIN knob
+        greys out on, read back through the screen so a test can check that the
+        picture and the controls agree about it. */
     EqFilter filterMode() const noexcept { return state.eq.filter; }
 
-    /** Whether *either* outer node is a cut -- what the old bool said. Kept
-        because "the screen took the mode at all" is still a claim worth
-        making on its own. */
+    /** Whether *either* outer node is a cut. */
     bool isFilterMode() const noexcept { return state.eq.filter != EqFilter::off; }
 
     /** The line of small printed text under the screen, for whichever page is
-        showing: the tap count and the ER window, the decay time and where the
-        tail ends, or the three crossover points.
+        showing.
 
         **ASCII only**, like every other string this module prints: the two
         display faces are licensed individually and live outside this
@@ -390,43 +427,59 @@ public:
         read what a page says it is showing. */
     juce::String readout() const;
 
-    /** The TAIL page's window, as the class comment argues it.
+    /** The menu band's height, inside the display. The suite's switch height,
+        because a divided menu segment and a switch are the same kind of object
+        -- a small rectangle with a word in it -- and the band is the display's
+        own version of the row of segments below the bezel. */
+    static constexpr int kMenuBand = ui::Tokens::switchHeight;
 
-        `kMaxSeconds` is **the ceiling the window is clamped to and no longer
-        the axis end itself**: it is `bmo::kMaxTailSeconds`, the clamp on the
-        tail this module and the rack it sits in will ever report, so the axis
-        can never be asked to draw a tail longer than the host is told about.
-        `tailWindowSeconds` is where the axis actually ends. */
+    /** The hairline between two menu segments, and the rule under the band. */
+    static constexpr float kMenuDivider = 1.0f;
+
+    /** The menu's point size. Smaller than a switch's label, because it is set
+        inside a picture rather than on the plate, and `menuLabelOverflow` is
+        what says it still fits. */
+    static constexpr float kMenuSize = 9.5f;
+
+    /** The TAIL page's window. `kMaxSeconds` is `bmo::kMaxTailSeconds`, the
+        clamp on the tail this module and the rack it sits in will ever report,
+        so the axis can never be asked to draw a tail longer than the host is
+        told about. `tailWindowSeconds` is where the axis actually ends. */
     static constexpr float kMinMs      = 1.0f;
     static constexpr float kMaxSeconds = 30.0f;
 
     /** How much of the box is left blank after the drawn tail reaches the
         floor, **as a fraction of the width and not as a multiple of the
-        time**.
-
-        On a logarithmic axis those are not the same thing and the difference
-        is the whole of why this constant is written this way: 15 % more time
-        after a 2.16 s tail is 1.8 % of the width, which rendered on AURORA as
-        a curve running into the right-hand frame. Eight per cent of the width
-        is eight per cent of the width at every setting, which is what
-        `erWindowMs`'s tenth already gives the EARLY page. */
+        time**. On a logarithmic axis those are not the same thing. */
     static constexpr float kAxisAir = 0.08f;
 
-    /** The shortest window the axis will draw, in seconds. DECAY bottoms out
-        at 0.1 s, which with the headroom is 115 ms and two decades of axis;
-        this floor is what stops a future shorter decay from drawing one. */
+    /** The shortest window the axis will draw, in seconds. */
     static constexpr float kMinWindowS = 0.05f;
 
     /** How far from the centre axis a hard-panned tap draws on EARLY, as a
         fraction of the half-height. Not 1.0: the plot's own edge is where the
-        frame is, and a bearing dash sitting on the frame reads as a clipped
-        dash rather than as a hard pan. */
-    static constexpr float kPanReach = 0.92f;
+        frame is, and a dot centred on the frame reads as clipped rather than
+        as hard panned. */
+    static constexpr float kPanReach = 0.88f;
 
-    /** The bright edge on IN HI-CUT's curtain, in pixels. The curtain's left
-        edge is inset by this much at 20 kHz so the whole of it stays inside
-        the plot -- which is the clipping the open circle was guilty of. */
+    /** The scatter's dot radii, in pixels: what a tap at the floor draws at
+        and what a tap at 0 dB draws at.
+
+        The small end is not zero. A tap at the bottom of the range is still an
+        arrival at a bearing, and a dot that shrank to nothing would delete the
+        quietest reflections rather than showing them as quiet -- which is the
+        opposite of what the gain axis is for. */
+    static constexpr float kDotMinRadius = 1.6f;
+    static constexpr float kDotMaxRadius = 5.4f;
+
+    /** The bright edge on IN HI-CUT's curtain, in pixels. */
     static constexpr float kCurtainEdge = 2.0f;
+
+    /** The EQ node markers: the filled disc's radius, and how far outside it
+        the selection ring is drawn. The ring has to be a ring at a glance
+        rather than a thicker dot, which is what the gap buys. */
+    static constexpr float kNodeRadius   = 3.6f;
+    static constexpr float kNodeRingGap  = 2.6f;
 
     /** The tick labels' point size. Small, and smaller than the readout's 11:
         these sit *inside* the picture and a tick that competed with the curve
@@ -438,18 +491,10 @@ public:
         instead of on the floor itself. */
     static constexpr float kFloorDb = -72.0f;
 
-    /** The bottom of the EARLY page's stem axis, in dB, and **it is the ER
-        fader's own bottom rather than the tail's floor**.
-
-        The taps span 15 dB between them -- the table runs 0.501 to 0.087 -- so
-        on the tail's -72 dB floor the first stem is 83 % of the box and the
-        last is 62 %, and a cluster that visibly decays draws as a comb of
-        near-equal lines. Against -40 the same set runs 70 % to 33 %, which is
-        the 1/d law made visible and is the thing the picture is of.
-
-        -40 rather than a number picked to look right: it is where the ER fader
-        stops and reads "Off", so a stem reaching the floor means the same
-        thing on the screen as the fader at the bottom of its travel does. */
+    /** The bottom of the EARLY page's gain scale, in dB, and **it is the ER
+        fader's own bottom rather than the tail's floor**. -40 is where the ER
+        fader stops and reads "Off", so a dot at the smallest radius means the
+        same thing on the screen as the fader at the bottom of its travel. */
     static constexpr float kTapFloorDb = -40.0f;
 
     /** The EQ page's axes. */
@@ -471,21 +516,25 @@ private:
     void rebuildSpectrum();
 
     /** Hz to x and dB to y on the EQ page, shared by the grid, the curve, the
-        wash, the node markers **and the spectrum** -- which is why they are
-        members rather than lambdas inside `paintEq`. A spectrum that built its
+        wash, the node markers **and the spectrum**. A spectrum that built its
         own log axis would drift from the one it is drawn against. */
     float eqXFor (double hz) const noexcept;
     float eqYFor (double db) const noexcept;
 
-    /** The plotting area, inset from the component. */
+    /** The plotting area: the component less the menu band, inset. */
     juce::Rectangle<float> plotArea() const noexcept;
 
-    /** Milliseconds to x on the TAIL page, over a window that follows the
-        tail. A member and not a lambda inside `paintTail`, because the decade
-        ticks in `axisLabels` have to land on the same axis the envelope is
-        drawn against -- the same reason `eqXFor` is one. */
+    /** Milliseconds to x on the EARLY page's linear window, and on the TAIL
+        page's logarithmic one. Members and not lambdas inside the painters,
+        because the labels in `axisLabels` and the dots in `tapDot` have to
+        land on the same axes the pictures are drawn against. */
+    float erXFor (float ms) const noexcept;
     float tailXFor (float ms) const noexcept;
 
+    /** A tap's gain in dB as a dot radius, against `kTapFloorDb`. */
+    float dotRadiusFor (float db) const noexcept;
+
+    void paintMenu  (juce::Graphics&, juce::Colour ink) const;
     void paintEarly (juce::Graphics&, juce::Rectangle<float> plot, juce::Colour ink) const;
     void paintTail  (juce::Graphics&, juce::Rectangle<float> plot, juce::Colour ink) const;
     void paintEq    (juce::Graphics&, juce::Rectangle<float> plot, juce::Colour ink) const;
@@ -493,6 +542,7 @@ private:
     juce::Colour accent;
     State state;
     Page page = Page::early;
+    EqNode selectedNode = EqNode::low;
 
     /** The three Reverb EQ nodes as designed filters, and the rate they were
         designed at. `kEqDesignRate` until a host says otherwise. */
@@ -507,291 +557,222 @@ private:
 };
 
 //==============================================================================
-/** One of the three page keys under the screen.
+/** A row of rectangular segments: one of N, and which one is lit.
 
-    **Round, and level rather than raked.** Frosty's call, 2026-09-21: a
-    handheld is held at an angle and can afford a raked key block, and a mix
-    panel is scanned in rows against its neighbours, so a row that sloped would
-    be the only thing in the window not lining up with the slot beside it. The
-    raked grille at the foot used to be the one sloped thing here; it was cut
-    later the same day and nothing on this panel slopes now.
+    **One component with two bindings, and that was the decision.** BMO Linger
+    uses it twice and the two uses are not the same kind of thing: on EARLY the
+    segments are `ermode`, a real three-position choice parameter a host can
+    automate, and on EQ they are `ui.node`, which is not a parameter and must
+    never become one -- `specs()` is thirty with two lanes spare and which node
+    a panel is pointed at does not belong in a session.
 
-    **The name is set inside the key, and was under it until 2026-09-22.**
-    Frosty's call, against the mockup. The old arrangement borrowed a knob's --
-    a circle with a caption row beneath it -- and that was the *less*
-    house-consistent of the two: every other thing in this suite that is a key
-    rather than a control puts its word inside itself. `ui::SwitchButton` does
-    (FILTER here, MONO in Util, LINK ER before the trim), and so do BMO Opto's
-    TELE and ELD. A page key is a key.
+    Two nearly identical components was the alternative and it was rejected on
+    what the difference actually is. Nothing about the *control* differs: same
+    rectangles, same height, same inverted-video selection, same hit test, same
+    keyboard-less radio behaviour. What differs is where the chosen index is
+    kept, and a control should not know that -- `PageButton` made the same
+    argument before it was replaced ("a click asks for a page rather than
+    flipping a state"), and BMO Opto's meter row makes it too. So this holds an
+    index and an `onSelect`, the panel owns the binding, and the two uses
+    differ by four lines in `ReverbPanel`'s constructor rather than by a class.
 
-    The old comment here claimed "EARLY does not fit at any size worth
-    reading", and it was measuring a 32 px circle. It is 36 now, paid for by
-    the caption row that went -- see `kPageRow` -- and the word fits with real
-    room to spare; `labelOverflow` is the measurement and
-    `tests/ui/LayoutTests.cpp` asserts on it per key per page. **Do not take
-    the diameter back down without re-reading that number**: this is the
-    MAKEUP -> MAKEU failure mode with a circle round it, and a chord is less
-    forgiving than a rectangle because the room runs out fastest exactly where
-    the letters are.
+    **Rectangular, at `ui::Tokens::switchHeight`.** Frosty rejected round keys
+    here on 2026-09-22: three circles want a 44 px row, the row would then be
+    the third tallest thing on the panel, and a sub-selection is not worth
+    that. A rectangle with a word in it is what every switch in the suite is,
+    and a segmented row is a line of them that happen to be exclusive.
 
-    The fill is unchanged: the module's accent when its page is selected and
-    `switchOff` -- the raised grey every unlit switch in the suite is filled
-    with -- when it is not. The *ink* had to change, because it moved off the
-    plate and onto the fill: `ui::onAccentOf` is what a switch's label uses for
-    the same reason, and deriving against the plate here would have put the
-    accent on top of itself.
-
-    **Flat, and staying flat.** No gradient, no bevel, no drop shadow. Every
-    control in this suite is flat and Frosty is assessing that separately; a
-    key that got a dimensional treatment on its own would decide the question
-    by accident.
-
-    A `juce::Button` rather than a `ui::SwitchButton`, because it is not a
-    switch: there is no parameter under it, the three are a radio set rather
-    than three independent toggles, and the panel owns which one is lit. */
-class PageButton final : public juce::Button
+    The fill is the suite's: the module's accent for the lit segment,
+    `switchOff` -- the raised grey every unlit switch is filled with -- for the
+    others, and `ui::onAccentOf` for the ink so a label on the accent is
+    legible against it rather than against the plate. */
+class Segments final : public juce::Component
 {
 public:
-    PageButton (const juce::String& name, juce::Colour accent);
+    Segments (juce::StringArray labels, juce::Colour accent);
 
-    void paintButton (juce::Graphics&, bool shouldDrawHighlighted, bool shouldDrawDown) override;
+    void paint (juce::Graphics&) override;
+    void mouseUp (const juce::MouseEvent&) override;
 
-    /** Re-colours the key. See `ui::PlainKnob::setAccent`. */
+    /** Lights segment `index` and nothing else. Silent: it does not call
+        `onSelect`, because it is what a binding calls *after* the value has
+        already moved. */
+    void setSelected (int index);
+    int getSelected() const noexcept { return selected; }
+
+    /** A click picked a segment. The panel decides what that means -- a
+        parameter gesture on EARLY, a repoint on EQ. */
+    std::function<void (int)> onSelect;
+
+    /** Re-colours the row. See `ui::PlainKnob::setAccent`. */
     void setAccent (juce::Colour);
 
-    /** How much wider the name is than the room it has **inside the circle**,
-        in pixels; zero or less fits, and the negative of it is the margin.
+    int numSegments() const noexcept { return labels.size(); }
 
-        Here rather than in the test that asserts on it, because it has to use
-        the same box and the same face `paintButton` does.
-        `ui::PlainKnob::captionOverflow` is the precedent and carries the
-        argument: MAKEUP drew as MAKEU for a full release, and a test that
-        measured it its own way could have agreed with the bug. */
-    float labelOverflow() const;
+    /** Segment `index`'s rectangle inside this component, dividers included.
+        Public so a layout test can assert the segments tile the row. */
+    juce::Rectangle<int> segmentBounds (int index) const;
 
-    /** The circle itself, inside the component. For a layout test that wants
-        to know the key is round rather than merely present. */
-    juce::Rectangle<int> dotBounds() const;
+    /** How much wider segment `index`'s word is than the room it has, in px;
+        zero or less fits, and the negative of it is the margin.
+        `ui::PlainKnob::captionOverflow`'s argument and its discipline. */
+    float labelOverflow (int index) const;
 
-    /** The box the name is actually set in, inside the circle.
+    /** The label's point size. `ui::SwitchButton` derives its own from the box
+        height at 62 %, which on a 26 px segment is 16 pt -- calibrated for a
+        word running the length of a 70 px box, and these are 90 px boxes with
+        four-letter words in them. Pinned instead, as BMO CEQ's square HI-Q
+        switch pins its own. */
+    static constexpr float kLabelSize = 11.0f;
 
-        Public because a label inside a round bound is not something the
-        caption walk in `tests/ui/LayoutTests.cpp` can check -- that walk knows
-        about captions under controls -- so the test asserts this box is inside
-        `dotBounds` itself. */
-    juce::Rectangle<int> labelBox() const;
-
-    /** 32 until the caption row went. The four extra pixels are four of the
-        twenty that row freed; the other sixteen are the PAGE legend under the
-        row. See `kPageRow` in ReverbPanel.cpp, which adds it up. */
-    static constexpr int kDotSide = 36;
-
-    /** The name's point size, and **it is a measurement, not a preference**.
-
-        `ui::SwitchButton` derives its label from the box height at 62%, which
-        on a 36 px key would be 22 pt and absurd: that ratio is calibrated for
-        a 26 px switch whose word runs the length of a 70 px box, and a chord
-        is not a box. Pinned instead, the way BMO CEQ's square HI-Q switch pins
-        its own.
-
-        "EARLY" in `labelFont`, against the chord `labelBox` gives it inside a
-        36 px key, measured on AURORA through `ui_layout_tests --dump`:
-
-            8.0 pt   23.7 px in 31.1   margin  7.4
-            9.0 pt   26.7 px in 30.9   margin  4.2     <- this
-           10.0 pt   29.6 px in 30.6   margin  1.0
-           10.5 pt   31.1 px in 30.4   margin -0.7     <- clips
-
-        Ten was the first choice and 1.0 px of margin is not a margin; it is
-        the half-pixel case `tests/ui/LayoutTests.cpp`'s own dump comment warns
-        about, one type size away from being the next MAKEUP. Nine gives four
-        px and reads.
-
-        **The face matters more than the size here.** `captionFont` -- Blender,
-        what the name was set in while it was a caption under the key -- is
-        *wider* than Minerva Black at the same nominal height, and by a lot:
-        "EARLY" is 45.4 px at 9 pt against Minerva's 26.7. That, and not the
-        circle, is why the old comment here concluded a word could not be set
-        inside a key at any size worth reading. It was measuring the wrong
-        face. */
-    static constexpr float kLabelSize = 9.0f;
-
-    /** How far inside the circle the name's box stops, each side.
-
-        The chord is where the outline is drawn, so a name measured to the
-        chord is a name touching the rim. Two pixels is the hairline plus air,
-        and it is taken off the measurement rather than off the drawing, so the
-        margin `labelOverflow` reports is room the reader can actually see. */
-    static constexpr float kLabelInset = 2.0f;
+    /** Air either side of a segment's word, taken off the measurement rather
+        than off the drawing, so the margin `labelOverflow` reports is room a
+        reader can see. */
+    static constexpr float kLabelInset = 5.0f;
 
 private:
+    juce::StringArray labels;
     juce::Colour accentColour;
+    int selected = 0;
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (PageButton)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Segments)
 };
 
 //==============================================================================
 /** BMO Linger's panel: a paged handheld.
 
-    A bezelled screen with a line of printed text under it, three page keys, a
-    persistent row that is there whatever page you are on, a cluster that
-    changes with the page, and a foot holding the two generator levels, MIX and
-    the TYPE dropdown. Frosty approved the shape on 2026-09-21, and it replaces
-    the compact/expanded two-width split BMO DEQ's precedent had given this
-    module.
+    A bezelled screen carrying its own page menu and a line of printed text
+    under it; a segmented sub-selection row; two rows of six controls that
+    change with the page; and a strip at the foot holding three faders, a rule
+    that names them, and a fourth column with TYPE over DECAY.
 
-    ## The speaker grille is gone, and TYPE has its corner
+    ## The height budget
 
-    The grille was texture in the fourth column of the level strip, raked, the
-    one sloped thing on a panel whose keys are deliberately level. **It lost
-    its job when the corners went square** and it rendered as a flat swatch
-    rather than as texture, so it was cut on 2026-09-21 rather than retried.
+    `ModulePanel::kContentHeight` is 688 suite-wide and `RackEditor` sets every
+    panel to it, so **the total cannot move**. What follows is the whole of the
+    680 of content area, and it is a reallocation rather than a growth:
 
-    **TYPE took the corner it left.** Frosty's call, and it is two arguments at
-    once: a dropdown is not knob-shaped, so it never belonged in a grid of
-    knobs, and the foot is where two of the nine parameters a type change
-    stamps already are. TYPE sits at the right-hand end of the ER / REVERB /
-    MIX row, under the LEVEL rule, which is the only wrinkle in the
-    arrangement -- TYPE is not a level, and the rule is legended as though it
-    were. The alternative was a rule that stopped short of one cell, which
-    `ModulePanel::addRule` does not draw and which would have been a second
-    kind of rule in the suite for one corner's sake.
+        bezel     302   24 of well, a 258 px screen, 4, a 16 px readout row
+        cluster   184   a 26 px segment row and two knob rows of 79
+        rule       16
+        strip     134   fader, caption, value, each on its own line
+                  ---
+                  636   leaving 44, which is four gaps of 11
 
-    ## One width, and `expandedWidth` is gone
+    **The screen paid for itself and then some.** It was 105 px and a
+    letterbox, because the EQ page was twelve controls in four reserved rows.
+    Repointing FREQ / GAIN / Q by a node selector takes that page to six, which
+    is the same two rows every other page needs, and the two rows that fall
+    free plus the page-key row plus the PAGE rule are what the screen grew
+    into. A reverb's display is the part of the panel doing the explaining, and
+    258 px is the first version of this face where it is bigger than the
+    controls.
 
-    The old arrangement was 300 compact and 700 expanded, with the same face
-    down the left of both and three groups of knobs appearing in the extra
-    400 px. **Paging removes the reason for it.** Six, five and six
-    controls never need to be on screen at once; what they need is to be
-    reachable, and a key under the screen reaches them in one click where the
-    expand switch reached them in one click and 400 px. So
-    `ModuleDef::expandedWidth` is 0 here, `isExpandable()` is false, the
-    standalone header and the rack's slot bar stop offering a switch with
-    nothing to switch, and the module is the same panel everywhere -- which is
-    the arrangement every module but BMO DEQ already had.
+    ### Where the odd numbers come from
 
-    It costs the width the groups used to take. It was **500** at four columns
-    and is **380** at three, since the 2026-09-21 control-set trim took the
-    schema from thirty parameters to twenty-four -- and it **stayed 380** when
-    the Reverb EQ took it back to thirty later the same day. Frosty's call:
-    the density belongs on the page, which is what paging is for.
+    **79 is the FILTER ring's box, and the knob row took it.** FILTER is a
+    `ui::ConcentricBand` with a null gain -- a legend ring -- and its cap is
+    `jmin (width, height) * 0.35`. The cap has to be **27.6 px**, which is what
+    `ui::Fader::kCapWidth` is and what every knob on this panel draws, so the
+    box has to be 78.86 and a component's bounds are integers: 79, which is
+    27.65. Sized by its cell instead, on the old 66 px cluster row, it came out
+    at 23 px beside 26.7 px knobs and the row visibly stepped when the page
+    turned. `ConcentricBand::capDiameter` exists so that is asserted rather
+    than assumed.
 
-    ## The grid, and why three columns at 380
+    **The knobs are 50 px and not 46.** A 27.6 px cap is 46 px at the suite's
+    0.6 face scale, which is where 46 comes from -- but the dotted track sits
+    `Tokens::trackGap` = 10 px outside the cap, so it wants a radius of 23.8
+    inside a 23 px half-box and the topmost track dot is drawn on the
+    component's own edge. It has been all along, at 46 and 0.58. 50 px is the
+    smallest box that holds the cap, the gap and the dot, and the cap is still
+    27.6 because the face scale comes off the cap rather than the other way
+    round.
 
-    Three columns of the content width for the knob grid: the persistent row is
-    three cells, the cluster is two rows of three, and the page keys take all
-    three.
+    ## The screen carries the pages, and the row below carries the node
 
-    **380 is not "roughly right", it is the width at which nothing that fitted
-    stops fitting.** A panel insets its content by `kPad` = 10 a side, so the
-    four-column cell at 500 was (500 - 20) / 4 = 120 px, and the three-column
-    cell at 380 is (380 - 20) / 3 = 120 px -- the same number. Every caption on
-    this panel was measured against a 120 px cell and still is, "EQ HIGH FREQ"
-    at 10 pt included, so the width came down by 120 px with no caption pass
-    at all. It is also a multiple of 20, like every other panel in the suite.
-    Anything narrower is a caption argument; anything wider is unearned.
+    The three page keys and their PAGE rule are gone from the plate. The menu
+    is drawn inside the display -- see `LingerScreen` -- which is 42 px of
+    faceplate back and, more to the point, is where a handheld's page menu
+    belongs.
 
-    The foot is the exception and holds **four** cells at 90 px, because it
-    holds four controls: ER, REVERB, MIX and TYPE. Three there would orphan
-    TYPE in a row of its own, which is the one thing this panel does not do.
+    **The segmented row under the bezel is a sub-selection and says so by being
+    there.** On EARLY it is ER MODE, a real parameter, replacing the dropdown
+    that control used. On EQ it is LOW / MID / HIGH, choosing which of the
+    three EQ nodes the one set of FREQ / GAIN / Q edits -- `ui.node`, UI state,
+    refused rather than defaulted on an unknown value. **On TAIL there are no
+    segments at all**, and the empty row is the point: nothing on that page is
+    three-way, and segments appearing means there is a sub-selection here.
 
-    ## Four rows reserved on every page, and what that cost
+    The row is reserved on every page whether it is filled or not, so the two
+    knob rows sit at the same y wherever you are and turning a page does not
+    move the controls under it.
 
-    EARLY is six and TAIL five, which is 3 + 3 and 3 + 2. **EQ is twelve**:
-    each of the three nodes as FREQ / GAIN / Q, then FILTER, IN HI-CUT and
-    OUTPUT. Twelve over three is four rows, and four rows is what the cluster
-    block is reserved at **on every page**, so the block under the keys does
-    not change height when the page does -- the one thing that would make
-    paging feel like switching panels rather than turning a page.
+    ## One set of FREQ / GAIN / Q, and it re-ranges
 
-    ### Where the two spare rows go, and it is not where they went
+    BMO DEQ's band-selector pattern, and the same mechanism: the three knobs
+    are rebuilt against the selected node's parameters when the node changes,
+    the way `DeqPanel::bindBand` rebuilds eight. **All nine EQ parameters still
+    exist and still automate** -- the panel shows three of them at a time.
 
-    **EARLY and TAIL fill two of the four rows, and since 2026-09-22 they are
-    packed to the top of the block rather than centred in it.** Frosty's
-    observation, against the render: the centred arrangement drew "two large
-    voids", one above the cluster and one below it, and a reader has no way to
-    tell a deliberate space from a control that failed to appear. Packed, the
-    page's own rows sit hard under the persistent row they qualify, and the
-    whole of the leftover falls in one piece immediately above the LEVEL rule
-    -- where a gap already belongs, because every legended rule in the suite
-    has one above it. It is a larger gap than usual and it reads as separation
-    rather than as absence.
+    **They are not a uniform control and the panel does not pretend they are.**
+    FREQ runs 16-1600 Hz on the low shelf, 20 Hz-20 kHz on the bell and
+    1 k-20 kHz on the high shelf; Q stops at `kShelfMaxQ` = 2.0 on the two
+    shelves and runs to 40 on the bell. So the same knob at the same angle
+    means three different frequencies depending on the segment above it. The
+    readout line prints real values, which is what keeps it honest, and
+    `AGENTS.md` records it because it is the one thing about this arrangement a
+    reader would not guess.
 
-    **Two alternatives were weighed and rejected.**
+    ## FILTER is a legend ring
 
-    A **taller screen on the short pages** would absorb the rows exactly, and
-    it is the one thing that cannot be done: the screen's height is the panel's
-    one soft number, and moving it per page makes the bezel -- the biggest
-    object on the face -- resize every time a page key is pressed. A panel that
-    jumps when you turn a page is worse than any amount of air, and the page
-    keys exist to make turning cheap.
+    `ui::ConcentricBand` with a null gain parameter, which its own comment
+    describes as "a filter: a single knob with the same legend around it" and
+    which sets `Knob::Style::filter`. The legend is `kEqFilterLegend` --
+    OFF / L / H / B -- while the parameter's value strings stay "Off",
+    "Lo Cut", "Hi Cut" and "Bandpass" for the host's lane and for the readout.
+    BMO CEQ's LO-CUT is the precedent and carries the argument: a 38 px legend
+    box cannot set "Bandpass" and an automation lane should not say "B".
 
-    **Spreading the two rows evenly over the four** leaves no void anywhere and
-    costs more: 44 px between a page's own two rows is more than the 66 px
-    between the cluster and its neighbours *was*, so the rows stop reading as
-    one block and start reading as two unrelated pairs. A page's rows belong
-    together; the space does not belong between them.
+    It replaces a `ui::SwitchButton`, which was marked provisional in the code
+    that added it: a switch on a four-position choice could only ever reach two
+    of them.
 
-    The panel is **380 x 688 either way**. Neither the height nor the width
-    moves, because the rack slot cannot resize.
+    ## The strip, and the fourth column
 
-    **The screen paid for the two extra rows, and it is the only thing that
-    could have.** A panel is 688 px of content and every block in it was
-    already sized; two more cluster rows are 132 px and there are five gaps of
-    8 px between six blocks. The screen came down from **170 to 105**, the
-    cluster knob from 54 to 46, and the persistent row and the level strip from
-    100 to 80 apiece -- which together is exactly the 132. `kContentHeight` is
-    640 against the 680 available, so the five gaps are `Tokens::switchGap` and
-    the panel fits to the pixel. **There is no slack left**: anything added to
-    a page now comes out of the screen again.
+    Three faders -- `ui::Fader`, ER, REVERB and MIX -- in 134 px: the fader,
+    then its caption, then its reading under the caption, which is the suite's
+    arrangement and what BMO Dimension does with BELOW over 700 Hz. `kStripRow`
+    is a named constant because Frosty has already noted the faders could be
+    taller later, and that should be one line.
 
-    A 336 x 105 screen is still a real instrument -- it is wider than BMO DEQ's
-    compact curve -- but it is a letterbox, and the EARLY and TAIL pictures are
-    the two that felt the loss. Both were checked in render: the ER stems and
-    the tail envelope both read, because both are shapes against a baseline
-    rather than fine detail.
+    **The fourth column is TYPE over DECAY, and both labels sit outside.**
+    TYPE's caption is above its dropdown and DECAY's is below its knob. With
+    both underneath, the upper label fell between the two controls, and a label
+    between two controls binds downward: it read as a second caption for DECAY
+    and the column stopped being two controls. `ui::ChoiceBox::setCaptionAbove`
+    is the half of that which is not this file's.
 
-    **OUTPUT stays on the EQ page rather than joining the foot.** Moving it was
-    allowed and would have made EQ eleven -- which is still four rows, 3 + 3 +
-    3 + 2, so it would have bought nothing vertically and cost the foot its
-    shape: the foot already holds four, and a fifth cell there would put a
-    60 px knob and the TYPE dropdown in 72 px cells. Twelve is the number that
-    fills four rows exactly, and a full last row is the tidier picture.
+    **The LEVEL rule spans the three faders and stops.** It named a fourth
+    column it does not describe for one release, and the panel owned that in a
+    comment as a wrinkle rather than drawing the truth; `ModulePanel::Rule` now
+    carries a span, so it is the same rule, the same hairline and the same
+    knocked-out legend, just ending where its subject does.
 
-    **WIDTH stays on TAIL**, where it moved in the 2026-09-21 trim: it is M/S
-    gain on the tail only (`kWidth`), the EQ page draws a frequency response
-    and WIDTH is not part of one.
-
-    **No row anywhere holds one control.** That is the rule MIX broke on the
-    old face -- a lone centred knob with two empty quarters beside it reads as
-    a control whose partner has gone missing -- and TAIL's second row is two
-    centred in the three for the same reason.
-
-    ## The cluster's controls are added and removed, not hidden
+    ## The page's controls are added and removed, not hidden
 
     A hidden component still has bounds, and `tests/ui/LayoutTests` walks every
     child of a panel whether it is visible or not -- so a hidden control with a
     stale or zeroed rectangle either escapes the panel, overlaps something, or
     reports a caption overflowing a box of width zero. Unparenting is the one
-    state in which a control is genuinely not part of this layout. All
-    twenty-three keep their parameter attachments throughout, so nothing is
-    rebound and nothing is rebuilt when the page turns. This is the same
-    arrangement the expanded groups used, and it is the reason turning a page
-    costs a `resized` and nothing else.
-
-    ## The page is UI state, and an unknown value is refused
-
-    `ui.page=early|tail|eq`, through `ModulePanel::setUiState`. See `Page`
-    for why it is not a parameter, and `setUiState` for why an unknown value
-    comes back false rather than falling back to EARLY.
+    state in which a control is genuinely not part of this layout.
 
     ## Square corners on the body, 3 px on everything cut into it
 
     `ModulePanel::paint` fills the plate with `fillAll`, so the body is square
-    by construction and a slot tiles flush against its neighbours -- a rack is
-    a rectangle, and a module that rounded its own corners would show four
-    slivers of whatever is behind it. Everything cut *into* the plate -- the
-    bezel and the screen -- takes `Tokens::corner`, 3 px, uniformly. */
+    by construction and a slot tiles flush against its neighbours. Everything
+    cut *into* the plate -- the bezel and the screen -- takes `Tokens::corner`,
+    3 px, uniformly. */
 class ReverbPanel final : public ui::ModulePanel
 {
 public:
@@ -799,56 +780,96 @@ public:
 
     void resized() override;
 
-    /** `ui.page=early|tail|eq`. Anything else is refused. */
+    /** `ui.page=early|tail|eq` and `ui.node=low|mid|high`. Anything else is
+        refused -- see the implementation for why refusing beats defaulting. */
     bool setUiState (const juce::String& key, const juce::String& value) override;
 
     Page getPage() const noexcept { return page; }
 
-    /** Turns to a page: the screen's drawing, the cluster's controls and which
-        key is lit, all three at once. There is no other way to change it. */
+    /** Turns to a page: the screen's drawing, its menu band, the segment row
+        and the cluster's controls, all at once. There is no other way. */
     void setPage (Page);
 
+    /** Points FREQ / GAIN / Q at a node and moves the ring on the screen's
+        marker with them. UI state; see the class comment. */
+    void setNode (EqNode);
+    EqNode getNode() const noexcept { return node; }
+
     const LingerScreen& getScreen() const noexcept { return screen; }
+
+    /** The FILTER legend ring, so a layout test can read the cap it drew
+        rather than the box it was given. See the class comment for the 79. */
+    const ui::ConcentricBand& getFilterRing() const noexcept { return filterRing; }
+
+    /** The segmented row for a page, or null where a page has none -- which is
+        TAIL, and the absence is the design rather than an omission. */
+    const Segments* segmentsFor (Page) const noexcept;
 
     /** The cluster controls belonging to `p`, in layout order. Public so a
         layout test can walk a page that is not showing and assert that those
         controls are **not** children of the panel. */
     std::vector<juce::Component*> pageControls (Page p) const;
 
-    /** Everything on the panel whatever the page: the three persistent knobs,
-        the three levels and TYPE in the corner. */
+    /** Everything on the panel whatever the page: the three faders, TYPE and
+        DECAY. */
     std::vector<juce::Component*> alwaysOnControls() const;
-
-    const PageButton& getPageButton (Page p) const noexcept
-    {
-        return *pageButtons[(size_t) p];
-    }
 
     //== Where the painted furniture landed ====================================
     //
-    // A bezel, a readout line and a rule are all *painted*, so unlike
-    // every control on the panel they have no bounds anyone can read. These are
-    // public for the reason `ui::ModulePanel::getRules` and
-    // `ui::DynamicsMeter::vuScale` are: it is the only way a test can see them.
+    // A bezel, a readout line and a rule are all *painted*, so unlike every
+    // control on the panel they have no bounds anyone can read. These are
+    // public for the reason `ui::ModulePanel::getRules` is: it is the only way
+    // a test can see them.
 
-    /** The recess the screen sits in, noticeably larger than the screen: it
-        carries the readout line as well, which is what the extra height is. */
-    juce::Rectangle<int> getBezelBox() const noexcept   { return bezelBox; }
-    juce::Rectangle<int> getScreenBox() const noexcept  { return screenBox; }
-    juce::Rectangle<int> getReadoutBox() const noexcept { return readoutBox; }
+    /** The recess the screen sits in, larger than the screen: it carries the
+        readout line as well, which is what the extra height is. */
+    juce::Rectangle<int> getBezelBox() const noexcept    { return bezelBox; }
+    juce::Rectangle<int> getScreenBox() const noexcept   { return screenBox; }
+    juce::Rectangle<int> getReadoutBox() const noexcept  { return readoutBox; }
 
-    // `getGrilleBox` was here. The grille was cut on 2026-09-21 and TYPE has
-    // its corner -- see the class comment. There is nothing painted at the
-    // foot any more, so there is nothing here for a test to read.
+    /** The row the segments are laid out in, reserved on every page. */
+    juce::Rectangle<int> getSegmentBox() const noexcept  { return segmentBox; }
 
-    /** The block the page cluster is laid out in. Two rows at every page. */
-    juce::Rectangle<int> getClusterBox() const noexcept { return clusterBox; }
+    /** The two knob rows the page's six controls are laid out in. */
+    juce::Rectangle<int> getClusterBox() const noexcept  { return clusterBox; }
 
-    // The one hairline on this panel -- LEVEL, over the strip at the foot,
-    // which is what says the three under it are there whatever page you turn
-    // to -- is a `ModulePanel::Rule` and is read through `getRules()`. It has
-    // no accessor of its own here: a second copy of one rectangle is the
-    // drift this whole section exists to avoid.
+    /** The strip at the foot: three faders and the TYPE / DECAY column. */
+    juce::Rectangle<int> getStripBox() const noexcept    { return stripBox; }
+
+    //== The numbers the budget is made of =====================================
+
+    /** The strip's height. **A named constant because it is the next thing
+        that will change**: Frosty has noted the faders could be taller, and
+        the whole of that change should be this line and the gap arithmetic
+        following it. 134 is the fader body, its caption at 12 pt and its value
+        line -- 102 + 18 + 14 -- which leaves 90 px of cap travel. */
+    static constexpr int kStripRow = 134;
+
+    /** The cluster's two rows, each. **79 is the FILTER ring's box**: see the
+        class comment, which does the arithmetic from the 27.6 px cap
+        backwards. Every other control in the row fills its cell, so nothing
+        here is special-cased at layout time. */
+    static constexpr int kClusterRow = 79;
+
+    /** The knob box in the cluster and in the strip, and the cap it draws.
+
+        The cap comes first and the box is derived: `ui::Fader::kCapWidth` is
+        the suite's 27.6, so a fader's cap and a knob's cap are one number
+        rather than two that happen to agree. The box is then the smallest that
+        holds the cap, the `Tokens::trackGap` outside it and the track's own
+        dot -- see the class comment. */
+    static constexpr int   kKnobSide  = 50;
+    static constexpr float kCapWidth  = ui::Fader::kCapWidth;
+    static constexpr float kFaceScale = kCapWidth / (float) kKnobSide;
+
+    /** The readout line's point size, and its row.
+
+        Public because the line is **painted** -- it has no component, so the
+        only way a test can ask whether it fits `getReadoutBox` is to measure it
+        with the size and the face the paint uses. `PlainKnob::captionOverflow`
+        is the discipline; this is the same claim for the one piece of text on
+        this panel that is not a control's. */
+    static constexpr float kReadoutSize = 11.0f;
 
 private:
     void paintPanel (juce::Graphics&) override;
@@ -857,85 +878,67 @@ private:
         as one state. */
     void refreshScreen();
 
-    /** All twenty-three cluster controls at once, for the unparenting walk. */
+    /** Builds FREQ / GAIN / Q against the selected node's three parameters.
+        `DeqPanel::bindBand` is the pattern and the precedent. */
+    void bindNode();
+
+    /** Greys out GAIN while the selected node is a cut, because a cut has no
+        gain. `setKnobEnabled` and **not** `setLockedOn`'s equivalent: the
+        parameter still holds whatever the user set, it is never written, and
+        switching FILTER off gives the gain back. A mode must not eat an edit.
+        `eqGainReachingDesign` is the same decision one folder over, in the
+        DSP, and it is the reason the two cannot disagree. */
+    void refreshFilterMode();
+
+    /** All of the cluster's controls at once, for the unparenting walk. */
     std::vector<juce::Component*> allPageControls() const;
 
     Page page = Page::early;
+    EqNode node = EqNode::low;
 
     LingerScreen screen;
 
-    std::array<std::unique_ptr<PageButton>, 3> pageButtons;
+    /** The two segmented rows. One class, two bindings -- see `Segments`. */
+    Segments erModeSegments, nodeSegments;
 
-    // The persistent row: what the room is, when the tail arrives and how long
-    // it rings. On screen at every page, because the three pages are all
-    // adjustments to these three.
-    ui::PlainKnob sizeKnob, preDelayKnob, decayKnob;
+    /** ER MODE's segments are a parameter, so the parameter has to be able to
+        move them: a host, an automation lane and a preset recall all reach the
+        panel this way and none of them goes through a click. */
+    std::unique_ptr<juce::ParameterAttachment> erModeAttachment;
 
-    /** **TYPE is a dropdown, not a knob**, and since 2026-09-21 it is not in
-        the knob grid either. A knob says less and more, and a room type says
-        neither -- Chamber is not more than Room. Frosty's call: "Room type
-        makes no sense as a knob", and then that a thing which is not
-        knob-shaped should not sit in a row of knobs. It lives in the corner
-        the grille vacated, beside the two levels it stamps. `ui::ChoiceBox`
-        carries the rest of the argument, including why VARIATION stays a knob
-        and BMO DEQ's SHAPE stays a legend ring. */
-    ui::ChoiceBox typeBox;
-
-    // EARLY. ER MODE is this panel's other list of names and its other
-    // dropdown; everything else in the cluster is an amount and stays a knob.
-    // ER SHAPE was here and is a per-type constant now, and LINK ER -- the one
-    // switch this panel had -- went with `prelink`.
-    ui::ChoiceBox erModeBox;
-    ui::PlainKnob densityKnob, erSpreadKnob, erHiCutKnob, variationKnob, feedKnob;
+    // EARLY. ER SHAPE was here and is a per-type constant now; LINK ER went
+    // with `prelink`; ER MODE's dropdown became the segment row above.
+    ui::PlainKnob densityKnob, erSpreadKnob, erHiCutKnob, variationKnob, feedKnob, sizeKnob;
 
     // TAIL. ATTACK, DECAY SHAPE and the two damping knees went into the
-    // per-type block; WIDTH arrived from TONE, because it is M/S gain on the
-    // tail and the page it was on draws a frequency response it is not part
-    // of.
-    ui::PlainKnob dampLoKnob, dampHiKnob, modDepthKnob, modRateKnob, widthKnob;
+    // per-type block. PRE-DELAY arrived here when the persistent row was
+    // dissolved: it is the tail's own delay and nothing else's.
+    ui::PlainKnob preDelayKnob, widthKnob, modRateKnob,
+                  dampLoKnob, dampHiKnob, modDepthKnob;
 
-    // EQ. Twelve controls in four rows: each node as FREQ / GAIN / Q, then the
-    // mode, the input cut and the output trim.
-    //
-    // **FILTER is the only switch on this panel.** LINK ER was the last one
-    // and went with `prelink` in the 2026-09-21 trim; this is not its
-    // replacement, it is a mode over three controls rather than a behaviour
-    // toggle. `ui::SwitchButton` and not a `ChoiceBox`, because two states
-    // named by one word is a switch, and not a page key, because a page key
-    // has no parameter under it and this one does.
-    ui::SwitchButton eqFilterSwitch;
-    ui::PlainKnob eqLoFreqKnob, eqLoKnob, eqLoQKnob,
-                  eqMidFreqKnob, eqMidKnob, eqMidQKnob,
-                  eqHiFreqKnob, eqHiKnob, eqHiQKnob,
-                  inHiCutKnob, outputKnob;
+    // EQ. FREQ, GAIN and Q are rebuilt per node -- see `bindNode` -- so they
+    // are owned by pointer where every other control here is a member.
+    std::unique_ptr<ui::PlainKnob> freqKnob, gainKnob, qKnob;
 
-    // The strip at the foot: the two absolute trims, which are the thesis of
-    // the module and have to be reachable from every page, and how much of the
-    // whole thing.
-    ui::PlainKnob erLevelKnob, verbLevelKnob, mixKnob;
+    /** FILTER, as a legend ring. `ui::ConcentricBand` with no gain, which is
+        what makes it a filter rather than a band. */
+    ui::ConcentricBand filterRing;
 
-    /** One per parameter the screen is drawn from. Twenty: nineteen of
+    ui::PlainKnob inHiCutKnob, outputKnob;
+
+    // The strip at the foot: the two absolute levels, which are the thesis of
+    // the module, how much of the whole thing, and the TYPE / DECAY column.
+    ui::Fader erLevelFader, verbLevelFader, mixFader;
+    ui::ChoiceBox typeBox;
+    ui::PlainKnob decayKnob;
+
+    /** One per parameter the screen is drawn from: twenty of
         `LingerScreen::State`'s values plus TYPE, which is not drawn itself but
         carries `attack` now that the knob is gone. The list in the constructor
-        is the thing a reader wants to be able to check at a glance.
+        is the thing a reader wants to be able to check at a glance. */
+    std::array<std::unique_ptr<juce::ParameterAttachment>, 21> screenAttachments;
 
-        It was fourteen; the Reverb EQ's six new parameters brought it to
-        twenty, and `eqfilter` is one of them -- it moves the two outer nodes'
-        shapes and so redraws the curve with no frequency or gain having
-        changed. */
-    std::array<std::unique_ptr<juce::ParameterAttachment>, 20> screenAttachments;
-
-    /** Greys out the two shelf GAIN knobs while FILTER is on, because a cut
-        has no gain.
-
-        `setKnobEnabled` and **not** `setLockedOn`'s equivalent: the parameters
-        still hold whatever the user set, they are never written, and switching
-        FILTER off gives both shelves their gains back. A mode must not eat an
-        edit. `eqGainReachingDesign` is the same decision one folder over, in
-        the DSP, and it is the reason the two cannot disagree. */
-    void refreshFilterMode();
-
-    juce::Rectangle<int> bezelBox, screenBox, readoutBox, clusterBox;
+    juce::Rectangle<int> bezelBox, screenBox, readoutBox, segmentBox, clusterBox, stripBox;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (ReverbPanel)
 };

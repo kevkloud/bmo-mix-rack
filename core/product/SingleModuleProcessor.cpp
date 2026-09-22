@@ -16,7 +16,17 @@ SingleModuleProcessor::SingleModuleProcessor (const ModuleDef& d, ProductInfo i)
 {
     for (const auto& s : def.specs)
         apvts.addParameterListener (s.id, this);
+
+    // Answer honestly before the first prepareToPlay: a host is entitled to
+    // ask an instance it has only just constructed, and for BMO Linger the
+    // default schema is already several seconds of tail.
+    reportedTail.store (engine.tailSeconds(), std::memory_order_relaxed);
 }
+
+// getTailLengthSeconds() may be called from the audio thread, so the cache it
+// reads has to be a load and not a lock. Stated rather than assumed.
+static_assert (std::atomic<double>::is_always_lock_free,
+               "getTailLengthSeconds() is polled from the audio thread");
 
 SingleModuleProcessor::~SingleModuleProcessor()
 {
@@ -51,6 +61,10 @@ void SingleModuleProcessor::handleAsyncUpdate()
 
     if (reportedLatency.exchange (latency, std::memory_order_relaxed) != latency)
         setLatencySamples (latency);
+
+    // No change-detection and no updateHostDisplay: the host pulls the tail
+    // when it wants it, so refreshing the cache is the whole job.
+    reportedTail.store (engine.tailSeconds(), std::memory_order_relaxed);
 }
 
 //==============================================================================
@@ -61,6 +75,8 @@ void SingleModuleProcessor::prepareToPlay (double sampleRate, int maximumExpecte
     const auto latency = engine.latency();
     reportedLatency.store (latency, std::memory_order_relaxed);
     setLatencySamples (latency);
+
+    reportedTail.store (engine.tailSeconds(), std::memory_order_relaxed);
 }
 
 void SingleModuleProcessor::releaseResources()

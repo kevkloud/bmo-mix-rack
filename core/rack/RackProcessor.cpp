@@ -408,12 +408,27 @@ int RackProcessor::totalLatency() const
     return total;
 }
 
+double RackProcessor::totalTail() const
+{
+    double total = 0.0;
+
+    // Summed, not maxed -- see the declaration. An empty rack adds nothing up
+    // and reports 0.0, which is what it did when this was hardcoded.
+    for (const auto& s : slots)
+        if (s.engine != nullptr)
+            total += s.engine->tailSeconds();
+
+    return total;
+}
+
 void RackProcessor::handleAsyncUpdate()
 {
     const auto latency = totalLatency();
 
     if (reportedLatency.exchange (latency, std::memory_order_relaxed) != latency)
         setLatencySamples (latency);
+
+    reportedTail.store (totalTail(), std::memory_order_relaxed);
 }
 
 //==============================================================================
@@ -433,6 +448,8 @@ void RackProcessor::prepareToPlay (double sampleRate, int maximumExpectedSamples
     const auto latency = totalLatency();
     reportedLatency.store (latency, std::memory_order_relaxed);
     setLatencySamples (latency);
+
+    reportedTail.store (totalTail(), std::memory_order_relaxed);
 }
 
 void RackProcessor::releaseResources()

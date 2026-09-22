@@ -44,12 +44,19 @@ public:
 
     void reset() override { core.reset(); }
 
-    void setParams (const float* v, int count) override
-    {
-        if (count < Index::count)
-            return;
+    /** The flat host array as the engine's own struct.
 
+        Pulled out of `setParams` when `tailSecondsForParams` arrived: that one
+        is `const`, answers from values rather than from the core, and needs
+        four of these fields. Unpacking twice would have been two places for
+        the per-cent-to-0..1 conversions to disagree, which is the one thing
+        the class comment above promises does not happen. */
+    static DspCore::Params paramsFrom (const float* v, int count)
+    {
         DspCore::Params p;
+
+        if (count < Index::count)
+            return p;                   // the schema's own defaults
 
         p.type          = typeFor ((int) v[Index::type]);
         p.sizeM         = v[Index::size];
@@ -87,7 +94,18 @@ public:
         p.mix           = v[Index::mix] * 0.01f;
         p.outputDb      = v[Index::output];
 
-        core.setParams (p);
+        return p;
+    }
+
+    void setParams (const float* v, int count) override
+    {
+        // Still a no-op on a short array rather than a stamp of the defaults:
+        // a half-sized array is a caller bug, and quietly resetting the engine
+        // to Room would be a worse answer than leaving it where it was.
+        if (count < Index::count)
+            return;
+
+        core.setParams (paramsFrom (v, count));
     }
 
     void process (float* const* channels, int numChannels, int numSamples) override
@@ -108,6 +126,23 @@ public:
         (void) v;
         (void) count;
         return DspCore::latencySamples();
+    }
+
+    /** **The one module in the suite that has a tail to report.**
+
+        `DspCore::tailSecondsFor` is the formula and its only copy -- pre-delay
+        plus T_mid at the largest damping multiplier plus the last early
+        reflection plus 50 ms, clamped to 30 s (docs/reverb/10-dsp-spec.md 5).
+        This is only the unpacking in front of it, so a change to the
+        arithmetic lands in one file and reaches the host through here without
+        being retyped.
+
+        A short array answers with the schema defaults' tail rather than with
+        zero: `paramsFrom` hands back the defaults, and the default instance of
+        BMO Linger does ring. Zero would be a lie that truncates. */
+    double tailSecondsForParams (const float* v, int count) const override
+    {
+        return (double) DspCore::tailSecondsFor (paramsFrom (v, count));
     }
 
     DspCore& getCore() noexcept { return core; }

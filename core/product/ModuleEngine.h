@@ -98,6 +98,20 @@ public:
         return dsp->latencyForParams (now.data(), (int) now.size());
     }
 
+    /** The tail for the parameters as they are now, in seconds. Safe from any
+        thread.
+
+        Here and not in the processors for `latency()`'s reason: the DSP is
+        private to the engine, so neither processor can ask it directly, and
+        neither should be growing its own copy of the read-all into a scratch
+        array. Every module but BMO Linger takes `ModuleDsp`'s zero default. */
+    double tailSeconds() const
+    {
+        std::vector<float> now ((size_t) paramSet.size());
+        paramSet.readAll (now.data());
+        return dsp->tailSecondsForParams (now.data(), (int) now.size());
+    }
+
     /** Momentary, from the panel; -1 clears it. Not a parameter, so it is not
         in paramSet, not in a preset and not in a saved session. */
     void setSolo (int index) noexcept { dsp->setSolo (index); }

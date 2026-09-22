@@ -535,14 +535,14 @@ int main()
         }
     }
 
-    //== The tail figure, which nothing reports yet ===========================
+    //== The tail figure, which the host is now told ==========================
     //
-    // `getTailLengthSeconds()` is hardcoded to 0.0 in both processors and
-    // `ModuleDsp` has no tail accessor, so **there is nothing to assert
-    // against a host here** -- adding the accessor lands on every module's
-    // vtable and is milestone M5 and its own reviewed commit (11 section 2a).
-    // What can be asserted now is the arithmetic that commit will call, and
-    // the ceiling that keeps it sane.
+    // `ModuleDsp::tailSecondsForParams` landed (11 section 2a, milestone M5),
+    // so the arithmetic below reaches a host rather than sitting unused. The
+    // figures themselves, the zero every other module reports and the rack's
+    // sum are tests/plugin/TailTests.cpp's, which walks the registry; what is
+    // asserted here is that BMO Linger's own processor publishes the number
+    // its own core computes, so the two cannot drift apart.
     {
         using Core = bmo::reverb::DspCore;
 
@@ -562,12 +562,23 @@ int main()
         checkClose (Core::tailSecondsFor (worst), (double) Core::kMaxTailSeconds, 1.0e-4,
                     "the reported tail is clamped to 30 s");
 
-        // And it still reports zero to the host today, which is what makes the
-        // M5 commit a change rather than a fix.
+        // And what the host is handed is that same arithmetic, at the defaults
+        // and at the ceiling -- not a second copy of the formula living in the
+        // processor.
         auto proc = createReverb();
+        proc->setPlayConfigDetails (2, 2, 48000.0, 512);
         proc->prepareToPlay (48000.0, 512);
-        checkClose (proc->getTailLengthSeconds(), 0.0, 1.0e-9,
-                    "the processor still reports no tail -- 11 section 2a is M5");
+        checkClose (proc->getTailLengthSeconds(), (double) Core::tailSecondsFor (p), 1.0e-6,
+                    "the processor publishes the core's figure at the defaults");
+
+        setValue (*proc, P::kPreDelay, worst.preDelayMs);
+        setValue (*proc, P::kDecay,    worst.decaySeconds);
+        setValue (*proc, P::kDampLo,   worst.dampLo);
+        setValue (*proc, P::kDampHi,   worst.dampHi);
+        setValue (*proc, P::kSize,     worst.sizeM);
+        proc->prepareToPlay (48000.0, 512);
+        checkClose (proc->getTailLengthSeconds(), (double) Core::kMaxTailSeconds, 1.0e-4,
+                    "and the 30 s ceiling reaches the host as 30 s");
     }
 
     //== State round-trip ======================================================

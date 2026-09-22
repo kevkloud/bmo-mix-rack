@@ -33,6 +33,34 @@ public:
         can be told about a change before the audio thread has picked it up. */
     virtual int latencyForParams (const float* values, int count) const = 0;
 
+    /** How long the module keeps making sound after its input stops, in
+        seconds, for the current parameters.
+
+        Mirrors `latencyForParams` above deliberately: computed from the values
+        rather than from DSP state, so the host can be told about a change
+        before the audio thread has picked it up, and so a test can ask the
+        question without preparing or running anything.
+
+        **Defaulted to zero rather than pure**, unlike its neighbour. Every
+        module that has shipped is a filter, a gain stage or a compressor;
+        none of them rings on past its input, and BMO Linger is the first for
+        which the honest answer is anything else. Making this pure would put
+        an identical `return 0.0;` in eight adapters and in every module
+        written after them -- eight places for one of them to drift. The
+        default is the right answer for all eight, and
+        tests/plugin/TailTests.cpp asserts it for all eight rather than
+        trusting it.
+
+        Both processors feed this into `getTailLengthSeconds()`, which a host
+        may poll from any thread, so what they publish is cached in an atomic
+        and refreshed on parameter change rather than computed in the getter. */
+    virtual double tailSecondsForParams (const float* values, int count) const
+    {
+        (void) values;
+        (void) count;
+        return 0.0;
+    }
+
     /** Gain this module is currently moving, in dB, **signed: positive is gain
         taken away, negative is gain added**.
 

@@ -216,17 +216,17 @@ public:
         the audio thread has picked a change up -- the same reason
         `latencyForParams` takes values rather than reading state.
 
-        **It is arithmetic, and nothing calls it yet.** `ModuleDsp` has no tail
-        accessor and both processors hardcode 0.0; wiring it up is 11 section
-        2a and milestone M5, because the accessor lands on every module's
-        vtable and has to be its own reviewed commit. Written now so that the
-        commit which adds the accessor has nothing left to decide, and so the
-        formula lives in one place rather than in a future diff.
+        **This is the only copy of the formula.** It is reached from a host
+        through `ReverbDsp::tailSecondsForParams`, which is nothing but the
+        unpacking in front of it (11 section 2a, milestone M5); neither
+        processor computes anything of its own. `tests/plugin/TailTests.cpp`
+        asserts the figures a host is handed against seconds written down by
+        hand, so the two cannot quietly become different arithmetic.
 
-        The rack will **sum** this across occupied slots rather than taking the
+        The rack **sums** this across occupied slots rather than taking the
         maximum: slots are in series, so 4 s feeding 2 s rings longer than
         either. Under-reporting truncates tails; over-reporting only costs idle
-        pulling. */
+        pulling. The ceiling below is therefore per module, not per rack. */
     static float tailSecondsFor (const Params& p) noexcept
     {
         const auto longest = std::max (1.0f, std::max (p.dampLo, p.dampHi));

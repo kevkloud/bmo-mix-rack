@@ -31,13 +31,19 @@ fi
 # Until 0.2.3 this script assumed single-config throughout, so on Windows it
 # built the wrong way round, ran ctest against a build it could not find tests
 # in, and then looked for the snapshot tool one directory above where it is.
+#
+# --parallel is seeded into the array rather than passed alongside it because
+# macOS ships bash 3.2, where expanding an empty array under `set -u` is an
+# unbound-variable error. A single-config build left the array empty, so this
+# script aborted before it compiled anything on any Mac; Windows is
+# multi-config, never took that branch, and never showed it.
+build_args=(--parallel)
+
 if grep -q '^CMAKE_CONFIGURATION_TYPES:' build/CMakeCache.txt; then
-    build_args=(--config "$config")
-else
-    build_args=()
+    build_args+=(--config "$config")
 fi
 
-cmake --build build --parallel "${build_args[@]}"
+cmake --build build "${build_args[@]}"
 
 # -C is required on a multi-config build and ignored on a single-config one.
 ctest --test-dir build -C "$config" --output-on-failure

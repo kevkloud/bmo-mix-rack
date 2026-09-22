@@ -903,5 +903,42 @@ int main()
     // where it can run in the seconds-long Linux job with no JUCE. 11 section
     // 6 is the list.
 
+    //== The dB formatters, called directly ===================================
+    //
+    // **Directly, and that is the whole point.** A test written through the
+    // parameter's own `text()` helper passes against this bug, because that
+    // helper *sets* the parameter and the 0.1 dB step snaps 0.01 to exactly
+    // zero before the formatter is ever reached — it exercises the snapping,
+    // not the formatting. BMO Defang learned that on THRESH in a0bc817 and it
+    // is why these call `detail::` and pass raw floats.
+    //
+    // The bug: sign taken from the unrounded value, digits from `%.1f`, so the
+    // two disagree in (0, 0.05) and (-0.05, 0). It hid on Windows because
+    // `min + t * range` happened to land on exactly zero there; BMO Linger's
+    // EQ gains sit at 0 dB on a -24..+12 range whose normalised position is
+    // 2/3 and is not exactly representable, and **macOS CI is what caught it**.
+    {
+        using namespace bmo::reverb::detail;
+
+        check (shelfText (0.0f)    == "0.0 dB", "a shelf at zero has no sign");
+        check (shelfText (0.01f)   == "0.0 dB", "a hair above zero rounds to zero and keeps no +");
+        check (shelfText (-0.01f)  == "0.0 dB", "a hair below zero does not print -0.0");
+        check (shelfText (0.06f)   == "+0.1 dB", "above the rounding boundary the + returns");
+        check (shelfText (-0.06f)  == "-0.1 dB", "and below it the - does");
+        check (shelfText (3.0f)    == "+3.0 dB", "an ordinary boost still signs");
+        check (shelfText (-24.0f)  == "Cut",     "the bottom of the travel is Cut, not a number");
+
+        check (levelText (0.0f)    == "0.0 dB", "a level at zero has no sign");
+        check (levelText (-0.01f)  == "0.0 dB", "and a hair below it does not print -0.0");
+        check (levelText (-40.0f)  == "Off",    "the bottom of a fader is Off, not -40.0 dB");
+
+        // The shared one, which every module's dB display goes through.
+        const auto& mid = P::specs()[P::Index::eqmid];
+        check (std::string (mid.text (0.0f))   == "0.0 dB",  "the shared formatter at zero has no sign");
+        check (std::string (mid.text (0.01f))  == "0.0 dB",  "and a hair above zero keeps no +");
+        check (std::string (mid.text (-0.01f)) == "0.0 dB",  "and a hair below prints no -");
+        check (std::string (mid.text (4.0f))   == "+4.0 dB", "an ordinary boost still signs");
+    }
+
     return finish ("BMO Linger");
 }

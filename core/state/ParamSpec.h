@@ -219,8 +219,34 @@ struct ParamSpec
         switch (format)
         {
             case ParamFormat::Decibels:
-                std::snprintf (buf, sizeof (buf), "%s%.1f dB", real > 0.0f ? "+" : "", (double) real);
+            {
+                // **Round first, then take the sign from the rounded value.**
+                // Sign from the unrounded float with digits from `%.1f` makes
+                // the two disagree: anything in (0, 0.05) printed "+0.0 dB",
+                // anything in (-0.05, 0) printed "-0.0 dB".
+                //
+                // This is the suite-wide copy of the bug BMO Defang fixed in
+                // its own THRESH readout in a0bc817. **Every module's dB
+                // display came through here**, so every one of them had it.
+                //
+                // It hides on Windows. A parameter round-trips through the
+                // host's 32-bit normalised float, and `min + t * range` is not
+                // obliged to land exactly on a value for every target: BMO
+                // Linger's EQ gains default to 0 dB on a -24..+12 range, whose
+                // normalised position is 2/3 and is not exactly representable,
+                // so macOS handed back a hair above zero where Windows handed
+                // back zero. macOS CI is the only reason this was found.
+                //
+                // The `== 0.0` branch is **not** a no-op: -0.0 == 0.0 is true,
+                // so it is reached and the sign bit goes with it.
+                auto r = std::round ((double) real * 10.0) / 10.0;
+
+                if (r == 0.0)
+                    r = 0.0;
+
+                std::snprintf (buf, sizeof (buf), "%s%.1f dB", r > 0.0 ? "+" : "", r);
                 return buf;
+            }
 
             case ParamFormat::Percent:
                 std::snprintf (buf, sizeof (buf), "%d %%", (int) std::lround (real));

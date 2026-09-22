@@ -850,8 +850,31 @@ namespace detail
         if (db <= -23.95f)
             return "Cut";
 
+        // **Round first, then take the sign from the rounded value.** Deriving
+        // the sign from the unrounded float and the digits from `%.1f` makes
+        // the two disagree: anything in (0, 0.05) prints "+0.0" and anything
+        // in (-0.05, 0) prints "-0.0".
+        //
+        // It is not hypothetical here. These shelves default to **0 dB on a
+        // -24..+12 range**, whose normalised position is 2/3 and is not exactly
+        // representable in the host's 32-bit float, so the value that comes
+        // back is not obliged to be exactly zero on every target. It is on
+        // Windows and it is a hair above on macOS -- which is the only reason
+        // macOS CI caught this and the local suite did not. The formatter was
+        // wrong on every platform; one of them was honest about it.
+        //
+        // BMO Defang hit the identical bug on THRESH and fixed it in a0bc817.
+        // The pattern was written fresh here, so this comment is the fence.
+        //
+        // The `== 0.0` branch is **not** a no-op: -0.0 == 0.0 is true, so the
+        // assignment is reached and the sign bit goes with it.
+        auto r = std::round ((double) db * 10.0) / 10.0;
+
+        if (r == 0.0)
+            r = 0.0;
+
         char buf[32];
-        std::snprintf (buf, sizeof (buf), "%s%.1f dB", db > 0.0f ? "+" : "", (double) db);
+        std::snprintf (buf, sizeof (buf), "%s%.1f dB", r > 0.0 ? "+" : "", r);
         return buf;
     }
 
@@ -865,8 +888,17 @@ namespace detail
         if (db <= -39.95f)
             return "Off";
 
+        // Rounded before the sign is taken, for `shelfText`'s reason. This one
+        // tops out at 0 so it can never print a "+", but it can still reach
+        // `%.1f` with a hair below zero and print "-0.0 dB" -- the same
+        // disagreement wearing the other sign.
+        auto r = std::round ((double) db * 10.0) / 10.0;
+
+        if (r == 0.0)
+            r = 0.0;
+
         char buf[32];
-        std::snprintf (buf, sizeof (buf), "%s%.1f dB", db > 0.0f ? "+" : "", (double) db);
+        std::snprintf (buf, sizeof (buf), "%s%.1f dB", r > 0.0 ? "+" : "", r);
         return buf;
     }
 

@@ -63,7 +63,8 @@ juce::Image decode (const juce::File& f)
 void writingOverARenderReplacesIt()
 {
     const auto dir = juce::File::getSpecialLocation (juce::File::tempDirectory)
-                         .getChildFile ("bmo-snapshot-io-tests");
+                         .getChildFile ("bmo-snapshot-io-tests-"
+                                        + juce::Uuid().toDashedString());
     dir.createDirectory();
 
     const auto out = dir.getChildFile ("render.png");
@@ -124,7 +125,8 @@ void writingOverARenderReplacesIt()
 void writingToAFreshPathWorks()
 {
     const auto dir = juce::File::getSpecialLocation (juce::File::tempDirectory)
-                         .getChildFile ("bmo-snapshot-io-tests-fresh");
+                         .getChildFile ("bmo-snapshot-io-tests-fresh-"
+                                        + juce::Uuid().toDashedString());
     dir.createDirectory();
 
     const auto out = dir.getChildFile ("new.png");

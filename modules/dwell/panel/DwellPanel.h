@@ -19,16 +19,26 @@ class ChoiceRow;
     ## What the split is, and what it is not
 
     It is a **visibility** split and nothing else. Every parameter stays live
-    and is read by the DSP at all times, whichever column it is drawn in.
-    There is no gate, no `enabled` bool and no schema change: `params.h` holds
-    ids 0-19 exactly as it did. A control being out of sight never means a
-    stage is switched off, which is the one thing a hidden section must not be
-    allowed to imply.
+    and is read by the DSP at all times, whichever column it is drawn in --
+    and that now includes the thirteen this panel does not draw at all. There
+    is no gate and no `enabled` bool. A control being out of sight never means
+    a stage is switched off, which is the one thing a hidden section must not
+    be allowed to imply.
+
+    ## What this panel does not draw yet
+
+    `params.h` carries **thirty-two** parameters from 2026-09-21
+    (docs/delay/15): CHOP, LINK and the lane's twelve. They are live, saved,
+    automatable and reachable from a host's generic view; the panel that draws
+    them is the 980 px redesign, which is its own pass. Until then this file is
+    the settled 560 px panel with VOICE removed, the performance pair renamed
+    SEND and HOLD, the FX grid at four types, and the lane's TAIL where the old
+    three-way THROW MODE stood.
 
     ## The face -- eleven controls
 
     CHARACTER, then TIME (with SYNC, and NOTE sharing TIME's position),
-    FEEDBACK, MIX, LO CUT, HI CUT, STEREO, THROW, FREEZE and FX.
+    FEEDBACK, MIX, LO CUT, HI CUT, STEREO, SEND, HOLD and FX.
 
     Eleven, because 280 px is a rack strip rather than a full-width device.
     The field's default-visible counts cluster between fourteen and twenty-five
@@ -51,9 +61,16 @@ class ChoiceRow;
 
     ## The revealed section -- a width expansion, not an in-place reveal
 
-    VOICE, DRIVE, MOD RATE, MOD DEPTH, DUCK, THROW MODE, FX TYPE and FX
-    AMOUNT, in a second 260 px column: 280 opens to 560, which is two columns
-    and a 20 px gutter.
+    DRIVE, MOD RATE, MOD DEPTH, DUCK, TAIL, FX TYPE and FX AMOUNT, in a second
+    260 px column: 280 opens to 560, which is two columns and a 20 px gutter.
+
+    **VOICE is gone** (Frosty, 2026-09-21): LO CUT and HI CUT are already
+    continuous sweeps and VOICE only added resonance on top of them. Its half
+    of the first knob row is not left bare -- DRIVE, RATE and DEPTH are laid
+    out as one trio, which is the same shape the face takes when DUCK is
+    promoted into it. **TAIL** is the lane's bipolar tail knob, standing where
+    the three-way THROW MODE row stood; that parameter is a float now, so a
+    ChoiceRow could not have carried it whatever the layout did.
 
     The alternative was LTV Comp's in-place reveal -- one width, the drawer's
     controls appearing in space the closed state already reserves. It is the
@@ -79,7 +96,7 @@ class ChoiceRow;
     module's accent, drawn beside the chevrons while the panel is compact and
     any parameter in the revealed section is away from its default. It is
     painted by `paintPanel`, it is not a parameter, it is not saved and it is
-    not automatable -- it is a reading of eight parameters that already exist.
+    not automatable -- it is a reading of the seven parameters that already exist.
 
     ## What is still open, and is deliberately cheap to move
 
@@ -168,6 +185,11 @@ private:
     void placeHero      (juce::Rectangle<int> row);
     void placePair      (ui::PlainKnob& left, ui::PlainKnob& right,
                          juce::Rectangle<int> row, int knobSide);
+    void placeTrio      (ui::PlainKnob& left, ui::PlainKnob& middle, ui::PlainKnob& right,
+                         juce::Rectangle<int> row, int knobSide);
+    /** One knob alone on its row, centred on the column: the lane's TAIL, which
+        has no sibling now that THROW MODE's three cells are one float. */
+    void placeSingle    (ui::PlainKnob& knob, juce::Rectangle<int> row, int knobSide);
     void placePerform   (juce::Rectangle<int> row);
     void placeSwitchRow (ChoiceRow&, juce::Rectangle<int> row);
     void placeDuckBand  (juce::Rectangle<int> row);
@@ -184,13 +206,15 @@ private:
 
     // The face.
     ui::PlainKnob time, note, feedback, mix, lowCut, highCut;
-    ui::SwitchButton sync, throwHeld, freeze, fx;
+    ui::SwitchButton sync, sendHeld, hold, fx;
     std::unique_ptr<ChoiceRow> character, stereo;
     ui::ExpandButton arrow;
 
-    // The revealed section.
-    ui::PlainKnob voice, drive, modRate, modDepth, duck;
-    std::unique_ptr<ChoiceRow> throwMode, fxType;
+    // The revealed section. `laneGain` is captioned TAIL: the parameter names
+    // what it is in a host's list, the caption names what it does under a
+    // LANE rule (a panel's words are not its schema).
+    ui::PlainKnob drive, modRate, modDepth, duck, laneGain;
+    std::unique_ptr<ChoiceRow> fxType;
     std::unique_ptr<ui::PlainKnob> fxAmount;
 
     class DuckMeter;

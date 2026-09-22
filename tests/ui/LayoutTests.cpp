@@ -801,11 +801,18 @@ void checkDeqBandToggle (bmo::ui::ModulePanel& panel, const juce::String& who)
 // The wide view adds two more rules and keeps every one of those rows exactly
 // where the compact one has them. The second column is laid out **between the
 // face's two rules**: its LOOP rule shares row 77 and its FX rule shares row
-// 460, with its own THROW rule in between at 395. Two columns whose rules
+// 460, with its own LANE rule in between at 320. Two columns whose rules
 // miss each other by a dozen pixels read as a failed alignment rather than as
 // two sections, so the column is cut on those lines rather than laid out as
 // one run and hoped over. What is left bare above it is the CHARACTER band --
 // that is the point: the trio sits over both columns.
+//
+// **320, where the THROW rule used to be at 395**, because the 32-parameter
+// schema of 2026-09-21 (docs/delay/15) took VOICE out of the column and made
+// the three-way THROW MODE row one knob. The LOOP section is a trio in one
+// row instead of two pairs, so the segment carries one row fewer and spends
+// the 88 px on air; the face's own two rules do not move, which is the
+// assertion that matters.
 //
 // **The first row is CHARACTER, above the first rule.** Frosty, 2026-09-21:
 // "so users know it affects the delay as a whole". CLEAN / TAPE / BUCKET
@@ -816,7 +823,7 @@ void checkDeqBandToggle (bmo::ui::ModulePanel& panel, const juce::String& who)
 
 constexpr int kDwellDelayRule = 77;    ///< and the LOOP rule of the second column
 constexpr int kDwellToneRule  = 460;   ///< and the FX rule of the second column
-constexpr int kDwellThrowRule = 395;   ///< the second column's own, and only there
+constexpr int kDwellLaneRule  = 320;   ///< the second column's own, and only there
 
 /** The face, at either width. The wide view keeps its ten bands exactly where
     the compact one has them and adds a column beside them, so every number
@@ -832,16 +839,24 @@ void checkDwellFace (bmo::ui::ModulePanel& panel, const juce::String& who, bool 
     // catches the column drifting off the face by a few pixels -- the failure
     // this layout is cut in two segments to make impossible.
     if (expanded)
-        checkHasRuleAt (panel, kDwellThrowRule, who);
+        checkHasRuleAt (panel, kDwellLaneRule, who);
 
     // **Eleven controls, and these are they.** The count is the whole redesign:
     // three attempts carried eighteen down a 280 px strip and all three read as
     // dense. LO CUT, HI CUT and the rest are what the panel prints -- a caption
     // is not schema (WORKFLOWS.md's control audit).
     for (const auto* name : { "TIME", "FEEDBACK", "MIX", "LO CUT", "HI CUT",
-                              "SYNC", "THROW", "FREEZE", "FX" })
+                              "SYNC", "SEND", "HOLD", "FX" })
         check (findNamed (panel, name) != nullptr,
                who + " has no " + juce::String (name));
+
+    // **CHOP, LINK and the lane's twelve are not drawn** and that is the
+    // settled state of this panel until the 980 px redesign: the schema landed
+    // first, deliberately (docs/delay/15). They are live parameters meanwhile,
+    // which is what the plugin and DSP suites check; here the only claim is
+    // that nobody quietly wedged a third performance switch into a pair.
+    check (findNamed (panel, "CHOP") == nullptr, who + " draws CHOP before the redesign does");
+    check (findNamed (panel, "LINK") == nullptr, who + " draws LINK before the redesign does");
 
     // The two trios, by a cell each, because a ChoiceRow's buttons are laid out
     // in the row's own coordinates and only the row knows where it sits.
@@ -861,7 +876,7 @@ void checkDwellFace (bmo::ui::ModulePanel& panel, const juce::String& who, bool 
     auto* sync = findNamed (panel, "SYNC");
     auto* mix  = findNamed (panel, "MIX");
     auto* hiCut = findNamed (panel, "HI CUT");
-    auto* freeze = findNamed (panel, "FREEZE");
+    auto* hold = findNamed (panel, "HOLD");
     auto* fx = findNamed (panel, "FX");
 
     // The CHARACTER trio is above the DELAY rule; the two cuts are below the
@@ -872,14 +887,14 @@ void checkDwellFace (bmo::ui::ModulePanel& panel, const juce::String& who, bool 
                    who + " the CHARACTER trio is not above the DELAY rule");
 
     if (time != nullptr && sync != nullptr && mix != nullptr
-        && hiCut != nullptr && freeze != nullptr && fx != nullptr)
+        && hiCut != nullptr && hold != nullptr && fx != nullptr)
     {
         check (time->getY() >= kDwellDelayRule, who + " TIME is above the DELAY rule");
         check (time->getBottom() <= mix->getY(), who + " TIME and MIX are out of order");
         check (mix->getBottom() <= kDwellToneRule, who + " MIX runs past the TONE rule");
         check (hiCut->getY() >= kDwellToneRule, who + " HI CUT is above the TONE rule");
-        check (freeze->getY() >= hiCut->getBottom(), who + " FREEZE is not below the tone pair");
-        check (fx->getY() >= freeze->getBottom(), who + " FX is not at the foot");
+        check (hold->getY() >= hiCut->getBottom(), who + " HOLD is not below the tone pair");
+        check (fx->getY() >= hold->getBottom(), who + " FX is not at the foot");
 
         // **TIME is the hero and it is on the column's centre line.** SYNC
         // sits beside it rather than under it, which is what buys the band;
@@ -915,16 +930,23 @@ void checkDwellFace (bmo::ui::ModulePanel& panel, const juce::String& who, bool 
 
     **It is a visibility split and nothing else.** Every one of these
     parameters stays live and is read by the DSP whichever width the panel is
-    at; there is no gate and `params.h` is untouched. Nothing here asserts on
-    the sound, because nothing about the sound changes. */
+    at; there is no gate. That goes double for the thirteen the 32-parameter
+    schema added or kept that this panel does not draw at all -- CHOP, LINK and
+    the lane's twelve are live and automatable, and the panel drawing them is
+    the 980 px redesign's job. Nothing here asserts on the sound, because
+    nothing about the sound changes. */
 void checkDwellRevealed (bmo::ui::ModulePanel& panel, const juce::String& who, bool expanded)
 {
     // DUCK is in this list while `kDuckHome` says `revealed`, which is where
     // it sits today and is explicitly still under investigation. If it is
     // promoted to the face, it moves from here to checkDwellFace and nothing
     // else in this file changes.
-    const juce::StringArray hidden { "VOICE", "DRIVE", "RATE", "DEPTH", "DUCK", "GR",
-                                     "AMOUNT (SMEAR)" };
+    // **VOICE is gone from the schema** (docs/delay/15) and TAIL stands where
+    // the THROW MODE trio did -- `lane_gain` is a bipolar float now, so no row
+    // of cells could have carried it. DRIVE, RATE and DEPTH are one trio
+    // rather than a pair and a half-empty row.
+    const juce::StringArray hidden { "DRIVE", "RATE", "DEPTH", "DUCK", "GR",
+                                     "TAIL", "AMOUNT (SMEAR)" };
 
     for (const auto& name : hidden)
     {
@@ -936,17 +958,30 @@ void checkDwellRevealed (bmo::ui::ModulePanel& panel, const juce::String& who, b
             check (found == nullptr, who + " compact still carries " + name);
     }
 
-    // The THROW MODE trio, whose cells are named with a prefix so the middle
-    // one and the performance switch on the face do not answer to the same
-    // name -- findNamed walks children by name and the child order changes
-    // every time the section opens.
-    const auto* modeCell = findNamed (panel, "mode.SEND");
+    // The FX grid, **four cells in a 2x2** since the octaves and Reverse were
+    // cut: a 260 px column gives each of them 126 px rather than the 82 that
+    // three across of seven did, and there is no short line to centre.
     const auto* fxCell = findNamed (panel, "DIFFUSE");
+    const auto* crushCell = findNamed (panel, "CRUSH");
+
+    // The types that came out. A cell for one of these is a choice list that
+    // grew back, which is the schema moving rather than a layout slip.
+    for (const auto* gone : { "OCT UP", "OCT DN", "REVERSE" })
+        check (findNamed (panel, gone) == nullptr,
+               who + " still has an " + juce::String (gone) + " cell");
 
     if (expanded)
     {
-        check (modeCell != nullptr, who + " wide has no THROW MODE cells");
         check (fxCell != nullptr, who + " wide has no FX type cells");
+        check (crushCell != nullptr, who + " wide has no CRUSH cell");
+
+        // Two rows of two: CRUSH is the fourth, so it sits below DIFFUSE and
+        // to the right of it -- which is the whole claim the 2x2 makes.
+        if (fxCell != nullptr && crushCell != nullptr)
+        {
+            check (crushCell->getY() > fxCell->getY(), who + " the FX grid is one row, not 2x2");
+            check (crushCell->getX() > fxCell->getX(), who + " the FX grid is one column, not 2x2");
+        }
 
         // Everything the section carries is to the right of the face's own
         // column, which is what "the module can only grow sideways" means.
@@ -961,8 +996,8 @@ void checkDwellRevealed (bmo::ui::ModulePanel& panel, const juce::String& who, b
     }
     else
     {
-        check (modeCell == nullptr, who + " compact still carries the THROW MODE cells");
         check (fxCell == nullptr, who + " compact still carries the FX type cells");
+        check (crushCell == nullptr, who + " compact still carries the FX type cells");
     }
 }
 

@@ -37,18 +37,34 @@ public:
         p.stereoChoice    = (int) v[Index::stereo];
         p.lowCutHz        = v[Index::lowCut];
         p.highCutHz       = v[Index::highCut];
-        p.voicePct        = v[Index::voice];
         p.modRateHz       = v[Index::modRate];
         p.modDepthPct     = v[Index::modDepth];
         p.drivePct        = v[Index::drive];
         p.duckDb          = v[Index::duck];
         p.mixPct          = v[Index::mix];
-        p.throwHeld       = v[Index::throwHeld] > 0.5f;
-        p.throwModeChoice = (int) v[Index::throwMode];
-        p.freeze          = v[Index::freeze] > 0.5f;
+        p.sendHeld        = v[Index::send] > 0.5f;
+        p.laneGain        = v[Index::laneGain];
+        p.hold            = v[Index::hold] > 0.5f;
+        p.chop            = v[Index::chop] > 0.5f;
         p.fx              = v[Index::fx] > 0.5f;
         p.fxTypeChoice    = (int) v[Index::fxType];
         p.fxAmountPct     = v[Index::fxAmount];
+
+        // The lane, ids 20-31. Carried whether or not LINK is on: what LINK
+        // does with them is the DSP's business in stage 2, and a value that
+        // stops arriving here is a value the lane could not go back to.
+        p.link                  = v[Index::link] > 0.5f;
+        p.laneLevelDb           = v[Index::laneLevel];
+        p.laneTimeMs            = v[Index::laneTime];
+        p.laneCharacterChoice   = (int) v[Index::laneCharacter];
+        p.laneStereoChoice      = (int) v[Index::laneStereo];
+        p.laneLowCutHz          = v[Index::laneLowCut];
+        p.laneHighCutHz         = v[Index::laneHighCut];
+        p.laneModRateHz         = v[Index::laneModRate];
+        p.laneModDepthPct       = v[Index::laneModDepth];
+        p.laneFx                = v[Index::laneFx] > 0.5f;
+        p.laneFxTypeChoice      = (int) v[Index::laneFxType];
+        p.laneFxAmountPct       = v[Index::laneFxAmount];
 
         core.setParams (p);
     }

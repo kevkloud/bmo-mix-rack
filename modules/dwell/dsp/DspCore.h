@@ -34,7 +34,12 @@ class DspCore
 {
 public:
     /** Every parameter in the real units the panel and the host show, in the
-        order docs/delay/11 §3 fixes. `DwellDsp::setParams` fills it. */
+        order docs/delay/15's table fixes. `DwellDsp::setParams` fills it.
+
+        Two engines from 2026-09-21: the main delay, then the lane that a send
+        feeds. Each field's initialiser is its spec default, so a core that has
+        never been handed a parameter array is still the module at its
+        defaults. */
     struct Params
     {
         float timeMs        = 375.0f;
@@ -45,18 +50,39 @@ public:
         int   stereoChoice  = 0;
         float lowCutHz      = 20.0f;
         float highCutHz     = 20000.0f;
-        float voicePct      = 0.0f;
         float modRateHz     = 0.6f;
         float modDepthPct   = 0.0f;
         float drivePct      = 0.0f;
-        float duckDb        = 4.0f;
+        float duckDb        = 0.0f;
         float mixPct        = 35.0f;
-        bool  throwHeld     = false;
-        int   throwModeChoice = 0;
-        bool  freeze        = false;
+
+        /** The lane's gates and its tail. `laneGain` is bipolar: below 0 the
+            lane decays, at 0 it holds at exact unity, above it builds. */
+        bool  sendHeld      = false;
+        float laneGain      = -40.0f;
+        bool  hold          = false;
+        bool  chop          = false;
+
         bool  fx            = false;
         int   fxTypeChoice  = 0;
         float fxAmountPct   = 35.0f;
+
+        /** The lane's mirror of the main delay. `link` defaults on, so an
+            untouched instance is one delay with one set of controls; the
+            seeding that happens when it is switched off is a UI gesture, not
+            something this struct does (docs/delay/15). */
+        bool  link              = true;
+        float laneLevelDb       = 0.0f;
+        float laneTimeMs        = 250.0f;
+        int   laneCharacterChoice = 0;
+        int   laneStereoChoice  = 0;
+        float laneLowCutHz      = 20.0f;
+        float laneHighCutHz     = 20000.0f;
+        float laneModRateHz     = 0.6f;
+        float laneModDepthPct   = 0.0f;
+        bool  laneFx            = false;
+        int   laneFxTypeChoice  = 0;
+        float laneFxAmountPct   = 35.0f;
     };
 
     void prepare (double newSampleRate, int newMaxBlockSize, int newNumChannels) noexcept

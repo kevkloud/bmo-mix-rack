@@ -76,12 +76,13 @@ const ModuleDef& module()
         // **560, not docs/delay/13 §6a's 460 -- a redesign proposal, not a
         // settled number.** 280 less the padding is a 260 px column, and this
         // panel is laid out in whole columns: 560 is two of them with a 20 px
-        // gutter between. At 460 the second column is 168 px, too narrow for a
-        // switch grid three cells across, so the seven FX types have to stack
-        // seven deep and the wide view ends up taller and busier than the
-        // compact one it was meant to relieve. Still a multiple of 20, as BMO
-        // DEQ's two widths are. Frosty picks from the renders; if candidate B
-        // wins this goes back to 460.
+        // gutter between. At 460 the second column is 168 px, too narrow for
+        // the knob trio the LOOP section is now laid out as. Still a multiple
+        // of 20, as BMO DEQ's two widths are.
+        //
+        // docs/delay/15 takes the panel to **980** for the lane's own column;
+        // that is the redesign pass, not this one, and the schema landing
+        // ahead of it is deliberate.
         560,
     };
 

@@ -5,9 +5,13 @@
     docs/delay/11-integration-and-test-plan.md §4 lists the suites this file
     grows into -- time accuracy, feedback decay, the mix law, the FX stage.
     None of them can be written yet. What can be written, and is worth writing
-    first, is everything that is *permanent*: ids 0-19 in their frozen order,
-    the four choice lists in their frozen index order, and the mapping from
+    first, is everything that is *permanent*: ids 0-31 in their frozen order,
+    the three choice lists in their frozen index order, and the mapping from
     spec index to named value in DwellDsp::setParams.
+
+    **The table is docs/delay/15's, settled 2026-09-21: thirty-two parameters,
+    two engines.** `11` §3 still prints the twenty-parameter checkpoint and is
+    stale until its own pass rewrites it.
 
     That last one is the reason this file exists now rather than with the DSP.
     The schema cannot move after release, so a lane read off by one here would
@@ -79,32 +83,54 @@ const Row kSchema[]
     {  5, "stereo",     0.0f,    2.0f,     0.0f,  3 },
     {  6, "low_cut",   20.0f, 1000.0f,    20.0f,  0 },
     {  7, "high_cut", 1000.0f, 20000.0f, 20000.0f, 0 },
-    {  8, "voice",      0.0f,  100.0f,     0.0f,  0 },
-    {  9, "mod_rate",   0.1f,    8.0f,     0.6f,  0 },
-    { 10, "mod_depth",  0.0f,  100.0f,     0.0f,  0 },
-    { 11, "drive",      0.0f,  100.0f,     0.0f,  0 },
+    {  8, "mod_rate",   0.1f,    8.0f,     0.6f,  0 },
+    {  9, "mod_depth",  0.0f,  100.0f,     0.0f,  0 },
+    { 10, "drive",      0.0f,  100.0f,     0.0f,  0 },
     // DUCK defaults to 0 dB from 2026-09-21 -- ducking ships inert and opt-in
-    // (DECIDED, Frosty; docs/delay/10 §6). The id, the slot and the 0-24 dB
-    // range are unchanged; only the default moved.
-    { 12, "duck",       0.0f,   24.0f,     0.0f,  0 },
-    { 13, "mix",        0.0f,  100.0f,    35.0f,  0 },
-    { 14, "throw",      0.0f,    1.0f,     0.0f,  0 },
-    { 15, "throw_mode", 0.0f,    2.0f,     0.0f,  3 },
-    { 16, "freeze",     0.0f,    1.0f,     0.0f,  0 },
+    // (DECIDED, Frosty; docs/delay/10 §6). The 0-24 dB range is unchanged;
+    // only the default moved, and the slot moved with VOICE's deletion.
+    { 11, "duck",       0.0f,   24.0f,     0.0f,  0 },
+    { 12, "mix",        0.0f,  100.0f,    35.0f,  0 },
+    // The lane's gates and its tail. `lane_gain` is bipolar and is a **float**,
+    // not the three-way choice `throw_mode` was: below 0 the lane decays, at 0
+    // it holds at exact unity, above it builds.
+    { 13, "send",       0.0f,    1.0f,     0.0f,  0 },
+    { 14, "lane_gain", -100.0f, 100.0f,  -40.0f,  0 },
+    { 15, "hold",       0.0f,    1.0f,     0.0f,  0 },
+    { 16, "chop",       0.0f,    1.0f,     0.0f,  0 },
     { 17, "fx",         0.0f,    1.0f,     0.0f,  0 },
-    { 18, "fx_type",    0.0f,    6.0f,     0.0f,  7 },
+    { 18, "fx_type",    0.0f,    3.0f,     0.0f,  4 },
     { 19, "fx_amount",  0.0f,  100.0f,    35.0f,  0 },
+    // The lane, ids 20-31. LINK is the one bool in this schema that defaults
+    // **on**: a mirror nobody has asked to differ follows the main delay.
+    { 20, "link",            0.0f,     1.0f,     1.0f,  0 },
+    { 21, "lane_level",    -24.0f,    24.0f,     0.0f,  0 },
+    { 22, "lane_time",       1.0f,  2000.0f,   250.0f,  0 },
+    { 23, "lane_character",  0.0f,     2.0f,     0.0f,  3 },
+    { 24, "lane_stereo",     0.0f,     2.0f,     0.0f,  3 },
+    { 25, "lane_low_cut",   20.0f,  1000.0f,    20.0f,  0 },
+    { 26, "lane_high_cut", 1000.0f, 20000.0f, 20000.0f, 0 },
+    { 27, "lane_mod_rate",   0.1f,     8.0f,     0.6f,  0 },
+    { 28, "lane_mod_depth",  0.0f,   100.0f,     0.0f,  0 },
+    { 29, "lane_fx",         0.0f,     1.0f,     0.0f,  0 },
+    { 30, "lane_fx_type",    0.0f,     3.0f,     0.0f,  4 },
+    { 31, "lane_fx_amount",  0.0f,   100.0f,    35.0f,  0 },
 };
 
 void testSchemaIsWhatItWillAlwaysBe()
 {
     const auto& specs = P::specs();
 
-    check (specs.size() == 20, "twenty parameters, ids 0-19");
+    check (specs.size() == 32, "thirty-two parameters, ids 0-31");
     check (specs.size() == (size_t) P::Index::count, "the Index enum matches specs()");
-    check ((int) P::Index::count == 20, "Index::count is 20");
+    check ((int) P::Index::count == 32, "Index::count is 32");
 
-    if (specs.size() != 20)
+    // The same ceiling tests/plugin/DwellTests.cpp asserts, checked here too
+    // because this is the suite a DSP-only container runs: past 32 a parameter
+    // keeps working but gets no host lane in a rack (SlotOverflow).
+    check (specs.size() <= 32, "every parameter still fits a rack slot's 32 host lanes");
+
+    if (specs.size() != 32)
         return;
 
     for (const auto& row : kSchema)
@@ -121,18 +147,25 @@ void testSchemaIsWhatItWillAlwaysBe()
     }
 
     // The enum is the other half of the same fact: the DSP indexes with it.
-    check (std::string (specs[(size_t) P::Index::time].id)      == P::kTime,      "Index::time is time");
-    check (std::string (specs[(size_t) P::Index::mix].id)       == P::kMix,       "Index::mix is mix");
-    check (std::string (specs[(size_t) P::Index::throwHeld].id) == P::kThrow,     "Index::throwHeld is throw");
-    check (std::string (specs[(size_t) P::Index::fxAmount].id)  == P::kFxAmount,  "Index::fxAmount is fx_amount");
+    check (std::string (specs[(size_t) P::Index::time].id)     == P::kTime,     "Index::time is time");
+    check (std::string (specs[(size_t) P::Index::mix].id)      == P::kMix,      "Index::mix is mix");
+    check (std::string (specs[(size_t) P::Index::send].id)     == P::kSend,     "Index::send is send");
+    check (std::string (specs[(size_t) P::Index::fxAmount].id) == P::kFxAmount, "Index::fxAmount is fx_amount");
+    check (std::string (specs[(size_t) P::Index::link].id)     == P::kLink,     "Index::link is link");
+    check (std::string (specs[(size_t) P::Index::laneFxAmount].id) == P::kLaneFxAmount,
+           "Index::laneFxAmount is lane_fx_amount, and it is the last one");
 }
 
 /** Choice lists are stored by index, so the order is as permanent as the ids.
 
     NOTE is the one that is not "least to most": its index is the automation
     lane, so it ascends in duration and all sixteen ship at once. The other
-    three run least to most intervention so that index 0 is the neutral value a
-    corrupt state lands on. */
+    two run least to most intervention so that index 0 is the neutral value a
+    corrupt state lands on.
+
+    The lane's three choices are the *same lists*, so checking the main
+    delay's checks both -- and the pair of assertions at the end is what
+    catches them being split into two lists that can drift apart. */
 void testChoiceListsKeepTheirOrder()
 {
     const auto& specs = P::specs();
@@ -167,24 +200,32 @@ void testChoiceListsKeepTheirOrder()
         check (std::string (stereo.choices[(size_t) i]) == expectedStereo[i],
                std::string ("stereo index ") + std::to_string (i) + " is " + expectedStereo[i]);
 
-    // Send open is index 0, so THROW is inert on a fresh instance.
-    const char* expectedThrow[] { "Send open", "Throw", "Build" };
-    const auto& mode = specs[(size_t) P::Index::throwMode];
-    check (mode.numChoices() == 3, "three throw modes");
-    for (int i = 0; i < mode.numChoices() && i < 3; ++i)
-        check (std::string (mode.choices[(size_t) i]) == expectedThrow[i],
-               std::string ("throwMode index ") + std::to_string (i) + " is " + expectedThrow[i]);
-
-    // The candidate list. Its contents may still change before ship; that
-    // index 0 is a type and not "Off" may not -- `fx` owns off, and a corrupt
-    // state landing on 0 has to give the gentlest type with the stage still
-    // gated by a bool that defaults off.
+    // The candidate list, **four entries from 2026-09-21**: Octave up, Octave
+    // down and Reverse are cut (docs/delay/15), and a cut is only possible
+    // before ship. Its contents may still change until then; that index 0 is a
+    // type and not "Off" may not -- `fx` owns off, and a corrupt state landing
+    // on 0 has to give the gentlest type with the stage still gated by a bool
+    // that defaults off.
+    const char* expectedFx[] { "Diffuse", "Sweep", "Pan/Tremolo", "Crush" };
     const auto& fxType = specs[(size_t) P::Index::fxType];
-    check (fxType.numChoices() == 7, "seven FX candidates");
+    check (fxType.numChoices() == 4, "four FX candidates");
     check (fxType.def == 0.0f, "the default FX type is index 0");
+    for (int i = 0; i < fxType.numChoices() && i < 4; ++i)
+        check (std::string (fxType.choices[(size_t) i]) == expectedFx[i],
+               std::string ("FX type index ") + std::to_string (i) + " is " + expectedFx[i]);
     for (int i = 0; i < fxType.numChoices(); ++i)
         check (std::string (fxType.choices[(size_t) i]) != "Off",
                "no FX type is called Off -- fx owns off");
+
+    // The lane mirrors the main delay off the same three lists rather than
+    // declaring its own, which is the only way the two cannot drift apart.
+    const auto& laneCharacter = specs[(size_t) P::Index::laneCharacter];
+    const auto& laneStereo    = specs[(size_t) P::Index::laneStereo];
+    const auto& laneFxType    = specs[(size_t) P::Index::laneFxType];
+
+    check (laneCharacter.choices == character.choices, "the lane's characters are the main delay's");
+    check (laneStereo.choices    == stereo.choices,    "the lane's stereo modes are the main delay's");
+    check (laneFxType.choices    == fxType.choices,    "the lane's FX types are the main delay's");
 }
 
 /** Every value reaches the core under the name it was given.
@@ -207,18 +248,31 @@ void testEveryParameterIsWiredToItsOwnValue()
     v[P::Index::stereo]    = 1.0f;
     v[P::Index::lowCut]    = 137.0f;
     v[P::Index::highCut]   = 7300.0f;
-    v[P::Index::voice]     = 44.0f;
     v[P::Index::modRate]   = 2.7f;
     v[P::Index::modDepth]  = 29.0f;
     v[P::Index::drive]     = 83.0f;
     v[P::Index::duck]      = 17.0f;
     v[P::Index::mix]       = 72.0f;
-    v[P::Index::throwHeld] = 1.0f;
-    v[P::Index::throwMode] = 2.0f;
-    v[P::Index::freeze]    = 1.0f;
+    v[P::Index::send]      = 1.0f;
+    v[P::Index::laneGain]  = 64.0f;
+    v[P::Index::hold]      = 1.0f;
+    v[P::Index::chop]      = 1.0f;
     v[P::Index::fx]        = 1.0f;
-    v[P::Index::fxType]    = 5.0f;
+    v[P::Index::fxType]    = 2.0f;
     v[P::Index::fxAmount]  = 12.0f;
+
+    v[P::Index::link]          = 0.0f;   // the only one whose default is on
+    v[P::Index::laneLevel]     = -7.5f;
+    v[P::Index::laneTime]      = 431.0f;
+    v[P::Index::laneCharacter] = 1.0f;
+    v[P::Index::laneStereo]    = 2.0f;
+    v[P::Index::laneLowCut]    = 219.0f;
+    v[P::Index::laneHighCut]   = 5100.0f;
+    v[P::Index::laneModRate]   = 4.3f;
+    v[P::Index::laneModDepth]  = 56.0f;
+    v[P::Index::laneFx]        = 1.0f;
+    v[P::Index::laneFxType]    = 3.0f;
+    v[P::Index::laneFxAmount]  = 88.0f;
 
     dsp.setParams (v.data(), (int) v.size());
     const auto& p = dsp.getCore().getParams();
@@ -230,18 +284,39 @@ void testEveryParameterIsWiredToItsOwnValue()
     check (p.stereoChoice    == 1,       "STEREO reaches the core");
     check (p.lowCutHz        == 137.0f,  "LOW CUT reaches the core");
     check (p.highCutHz       == 7300.0f, "HIGH CUT reaches the core");
-    check (p.voicePct        == 44.0f,   "VOICE reaches the core");
     check (p.modRateHz       == 2.7f,    "MOD RATE reaches the core");
     check (p.modDepthPct     == 29.0f,   "MOD DEPTH reaches the core");
     check (p.drivePct        == 83.0f,   "DRIVE reaches the core");
     check (p.duckDb          == 17.0f,   "DUCK reaches the core");
     check (p.mixPct          == 72.0f,   "MIX reaches the core");
-    check (p.throwHeld,                  "THROW reaches the core");
-    check (p.throwModeChoice == 2,       "THROW MODE reaches the core");
-    check (p.freeze,                     "FREEZE reaches the core");
+    check (p.sendHeld,                   "SEND reaches the core");
+    check (p.laneGain        == 64.0f,   "LANE GAIN reaches the core");
+    check (p.hold,                       "HOLD reaches the core");
+    check (p.chop,                       "CHOP reaches the core");
     check (p.fx,                         "FX reaches the core");
-    check (p.fxTypeChoice    == 5,       "FX TYPE reaches the core");
+    check (p.fxTypeChoice    == 2,       "FX TYPE reaches the core");
     check (p.fxAmountPct     == 12.0f,   "FX AMOUNT reaches the core");
+
+    check (! p.link,                            "LINK reaches the core");
+    check (p.laneLevelDb         == -7.5f,      "LANE LEVEL reaches the core");
+    check (p.laneTimeMs          == 431.0f,     "LANE TIME reaches the core");
+    check (p.laneCharacterChoice == 1,          "LANE CHARACTER reaches the core");
+    check (p.laneStereoChoice    == 2,          "LANE STEREO reaches the core");
+    check (p.laneLowCutHz        == 219.0f,     "LANE LOW CUT reaches the core");
+    check (p.laneHighCutHz       == 5100.0f,    "LANE HIGH CUT reaches the core");
+    check (p.laneModRateHz       == 4.3f,       "LANE MOD RATE reaches the core");
+    check (p.laneModDepthPct     == 56.0f,      "LANE MOD DEPTH reaches the core");
+    check (p.laneFx,                            "LANE FX reaches the core");
+    check (p.laneFxTypeChoice    == 3,          "LANE FX TYPE reaches the core");
+    check (p.laneFxAmountPct     == 88.0f,      "LANE FX AMOUNT reaches the core");
+
+    // The lane's twelve are a mirror of the main delay's rows and the pairs
+    // sit next to each other in this struct, which is exactly the shape a
+    // copy-paste reads the wrong lane into. Every pair above is set to a
+    // different number for that reason; these are the two that would still
+    // pass if a lane row were wired to the main's.
+    check (p.timeMs != p.laneTimeMs, "TIME and LANE TIME are not the same lane");
+    check (p.lowCutHz != p.laneLowCutHz, "LOW CUT and LANE LOW CUT are not the same lane");
 }
 
 /** SYNC is in the schema and switched off at the source.
@@ -289,8 +364,8 @@ void testLatencyIsAlwaysZero()
 
                 for (const auto on : { 0.0f, 1.0f })
                 {
-                    v[P::Index::fx]     = on;
-                    v[P::Index::freeze] = on;
+                    v[P::Index::fx]   = on;
+                    v[P::Index::hold] = on;
 
                     check (dsp.latencyForParams (v.data(), (int) v.size()) == 0,
                            "zero latency at TIME " + std::to_string ((int) ms)

@@ -72,7 +72,7 @@ void printSchema()
 }
 
 /** The latency claim, walked rather than asserted: every character, the ends
-    and middle of TIME, DRIVE at both ends, FREEZE and FX on and off. Anything
+    and middle of TIME, DRIVE at both ends, HOLD and FX on and off. Anything
     but a column of zeros is a fault. */
 int printLatency()
 {
@@ -94,9 +94,9 @@ int printLatency()
 
                 for (const auto on : { 0.0f, 1.0f })
                 {
-                    v[P::Index::fx]     = on;
-                    v[P::Index::freeze] = on;
-                    v[P::Index::mix]    = on > 0.5f ? 100.0f : 0.0f;
+                    v[P::Index::fx]   = on;
+                    v[P::Index::hold] = on;
+                    v[P::Index::mix]  = on > 0.5f ? 100.0f : 0.0f;
 
                     const auto latency = dsp.latencyForParams (v.data(), (int) v.size());
                     worst = latency > worst ? latency : worst;

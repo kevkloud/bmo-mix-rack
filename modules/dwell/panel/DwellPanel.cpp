@@ -18,16 +18,16 @@ namespace bmo::dwell
     nothing.
 
     `columns` is how many cells stand side by side before the next line starts:
-    3 everywhere on this panel, which is `docs/delay/13` §1's row maximum
-    honoured rather than waived. A short last line is centred rather than
-    left-hung, so the seven FX types read as a block.
+    3 for the two trios, 2 for the FX grid now that there are four types. A
+    short last line is centred rather than left-hung, which the 2x2 grid never
+    needs and the old seven-cell stack did.
 
     `namePrefix` renames the *components* without touching what is drawn on
-    them. THROW MODE's middle cell says THROW and so does the performance
-    switch on the face, and `findNamed` in tests/ui/LayoutTests.cpp walks
-    children by name: without the prefix a test asking for the button would
-    get whichever of the two happened to be earlier in the child list, and
-    that order changes every time the revealed section opens.
+    them. Nothing needs it today -- it was THROW MODE's middle cell, which said
+    THROW and so did the performance switch on the face -- but `findNamed` in
+    tests/ui/LayoutTests.cpp walks children by name and two cells with one name
+    resolve by child order, which changes every time the revealed section
+    opens. It stays for the next row that collides.
 
     Plain `juce::ToggleButton`s rather than `ui::SwitchButton`s because a
     SwitchButton attaches itself to a *bool*; the look and feel draws both the
@@ -84,8 +84,8 @@ public:
             const auto first = line * columns;
             const auto inLine = juce::jmin (columns, n - first);
 
-            // A short last line is centred: the FX grid is three, three and one,
-            // and one cell hung on the left edge reads as a mistake.
+            // A short last line is centred, for whatever count does not divide
+            // by its columns: one cell hung on the left edge reads as a mistake.
             auto band = row.withSizeKeepingCentre (inLine * cellWidth + (inLine - 1) * gap,
                                                    row.getHeight());
 
@@ -216,8 +216,8 @@ namespace
     // default was not its inert end: 4 dB of reduction on a fresh instance
     // meant a hidden DUCK was doing something nobody had asked for and could
     // not see. **Its default is 0 dB from 2026-09-21** (DECIDED, Frosty;
-    // params.h id 12, docs/delay/10 §6), so it ships inert like DRIVE, VOICE
-    // and MOD DEPTH beside it, and hiding it costs a fresh instance nothing.
+    // params.h id 11, docs/delay/10 §6), so it ships inert like DRIVE and MOD
+    // DEPTH beside it, and hiding it costs a fresh instance nothing.
     //
     // Where it finally lives is still a listening question rather than a
     // layout one, so this enum and the one line under it stay the whole
@@ -262,15 +262,16 @@ namespace
         measures about 125 px at 15 pt and "AMOUNT (SMEAR)" about 209 in a
         column of 260 -- so no word had to be shortened to buy the size back.
 
-        MOD RATE and MOD DEPTH are still captioned RATE and DEPTH, and LOW and
-        HIGH CUT LO CUT and HI CUT, but that is now a reading choice rather
-        than a fit: a panel's words are not its schema (WORKFLOWS.md's control
-        audit), and the short forms are what a pair of filters reads best at.
+        MOD RATE and MOD DEPTH are still captioned RATE and DEPTH, LOW and
+        HIGH CUT LO CUT and HI CUT, and LANE GAIN is TAIL, but that is a
+        reading choice rather than a fit: a panel's words are not its schema
+        (WORKFLOWS.md's control audit), and the short forms are what a pair of
+        filters and a bipolar decay read best at.
 
         **Switch labels are not captions** and keep their own sizes, which the
         suite sets to the cell rather than to a standard: 13 pt for CHARACTER's
-        three wide cells, 12 for STEREO's, THROW MODE's and the FX grid's, 14
-        on THROW and FREEZE, 11 on SYNC and FX. Section legends stay at
+        three wide cells, 12 for STEREO's and the FX grid's, 14 on SEND and
+        HOLD, 11 on SYNC and FX. Section legends stay at
         `ui::ModulePanel::kLegendSize`. */
     constexpr float kCaption = 15.0f;
 
@@ -328,10 +329,11 @@ namespace
         two letters and it shares the foot with the arrow. */
     constexpr int kFxSwitchWidth = 56;
 
-    /** Down or across the FX cells. Tighter than the suite's 8 because seven
-        cells is more than a row was built for. */
-    constexpr int kFxCellGap = 6;
-    constexpr int kFxGridRow = 3 * kSwitchHeight + 2 * kFxCellGap;   // 90
+    /** Down and across the FX cells. **The suite's 8 again**: the gap was
+        squeezed to 6 because seven cells were more than a row was built for,
+        and four tile as a 2x2 with 127 px to a cell. */
+    constexpr int kFxCellGap = ui::Tokens::switchGap;                // 8
+    constexpr int kFxGridRow = 2 * kSwitchHeight + kFxCellGap;       // 60
 
     /** The DUCK bar, on the knob's own centre line. */
     constexpr int kDuckBarHeight = 18;
@@ -353,30 +355,33 @@ namespace
             case 0:  return "AMOUNT (SMEAR)";    // Diffuse
             case 1:  return "AMOUNT (SWEEP)";    // Sweep
             case 2:  return "AMOUNT (DEPTH)";    // Pan/Tremolo
-            case 3:
-            case 4:  return "AMOUNT (BLEND)";    // either octave
-            case 5:  return "AMOUNT (SEAM)";     // Reverse
-            case 6:  return "AMOUNT (BITS)";     // Crush
+            case 3:  return "AMOUNT (BITS)";     // Crush
             default: return "AMOUNT";
         }
     }
 
-    /** Short forms for the seven cells. A panel's button labels are not its
+    /** Short forms for the four cells. A panel's button labels are not its
         schema (WORKFLOWS.md's control audit), so these can be re-worded
-        without touching `kFxTypeNames`. */
+        without touching `kFxTypeNames` -- but the *count* is the schema, and it
+        is four from 2026-09-21. */
     juce::StringArray fxTypeLabels()
     {
-        return { "DIFFUSE", "SWEEP", "PAN", "OCT UP", "OCT DN", "REVERSE", "CRUSH" };
+        return { "DIFFUSE", "SWEEP", "PAN", "CRUSH" };
     }
 
     /** Every parameter the revealed section carries, which is exactly what the
         state dot reads. DUCK is in the list only while it is hidden -- a
         control the face already shows cannot be something the dot is warning
-        about. */
+        about.
+
+        The thirteen parameters this panel does not draw at all are **not**
+        here: the dot says "something behind the arrow was moved", and a
+        control that is behind nothing is not something opening the column
+        would reveal. */
     std::vector<int> revealedIndices()
     {
-        std::vector<int> out { Index::voice, Index::drive, Index::modRate, Index::modDepth,
-                               Index::throwMode, Index::fxType, Index::fxAmount };
+        std::vector<int> out { Index::drive, Index::modRate, Index::modDepth,
+                               Index::laneGain, Index::fxType, Index::fxAmount };
 
         if constexpr (kDuckHome == DuckHome::revealed)
             out.push_back (Index::duck);
@@ -435,18 +440,24 @@ namespace
 
     /** The revealed column, in the two segments the face's rules cut it into.
 
-        Above the TONE line: the LOOP rule, two or three knob rows depending on
-        where DUCK lives, the THROW rule and the mode trio. Promoting DUCK
+        Above the TONE line: the LOOP rule, the DRIVE / RATE / DEPTH trio, the
+        DUCK band if DUCK lives here, the LANE rule and TAIL. Promoting DUCK
         takes its row and its helping of air out of the column rather than
         leaving a hole where it was, which is the other half of `kDuckHome`
         being one line.
+
+        **A trio, since VOICE went.** Three knobs in two rows would have left
+        half a row bare in the middle of a column, which is the one thing the
+        redesign was about. Three across a 260 px column is an 86 px cell --
+        the same cut the face takes when `kDuckHome` promotes DUCK into it --
+        and the longest caption in the three is DEPTH.
 
         Below it: the FX rule and the type grid, with FX AMOUNT anchored to the
         foot so the two columns end on one line. */
     constexpr int kRevealDuck = (kDuckHome == DuckHome::revealed) ? kRevealRow : 0;
 
-    constexpr int kRevealTopRows = kRule + kRevealRow * 2 + kRevealDuck + kRule + kSwitchRow;
-    constexpr int kRevealTopAir  = (kDuckHome == DuckHome::revealed) ? 8 : 7;   // singles + 2 double
+    constexpr int kRevealTopRows = kRule + kRevealRow + kRevealDuck + kRule + kRevealRow;
+    constexpr int kRevealTopAir  = (kDuckHome == DuckHome::revealed) ? 7 : 6;   // singles + 2 double
 
     constexpr int kRevealBotRows = kRule + kFxGridRow;
     constexpr int kRevealBotAir  = 3;   // 1 single + 1 double
@@ -461,20 +472,20 @@ DwellPanel::DwellPanel (ui::ModuleContext ctx)
       mix      (context.params.param (Index::mix),      "MIX",      ui::Knob::Style::character, kPairFace, context.def.accent),
       lowCut   (context.params.param (Index::lowCut),   "LO CUT",   ui::Knob::Style::character, kPairFace, context.def.accent),
       highCut  (context.params.param (Index::highCut),  "HI CUT",   ui::Knob::Style::character, kPairFace, context.def.accent),
-      sync      (context.params.param (Index::sync),      "SYNC",   ui::tokens().switchAlt),
-      throwHeld (context.params.param (Index::throwHeld), "THROW",  context.def.accent),
-      freeze    (context.params.param (Index::freeze),    "FREEZE", context.def.accent),
-      fx        (context.params.param (Index::fx),        "FX",     context.def.accent),
+      sync     (context.params.param (Index::sync),     "SYNC", ui::tokens().switchAlt),
+      sendHeld (context.params.param (Index::send),     "SEND", context.def.accent),
+      hold     (context.params.param (Index::hold),     "HOLD", context.def.accent),
+      fx       (context.params.param (Index::fx),       "FX",   context.def.accent),
       arrow ([this] { return isShowingExpanded(); }),
-      // VOICE is an ordinary knob rather than a ConcentricBand ring around
-      // HI CUT. The ring was the panel's third control idiom, it needed two
-      // panel-drawn names where every other knob names itself, and it put the
-      // visually heaviest object on the panel on a secondary control.
-      voice    (context.params.param (Index::voice),    "VOICE",  ui::Knob::Style::character, kRevealFace, context.def.accent),
-      drive    (context.params.param (Index::drive),    "DRIVE",  ui::Knob::Style::character, kRevealFace, context.def.accent),
-      modRate  (context.params.param (Index::modRate),  "RATE",   ui::Knob::Style::character, kRevealFace, context.def.accent),
-      modDepth (context.params.param (Index::modDepth), "DEPTH",  ui::Knob::Style::character, kRevealFace, context.def.accent),
-      duck     (context.params.param (Index::duck),     "DUCK",   ui::Knob::Style::character, kRevealFace, context.def.accent)
+      drive    (context.params.param (Index::drive),    "DRIVE", ui::Knob::Style::character, kRevealFace, context.def.accent),
+      modRate  (context.params.param (Index::modRate),  "RATE",  ui::Knob::Style::character, kRevealFace, context.def.accent),
+      modDepth (context.params.param (Index::modDepth), "DEPTH", ui::Knob::Style::character, kRevealFace, context.def.accent),
+      duck     (context.params.param (Index::duck),     "DUCK",  ui::Knob::Style::character, kRevealFace, context.def.accent),
+      // The lane's tail, where the three-way THROW MODE row stood. One
+      // bipolar knob: below centre the lane decays, at centre it holds, above
+      // it builds -- three regions of one loop gain rather than three modes,
+      // which is why the parameter is a float and this is a knob.
+      laneGain (context.params.param (Index::laneGain), "TAIL",  ui::Knob::Style::character, kRevealFace, context.def.accent)
 {
     character = std::make_unique<ChoiceRow> (context.params.param (Index::character),
                                              juce::StringArray { "CLEAN", "TAPE", "BUCKET" },
@@ -484,21 +495,18 @@ DwellPanel::DwellPanel (ui::ModuleContext ctx)
                                           juce::StringArray { "STEREO", "PING-PONG", "DUAL" },
                                           ui::tokens().switchAlt, 12.0f, 3, kSwitchGap);
 
-    // SEND / THROW / BUILD, prefixed so the middle cell and the performance
-    // switch on the face do not answer to the same name. See ChoiceRow.
-    throwMode = std::make_unique<ChoiceRow> (context.params.param (Index::throwMode),
-                                             juce::StringArray { "SEND", "THROW", "BUILD" },
-                                             ui::tokens().switchAlt, 12.0f, 3, kSwitchGap,
-                                             "mode");
-
+    // **Two columns, not three.** Four types tile as a 2x2 with 127 px to a
+    // cell; three across would put DIFFUSE, SWEEP and PAN on one line and hang
+    // CRUSH alone under them, which is the shape the seven-cell stack had and
+    // the reason the list was cut to four.
     fxType = std::make_unique<ChoiceRow> (context.params.param (Index::fxType),
                                           fxTypeLabels(),
-                                          ui::tokens().switchAlt, 12.0f, 3, kFxCellGap);
+                                          ui::tokens().switchAlt, 12.0f, 2, kFxCellGap);
 
     duckMeter = std::make_unique<DuckMeter> (context.gainReductionDb, context.def.accent);
 
     for (auto* c : std::initializer_list<juce::Component*> {
-             &feedback, &mix, &lowCut, &highCut, &sync, &throwHeld, &freeze, &fx, &arrow,
+             &feedback, &mix, &lowCut, &highCut, &sync, &sendHeld, &hold, &fx, &arrow,
              character.get(), stereo.get() })
         addAndMakeVisible (c);
 
@@ -535,7 +543,7 @@ DwellPanel::DwellPanel (ui::ModuleContext ctx)
         k->setCaptionSize (kCaption);
     }
 
-    for (auto* k : { &voice, &drive, &modRate, &modDepth, &duck })
+    for (auto* k : { &drive, &modRate, &modDepth, &duck, &laneGain })
     {
         k->setKnobSide (kRevealKnob);
         k->setCaptionSize (kCaption);
@@ -547,12 +555,17 @@ DwellPanel::DwellPanel (ui::ModuleContext ctx)
     sync.setSwitchEnabled (dwell::kSyncIsEnabled);
     sync.setLabelSize (11.0f);
 
-    // THROW and FREEZE are lit from across the room, so their labels are set
-    // to the row rather than to the suite's 26 px switch -- and they light in
-    // the module's accent rather than switchAlt, with a glow painted behind
-    // them by paintPanel, so a held performance button cannot read as one more
+    // SEND and HOLD are lit from across the room, so their labels are set to
+    // the row rather than to the suite's 26 px switch -- and they light in the
+    // module's accent rather than switchAlt, with a glow painted behind them
+    // by paintPanel, so a held performance button cannot read as one more
     // CHARACTER or STEREO selection (§3).
-    for (auto* s : { &throwHeld, &freeze })
+    //
+    // CHOP is the third gate of the same family (docs/delay/15) and is **not
+    // drawn here**: the performance band is a pair, and re-cutting it for
+    // three belongs to the 980 px redesign along with LINK and the lane's
+    // twelve. The parameter is live and automatable meanwhile.
+    for (auto* s : { &sendHeld, &hold })
         s->setLabelSize (14.0f);
 
     fx.setLabelSize (11.0f);
@@ -632,8 +645,8 @@ void DwellPanel::showRevealed (bool shown)
 
     revealedShown = shown;
 
-    std::vector<juce::Component*> group { &voice, &drive, &modRate, &modDepth,
-                                          throwMode.get(), fxType.get() };
+    std::vector<juce::Component*> group { &drive, &modRate, &modDepth,
+                                          &laneGain, fxType.get() };
 
     if constexpr (kDuckHome == DuckHome::revealed)
     {
@@ -724,11 +737,11 @@ void DwellPanel::timerCallback()
     {
         lastFxWasOn = fxOn;
         refreshFxEnablement();
-        repaint();                 // the foot's glow follows FX as well as THROW
+        repaint();                 // the foot's glow follows FX as well as SEND
     }
 
     // The state dot. Polled with everything else rather than listened for: it
-    // reads eight parameters, any of them can be moved by a knob, a lane or a
+    // reads seven parameters, any of them can be moved by a knob, a lane or a
     // preset, and all three have to light it.
     const auto moved = revealedSectionIsMoved();
 
@@ -789,13 +802,41 @@ void DwellPanel::placePair (ui::PlainKnob& leftKnob, ui::PlainKnob& rightKnob,
     rightKnob.setBounds (row);
 }
 
+void DwellPanel::placeTrio (ui::PlainKnob& leftKnob, ui::PlainKnob& middleKnob,
+                            ui::PlainKnob& rightKnob, juce::Rectangle<int> row, int knobSide)
+{
+    for (auto* k : { &leftKnob, &middleKnob, &rightKnob })
+    {
+        k->setKnobSide (knobSide);
+        k->setCaptionSize (kCaption);
+    }
+
+    const auto third = row.getWidth() / 3;
+
+    leftKnob.setBounds (row.removeFromLeft (third));
+    middleKnob.setBounds (row.removeFromLeft (third));
+    rightKnob.setBounds (row);
+}
+
+void DwellPanel::placeSingle (ui::PlainKnob& knob, juce::Rectangle<int> row, int knobSide)
+{
+    knob.setKnobSide (knobSide);
+    knob.setCaptionSize (kCaption);
+
+    // Half the column, centred, which is the cell a pair would have given it:
+    // a lone knob spanning the full width draws in the same place and gives
+    // its caption more room than any other knob on the panel has, which reads
+    // as a different size of control rather than as the same one alone.
+    knob.setBounds (row.withSizeKeepingCentre (row.getWidth() / 2, row.getHeight()));
+}
+
 void DwellPanel::placePerform (juce::Rectangle<int> row)
 {
     const auto half = (row.getWidth() - kSwitchGap) / 2;
 
-    throwHeld.setBounds (row.removeFromLeft (half));
+    sendHeld.setBounds (row.removeFromLeft (half));
     row.removeFromLeft (kSwitchGap);
-    freeze.setBounds (row);
+    hold.setBounds (row);
 }
 
 void DwellPanel::placeSwitchRow (ChoiceRow& switches, juce::Rectangle<int> row)
@@ -851,10 +892,10 @@ void DwellPanel::placeFoot (juce::Rectangle<int> row)
 
 void DwellPanel::placeFxGrid (juce::Rectangle<int> row)
 {
-    // Three across, which is docs/delay/13 §1's row maximum honoured rather
-    // than waived: a 260 px column cuts three 82 px cells and "REVERSE" fits
-    // one at 12 pt. The seven land three, three and one, the short line
-    // centred.
+    // **Two across, two down.** Four types (docs/delay/15) cut a 260 px column
+    // into 126 px cells, which is half again what the seven-cell version gave
+    // DIFFUSE and twice what "OCT DN" needed; the grid is also 30 px shorter,
+    // and that height goes back to the column's air.
     fxType->setBounds (row);
 }
 
@@ -976,7 +1017,7 @@ void DwellPanel::layOutFace (juce::Rectangle<int> column, int& delayRuleTop, int
     placeFoot (foot);
 }
 
-/** The revealed column: LOOP, THROW and FX, read top to bottom in the order
+/** The revealed column: LOOP, LANE and FX, read top to bottom in the order
     the face reads in.
 
     Every knob here is a step smaller than the face's, which is the hierarchy
@@ -996,18 +1037,22 @@ void DwellPanel::layOutRevealed (juce::Rectangle<int> column, int toneRuleTop)
 
     addRule (top.take (kRule), "LOOP");
     top.air();
-    placePair (voice, drive, top.take (kRevealRow), kRevealKnob);
-    top.air();
-    placePair (modRate, modDepth, top.take (kRevealRow), kRevealKnob);
+    placeTrio (drive, modRate, modDepth, top.take (kRevealRow), kRevealKnob);
 
     // === DUCK: still under investigation. See kDuckHome. =====================
     if constexpr (kDuckHome == DuckHome::revealed) { top.air(); placeDuckBand (top.take (kRevealRow)); }
     // =========================================================================
 
     top.breakAir();
-    addRule (top.take (kRule), "THROW");
+
+    // **LANE, not THROW.** The old section was a three-cell THROW MODE row
+    // whose first cell meant "not armed"; the lane is a second delay with its
+    // own tail, SEND on the face gates its input, and no control on this panel
+    // is called THROW any more. One knob under a legend naming what it belongs
+    // to says more than a legend naming a gesture.
+    addRule (top.take (kRule), "LANE");
     top.air();
-    placeSwitchRow (*throwMode, top.take (kSwitchRow));
+    placeSingle (laneGain, top.take (kRevealRow), kRevealKnob);
     top.breakAir();
 
     Column bottom { column.withTop (toneRuleTop) };
@@ -1051,9 +1096,9 @@ void DwellPanel::paintPanel (juce::Graphics& g)
         bloom.drawForRectangle (g, c.getBounds());
     };
 
-    glow (throwHeld, context.params.getReal (Index::throwHeld) > 0.5f);
-    glow (freeze,    context.params.getReal (Index::freeze)    > 0.5f);
-    glow (fx,        context.params.getReal (Index::fx)        > 0.5f);
+    glow (sendHeld, context.params.getReal (Index::send) > 0.5f);
+    glow (hold,     context.params.getReal (Index::hold) > 0.5f);
+    glow (fx,       context.params.getReal (Index::fx)   > 0.5f);
 
     /** A short travel strip with one numbered mark on it: what a knob's own
         track cannot say, drawn under the knob it belongs to. */
@@ -1109,14 +1154,14 @@ void DwellPanel::paintPanel (juce::Graphics& g)
     /** **The state dot**: the arrow says whether anything behind it has been
         moved.
 
-        A closed section whose eight controls are all at their defaults and one
+        A closed section whose seven controls are all at their defaults and one
         whose DRIVE is at 80 % are the same picture, and that is the measured
         cost of hiding anything at all. A filled disc in the module's accent,
         beside the chevrons, is the cheapest thing that answers it: it is where
         the eye already is when it asks the question, it costs no row, and it
         is drawn rather than clicked, so it cannot be mistaken for a control.
 
-        It is **not a parameter** -- it is a reading of eight that already
+        It is **not a parameter** -- it is a reading of seven that already
         exist, refreshed by the panel's own timer, so a lane, a preset and a
         knob all light it and none of them stores it. And it is drawn only
         while the panel is compact: with the column open nothing is hidden, and

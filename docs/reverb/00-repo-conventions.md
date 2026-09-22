@@ -45,18 +45,22 @@ pattern; nothing mandates promoting a primitive to `core/dsp/`.
 (cheap, targets only), `process(...)`, `latencyForParams(...)` (from param
 values, not DSP state). No block-size ceiling beyond what the host passes.
 
-- **Channel layout**: both processors restrict buses to mono **or** stereo
-  with **no conversion** (`SingleModuleProcessor.cpp:70-79`). No mono-in/
-  stereo-out path exists; Dimension instead early-returns on mono
-  (`DspCore.h:390-391`). A reverb wanting mono-in/stereo-out spread needs
-  new bus-layout handling.
+- **Channel layout**: both processors *restricted* buses to mono **or** stereo
+  with **no conversion** (`SingleModuleProcessor.cpp:70-79`); Dimension instead
+  early-returns on mono (`DspCore.h:390-391`). **Shipped 2026-09-21 on AURORA:**
+  `core/product/BusLayouts.h` carries mono-in/stereo-out, the rack widening
+  once at its own input ahead of slot 1, covered by `bus_tests`. The sentence
+  above is the survey this pack was written against.
 - **Tempo/transport does not reach a module** — no `AudioPlayHead`/tempo
   plumbing anywhere in `core/`or `modules/`. Tempo-synced pre-delay needs
   new plumbing down to `prepare`/`setParams`; no existing module does this.
-- **Tail length is hardcoded to zero** in both `SingleModuleProcessor.h:41`
-  and `RackProcessor.h:124` — no module reports a tail today. Reverb is the
-  first case this is actually wrong for; expect to touch both, and
-  `ModuleDef`/`ModuleDsp` have no tail accessor to plumb it through yet.
+- **Tail length was hardcoded to zero** in both `SingleModuleProcessor.h:41`
+  and `RackProcessor.h:124` — no module reported a tail. Reverb was the first
+  case that was wrong for. **Shipped 2026-09-21 on AURORA:**
+  `ModuleDsp::tailSecondsForParams` defaults to 0.0 on every module's vtable,
+  the single processor returns it, and the rack **sums** over occupied slots
+  and clamps the total at `bmo::kMaxTailSeconds` — the same 30 s a module
+  clamps itself at. Do not write 30.0 anywhere else.
 - **Bypass**: no per-slot enable/bypass flag in `RackProcessor.cpp/.h` —
   modules are present/absent from the chain, not toggled; verify before
   assuming a slot drops mid-tail.

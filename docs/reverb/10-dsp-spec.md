@@ -44,14 +44,25 @@ metallic". That answers the owner's hardest constraint, and is why ER can solo.
 scattering delay networks (a simulation, not an effect); per-tap multi-band
 shelving (cost, §6); freeze; ducking; tempo-synced pre-delay (no host plumbing
 exists, `00` §2); user-editable tap lists; separate gated and reverse algorithms
-(Decay truncation covers them, `01` D9); **negative pre-delay** (§2).
+(Decay truncation covers them, `01` D9 — **though note that since the trim the
+truncation is a per-type constant and every one of the six types ships it
+linear, i.e. off, so nothing in v1 actually reaches a gated decay; a gated type
+or a returned knob is what would**); **negative pre-delay** (§2).
 
 ### Types
 
 A type changes **only constants** over the shared topology: ER tap table, ER
 window and default density, the eight FDN times, input-diffusion depth, damping
 and modulation defaults, input bandwidth, default ER→tail feed, and a reserved
-**era block** (below). No audio-path branch beyond a table lookup. Buffers are
+**era block** (below). **Since the 2026-09-21 control-set trim (§6, `11` §4a)
+the block also carries the two damping knee frequencies, the tail-onset contour
+(Attack), the decay-truncation shape and the early cluster's rise exponent *p*,
+none of which is a user control any more**, plus the two generator levels, which
+became per-type the same day so that Ambience could be built as specified. Which
+half of the block a field is in — the nine with a host lane, the rest without —
+is `modules/reverb/params.h`'s `TypeConstants` and `11` §4b; it changes nothing
+here, because a type was always a table of constants and these are more of them.
+No audio-path branch beyond a table lookup. Buffers are
 sized in `prepare()` for the largest type (`00` §2), so switching never
 allocates.
 
@@ -59,8 +70,17 @@ The list is append-only once shipped, so this order is final.
 **v1 (6):** 1 Room · 2 Chamber · 3 Hall · 4 Cavern · 5 Plate · 6 Ambience —
 the Reference-A core set, small→large→plate→ambience. Ambience is the ER-star
 type: tiny tail, ER-dominant, where "tail off, distance sets depth" lands by
-default. **Appended later:** 7 Church · 8 Shaped Hall · 9 Pattern Room ·
-10 Positional Room · 11 Vintage Room.
+default. **Appended later:** 7 Shaped Hall · 8 Pattern Room · 9 Positional
+Room · 10 Vintage Room.
+
+*Church was struck from this reserve on 2026-09-21*, because Cavern at index 4
+carries exactly that character and the list would otherwise hold a type that
+already ships (`11` §1). Note too that the four remaining read as universal
+controls rather than as rooms, so the reserve is emptier than it looks — and
+appending is not free. The **count** is what `juce::AudioParameterChoice`
+normalises by, so a seventh type remaps every recorded automation lane on TYPE.
+Sessions and presets survive it, because state is stored as plain values keyed
+by id; automation does not.
 
 HW-2 is `02`'s flagship, but its distinguishing feature is an ER *envelope*,
 which belongs to every type as a mode (§3). HW-8's pattern knob likewise becomes
@@ -86,8 +106,12 @@ be bandlimited or oversampled (`04` §3).
 
 ## 2. Signal flow
 
-**Input.** Stereo→stereo is native; mono→mono works; **mono→stereo is wanted and
-impossible today** (`00` §2, §8). Fixed 20 Hz high-pass plus an input high-cut
+**Input.** Stereo→stereo is native; mono→mono works; **mono→stereo was wanted
+and impossible when this was written, and shipped on 2026-09-21** in
+`core/product/BusLayouts.h` — the rack widens once at its own input, ahead of
+slot 1, so no slot ever sees an asymmetric layout (`11` §2b). The reverb sees
+the mono input duplicated into both channels and is free to decorrelate its tail
+from it. Fixed 20 Hz high-pass plus an input high-cut
 2–20 kHz. The **Reverb EQ** (low shelf 16–1600 Hz, high shelf 1000–2100 Hz, each
 −24…+12 dB) sits here, because Reference A's EQ is *pre* both generators
 (`01` A). Input diffusion (2 allpasses per channel, 4 for Plate) is tail-path
@@ -96,8 +120,11 @@ only.
 **Pre-delay** is **tail-only and wet-path-only**, 0…+250 ms. Dry is never delayed
 nor summed against a delayed copy of itself — the phasing trap behind the "100 %
 wet delay ahead of the reverb" habit (`03` Part 1); honouring it removes the
-reason for the habit. ER travel with dry (`01` A), with an ER Pre-delay Link
-switch.
+reason for the habit. **ER travel with dry** (`01` A). That was an ER Pre-delay
+Link switch until 2026-09-21; it is now `kPreLinkFixed = false` for every type —
+off is the reference behaviour, every type shipped it identically and nobody
+automates it (§6, `11` §4a). The behaviour is unchanged; only the switch is
+gone, and restoring it is an append if a listening pass ever wants it.
 
 **Negative pre-delay, honestly.** Reference A's −160 ms delays the *dry* signal.
 Here that delays the module's whole output against the host timeline, which is
@@ -113,11 +140,15 @@ behind an explicit report-latency switch, off by default.
 *before* decorrelation and *before* the ER fader, so the two faders stay
 independent (`03` Part 3) while the tail still belongs to the room. Default 0.7.
 
-**Tail onset (Attack).** Reference B's contribution to the control set: a 0–1
-contour applied as a rising envelope on the FDN *input*, ramping over 0–120 ms,
-so the tail blooms behind the ER instead of arriving with it. At 0 the tail is
-immediate (plate behaviour); at 1 it is a slow bloom that also raises the
-perceived ITDG without touching pre-delay.
+**Tail onset (Attack).** Reference B's contribution to the voicing — **a
+per-type constant since 2026-09-21, not a control** (§6, `11` §4a), on the
+owner's own words that attack should be type dependent. The acoustics are
+unchanged: a 0–1 contour applied as a rising envelope on the FDN *input*,
+ramping over 0–120 ms, so the tail blooms behind the ER instead of arriving with
+it. At 0 the tail is immediate (plate behaviour) — which is why Plate's constant
+is 0 and is the one value in the row that is not a placeholder; at 1 it is a
+slow bloom that also raises the perceived ITDG without touching pre-delay. The
+panel prints the bloom on its TAIL page because there is no knob to read it off.
 
 **Levels** (`01` D1): ER 0…−40 dB (off), Reverb 0…−40 dB (off), two absolute
 trims; wet = ER + tail; Mix 0–100 %; Output −24…0 dB. **Width** is M/S gain on
@@ -263,7 +294,11 @@ quickly, higher Shape builds more slowly and sustains for the time Spread sets �
 is confirmed; **the end-stops are not** and stay `02`'s flagged unknown.
 Parametrise as a rise (*t*/τ_r)^p to a plateau then exponential handover, Shape
 setting *p* ∈ [0,3] and the plateau fraction, Spread setting σ ∈ 5…200 ms
-(`02` row 4). All CALIBRATE.
+(`02` row 4). All CALIBRATE. **Shape is a per-type constant and not a control**
+since 2026-09-21 (§6, `11` §4a): a unitless exponent whose end-stops §7 itself
+still marks unconfirmed is character, in the way Attack and Decay Shape are.
+*p* is exactly what it was and the envelope is exactly what it was; **ER SPREAD
+stays a parameter**, so σ is still on a knob.
 
 **Size.** *t*ₖ(*S*) = *t*ₖ,ref·*S*/*S*ref with *a*ₖ ∝ 1/*d*ₖ and cutoffs
 re-derived; scaling times while keeping the pattern preserves the room's identity
@@ -417,15 +452,38 @@ with modulation headroom, diffuser and allpasses ≈ 0.1 s — ≈1.55 s
 mono-equivalent → **≈300 kB at 48 kHz, ≈1.2 MB at 192 kHz** per instance, ≈10 MB
 for a full rack at 192 kHz. Allocated in `prepare()` from `sampleRate`.
 
-**Parameters: 30**, inside one slot's 32 host params with no overflow state,
-unlike DEQ, leaving two spare lanes. The permanent order is `11`'s schema table,
-and this is the same list: Type, Size, Pre-delay, ER Pre-delay Link, Decay, Decay
-Shape, Attack, Diffusion, 2 damping knees, 2 damping ratios, 2 EQ knees, 2 EQ
-gains, ER Mode, ER Density, ER Shape, ER Spread, ER High Cut, ER Variation, Mod
+**Parameters: 24**, inside one slot's 32 host params with no overflow state,
+unlike DEQ, leaving **eight** spare lanes. The permanent order is `11` §4's
+schema table, which is the authoritative copy, and this is the same list in the
+same order: Type, Size, Pre-delay, Decay, Source, 2 damping ratios, 2 EQ knees,
+2 EQ gains, ER Mode, ER Density, ER Spread, ER High Cut, ER Variation, Mod
 Depth, Mod Rate, Width, In High Cut, ER Level, Reverb Level, Mix, Output. Era
 fields are constants, not parameters (§1).
 
-*This said 29 while listing 30.* The odd one is **In High Cut**: §2 introduces it
+*This list said thirty until the control-set trim of 2026-09-21, which cut six
+before anything shipped.* **None of the six left the design; each became a
+constant** in the per-type block §1 already describes, so everything this
+document says about what they *do* stands unchanged — the tail-onset contour in
+§2, the decay truncation in §1, the damping knees in §2, the rise exponent *p*
+in §3, and ER travelling with the dry signal in §2 are all still here and still
+specified. What changed is only that the engine reads them from
+`TypeConstants` rather than from a host lane. The six, with the ids `11` §4a
+records: `attack`, `decayshape`, `damplofreq`, `damphifreq` (the owner's call,
+the frequencies belonging to the onboard EQ), `ershape` and `prelink` (Claude's
+call, accepted). `prelink` is a **fixed** constant, `kPreLinkFixed = false`, not
+a per-type one, because no type wanted its own answer — so **ER always travels
+with the dry signal** and §2's Link switch is no longer offered. Every cut was a
+float or a bool, and those re-append safely, since state is plain values keyed
+by id; the two choices, Type and ER Mode, were not touched and must not be.
+
+*Also decided and not yet built:* the four shelf rows above — 2 EQ knees and 2
+EQ gains — are to be replaced by a **3-node parametric EQ** (low shelf, bell,
+high shelf; FREQ, GAIN and Q each) plus a **filter bool** that turns nodes 1 and
+3 into cuts, taking the schema to **30** and leaving two spare lanes. `11` §4c
+carries it. This document's §2 sentence about where the Reverb EQ sits — *pre*
+both generators — is what survives that change; the node count is not.
+
+*This section also said 29 while listing 30.* The odd one is **In High Cut**: §2 introduces it
 inside the *Input* sentence beside an explicitly fixed 20 Hz high-pass, §6's CPU
 line bundles it into "input conditioning and EQ", and §7 gives it no range row
 though every other control has one — so the body read as 29 plus a constant. It
@@ -457,6 +515,7 @@ is permanent.
 | Decorrelation steps | 7 (Variation 0–6) | `01`; `02` r19 | High |
 | Pre-delay / Size | 0…+250 ms tail-only; 0.5–80 m | `03`; `02` r7 | High / Med |
 | Decay, damping, EQ, faders | 0.1–20 s; 0.10–2.00× at 16–1600 / 1000–2100 Hz; −24…+12 dB; 0…−40 dB | `01` A | High |
+| *(note)* the two damping knee spans above are **per-type constants, not knob ranges**, since the 2026-09-21 trim (§6); they are still the spans a type's knee must fall inside | — | `11` §4a | High |
 | FDN lines / τ̄ | 8; 18–80 ms by type | `04` | **CALIBRATE** |
 | Modal density | Σ*m*ᵢ ≥ 0.15·**T60**·*f*s | `05` §8 | High — corrects `04` |
 | Echo density / mixing | 1000/s (not 10 000); √V ms, R² 78.6 % | `05` §8, §11 | High |
@@ -470,10 +529,13 @@ is permanent.
 hardcode 0.0 and neither `ModuleDef` nor `ModuleDsp` has a tail accessor; needs
 `tailSecondsForParams(const float*, int)` on `ModuleDsp` mirroring
 `latencyForParams` (default 0.0), the single processor returning it, the rack
-summing over slots. Touches every module's vtable. (2) **Mono in → stereo out** —
-both processors restrict buses to mono *or* stereo with no conversion
-(`SingleModuleProcessor.cpp:70-79`); the engine generates stereo natively from
-one input, so bus layout is the whole obstacle. (3) **Tempo-synced pre-delay**
+summing over slots. Touches every module's vtable. **Both halves shipped on
+2026-09-21**, and the rack clamps its summed total at `bmo::kMaxTailSeconds` as
+well, because eight Lingers in a chain is a legal four-minute tail.
+(2) **Mono in → stereo out** — both processors restricted buses to mono *or*
+stereo with no conversion (`SingleModuleProcessor.cpp:70-79`); the engine
+generates stereo natively from one input, so bus layout was the whole obstacle.
+**Shipped in v1, 2026-09-21**, in `core/product/BusLayouts.h`. (3) **Tempo-synced pre-delay**
 needs `AudioPlayHead` plumbing that exists nowhere (`00` §2) — out of v1.
 (4) **Real bypass** — no per-slot enable flag, so no tail survives one.
 

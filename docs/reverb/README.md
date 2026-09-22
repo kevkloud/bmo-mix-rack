@@ -2,7 +2,13 @@
 
 Spec, theory, math and test direction for an algorithmic reverb module. No
 implementation code here; the dev team writes it from this pack. Assembled on
-AURORA, 2026-09-20/21; nothing in it has been built, measured or heard.
+AURORA, 2026-09-20/21.
+
+**The schema, the type list, the panel and three shared-code changes have since
+been built** on AURORA, on `frosty-add-bmo-linger`. `modules/reverb/params.h`
+and `modules/reverb/AGENTS.md` are the source of truth for what exists; this
+pack is the reasoning behind it, reconciled to the code on 2026-09-21. **The DSP
+is a marked placeholder and nothing has been heard** — not one setting.
 
 ## Decided
 
@@ -33,19 +39,39 @@ labels.
    proof sheet rather than from hex. Linger spends the only admissible arc, so
    BMO Dwell needs a different hue — see 11 §3 for the arithmetic and for the
    Tune RT omission in Dwell's own conventions doc.
-2. **Thirty parameters on one module.** Both packs now say 30, one permanent
-   order; the count settled when `inhicut` (IN HI-CUT) proved to be the
-   difference and was kept, marked "owner confirm" — accept or cut it before
-   first ship. Main face takes 7 controls plus a display. Type list append-only:
-   Room, Chamber, Hall, Cavern, Plate, Ambience.
-3. **Three shared-code changes.** Tail-length reporting (every module reports 0
-   today; the rack would sum its slots) is in v1, as decided. **Mono-in to
-   stereo-out is also in v1** — Frosty's call on 2026-09-21, reversing the
-   deferral: it is a bus-contract change in both processors, not a DSP one, and
-   BMO Dimension's mono path cannot be reused for it (Dimension early-returns on
-   a mono bus by design). Host tempo stays out of v1 and should land once,
-   byte-identically, with BMO Dwell.
-4. **Era colour is not in v1.** Each type reserves the fields so a later
+2. ~~**Thirty parameters on one module.**~~ **Settled 2026-09-21: twenty-four,
+   with eight spare lanes of a slot's 32.** The control-set trim cut six —
+   `attack`, `decayshape`, `damplofreq`, `damphifreq` (the owner's call),
+   `ershape` and `prelink` (Claude's, accepted) — and **none of them left the
+   design**: each is now a constant in the per-type block, so the acoustics in
+   10 are untouched and only their status as user controls changed. Every cut
+   was a float or a bool, so all six re-append safely if listening disagrees.
+   11 §4 is the authoritative table and 11 §4a the record of the cut. The type
+   list is append-only and settled: Room, Chamber, Hall, Cavern, Plate,
+   Ambience — **Large Hall was cut and Cavern took index 3**. Still open:
+   `inhicut` (IN HI-CUT) is marked "owner confirm" — accept or cut it before
+   first ship (11 §4d).
+3. **Approved and not yet built: the Reverb EQ becomes three parametric nodes.**
+   The four shelf parameters give way to low shelf · bell · high shelf, each
+   with FREQ, GAIN and Q, plus a filter bool that turns nodes 1 and 3 into cuts
+   and greys their GAIN. That takes the schema to **30**, two lanes spare. The
+   filter DSP is reproduced byte-identically from the unmerged BMO Defang
+   branch, never stacked on it. 11 §4c. **This is decided, not done.**
+4. ~~**Three shared-code changes.**~~ **Two of the three shipped in v1 on
+   2026-09-21.** Tail-length reporting is in, with a 30 s clamp at the module
+   *and* at the rack, which sums its slots rather than maxing them. **Mono-in to
+   stereo-out is in** — Frosty's call, reversing the deferral: it is a
+   bus-contract change in both processors, not a DSP one, and BMO Dimension's
+   mono path cannot be reused for it (Dimension early-returns on a mono bus by
+   design). Host tempo stays out of v1 and should land once, byte-identically,
+   with BMO Dwell.
+5. ~~**The panel split.**~~ **Settled 2026-09-21: a paged handheld, one width,
+   380 px.** `ModuleDef::expandedWidth` is 0 and the module is not expandable;
+   three columns, three pages EARLY / TAIL / TONE keyed `ui.page=`, a persistent
+   row, a foot holding ER, REVERB, MIX and TYPE as a dropdown in the corner, and
+   no speaker grille. WIDTH sits on TAIL, not TONE. 11 §4e. **Do not
+   reintroduce a second width** — a fourth page is what the shape is for.
+6. **Era colour is not in v1.** Each type reserves the fields so a later
    voicing switch changes no ordinals.
 
 ## Known soft spots

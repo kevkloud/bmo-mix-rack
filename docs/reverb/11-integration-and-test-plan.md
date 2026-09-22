@@ -220,72 +220,217 @@ can never sit beside Dwell — but it should be taken knowingly, not by omission
 
 ## 4. Parameter layout
 
-Aligned to 10 §6's control set; the **order** below is this pack's proposal and
-freezes at first ship. **All automatable.** Continuous and per-sample-smoothed
-(20 ms one-pole, 10 §5) unless flagged **S** stepped, **X** 30 ms raised-cosine
-crossfade, **L** log skew.
+Aligned to 10 §6's control set. This table is the **authoritative copy** of the
+schema: `modules/reverb/params.h` was written from it, `10-dsp-spec.md` §6
+restates the same names in the same order, and `checkSchema` in
+`tests/plugin/ReverbTests.cpp` pins ids, order, ranges, steps, defaults, formats
+and both choice lists with their index order. The steps themselves live in
+`params.h` and are not repeated here. **All automatable.** Continuous and
+per-sample-smoothed (20 ms one-pole, 10 §5) unless flagged **S** stepped,
+**X** 30 ms raised-cosine crossfade, **L** log skew.
+
+**Captions are ASCII.** The two display faces are licensed individually and live
+outside this repository, so the damping pair reads `LOW x` / `HIGH x` and prints
+`1.20x` rather than carrying a multiplication sign.
+
+***per type*** in the default column marks one of the **nine** rows a type
+change writes (§4b); the number beside it is Room's, which is what a fresh
+instance opens on — and is therefore a claim about what Room *is*, not merely a
+knob position.
 
 | # | id | caption | range | default | value string | flags |
 |---|---|---|---|---|---|---|
 | 0 | `type` | TYPE | 6 types, 10 §1 | Room | name | S, X |
-| 1 | `size` | SIZE | 0.5…80 m | *per 10* | `12.0 m` | L, X |
+| 1 | `size` | SIZE | 0.5…80 m | *per type* (12.0) | `12.0 m` | L, X |
 | 2 | `predelay` | PRE-DELAY | 0…250 ms | 0 | `40.0 ms` | X |
-| 3 | `prelink` | LINK ER | off/on | off | on/off | S |
-| 4 | `decay` | DECAY | 0.1…20 s | 1.8 | `1.80 s` | L |
-| 5 | `decayshape` | DECAY SHAPE | 0.04…3.5 | 3.5 | `Gated`…`Linear` | L |
-| 6 | `attack` | ATTACK | 0…100 % | 30 | 0–120 ms bloom | |
-| 7 | `feed` | TAIL FEED | 0…100 % | 70 | `Direct`…`Early` | |
-| 8 | `damplofreq` | LOW × FREQ | 16…1600 Hz | 200 | Hz | L |
-| 9 | `damplo` | LOW × | 0.10…2.00 | 1.20 | `1.20×` | L |
-| 10 | `damphifreq` | HIGH × FREQ | 1000…2100 Hz | 1600 | Hz | L |
-| 11 | `damphi` | HIGH × | 0.10…2.00 | 0.40 | `0.40×` | L |
-| 12 | `eqlofreq` | EQ LOW FREQ | 16…1600 Hz | 200 | Hz | L |
-| 13 | `eqlo` | EQ LOW | −24…+12 dB | 0 | dB, `Cut` at −24 | |
-| 14 | `eqhifreq` | EQ HIGH FREQ | 1000…2100 Hz | 1600 | Hz | L |
-| 15 | `eqhi` | EQ HIGH | −24…+12 dB | 0 | as `eqlo` | |
-| 16 | `ermode` | ER MODE | Taps/Energy/Blend | Taps | name | S, X |
-| 17 | `erdensity` | DENSITY | 0…100 % | *per 10* | `Discrete`…`Dense` | |
-| 18 | `ershape` | ER SHAPE | 0…3 | *per 10* | contour *p* | |
-| 19 | `erspread` | ER SPREAD | 5…200 ms | *per 10* | ms | L |
-| 20 | `erhicut` | ER HI-CUT | 1…20 kHz | 7 k | Hz/kHz | L |
-| 21 | `ervariation` | VARIATION | 0…6 | 2 | `Var 2` | S, X |
-| 22 | `moddepth` | MOD DEPTH | 0.1…0.8 ms | *per 10* | ms | |
-| 23 | `modrate` | MOD RATE | 0.1…1.2 Hz | *per 10* | Hz | L |
-| 24 | `width` | WIDTH | 0…200 % | 100 | % | |
-| 25 | `inhicut` | IN HI-CUT | 2…20 kHz | *per 10* | Hz/kHz | L, **owner confirm** |
-| 26 | `erlevel` | ER | −40…0 dB | −6 | dB, `Off` at −40 | |
-| 27 | `verblevel` | REVERB | −40…0 dB | −6 | as `erlevel` | |
-| 28 | `mix` | MIX | 0…100 % | 100 | % | |
-| 29 | `output` | OUTPUT | −24…0 dB | 0 | dB | |
+| 3 | `decay` | DECAY | 0.1…20 s | 1.8 | `1.80 s` | L |
+| 4 | `feed` | SOURCE | 0…100 % | *per type* (70) | `70 % (Mostly Early)` | |
+| 5 | `damplo` | LOW x | 0.10…2.00 | 1.20 | `1.20x` | L |
+| 6 | `damphi` | HIGH x | 0.10…2.00 | 0.40 | `0.40x` | L |
+| 7 | `eqlofreq` | EQ LOW FREQ | 16…1600 Hz | 200 | Hz | L |
+| 8 | `eqlo` | EQ LOW | −24…+12 dB | 0 | dB, `Cut` at −24 | |
+| 9 | `eqhifreq` | EQ HIGH FREQ | 1000…2100 Hz | 1600 | Hz | L |
+| 10 | `eqhi` | EQ HIGH | −24…+12 dB | 0 | as `eqlo` | |
+| 11 | `ermode` | ER MODE | Taps/Energy/Blend | Taps | name | S, X |
+| 12 | `erdensity` | DENSITY | 0…100 % | *per type* (50) | `50 % (Diffuse)` | |
+| 13 | `erspread` | ER SPREAD | 5…200 ms | *per type* (80) | ms | L |
+| 14 | `erhicut` | ER HI-CUT | 1…20 kHz | 7 k | Hz/kHz | L |
+| 15 | `ervariation` | VARIATION | 0…6 | 2 | `Var 2`; `Var 6 (mono null)` | S, X |
+| 16 | `moddepth` | MOD DEPTH | 0.1…0.8 ms | *per type* (0.28) | `0.28 ms` | |
+| 17 | `modrate` | MOD RATE | 0.1…1.2 Hz | *per type* (0.50) | Hz | L |
+| 18 | `width` | WIDTH | 0…200 % | 100 | % | |
+| 19 | `inhicut` | IN HI-CUT | 2…20 kHz | *per type* (20 k) | Hz/kHz | L, **owner confirm** |
+| 20 | `erlevel` | ER | −40…0 dB | *per type* (−6) | dB, `Off` at −40 | |
+| 21 | `verblevel` | REVERB | −40…0 dB | *per type* (−6) | as `erlevel` | |
+| 22 | `mix` | MIX | 0…100 % | 100 | % | |
+| 23 | `output` | OUTPUT | −24…0 dB | 0 | dB | |
 
-**Count: 30 — the rack's biggest panel, and both packs now say 30.** It fits a
-slot's **32 host lanes**, so none of DEQ's `SlotOverflow` machinery is needed, but
-only **two lanes remain**, and a later Freeze, ducking or `syncon`/`syncdiv` would
-exhaust them. Say so in `AGENTS.md`. There is **no `voicing` parameter**: 10 §1
-keeps the era block as per-type constants, promotable in v2 without touching type
-ordinals or state layout.
+**Count: 24, and the count is the decision.** It fits a slot's **32 host lanes**
+with **eight spare**, so none of DEQ's `SlotOverflow` machinery is needed and a
+later Freeze, a ducking control and the tempo-sync pair `syncon`/`syncdiv` no
+longer have to be argued against each other for the last lane. Note that §4c's
+pending EQ change is a net **+6** — four shelf rows out, ten nodes-and-switch in
+— so read the headroom as **two spare** once it lands. There is **no `voicing`
+parameter**:
+10 §1 keeps the era block as per-type constants, promotable in v2 without
+touching type ordinals or state layout.
 
-**The parameter that explained 29 vs 30 is `inhicut` (IN HI-CUT), and it stays —
-marked "owner confirm".** 10 §6 stated 29 while enumerating 30. On 10's own
-evidence the odd one out is the input high-cut: it appears only inside §2's
-*Input* sentence, beside an explicitly **fixed** 20 Hz high-pass; §6's CPU line
-bundles it into "input conditioning and EQ"; and §7's fixed-values table gives
-every other user control a range row but gives it none. So 10's body reads as
-29 parameters plus an internal constant, while its own list reads 30. Kept as a
-parameter, because §2 gives it a user range (2–20 kHz) that a constant would not
-need, and because it is the only way to darken what feeds **both** generators
-independently of the Reverb EQ shelves — a real control, not a miscount. If the
-owner would rather it were a constant, deleting index 25 before the first ship is
-free and returns a third spare lane; after that it is permanent.
+*This section said thirty until 2026-09-21, and the table above replaced that
+one.* The paragraphs that follow are the record of what changed and why, kept
+rather than deleted because the six that went can come back and whoever brings
+one back should not have to reconstruct the argument against it.
 
-**Main face vs expanded** — DEQ's precedent (`ModuleDef::expandedWidth`, 320/600,
-switched on the host bar). *Main face:* the ER/tail display, TYPE, SIZE,
-PRE-DELAY, DECAY, **ER**, **REVERB**, MIX — the two faders are the thesis, and
-the tail-off depth-placement technique must be reachable without expanding.
-*Expanded, three groups:* **EARLY** (ER MODE, DENSITY, ER SHAPE, ER SPREAD, ER
-HI-CUT, VARIATION, LINK ER, TAIL FEED); **TAIL** (ATTACK, DECAY SHAPE, four
-damping); **TONE & OUT** (four EQ, IN HI-CUT, WIDTH, MOD DEPTH, MOD RATE,
-OUTPUT).
+### 4a. The control-set trim — six cut on 2026-09-21, and it is reversible
+
+Frosty opened it that morning — "I'm not sure all these controls will survive
+trim" — and it closed the same day, **before anything shipped**, which is what
+made it free. Every one of the six is **character rather than a mix move**, what
+makes a Plate a Plate rather than what an engineer dials mid-session, so none of
+them vanished: each became a constant in the per-type block (§4b) instead.
+
+| Cut | Was # | Whose call | Why, and where it went |
+|---|---|---|---|
+| `attack` | 6 | **Owner** | Verbatim: attack should be type dependent. The tail's bloom contour. → `TypeConstants::attack` |
+| `decayshape` | 5 | **Owner** | The same sentence. The gated/linear curve. → `TypeConstants::decayShape` |
+| `damplofreq` | 8 | **Owner** | "The frequencies should be handled by the onboard EQ." A damping knee is a property of a room, not a mix decision; `damplo` survives as a pure decay multiplier over it. → `TypeConstants::dampLoFreqHz` |
+| `damphifreq` | 10 | **Owner** | The same argument — and it spanned 1000–2100 Hz, **1.07 octaves**, which the trim review called a constant with a knob on it. → `TypeConstants::dampHiFreqHz` |
+| `ershape` | 18 | **Claude's, not the owner's** | A unitless exponent whose end-stops this pack itself records as unconfirmed (10 §7, HW-2 row), and the early cluster's contour — the same "what kind of room is this" argument the owner used for `attack` and `decayshape`. It was *already* a per-type constant; the trim took the knob, not the number. Proposed by Claude, accepted by the owner. → `TypeConstants::erShape` |
+| `prelink` | 3 | **Claude's, not the owner's** | Set-and-forget: off is the reference behaviour, every type shipped it identically, nobody automates it. Proposed by Claude, accepted. It is a **fixed** constant and not a per-type field, because no type wanted its own answer. → `kPreLinkFixed = false` |
+
+**Two of the six are Claude's judgement and are flagged as such so that Frosty
+can overturn either without archaeology.** `ershape` and `prelink` were not
+asked for.
+
+**Why it was free, and where the line is.** Cutting a **float or a bool is
+reversible**: state is stored as plain values keyed by parameter id
+(`ParamSet::toXml` writes `getReal(i)`), so re-appending one at the end later
+costs a saved session nothing — it simply gains a parameter it did not have.
+All six were floats or the one bool. Cutting or shortening a **choice is not**
+reversible, because it reaches the host as `juce::AudioParameterChoice`, which
+normalises as index/(n−1): change the count and every recorded automation lane
+on it remaps silently. **`type` and `ermode` were not touched and must not be**,
+and `tests/plugin/ReverbTests.cpp` asserts both counts for exactly that reason.
+
+**Nothing that stayed was also retuned.** Every surviving row above is what it
+was — same range, same step, same default — and the four constants the trim
+brought in are the schema's *own previous defaults* for Room, which is why
+§4b's table marks them SCHEMA rather than CALIBRATE. A fresh Room after the trim
+is the fresh Room that was there before it. The cut moved no sound.
+
+The relative order of the twenty-four is unchanged and the ids are unchanged;
+the six that went took their indices with them and everything after each one
+closed up. That is what makes a state file written before the trim still restore
+every parameter it still has.
+
+### 4b. A type is a voicing: fourteen constants, nine of them parameters
+
+`erlevel` and `verblevel` joined the per-type block earlier the same day (§1),
+taking `roomDefaults` from eight to ten; the trim then added `decayShape`,
+`attack`, `dampLoFreqHz` and `dampHiFreqHz`, and `erShape` — already there —
+stopped being a knob as well. **The row is fourteen fields wide and five of them
+have no host lane**, so `typeSettings` returns **nine** settings and
+`TypeVoicing` never sees the other five: those reach the engine directly in
+`ReverbDsp::paramsFrom`, keyed off the TYPE value, because a `Setting` can only
+name a parameter id and a field with no id has nothing to be set on.
+
+The nine a type writes are `size`, `erdensity`, `erspread`, `moddepth`,
+`modrate`, `inhicut`, `feed`, `erlevel` and `verblevel` — the rows marked *per
+type* above — and a type **re-applies them on every change**, not only at
+instantiation. The five with no lane are `erShape`, `decayShape`, `attack`,
+`dampLoFreqHz` and `dampHiFreqHz`.
+
+*The consequence recorded in §1 — TYPE is automatable and writes automatable
+parameters — is unchanged, and the trim made it smaller rather than larger:*
+five of the settings a type changes no longer have a host lane at all, so there
+is nothing for an automation curve to fight over on any of them.
+
+`predelay`, `decay`, the two damping multipliers, the four EQ rows, `ermode`,
+`erhicut`, `ervariation`, `width`, `mix` and `output` are the user's and stay
+put through a type change.
+
+### 4c. Approved and not yet built: the Reverb EQ becomes three parametric nodes
+
+**Decided, pending. Nothing below exists in `params.h` yet, and the table above
+is still what ships today.**
+
+The four shelf rows — `eqlofreq`, `eqlo`, `eqhifreq`, `eqhi`, indices 7–10 — are
+to be replaced by a **3-node parametric EQ**. The three nodes are fixed as **low
+shelf, bell, high shelf**, in that order, each with **FREQ, GAIN and Q**: nine
+parameters. A **filter bool** flips node 1 to a low cut and node 3 to a high cut
+and **greys their GAIN**, which is why the cuts do not need lanes of their own.
+
+That is 24 − 4 + 9 + 1 = **30 parameters**, and **two lanes spare of 32** — the
+headroom the trim bought, spent deliberately and with the argument written down,
+which is what the trim's "spending it still takes an edit and an argument" meant.
+
+**The filter DSP already exists** as `core/dsp/{Biquad,Design,Prototype,Svf}.*`
+on the **unmerged** BMO Defang branch. It is to be **reproduced
+byte-identically** here — `git hash-object` on both sides, and say so in the
+commit body — and **never inherited by stacking** on an unmerged branch, which
+is this repository's standing rule (§1, and the handoff's "Where to work").
+
+When it lands, the table above grows those rows, §4a's count paragraph loses its
+parenthesis, 10 §6's list is reconciled again, and the panel's TONE page holds
+nine controls plus the filter switch rather than six — which is a page argument,
+not a width one (§4d).
+
+### 4d. `inhicut`, still marked "owner confirm"
+
+10 §6 stated 29 while enumerating 30. On 10's own evidence the odd one out is the
+input high-cut: it appears only inside §2's *Input* sentence, beside an
+explicitly **fixed** 20 Hz high-pass; §6's CPU line bundles it into "input
+conditioning and EQ"; and §7's fixed-values table gives every other user control
+a range row but gives it none. So 10's body reads as 29 parameters plus an
+internal constant, while its own list reads 30.
+
+**Kept as a parameter**, because §2 gives it a user range (2–20 kHz) that a
+constant would not need, and because it is the only way to darken what feeds
+**both** generators independently of the Reverb EQ. It survived the trim on a
+sharper version of the same argument: *what you feed the reverb is a mix move in
+a way that where a room stops absorbing is not.* If the owner would rather it
+were a constant, deleting index 19 before the first ship is free and returns a
+**ninth** spare lane; after that it is permanent.
+
+### 4e. The panel: one width, three pages
+
+**Superseding this section's "main face vs expanded" proposal**, which was
+DEQ's precedent — `ModuleDef::expandedWidth`, two widths switched on the host
+bar, seven controls and a display on the main face and three groups (EARLY /
+TAIL / TONE & OUT) behind the switch. Frosty approved a **paged handheld**
+instead on 2026-09-21, and the two-width split is gone: **`expandedWidth` is 0
+and the module is not expandable.**
+
+- **One width, 380 px.** A panel insets by `kPad` = 10 a side, so the
+  three-column cell at 380 is (380 − 20) / 3 = **120 px** — the same cell the
+  four-column 500 px face had, which is why the width came down by 120 px with
+  no caption pass.
+- **Persistent on every page:** SIZE, PRE-DELAY, DECAY.
+- **EARLY (6):** ER MODE, DENSITY, ER SPREAD, ER HI-CUT, VARIATION, SOURCE.
+- **TAIL (5):** LOW x, HIGH x, MOD DEPTH, MOD RATE, WIDTH.
+- **TONE (6):** EQ LOW FREQ, EQ LOW, EQ HIGH FREQ, EQ HIGH, IN HI-CUT, OUTPUT.
+- **Always on, at the foot:** ER, REVERB, MIX, and **TYPE as a dropdown in the
+  bottom-right corner** — a dropdown is not knob-shaped and never belonged in a
+  grid of knobs. 3 + 6 + 5 + 6 + 4 = 24 is the whole schema, and
+  `checkReverbPanel` asserts that sum.
+- **WIDTH sits on TAIL, not on TONE.** After the cuts TONE held seven, which is
+  3 + 2 + 2 over three columns and a third row on one page only. WIDTH is M/S
+  gain on the **tail** only and the TONE page draws a three-node response WIDTH
+  is not one of, so the move is right on its own terms as well as on the
+  arithmetic.
+- **The page is UI state, not a parameter:** `ui.page=early|tail|tone` through
+  `ModulePanel::setUiState`, as BMO Opto's meter mode and BMO DEQ's band already
+  are. An unknown value is **refused rather than defaulted** — a render labelled
+  TONE that shows EARLY is worse than no render.
+- **No speaker grille.** It was painted texture in a fourth column, raked, and
+  it lost its job when the body's corners went square. Nothing on this panel
+  slopes now.
+- **ATTACK is the one number with no control under it.** It lost its knob in the
+  trim, so the bloom is printed on the TAIL page's readout line, read off
+  `TypeConstants::attack` through the same `constantsFor` call the engine makes.
+
+**Do not reintroduce a second width to make room for something** — a fourth page
+is what this shape is for, and it is where §4c's ninth and tenth EQ controls go
+if TONE will not hold them.
 
 ## 5. Panel — ER/tail display
 
@@ -307,6 +452,21 @@ the numbers). Risk is sketch/DSP drift — one source of truth plus a layout tes
 asserting the sketch's first tap time equals the table's. **Fallbacks:** (1)
 envelope only — pre-delay gap plus damped exponential, still shows ITDG; (2) no
 display, numeric ITDG and T60 readouts.
+
+**What was built instead, 2026-09-21 — the argument above held, the single
+sketch did not.** `LingerScreen` draws **one of three pictures**, whichever page
+the keys have selected (§4e), in the module's accent rather than in LCD green.
+EARLY is linear time over the ER window; TONE is log frequency 20 Hz–20 kHz over
+±24 dB, drawn as the three nodes the Reverb EQ and the input high-cut make.
+**TAIL is logarithmic time, 1 ms to 30 s, and that is a deliberate departure
+from the 0–500 ms window proposed above**: a fixed 0–500 ms window leaves a 20 s
+decay off the right-hand edge and puts the whole 0–120 ms bloom inside the first
+two pixels, where a log axis keeps 45 % of the width for 1–100 ms. The ends are
+chosen rather than round — 1 ms is where a reflection stops fusing with the
+direct sound, and 30 s is `bmo::kMaxTailSeconds`, so the right-hand edge is the
+same number the host is told. Everything in this section about *why* a display
+earns its space, and about sketch/DSP drift and its layout-test answer, is
+unchanged and is what `tests/ui/LayoutTests.cpp` asserts.
 
 ## 6. Building the test suites
 
@@ -375,10 +535,10 @@ The rest, one line each:
 | Test | Assertion |
 |---|---|
 | Modal density | Each *mᵢ* prime, **re-derived per rate, not multiplied**; `Σmᵢ ≥ 0.15·fs`, every type and rate. **10 §4 records Plate failing at 8 lines** — write it before Plate is tuned and expect red until 12 lines or 2× τ̄ |
-| Onset | First 50 ms in 1 ms windows, no jump above **3 dB** after the ER span; ATTACK 0→100% blooms monotonically over **0–120 ms** (10 §2) |
+| Onset | First 50 ms in 1 ms windows, no jump above **3 dB** after the ER span; the bloom is monotonic over **0–120 ms** across `TypeConstants::attack` 0→100 (10 §2). **ATTACK has no host lane since the trim (§4a)**, so this is swept by selecting types or by driving `DspCore::Params` directly in the JUCE-free suite, not by writing a parameter — and Plate's 0 is an assertion of its own: the tail is immediate |
 | Ringing | Late tail (2× mixing time to −30 dB): spectral flatness **≥0.3**, no 1/3-octave band **>6 dB** over the smoothed mean, envelope autocorrelation **no peak >0.2 at lags 2–200 ms**, every type |
 | Modulation | 1 kHz sine, wet, tail only; instantaneous frequency from the phase derivative in 50 ms windows. Peak deviation **≤3 cents** at the top of depth and rate (10 §4). Report its spectrum — a visible rate means chorused, not randomised |
-| Pre-delay | First tail sample above −60 dB within **±1 sample**, every rate; ER taps untouched unless LINK ER is on (peak lag 0 over the first 100 ms); **range cannot go negative** and `latencyForParams` returns 0 throughout (10 §2) |
+| Pre-delay | First tail sample above −60 dB within **±1 sample**, every rate; **ER taps untouched, full stop** — `kPreLinkFixed` is `false` for every type since the trim (§4a), so the peak lag over the first 100 ms is 0 unconditionally and there is no second case to test; **range cannot go negative** and `latencyForParams` returns 0 throughout (10 §2) |
 | Parameter changes | TYPE: 30 ms dip, tables swapped at the minimum — no click, **no allocation**, no second engine. SIZE/PRE-DELAY: 30 ms crossfade, retriggered at 1% accumulated \|ΔS\|, windows summing to one, **ER and late sharing the scheme** (10 §3), no pitch shift on a held sine. Coefficients: no 1 ms energy jump above 3 dB |
 | Stability | Matrix orthogonal to 1e−6, `max\|Hᵢ(ω)\| ≤ 1 − 1e−4`. At `damphi` 2.0 / `decay` 20 s (effective T60 40 s): ten minutes then silence, never above +6 dBFS, RMS never growing over any 10 s window |
 | Denormals | 60 s of silence after a loud burst with FTZ/DAZ **disabled** — block time must not rise (the ~100× trap), tail reaching exactly 0.0f; this is what 10 §4's ±1e−20 injection is for |
@@ -423,10 +583,10 @@ all of the above summed, at VARIATION 0 and 6.
 
 | | Contents | Exit test |
 |---|---|---|
-| **M0** skeleton | Directory, identity and accent rows, `params.h` with the **full 30-parameter schema** and frozen type order, pass-through adapter reporting zero latency and zero tail, every registration point | Schema green; rack N→N+1; standalone loads; `ui_layout_tests` pass; both appearances hashed — after a build that exited 0 |
-| **M1** panel | Real panel, main face + expanded, ER/tail sketch or fallback, value strings, presets | Renders reviewed **by the owner**; ratios, gaps, hashes in `testing-notes/ui-pass-reverb-<date>.md`, naming AURORA |
+| **M0** skeleton | Directory, identity and accent rows, `params.h` with the **full 24-parameter schema** (§4) and frozen type order, pass-through adapter reporting zero latency and zero tail, every registration point | Schema green; rack N→N+1; standalone loads; `ui_layout_tests` pass; both appearances hashed — after a build that exited 0 |
+| **M1** panel | Real panel — **one 380 px width, three pages** (§4e), the three-picture screen or a fallback, value strings, presets | Renders reviewed **by the owner**; ratios, gaps, hashes in `testing-notes/ui-pass-reverb-<date>.md`, naming AURORA |
 | **M2** ER generator | Image-source tables, Size law and crossfade, order-banded filters, diffuser, VARIATION, hi-cut, the Density bridge — tail silent | The whole ER block of §6 plus the ER-only listening items. **This milestone decides the module** |
-| **M3** late network | FDN, absorbent filters, damping, EQ, pre-delay, TAIL FEED, ATTACK, DECAY SHAPE, modulation | Modal density (incl. the Plate failure), T60, damping, echo density, ringing, modulation, pre-delay, level laws, phasing nulls, clicks |
+| **M3** late network | FDN, absorbent filters, damping over the per-type knees, EQ, pre-delay, SOURCE, modulation — plus the tail-onset and decay-truncation contours, which are now `TypeConstants::attack` and `decayShape` rather than knobs (§4a), and which the engine reads in `ReverbDsp::paramsFrom` | Modal density (incl. the Plate failure), T60, damping, echo density, ringing, modulation, pre-delay, level laws, phasing nulls, clicks |
 | **M4** types | Six v1 types and their constant blocks incl. reserved era fields | Every §6 test at every type; order frozen; Plate's line count resolved |
 | **M5** shared code | §2(a) as its own reviewed commit; (b)/(c) only if taken, byte-identical with BMO Dwell | Tail report ≥ measured and ≤30 s; existing modules proven unchanged by hash and schema test |
 | **M6** acceptance | Invariance, stability, CPU/memory, CALIBRATE, listening | Those §6 blocks, recorded naming AURORA |
@@ -438,10 +598,19 @@ name permanent with the collision scan recorded; `measure_reverb` registered;
 figures written up naming AURORA; the listening checklist heard; branch from
 Kevin's `origin/main`, stacked on nothing unmerged.
 
-**Blocking unknown:** none. **Decided:** the name, the module id and the
-30-parameter count (§1, §4). **Owner confirm, before the first build:** the
-accent; whether `inhicut` ships as a parameter or becomes a constant (§4);
-`feed`'s caption — 10's **Diffusion** (Reference A's word) or **TAIL FEED** as
-proposed here, since "diffusion" means density everywhere else in the suite;
-whether ER SHAPE and ER SPREAD grey out in Taps mode or sit inert; the MIX law
-and its default.
+**Blocking unknown:** none.
+
+**Decided:** the name, the module id, the accent (`#e694e0`, §3), the type list
+with Cavern at index 3 (§1), the **24-parameter count** (§4), and `feed`'s
+caption — **SOURCE**, the owner's word on 2026-09-21, beating both 10's
+*Diffusion* and this pack's proposed *TAIL FEED*, because "diffusion" means
+density everywhere else in the suite and a third word beat both. The panel shape
+is decided too: one 380 px width, three pages, no expanded section (§4e).
+
+**Approved and pending, not built:** the 3-node parametric EQ and its filter
+bool, which take the schema from 24 to 30 (§4c).
+
+**Owner confirm, still open:** whether `inhicut` ships as a parameter or becomes
+a constant (§4d); whether ER SPREAD greys out in Taps mode or sits inert — *ER
+SHAPE is no longer part of that question, having lost its knob in the trim*
+(§4a); the MIX law and its default.

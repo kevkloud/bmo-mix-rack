@@ -1,5 +1,15 @@
 # Handoff: add BMO Linger (panel first, renders, open questions)
 
+**Historical. This brief was carried out on AURORA on 2026-09-21 and all five
+of its open questions are now settled** — the accent is `#e694e0`, the schema is
+**twenty-four** parameters and not thirty, the panel is a paged handheld at one
+380 px width rather than a main face plus an expanded section, the display is
+three pictures behind three page keys, tail reporting *and* mono-in→stereo-out
+both shipped, and era colour stayed out of v1 with the fields reserved. Kept
+because it is where the questions came from and what the answers were answers
+to. `modules/reverb/params.h` and `modules/reverb/AGENTS.md` are the source of
+truth; `11-integration-and-test-plan.md` §4 is the schema table.
+
 For a fresh session. Written on AURORA, 2026-09-21. The groundwork pack is
 done; this session builds what is needed to put real renders in front of
 Frosty and settles the open questions with them. Read this, then
@@ -74,6 +84,10 @@ survey. All are permanent once shipped.
    judge it. `inhicut` (index 25) is marked "owner confirm": keep or cut.
    Nothing can be reordered or removed after first ship, so freeze the order
    only when Frosty has seen it.
+   > *Answered.* The count came down to **twenty-four** — six controls proved to
+   > be character and became per-type constants (11 §4a) — and the split became
+   > **three pages at one 380 px width** rather than two widths (11 §4e).
+   > `inhicut` survived and is **still** marked "owner confirm", now at index 19.
 3. **The display.** 11 asks whether a static time-domain sketch (ER taps plus
    decay envelope, redrawn from the parameters, like BMO Defang's band sketch)
    earns its space. Render it with real parameter values at two or three
@@ -85,6 +99,10 @@ survey. All are permanent once shipped.
    deferred with the fallback in 10. Host tempo is out of v1 and should land
    once, byte-identically, with BMO Dwell. Confirm this plan with Frosty before
    touching shared code.
+   > *Answered.* Both tail reporting and **mono-in to stereo-out** shipped in
+   > v1; Frosty reversed the deferral on the second. The tail figure is clamped
+   > at 30 s at the module **and** at the rack, which sums its slots. Host tempo
+   > is still out of v1.
 5. **Era colour.** Out of v1, fields reserved per type. Confirm or promote.
 
 ## The work, in order

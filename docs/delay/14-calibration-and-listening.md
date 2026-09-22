@@ -31,7 +31,8 @@ M = measure (§2), L = listen (§3), F = Frosty's call.
 | Clean crossfade, 20 ms, time change | M8, L2: no click, ≤0.5 dB dip, no flam |
 | LOW/HIGH CUT, as spec'd, loop tone | M6: extremes stable; cap holds at every rate |
 | Tape LP / bump, 4.5 kHz / +2 dB, tape voicing | L1: beats or ties two neighbours, blind |
-| **Tape shelf corner convention**, 55 Hz as the pole or as the +1 dB midpoint, tape's low end | M6, L1: **it moves `P_c` between 1.054 and 1.040** (`10` §4), so it moves the sound and not the stability — `10` §3 sweeps the built coefficients either way. Pick one by ear, then log which |
+| ~~**Tape shelf corner convention**, pole or +1 dB midpoint~~ | **SETTLED 2026-09-23: 55 Hz is the pole**, giving the 1.054 already in `10` §3's acceptance — measured `P_c` 1.05361 at 63.4 Hz. No longer open |
+| **Tape character floor**, 0.03 % of speed (~half a cent) as built, what makes TAPE sound like tape at MOD DEPTH 0 | **L1, by ear** (CALIBRATE; `10` §5a). Too little and tape is dead still at depth zero, which is not tape; too much and it is wow the user did not ask for. It rides MOD RATE and **sums** with MOD DEPTH, so the knob still reaches zero *added* wobble. **TAPE only** — bucket-brigade has its clock darkening and compander breathing without it, and clean means clean |
 | **BBD compander ballistics**, 2:1 at 5/50 ms as the starting pair, noise vs pumping | M4, L1: floor −10 dB, no breathing on a pad. The expander reads the compressor's **stored** gain rather than re-detecting (`10` §4), so these constants voice the pair; they no longer decide whether it is bounded |
 | Flutter, 11.7 Hz, tape flutter | M2, L1: inside 10–100 Hz; not vibrato |
 | Clean mod depth, 0–8 ms, chorus width | L1: chorus not detune; zero is still |
@@ -59,12 +60,12 @@ Octave grain and Reverse seam (both cut 2026-09-21); and **Sweep, cut 2026-09-22
 because VOICE was cut** — it swept VOICE's resonant centre and had nothing left
 to move.
 
-**One figure in `10` is modelled and must not be quoted until it is benched**:
-the re-detecting compander's **+0.184 dB per dB of envelope step**, +3.7 dB on a
-20 dB transient (`10` §4, README item 23). It assumes log-domain one-pole
-detectors and a feed-forward pair; a feedback RMS cell tracks better. **M4 owes
-a measured figure**, and until it has one the number stays labelled as modelled
-wherever it appears.
+**That bench is done.** The re-detecting compander's overshoot was **measured on
+AURORA, 2026-09-23** (stage 2b, c4d2d33) at **+3.67 dB on a 20 dB step, which is
+0.184 dB per dB** — the modelled figure, confirmed exactly. `10` §4 and README
+item 23 now state it as a measurement, and it may be quoted as one. **The CPU
+bench is the one still outstanding** (`11` §4k's heaviest-case budget against
+two engines).
 
 Open decision 1 in 10's closing list (ping-pong routing) is Frosty's alone. Do not settle it by ear.
 
@@ -85,12 +86,17 @@ at 44.1 and 192 kHz. One table per procedure.
   `g_max`, at the top of LANE LEVEL's travel rather than at unity (`15`).
 - **M4 saturation per repeat.** Level and THD of repeat k, k = 1…10, min/mid/max
   DRIVE, both modes. **M5 alias floor** is that run's non-harmonic floor at repeat
-  10, max DRIVE. **M4 also owes the compander's measured net gain through a rising
-  envelope**, against `10` §4's modelled +0.184 dB per dB.
-- **M6 loop filters.** Sweep both cutoffs at high feedback, each engine, both
-  tape shelf conventions; log the magnitude at every extreme and the resulting
-  `P_c`. Nothing may grow. *(The VOICE resonance sweep this asked for is struck
-  with VOICE.)*
+  10, max DRIVE. **The compander's net gain through a rising envelope is
+  measured and done**: +3.67 dB on a 20 dB step, 0.184 dB per dB (AURORA,
+  2026-09-23). **Add the loop's DC at maximum DRIVE to this run** — it is the
+  figure that caught the blocker's position (`10` §4), −38.7 dBFS wrong against
+  −114.3 dBFS right, and it is invisible at DRIVE 0.
+- **M6 loop filters.** Sweep both cutoffs at high feedback, each engine; log the
+  magnitude at every extreme and the resulting `P_c`, against the measured
+  clean 0.99939, tape 1.05361, bucket-brigade 0.99611 (0.9946–0.9983 with TIME)
+  at 48 kHz. Nothing may grow. *(The VOICE resonance sweep this asked for is
+  struck with VOICE, and the two tape shelf conventions are down to one: 55 Hz
+  is the pole.)*
 - **M7 dry null.** Output against input at every MIX ≤ 50%, TIME beyond the block,
   feedback zero and maximum. Bit-exact, not −100 dB.
 - **M8 gate edges.** SEND's ramp times, CHOP's fade, the HOLD-off clear, peak
@@ -109,7 +115,10 @@ source**, key beside the audio, audio outside the repository, 32-bit float.
 
 - **L1 voicing**: three candidates, **one entered twice**. The gap between the
   duplicates is the round's noise floor; a smaller separation decides nothing (the
-  Opto lesson). One control pair per source, first.
+  Opto lesson). One control pair per source, first. **The tape character floor
+  is heard here, at MOD DEPTH 0** (`10` §5a): the question is whether TAPE
+  sounds like tape with the modulation knob down, and the comparison is against
+  the floor removed, not against clean.
 - **L2 gesture**: glide, crossfade, and the lane — SEND catching one word, the
   detent holding, the build region swelling at each candidate `g_max`, CHOP at a
   sixteenth-note rate. Moving material only.

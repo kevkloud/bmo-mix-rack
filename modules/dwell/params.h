@@ -201,17 +201,23 @@ inline constexpr int kDefaultLaneNote = 6;
 //==============================================================================
 // Fixed values the schema itself depends on. Everything else lives in the DSP.
 //==============================================================================
-
 /** The longest delay either engine's ring is sized for, in ms (docs/delay/10
     §10; DECIDED, Frosty 2026-09-20). The buffer is allocated at `prepare` from
     this figure and never from a parameter: 2.0 s at 192 kHz rounds up to
     524 288 samples per channel, which is 2.0 MB a ring in stereo.
 
     TIME and LANE TIME share the figure, so **the lane costs a second ring of
-    the same size**: two engines is **8.0 MB per instance** at 192 kHz, and
-    **16.2 MB worst case** with both engines' FX stages allocated as well. The
-    4.0 MB this comment gave until 2026-09-22 was the figure for one engine and
-    was left behind when the lane landed.
+    the same size** -- and bucket-brigade's compander costs a third and fourth,
+    because its expander reads the compressor's stored gain rather than
+    re-detecting (10 §4), and that control ring is sized like the audio one.
+    Two engines, each with audio and control, is **16 MB per instance** at
+    192 kHz, or roughly 130 MB for a full rack. At 48 kHz, which is what most
+    sessions run, it is about a quarter of that.
+
+    Two earlier figures in this comment were wrong and are named so nobody
+    reinstates them: 4.0 MB was one engine, left behind when the lane landed on
+    2026-09-22; 8.0 MB counted both engines but not the compander's rings, and
+    was corrected on 2026-09-23 when stage 2b built it.
 
     Bucket-brigade caps itself lower in the DSP; the allocation does not
     change. */

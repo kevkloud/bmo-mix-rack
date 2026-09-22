@@ -212,14 +212,29 @@ against a lane read off by one. The ring is allocated in `prepare` from
 channel** — so nothing is allocated on the audio thread. Stage 2 fills it in, in
 the order `docs/delay/HANDOFF-add-bmo-dwell.md` sets out.
 
-**Stage 2 is now two engines, so the memory figure doubles.** The lane's ring is
-the same fixed maximum as the main's — `lane_time` shares TIME's range — which
-is **8.0 MB per instance at 192 kHz**, 2.0 MB at 44.1 kHz. `params.h`'s
-`kMaxTimeMs` comment still says 4.0 MB per instance and is describing one ring;
-it wants correcting in a code pass. Every invariant in `11` §4 — sample-rate and
-block-size invariance, denormal, NaN and silence robustness, the bit-exact dry
-null, the alias floor — now has to hold for **both** engines, so expect roughly
-double the work the handoff estimates.
+**The memory figure doubles twice, and both are structural.** The lane's ring is
+the same fixed maximum as the main's — `lane_time` shares TIME's range — and the
+**compander's control ring is as long as the audio ring**, per channel per
+engine, allocated whichever character is selected (`docs/delay/10` §4, §10). So
+an instance is **16 MB at 192 kHz**, 4.0 MB at 44.1 kHz; the 8.0 MB an earlier
+pass quoted counted the audio rings alone. **`params.h`'s `kMaxTimeMs` comment
+still quotes a one-engine figure and wants correcting in a code pass.** Every
+invariant in `11` §4 — sample-rate and block-size invariance, denormal, NaN and
+silence robustness, the bit-exact dry null, the alias floor — has to hold for
+**both** engines, so expect roughly double the work the handoff estimates.
+
+**Two things stage 2b settled that are easy to undo by accident**
+(`docs/delay/15`, "What stage 2b turned up"; committed c4d2d33):
+
+- **The DC blocker goes after the shaper, not before it.** Before it, LOW CUT
+  has already taken the DC so it does nothing, while the shaper's own asymmetric
+  offset compounds in the ring: **−38.7 dBFS at DRIVE 100** against **−114.3**
+  with it moved. It is invisible at DRIVE 0, so only the high-DRIVE case catches
+  a regression.
+- **TAPE's character floor modulates the read position, never the output.** A
+  zeroed ring then still reads zero, so `11` §4k's silence-to-exact-zeros holds
+  without a gate. An output-gain implementation would pass on clean and fail on
+  tape.
 
 ## House rules this module is easy to break
 

@@ -146,8 +146,11 @@ one — +3.7 dB on a 20 dB transient, unbounded, in-loop, at the same point in t
 circulating word every lap. `10` §4 now specifies the expander reading the
 compressor's **stored** gain at the same fractional position and applying its
 exact reciprocal, so the pair is unity at every instant. The clamp fallback
-remains Frosty's call, and **the overshoot figure is modelled, not measured** —
-it needs a bench.
+remains Frosty's call, and **the overshoot figure is MEASURED**: a re-detecting
+pair benched at **+3.67 dB on a 20 dB step, 0.184 dB per dB** (AURORA,
+2026-09-23, stage 2b at c4d2d33), landing exactly on the model. **The control
+ring that buys the fix costs as much memory as the audio ring** — see the
+memory note below.
 
 ## What stage 2 now is
 
@@ -170,6 +173,23 @@ candidates cheapest first. Add to it:
 - **Nothing is seeded by any parameter change.** The seed-on-unlink machinery
   went with LINK; `fx_link` needs none, because the lane's FX values are never
   overwritten while the tie is on.
+
+**What stage 2b turned up** (built and committed 2026-09-23, c4d2d33):
+
+- **Memory is 16 MB per instance at 192 kHz, not 8.0** (`10` §10). Two engines
+  is two audio rings, and the compander's control ring is **the same length as
+  the audio ring**, per channel per engine, allocated whichever character is
+  selected. Eight Dwells in a full rack is ~130 MB of rings.
+- **The DC blocker was on the wrong side of the shaper**, and it was a real bug
+  rather than a preference: before the shaper it has nothing to do, because LOW
+  CUT has already taken the DC, while the asymmetric shaper's own offset went
+  into the ring and compounded. **−38.7 dBFS at DRIVE 100 against `11` §4c's
+  acceptance; −114.3 dBFS with it moved after.** `P_c` is unaffected, since it
+  is swept at DRIVE 0 where the shaper is out of the chain.
+- **The tape character floor was decided, built and never written down** — the
+  gap that let it fall through the first time. It is now `10` §5a: **TAPE only**,
+  0.03 % of speed, riding MOD RATE and summing with MOD DEPTH, modulating the
+  **read position** so silence stays silent without a gate.
 
 ## THE PARAMETER TABLE — settled 2026-09-21, amended 2026-09-22, cut back and then extended 2026-09-23, 27 parameters
 

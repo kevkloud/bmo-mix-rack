@@ -23,7 +23,8 @@ by dispatched agents on AURORA, 2026-09-20, under `HANDOFF-groundwork.md`.
 
 1. **SYNC** — the SYNC and NOTE slots and the note-list order are reserved in the permanent schema now; the feature ships, enabled, when the tempo plumbing (`12`) lands. *(Items 31–33 add `lane_note` beside them, on the same switch.)*
 2. **FREEZE** — its own button and parameter slot (row 16), enabled in v1; not folded into THROW.
-3. **Maximum delay 2000 ms** (4.0 MB per instance at 192 kHz).
+3. **Maximum delay 2000 ms** (4.0 MB per instance at 192 kHz — *superseded by
+   item 36: two engines and the compander's control rings make it 16 MB*).
 4. **Feedback top of travel is loop gain 1.05**; the ~97–100% self-oscillation zone is accepted and marked on the panel. BUILD depends on it.
 5. **No auto-gain at MIX 50%** — the bit-exact dry path wins (about +3 dB typical, +6 dB worst).
 6. **Module id `dwell`.**
@@ -105,9 +106,11 @@ by dispatched agents on AURORA, 2026-09-20, under `HANDOFF-groundwork.md`.
     Butterworth at `Q = 1/√2`, chain peak 0.990–0.999 — but its compander is now
     specified with the expander reading the compressor's stored gain rather than
     re-detecting, so the pair is unity through transients. A re-detecting pair
-    would add up to +3.7 dB on a 20 dB transient, in-loop, on every lap. That
-    figure is **modelled, not measured — bench it**, and the clamp fallback
-    remains Frosty's decision.
+    would add up to +3.67 dB on a 20 dB transient, in-loop, on every lap. That
+    figure is **MEASURED** — benched on AURORA, 2026-09-23, at 0.184 dB per dB,
+    landing exactly on the model — and the clamp fallback remains Frosty's
+    decision. The stored-gain fix costs a **control ring as long as the audio
+    ring** (item 36).
 
 ## Decided (Frosty, 2026-09-22) — answering the spec rewrite's open questions
 
@@ -175,6 +178,41 @@ by dispatched agents on AURORA, 2026-09-20, under `HANDOFF-groundwork.md`.
     SYNC at 120 BPM changes nothing audible** — the silent-toggle property
     `modules/vcomp`'s COMPLEX was built around, and the reason `lane_note`
     defaults to 1/8 rather than copying the main's 1/8D.
+
+## Decided and measured (2026-09-23) — what building stage 2b turned up
+
+Stage 2b is built and committed at **c4d2d33**; these four came out of building
+it, and three of them were things this pack had wrong or hedged.
+
+34. **The DC blocker goes AFTER the shaper** — a real bug, not a preference.
+    Before it, LOW CUT has already taken the DC so the blocker does nothing,
+    while the asymmetric shaper's own offset goes into the ring and compounds
+    per lap. Measured **−38.7 dBFS at DRIVE 100**, which fails `11` §4c;
+    **−114.3 dBFS** with it moved. `P_c` is unchanged, because it is swept at
+    DRIVE 0 where the shaper branches out. `10` §4 says so now, and says why,
+    so nobody restores the old order.
+35. **The compander overshoot is measured, not modelled.** A re-detecting pair
+    benches at **+3.67 dB on a 20 dB step = 0.184 dB per dB** (AURORA,
+    2026-09-23), confirming the model exactly. **That was one of the two parked
+    benches; the CPU one is still outstanding** (`11` §4k against two engines).
+36. **Memory is 16 MB per instance at 192 kHz**, not 8.0. The compander's
+    control ring is the same length as the audio ring, per channel per engine,
+    and is allocated whichever character is selected — so two engines means two
+    audio rings and two control rings. Eight Dwells in a rack is ~130 MB.
+37. **TAPE gets a character floor; the other two do not** (Frosty). **0.03 % of
+    speed, about half a cent**, riding MOD RATE and **summing** with MOD DEPTH,
+    so tape is never dead still even at depth zero — a CALIBRATE value, settled
+    by ear in `14`. **Bucket-brigade gets none**: its signature is the
+    time-dependent darkening as the clock slows plus the compander's breathing,
+    both present with no modulation at all. **Clean gets none.** The floor
+    **modulates the read position, never the output**, so a zeroed ring reads
+    zero and silence stays silent structurally rather than by a gate. It was
+    built before it was specified, which is how it fell through the first time;
+    it is `10` §5a now.
+38. **The tape shelf's corner convention is settled: 55 Hz is the pole**, which
+    gives the 1.054 already written into `10` §3's acceptance. Measured `P_c`:
+    clean **0.99939**, tape **1.05361 at 63.4 Hz**, bucket-brigade **0.99611**
+    (0.9946–0.9983 with TIME), 48 kHz — unity at **97.0 % on all three**.
 
 ## Still open after that pass
 

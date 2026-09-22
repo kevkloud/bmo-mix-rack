@@ -94,9 +94,14 @@ g = (1.05 · fb^1.6) / P_c
 resolution in the 2–8-repeat region; the loop's peak magnitude reaches **1.000
 at fb = 97.0 % and 1.05 at full travel, on every character** — Decided item 4
 holds as written, and the panel carries **one** self-oscillation tick rather
-than one per character. Expected `P_c`: clean **0.999**, tape **1.054**,
-bucket-brigade **0.990–0.999** with TIME. Tape's tail is therefore slightly
-shorter than clean's at the same knob position, which is what tape does.
+than one per character. **`P_c` as built and measured** (AURORA, 2026-09-23,
+48 kHz, stage 2b at c4d2d33): clean **0.99939**, tape **1.05361 at 63.4 Hz**,
+bucket-brigade **0.99611**, moving **0.9946–0.9983** with TIME. **Unity lands at
+97.0 % on all three**, as the law intends. These replace the estimates this
+section carried, and they agree with them to three figures — which is what
+computing `P_c` from the built coefficients buys over hardcoding it. Tape's tail
+is therefore slightly shorter than clean's at the same knob position, which is
+what tape does.
 
 **Unity means the loudest band neither grows nor decays**, not that every band
 holds; a non-flat loop cannot do the latter and stay bounded. Every other band
@@ -113,9 +118,33 @@ ceiling 1.0 (0 dBFS), active regardless of DRIVE. Its describing-function gain
 `g·|H|·G(A) = 1` — a limit cycle just under the ceiling, not divergence. The
 clip sits **after** the filters, so howl inherits the mode's tone (02 flags the
 trade).
+
+## 4. The character chain
+
 TPT one-poles/biquads, prewarped `g = tan(π f_c/f_s)`. Since `g` depends only on
-`f_c/f_s`, every coefficient is sample-rate invariant over 44.1–192 kHz. Loop order:
-LOW CUT → HIGH CUT → mode filters → DC blocker → shaper → clip.
+`f_c/f_s`, every coefficient is sample-rate invariant over 44.1–192 kHz. Loop
+order:
+
+```
+LOW CUT → HIGH CUT → mode filters → FX (§11a) → shaper → DC blocker → clip
+```
+
+**The DC blocker sits AFTER the shaper, and moving it there fixed a real bug**
+(built and measured on AURORA, 2026-09-23, stage 2b at c4d2d33). This spec used
+to place it *before* the shaper. That is the wrong side twice over: **LOW CUT
+has already removed DC by then**, so the blocker had nothing to do where it
+stood, and **the asymmetric shaper's own offset went straight into the ring**
+and compounded a lap at a time. Measured at DRIVE 100, the loop's DC was
+**−38.7 dBFS**, which **fails `11` §4c's acceptance**; with the blocker after
+the shaper it reads **−114.3 dBFS**. **Do not "restore" the old order** — the
+reason it looked right is that a blocker before a shaper is the usual
+arrangement when the shaper is *outside* a feedback path, and here it is inside
+one.
+
+`P_c` is unchanged by the move: it is evaluated at DRIVE 0 (§3), where the
+shaper branches out of the chain entirely, so nothing the blocker's position
+affects is in that sweep. The clip stays last, so §3's bound still ends where it
+did.
 
 - **LOW CUT** HP 20 Hz–1 kHz log; **HIGH CUT** LP 1–20 kHz log, hard-capped at
   `min(18 kHz, 0.45·f_s)`. The cap is load-bearing: it keeps the shaper's input from
@@ -126,11 +155,13 @@ LOW CUT → HIGH CUT → mode filters → DC blocker → shaper → clip.
   purpose: the bump must compound per repeat. Its nameplate gain is 1.2589, but
   that asymptote lives below the 10 Hz blocker and LOW CUT's 20 Hz floor, so what
   the loop actually sees is **+0.45 dB at 63 Hz** — the chain peak is **1.054**,
-  and §3's `P_c` divides exactly that out. **The shelf's corner convention is not
-  yet pinned** (CALIBRATE): 55 Hz read as the pole gives 1.054 at 63 Hz, 55 Hz
-  read as the +1 dB midpoint gives 1.040 at 64 Hz. Pick one at implementation;
-  §3's runtime sweep takes the figure from the built coefficients either way, so
-  the choice moves the sound, not the stability.
+  and §3's `P_c` divides exactly that out. **The shelf's corner convention is
+  SETTLED: 55 Hz is the pole** (2026-09-23, built at c4d2d33), which is the
+  reading that gives the 1.054 already written into §3's acceptance; the +1 dB
+  midpoint reading, which would have given 1.040 at 64 Hz, is not used. §3's
+  runtime sweep would have taken the figure from the built coefficients either
+  way, so this settles the sound rather than the stability — and the measured
+  `P_c` is **1.05361 at 63.4 Hz** (§3).
 - **bucket-brigade** derives filters from a modelled clock: N = 4096 stages,
   `f_clk = N/(2T)`; anti-alias and reconstruction are each a 2-pole Butterworth at
   `f_c = 0.6·f_clk/2`, clamped to [800 Hz, 16 kHz]. At T = 205 ms that is
@@ -148,17 +179,23 @@ LOW CUT → HIGH CUT → mode filters → DC blocker → shaper → clip.
   a refinement.** A re-detecting pair with identical ballistics on both halves has
   net gain `Δ = 0.5·(Ê − S[Ê])` in dB — zero in steady state, but through a rising
   envelope it peaks at **0.184 dB per dB of envelope step**, one attack constant
-  in: +3.7 dB on a 20 dB transient, unbounded in the step, *inside the loop*, at
-  the same point in the circulating word on every lap. It sharpens attacks and
+  in: **+3.67 dB on a 20 dB transient — measured on AURORA, 2026-09-23**, which
+  confirms the modelled figure exactly. It is unbounded in the step, *inside the
+  loop*, at the same point in the circulating word on every lap. It sharpens attacks and
   thins decays each pass, so a percussive word parked at the lane's centre detent
   grows into the clip instead of holding. No choice of ballistics fixes it: a
   faster expander detector overshoots on attacks by up to the full step, a slower
   one moves the overshoot to releases. If the delayed-gain construction is
   rejected for authenticity, the fallback is to clamp the pair's net gain to
-  `≤ 0 dB` from the two envelopes already in hand (DECISION for Frosty). The
-  overshoot figure is **modelled, not measured** — it assumes log-domain one-pole
-  detectors and a feed-forward pair, and a feedback RMS cell tracks better; bench
-  it before quoting it.
+  `≤ 0 dB` from the two envelopes already in hand (DECISION for Frosty). **The
+  overshoot figure is MEASURED, not modelled** (AURORA, 2026-09-23): a
+  re-detecting pair benched at **+3.67 dB on a 20 dB step, 0.184 dB per dB**,
+  landing on the modelled value. It may be quoted as a measurement from here on.
+
+  **The control ring costs as much memory as the audio ring**, one per channel
+  per engine, because it has to be read at the same fractional position as the
+  audio it belongs to — §10 carries the arithmetic, and it is why the
+  per-instance figure doubled.
 - **Saturation**: the repo's ADAA residual shaper (`modules/sat/dsp/Shaper.h`,
   00 §1), driven by DRIVE, returning `shape(x) − x` anti-aliased by the first-order
   antiderivative quotient at zero latency. 02 warns aliases accumulate *per repeat*,
@@ -166,8 +203,11 @@ LOW CUT → HIGH CUT → mode filters → DC blocker → shaper → clip.
   at max DRIVE**, ≤ −60 dBFS (DECISION). If it fails, add
   `Halfband2x` (00 §1) around the shaper only: its group delay is whole-sample, so
   subtracting it from `D` keeps latency 0 and the time exact.
-- **DC**: a 10 Hz blocker before the shaper, which is asymmetric (02) — offset
-  would compound per repeat.
+- **DC**: a 10 Hz blocker **after** the shaper, which is asymmetric (02) — its
+  offset would otherwise compound per repeat. See the ordering note at the head
+  of this section: before the shaper the blocker is a no-op, because LOW CUT has
+  already taken the DC that reaches it, and the offset that actually matters is
+  made downstream of where it used to sit.
 
 ## 5. Modulation
 
@@ -181,6 +221,31 @@ LOW CUT → HIGH CUT → mode filters → DC blocker → shaper → clip.
   absolute: chorus, not pitch wobble.
 - Tape/BBD scale rate and depth by `clamp(T/300 ms, 0.5, 2)` (01: both scale with
   time).
+
+### 5a. The tape character floor
+
+**TAPE has a modulation floor that is always present, even at MOD DEPTH 0**
+(DECIDED, Frosty 2026-09-23; built in stage 2b at c4d2d33 and previously missing
+from this spec — which is how it came to be built before it was written down).
+Tape transport is never perfectly steady, so a tape mode that is dead still at
+depth zero is not tape; the floor is what makes the character audible before the
+user asks for wow.
+
+- **Only TAPE gets one.** **Bucket-brigade gets none**: its signature is the
+  time-dependent darkening as the modelled clock slows (§4) plus the compander's
+  breathing, and **both are present with no modulation at all**, so a floor
+  would add nothing it does not already have. **Clean gets none** — clean means
+  clean.
+- **The built figure is 0.03 % of speed, about half a cent** (CALIBRATE — `14`
+  settles it by ear). It **rides MOD RATE**, so it moves with the control the
+  user can see rather than at some fixed hidden rate, and it **sums with MOD
+  DEPTH** rather than flooring it, so the knob still reaches zero *added*
+  wobble while the character stays.
+- **It modulates the read position, never the output**, and that is
+  load-bearing rather than incidental: a read offset applied to a zeroed ring
+  still reads zero, so **silence stays silent structurally** and `11` §4k's
+  "silence decays to exact zeros" holds without a gate or a special case. A
+  floor applied as an output gain would have needed one.
 
 ## 6. Ducking
 
@@ -284,13 +349,27 @@ reaches ~1.5 s, and 2 s covers a quarter note at 30 BPM). BBD caps at 1500 ms. A
 = **2.0 MB per channel, 4.0 MB per instance** (+ ~4 KB of state); 0.5 MB per channel
 at 44.1 kHz. Allocate at `prepare` from the fixed maximum, never from a parameter.
 
-**That figure is per engine.** §11's lane is a second ring of the same fixed
-maximum — `lane_time` shares TIME's range — so an instance is **8.0 MB at
-192 kHz** and 2.0 MB at 44.1 kHz, plus ~0.2 MB of FX scratch across both engines
-at the top rate. Nothing else allocates: no candidate needs a second buffer now
-that Reverse is cut (§11a). Eight Dwells in a full rack at 192 kHz is ~65 MB of
-rings. `modules/dwell/params.h`'s `kMaxTimeMs` comment and `11` §4k still quote
-the one-engine figure and need the same correction.
+**Two things multiply that figure, and both are structural.**
+
+1. **Per engine.** §11's lane is a second ring of the same fixed maximum —
+   `lane_time` shares TIME's range — so the audio rings alone are 4.0 MB at
+   192 kHz.
+2. **The compander's control ring** (§4). Bucket-brigade's expander reads the
+   compressor's **stored** gain at the same fractional position as the audio, so
+   that ring is **the same length as the audio ring**, per channel per engine.
+   It is allocated at `prepare` from the same fixed maximum like everything
+   else, because it must exist whichever character is selected.
+
+**So an instance is 16 MB at 192 kHz** — 2.0 MB per channel × 2 channels × 2
+engines × (audio + control) — and 4.0 MB at 44.1 kHz, plus ~0.2 MB of FX scratch
+across both engines at the top rate. **The earlier 8.0 MB counted the audio
+rings only.** Nothing else allocates: no candidate needs a second buffer now
+that Reverse is cut (§11a). Eight Dwells in a full rack at 192 kHz is **~130 MB**
+of rings — worth knowing, and the lever if it ever matters is the fixed 2000 ms
+maximum, not the lane.
+
+`modules/dwell/params.h`'s `kMaxTimeMs` comment still quotes a one-engine
+figure; that is a code comment and is flagged rather than edited here.
 
 ## 11. The lane
 
@@ -643,10 +722,11 @@ in place.
   wet unities: "about +3 dB typical, +6 dB worst" becomes roughly **+4.8 dB
   typical, +9.5 dB worst**. README Decided item 5 (no auto-gain) is unchanged;
   the figure is not.
-- **§10's memory figure is per engine** — two rings, so **8.0 MB per instance at
-  192 kHz**. **`modules/dwell/params.h`'s `kMaxTimeMs` comment still states
-  4.0 MB per instance**: that is a code comment and is flagged rather than
-  edited, this being a documentation pass.
+- **§10's memory figure is per engine, and the compander doubles it again** —
+  two audio rings plus two control rings, so **16 MB per instance at 192 kHz**.
+  **`modules/dwell/params.h`'s `kMaxTimeMs` comment still states a one-engine
+  figure**: that is a code comment and is flagged rather than edited, this being
+  a documentation pass.
 - **CPU doubles while HOLD is on and costs a branch while it is off**, so the
   module at its defaults costs what the single-engine module cost. `11` §4k's
   heaviest-case budget is marked there as needing re-measurement rather than
@@ -655,7 +735,7 @@ in place.
 ## 11a. In-loop FX
 
 **Position.** One FX stage in the character chain:
-`LOW CUT → HIGH CUT → mode filters → FX → DC blocker → shaper → clip` (§4).
+`LOW CUT → HIGH CUT → mode filters → FX → shaper → DC blocker → clip` (§4).
 **One stage per engine** (§11): the main delay's is `fx`/`fx_type`/`fx_amount`,
 the lane's is `lane_fx`/`lane_fx_type`/`lane_fx_amount`, and everything in this
 section applies to each independently. **The two stages share no state** — no
@@ -667,10 +747,11 @@ with both stages set identically they run from separate buffers, and that is
 what keeps the claim above true at every setting of the flag. The same holds of
 the voicing the two engines now share — one `character` value, two sets of
 filter state.
-Before the blocker, so an offset an FX introduces is removed rather than
-compounded; before the shaper and clip, so the clip stays the last thing in the
-loop and §3's bound still ends there. The stage recirculates, so every candidate
-**compounds per repeat** — the point of it, and the risk.
+Still **before the blocker**, so an offset an FX introduces is removed rather
+than compounded — that survived the blocker moving after the shaper (§4), since
+the stage sits ahead of both. Before the shaper and clip, so the clip stays the
+last thing in the loop and §3's bound still ends there. The stage recirculates,
+so every candidate **compounds per repeat** — the point of it, and the risk.
 
 **Bound.** Each candidate is non-expanding, `|F| ≤ 1` at every setting,
 peak-normalised in closed form where it could exceed unity, so §3's `|g| < 1` is
@@ -737,11 +818,14 @@ why 11 §4k's heaviest-case budget is marked for re-measurement.
 | Glide τ / rate cap | 120 ms / 0.25 | CALIBRATE, 01 glide |
 | Clean crossfade | 20 ms raised cosine | CALIBRATE, 00 §1 |
 | Feedback law | `g = 1.05·fb^1.6`, unity at fb ≈ 97% | DECIDED (Frosty, 2026-09-20); 01 |
-| Safety clip, DC | tanh at 1.0 always on; 10 Hz blocker | 02 |
+| Safety clip, DC | tanh at 1.0 always on; 10 Hz blocker **after the shaper** (−114.3 vs −38.7 dBFS at DRIVE 100) | 02; MEASURED 2026-09-23 |
+| `P_c`, measured | clean 0.99939, tape 1.05361 at 63.4 Hz, BBD 0.99611 (0.9946–0.9983 with TIME), 48 kHz | MEASURED (AURORA, 2026-09-23) |
 | LOW/HIGH CUT | 20 Hz–1 kHz / 1–20 kHz, cap 18 kHz | CALIBRATE |
-| Tape LP / head bump | 4.5 kHz / +2 dB at 55 Hz | CALIBRATE / 01 |
+| Tape LP / head bump | 4.5 kHz / +2 dB at 55 Hz, **55 Hz read as the pole** | CALIBRATE / 01; convention DECIDED 2026-09-23 |
+| Tape character floor | **0.03 % of speed (~half a cent), TAPE only**; rides MOD RATE, sums with MOD DEPTH, modulates the read position | DECIDED (Frosty, 2026-09-23); CALIBRATE, §5a |
 | BBD clock, cutoff | 4096 stages, `N/(2T)`; `0.3·f_clk` | 01 |
-| BBD compander | 2:1, 5 / 50 ms | CALIBRATE |
+| BBD compander | 2:1, 5 / 50 ms; expander reads stored gain. Re-detecting pair measures **+3.67 dB on a 20 dB step = 0.184 dB/dB** | CALIBRATE / MEASURED (AURORA, 2026-09-23) |
+| Memory | **16 MB per instance at 192 kHz** — two engines × (audio ring + compander control ring) | §10 |
 | Alias floor | ≤ −60 dBFS, 10 repeats | DECISION |
 | Wow / flutter | 0.1–8 Hz / 11.7 Hz at 0.25× | 01 |
 | Mod depth | 0–0.5% speed; clean 0–8 ms | 01 / CALIBRATE |

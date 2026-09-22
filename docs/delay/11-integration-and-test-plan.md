@@ -259,6 +259,15 @@ matching the reported tail. At full travel, 10 min at 48 kHz per character: it
 sustains yet stays bounded — peak under the ceiling, converging within 1 dB,
 DC ≤ −80 dBFS, no NaN, no denormal slowdown.
 
+**The DC bound is the one that caught a real bug, so run it at maximum DRIVE
+and keep it there.** With the blocker placed *before* the shaper, as 10 §4 used
+to specify, the loop measured **−38.7 dBFS at DRIVE 100** — a clear fail; with
+it after the shaper, **−114.3 dBFS** (AURORA, 2026-09-23, c4d2d33). Nothing in
+the chain reveals the difference at DRIVE 0, because the shaper branches out
+entirely, **so this assertion only bites at high DRIVE** — which is exactly why
+the ordering survived so long. Treat a regression here as the blocker having
+been moved back.
+
 **d. In-loop filter stability.** `feedback` 100, both cuts at both extremes,
 60 s at 44.1–192 kHz, **each engine** — the cuts are shared, so the same
 extremes drive both, and the lane is run at `lane_gain` +100 and at its own
@@ -389,8 +398,12 @@ the measured time to −60 dBFS.
 **k. Invariance, robustness, cost.** Across 44.1–192 kHz, times, decays, corners,
 mod rate and duck ballistics hold; block sizes 1/32/64/512/1023 and a random
 schedule identical to −120 dB. Silence decays to exact zeros with no CPU rise
-(tail ≤ 1.1× steady); no NaN at any extreme; an injected NaN contained within
-one tail. `bench`, Release, 100 × 10 s at 48 kHz/512 against `measure_ltvcomp`
+(tail ≤ 1.1× steady) — **including on TAPE, whose character floor modulates at
+MOD DEPTH 0** (10 §5a). That holds structurally rather than by a gate: the floor
+moves the **read position**, so a zeroed ring still reads zero. **Run the
+silence case on every character**, since a floor implemented as an output gain
+instead would pass on clean and fail here. No NaN at any extreme; an injected
+NaN contained within one tail. `bench`, Release, 100 × 10 s at 48 kHz/512 against `measure_ltvcomp`
 on the same box: ≤ 1.5× at defaults, ≤ 3.0× heaviest.
 
 **The ≤ 3.0× heaviest figure predates the second engine and is NOT re-set here —
@@ -403,11 +416,15 @@ counted, so 3.0× against `measure_ltvcomp` is unlikely to survive. `bench`
 settles it; **a budget known to fail is worse than no budget**, so the number
 moves on a measurement and not on this paragraph.
 
-**Both rings** are allocated once in `prepare()` from the fixed maximum — 10 §10,
-now **8.0 MB per instance at 192 kHz** for the two engines; the 4.0 MB this item
-quoted before covered the main ring alone. No allocation in
-`process()`, including when `hold` or either `fx` turns on.
-`latencyForParams` is **exactly 0** everywhere, both engines.
+**All four rings** are allocated once in `prepare()` from the fixed maximum —
+two audio rings, one per engine, and **two compander control rings of the same
+length** (10 §4), which is **16 MB per instance at 192 kHz** (10 §10). Earlier
+figures of 4.0 and 8.0 MB counted one engine and then the audio rings alone. The
+control rings are allocated whichever character is selected, so **assert the
+allocation is character-independent**: switching to bucket-brigade in
+`process()` must not allocate. No allocation in `process()` at all, including
+when `hold` or either `fx` turns on. `latencyForParams` is **exactly 0**
+everywhere, both engines.
 
 **l. In-loop FX (10 §11a).** There is **one stage per engine** and everything
 here is asserted **per path**, `fx`/`fx_type`/`fx_amount` on the main and

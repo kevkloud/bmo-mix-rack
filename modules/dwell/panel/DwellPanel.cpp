@@ -16,17 +16,18 @@ namespace bmo::dwell
     row and BMO DEQ's placement row are the same shape. There is no Off
     position in any of the choices here, so clicking the lit one does nothing.
 
-    `columns` is how many cells stand side by side before the next line starts:
-    3 for the trios, 2 for an FX grid. A short last line is centred rather than
-    left-hung, which a 2x2 grid never needs and the old seven-cell stack did.
+    `columns` is how many cells stand side by side before the next line starts,
+    which is 3 for every row on this panel now. A short last line is centred
+    rather than left-hung, which three across three never needs and the old
+    seven-cell stack did.
 
     `namePrefix` renames the *components* without touching what is drawn on
-    them, and the lane is what it is for. The lane's voicing repeats the main
-    delay's words on purpose -- CLEAN, TAPE and BUCKET under a LANE rule read
-    as a second delay, where LN-CLEAN would read as a bin of leftovers -- but
-    `findNamed` in tests/ui/LayoutTests.cpp walks children by name, and two
-    cells with one name resolve by child order, which changes every time the
-    reveal opens.
+    them, and the lane's FX cells are what it is for. They repeat the main
+    delay's words on purpose -- DIFFUSE, PAN and CRUSH under a LANE rule read
+    as the same stage on the other engine, where LN-DIFFUSE would read as a bin
+    of leftovers -- but `findNamed` in tests/ui/LayoutTests.cpp walks children
+    by name, and two cells with one name resolve by child order, which changes
+    every time the reveal opens.
 
     Plain `juce::ToggleButton`s rather than `ui::SwitchButton`s because a
     SwitchButton attaches itself to a *bool*; the look and feel draws both the
@@ -104,9 +105,9 @@ public:
 
     /** What the lit cell draws in.
 
-        For the lane's two voicing rows, which step back toward the hairline
-        while LINK is holding them to the main delay's -- see
-        DwellPanel::refreshLinkFollowing. It is a *colour* change and
+        For the lane's FX cells, which step back toward the hairline while
+        FX LINK is holding them to the main delay's -- see
+        DwellPanel::refreshFxLinkFollowing. It is a *colour* change and
         deliberately not `setRowEnabled (false)`: the dim a disabled control
         takes means "this stage is off" everywhere else in the suite, and these
         are not off. */
@@ -228,24 +229,28 @@ namespace
     //== The three columns =====================================================
     //
     /** 280 less `kPad` each side is a 260 px column, and this panel is laid
-        out in whole columns. The face keeps 260; the main delay's depth takes
-        another 260; the lane takes **400**, because it is a second delay and
-        has to carry sixteen controls including two trios, a 2x2 grid and an
-        `AMOUNT (SMEAR)` caption that measures 209 px at 15 pt.
+        out in whole columns: the face, the main delay's depth, and the lane.
 
-        260 + 20 + 260 + 20 + 400 + 2 * kPad = 980, which is
-        `ModuleDef::expandedWidth`. See Module.cpp for why not 1120. */
-    constexpr int kColumn     = 260;
-    constexpr int kLaneColumn = 400;
-    constexpr int kGutter     = 20;
+        **All three are 260 from 2026-09-22.** The lane took 400 while it
+        mirrored the main delay -- four voicing knobs across a row, and an FX
+        band laid out as a 172 px stack of type cells beside a 220 px AMOUNT.
+        With the voicing gone its widest row is an `AMOUNT (SMEAR)` caption
+        that measures 209 px at 15 pt, which a 260 px column carries with room
+        to spare, and its three type cells go across a row at 84 px a cell --
+        the same shape, and the same cell, the depth column already uses.
+
+        260 + 20 + 260 + 20 + 260 + 2 * kPad = 840, which is
+        `ModuleDef::expandedWidth`. See Module.cpp for why not two columns. */
+    constexpr int kColumn = 260;
+    constexpr int kGutter = 20;
 
     /** The arithmetic, asserted rather than described. `resized` never names
         the lane's width -- it takes the two fixed columns off the left and
         gives the lane what is left -- so this is the only thing that would
-        catch `expandedWidth` and these three drifting apart, and it catches it
-        at compile time. */
+        catch `expandedWidth` and these drifting apart, and it catches it at
+        compile time. */
     static_assert (2 * ui::ModulePanel::kPad + kColumn + kGutter + kColumn
-                       + kGutter + kLaneColumn == 980,
+                       + kGutter + kColumn == 840,
                    "the three columns and their gutters are ModuleDef::expandedWidth");
 
     constexpr int kSwitchHeight = ui::Tokens::switchHeight;   // 26
@@ -262,9 +267,9 @@ namespace
 
         Nothing on this panel is laid out three knobs across a 260 px column
         any more. The face runs in pairs at 130 px a cell; the depth column
-        runs a single and a pair; the lane's widest knob row is four across a
-        **400** px column, which is 100 px a cell where "LO CUT" measures about
-        94. No word was shortened to buy the size back.
+        runs a single and a pair; the lane runs a single and a pair too, now
+        that its four voicing knobs are gone. No word was shortened to buy the
+        size back.
 
         MOD RATE and MOD DEPTH are still captioned RATE and DEPTH, LOW and HIGH
         CUT LO CUT and HI CUT, and LANE GAIN is TAIL -- a reading choice rather
@@ -312,17 +317,20 @@ namespace
     constexpr int kStripRow  = 20;
     constexpr int kSwitchRow = 28;
 
-    /** A band with a switch at the right-hand end of its rule. Tall enough for
-        the switch rather than for the hairline. */
-    constexpr int kRuledSwitchRow = 28;
-
     /** The lane's three gates, and the face's FX. The controls a hand reaches
         for while something is playing, so they are taller than a switch row
         and lettered a size up. */
     constexpr int kGateRow = 40;
 
-    /** Under the lane's tail knob: THROW, FREEZE, BUILD. */
-    constexpr int kRegionRow = 16;
+    /** Under the lane's tail knob: THROW, FREEZE, BUILD.
+
+        The band is wider than the knob's own box -- 200 px of a 260 px column
+        against the 130 the knob takes -- because it carries three words and
+        the knob carries one. 200 gives each word a 66 px cell where "FREEZE"
+        measures about 33 at 9.5 pt; the knob's 130 would give 43, which fits
+        and looks like it only just does. */
+    constexpr int kRegionRow   = 16;
+    constexpr int kRegionWidth = 200;
 
     constexpr int kFootRow   = 28;
     constexpr int kArrowSide = 16;
@@ -331,40 +339,29 @@ namespace
         as the one thing left on a row. */
     constexpr int kFxSwitchWidth = 126;
 
-    /** Between the FX cells, and how tall a stack of three of them is. */
+    /** Between the FX cells. */
     constexpr int kFxCellGap = ui::Tokens::switchGap;                   // 8
-    constexpr int kFxListRow = 3 * kSwitchHeight + 2 * kFxCellGap;      // 94
 
-    //== Three FX types, and two different shapes for them =====================
+    //== Three FX types, and one shape for them now =============================
     //
     // **Sweep is cut** (DECIDED, Frosty 2026-09-22; modules/dwell/params.h):
     // it was specified as sweeping VOICE's resonant centre, and VOICE was
     // deleted the day before. Three types do not tile as the 2x2 that four
-    // did, and the two FX stages on this panel get two different answers,
-    // because **the shape follows the slot each one has** -- the same rule the
-    // rest of this layout runs on.
+    // did, so both FX stages lay them **across a row**: an 84 px cell in a
+    // 260 px column, which is the cell the face's STEREO trio already uses,
+    // and a band 28 px tall rather than the 2x2's 60.
     //
-    //   - **The depth column: three across, one row.** Its AMOUNT knob has to
-    //     span the full 260 -- "AMOUNT (SMEAR)" measures 209 px at 15 pt and a
-    //     260 px column has nowhere else to put it -- so the types are a band
-    //     above it, and three across 260 is an 84 px cell. That is the cell the
-    //     face's STEREO trio already uses, and what it buys is a band 28 px
-    //     tall instead of the 2x2's 60, which goes back to the column's air.
+    // Either stage's AMOUNT then takes a row of its own and spans the whole
+    // column, which is what its caption needs: "AMOUNT (SMEAR)" measures
+    // 209 px at 15 pt.
     //
-    //   - **The lane: three down, beside its AMOUNT.** The lane puts its knob
-    //     *next to* its types, which is what lets one column carry the gates,
-    //     the tail, the whole voicing and an FX stage. That leaves the types a
-    //     tall narrow 172 px slot: three across it is a 52 px cell, and
-    //     "DIFFUSE" measures about 46 before any padding -- the kind of fit
-    //     that clips the first time somebody re-words a label. Three down gives
-    //     each of them the whole 172 and costs no height at all: 94 of the
-    //     row's 108.
-    //
-    // Neither is a 2x2 and neither leaves a short line to centre, which is what
-    // four types needed and three do not.
-    constexpr int kDepthFxRow        = kSwitchRow;   // 28
-    constexpr int kLaneFxListWidth   = 172;
-    constexpr int kLaneFxAmountWidth = 220;          // 172 + 8 + 220 = 400
+    // **The lane stacked its three down a 172 px slot until 2026-09-22**,
+    // beside its AMOUNT, because a 400 px column carrying a voicing block had
+    // no height to spare and three across that slot would have cut the cell to
+    // 52 px against a "DIFFUSE" that measures about 46. The voicing is gone,
+    // the column is 260, and the two stages are the same shape -- which is the
+    // truer reading anyway, since they are the same stage on two engines.
+    constexpr int kFxRow = kSwitchRow;   // 28
 
     /** The DUCK bar, on the knob's own centre line. */
     constexpr int kDuckBarHeight = 18;
@@ -414,23 +411,20 @@ namespace
     }
 
     /** Every parameter the reveal carries, which is exactly what the state dot
-        reads: **twenty-three**, which is everything that is not one of the ten
-        the face draws.
+        reads: **sixteen**, which is everything that is not one of the ten the
+        face draws. Six in the depth column, ten in the lane.
 
-        It read seven while the lane was undrawn, and the difference is the
-        whole reason for extending it. CHOP, LINK and the lane's twelve were
-        live, automatable and drawn nowhere at all; now they are behind the
-        arrow, and a dot that did not read them would be saying "nothing behind
-        here has moved" about a panel whose preset had set the lane to build. */
+        A dot that did not read them would be saying "nothing behind here has
+        moved" about a panel whose preset had set the lane to build. Every
+        index in this list is drawn behind the arrow and nowhere else, and the
+        two facts have to stay one fact: a parameter added to the reveal and
+        left out of here is a silent dot. */
     std::vector<int> revealedIndices()
     {
         return { Index::drive, Index::modRate, Index::modDepth, Index::duck,
                  Index::fxType, Index::fxAmount,
                  Index::send, Index::laneGain, Index::hold, Index::chop,
-                 Index::link, Index::laneLevel, Index::laneTime,
-                 Index::laneCharacter, Index::laneStereo,
-                 Index::laneLowCut, Index::laneHighCut,
-                 Index::laneModRate, Index::laneModDepth,
+                 Index::laneLevel, Index::laneTime,
                  Index::laneFx, Index::laneFxType, Index::laneFxAmount,
                  Index::fxLink };
     }
@@ -505,7 +499,7 @@ namespace
     constexpr int kDepthTopRows = kRule + kPairRow + kPairRow + kPairRow;
     constexpr int kDepthTopAir  = 4;   // 2 single + 1 double
 
-    constexpr int kDepthBotRows = kRule + kDepthFxRow;
+    constexpr int kDepthBotRows = kRule + kFxRow;
 
     // **Two even units, not a single and a double.** Three types across one
     // row spend 32 px less than the 2x2 did, and all 32 of them land in this
@@ -517,23 +511,41 @@ namespace
     // band with air around it.
     constexpr int kDepthBotAir  = 2;   // 2 single, evenly
 
-    /** The lane, under its own rule and in one run.
+    /** The lane, in the two segments the face's rules cut it into, exactly as
+        the depth column is.
 
-        The LANE rule, the tail band and its region legend, the VOICE rule with
-        LINK on it, the two voicing trios, the four voicing knobs, the FX rule
-        with the lane's own gate on it, and the FX band.
+        Above the TONE line: the LANE rule, the tail alone on its row, its
+        region legend, and the lane's own TIME and LEVEL as a pair.
 
-        **One run, not two segments.** The depth column is cut on the face's
-        TONE line so that its FX rule is exact by construction; the lane is
-        not, because there is nothing for it to be exact *to*. Its two interior
-        rules land at 300 and 547 -- 160 px and 87 px clear of the 460 the
-        other two columns share, which is far enough to read as its own rhythm
-        rather than as an alignment that missed by a dozen pixels. The one line
-        all three columns do share is the first, at 77. */
-    constexpr int kLaneRows = kRule + kHeroRow + kRegionRow
-                            + kRuledSwitchRow + kSwitchRow + kSwitchRow + kPairRow
-                            + kRuledSwitchRow + kPairRow;
-    constexpr int kLaneAir  = 9;    // 5 single + 2 double
+        Below it: the FX rule carrying the lane's gate and FX LINK, the three
+        type cells, and AMOUNT anchored to the foot so all three columns end on
+        one line.
+
+        **Two segments, not one run, from 2026-09-22.** The lane ran as one run
+        while it was a second engine: nine bands under its own rule, on interior
+        lines at 300 and 547 that were deliberately *clear* of the 460 the other
+        two columns share, because a rule struck a dozen pixels off a face rule
+        reads as a failed alignment rather than as two sections. Cutting the
+        voicing left five bands, which land where the grid wants them, so the
+        lane shares the line instead of avoiding it -- and shares it exactly,
+        by construction, rather than by arithmetic that has to be redone every
+        time a row's height changes.
+
+        **The bottom segment is the depth column's, row for row**: the same
+        16 px rule, the same 28 px band of type cells and the same
+        foot-anchored AMOUNT, so the two FX stages are laid out on the same
+        three lines rather than three pixels apart. The lane's rule carries two
+        switches and the depth column's carries none, and that is the only
+        difference -- a 26 px switch centred on a 16 px rule row overhangs it
+        by five pixels either way, which the air above and below absorbs.
+        Giving the lane a taller band instead put its cells 3 px below the
+        depth column's, which is exactly the near-miss this grid exists to
+        avoid. */
+    constexpr int kLaneTopRows = kRule + kHeroRow + kRegionRow + kValuePair;
+    constexpr int kLaneTopAir  = 3;   // 3 single
+
+    constexpr int kLaneBotRows = kDepthBotRows;
+    constexpr int kLaneBotAir  = kDepthBotAir;
 }
 
 //==============================================================================
@@ -555,22 +567,18 @@ DwellPanel::DwellPanel (ui::ModuleContext ctx)
       sendHeld (context.params.param (Index::send),     "SEND", context.def.accent),
       hold     (context.params.param (Index::hold),     "HOLD", context.def.accent),
       chop     (context.params.param (Index::chop),     "CHOP", context.def.accent),
-      link     (context.params.param (Index::link),     "LINK", context.def.accent),
       // **ON, not FX.** It sits at the right-hand end of a rule whose legend
-      // already says FX, and "FX ---- FX" is the one place on this panel the
-      // mirror would have printed a word twice on one line. The face's own FX
-      // gate stands in a band with no rule over it, so that one has to say FX;
-      // this one does not. Its component name is LANE FX either way.
+      // already says FX, and "FX ---- FX" is the one place on this panel a
+      // word would have been printed twice on one line. The face's own FX gate
+      // stands in a band with no rule over it, so that one has to say FX; this
+      // one does not. Its component name is LANE FX either way.
       laneFx   (context.params.param (Index::laneFx),   "ON",   context.def.accent),
-      // **A second link, over the lane's FX rather than over its voicing.**
-      // LINK ties the six voicing rows; this ties the FX trio. Two switches
-      // because independent FX is what the lane's own FX stage is *for* -- a
-      // thrown word crushed against a clean main delay -- and folding it into
-      // LINK would have made that cost six parameters of divergence to buy one
-      // (params.h, id 32; DECIDED, Frosty 2026-09-22). It is drawn exactly the
-      // way LINK is drawn: on the rule of the section it governs, with the
-      // same word on it, told apart by its component name and by which rule it
-      // is standing on.
+      // **The only link left**, and the only place the lane is still allowed
+      // to differ from the main delay. The voicing LINK that stood beside it
+      // went with the six parameters it tied (params.h, 2026-09-22); this one
+      // stayed because a thrown word crushed against a clean main delay is a
+      // sound somebody asks for, where a thrown word with its own low cut is a
+      // setting. On the rule of the section it governs, rightmost.
       fxLink   (context.params.param (Index::fxLink),   "LINK", context.def.accent),
       // The lane's tail. One bipolar knob: below centre the caught word
       // decays, at centre it holds at exact unity and above it builds -- three
@@ -580,11 +588,7 @@ DwellPanel::DwellPanel (ui::ModuleContext ctx)
       // `paintPanel`.
       laneGain     (context.params.param (Index::laneGain),     "TAIL",   ui::Knob::Style::character, kHeroFace, context.def.accent),
       laneTime     (context.params.param (Index::laneTime),     "TIME",   ui::Knob::Style::character, kPairFace, context.def.accent),
-      laneLevel    (context.params.param (Index::laneLevel),    "LEVEL",  ui::Knob::Style::character, kPairFace, context.def.accent),
-      laneLowCut   (context.params.param (Index::laneLowCut),   "LO CUT", ui::Knob::Style::character, kPairFace, context.def.accent),
-      laneHighCut  (context.params.param (Index::laneHighCut),  "HI CUT", ui::Knob::Style::character, kPairFace, context.def.accent),
-      laneModRate  (context.params.param (Index::laneModRate),  "RATE",   ui::Knob::Style::character, kPairFace, context.def.accent),
-      laneModDepth (context.params.param (Index::laneModDepth), "DEPTH",  ui::Knob::Style::character, kPairFace, context.def.accent)
+      laneLevel    (context.params.param (Index::laneLevel),    "LEVEL",  ui::Knob::Style::character, kPairFace, context.def.accent)
 {
     character = std::make_unique<ChoiceRow> (context.params.param (Index::character),
                                              juce::StringArray { "CLEAN", "TAPE", "BUCKET" },
@@ -594,29 +598,18 @@ DwellPanel::DwellPanel (ui::ModuleContext ctx)
                                           juce::StringArray { "STEREO", "PING-PONG", "DUAL" },
                                           ui::tokens().switchAlt, 12.0f, 3, kSwitchGap);
 
-    // **Three across, on one line, with nothing left over to centre.** See
-    // kDepthFxRow for why this stage takes a row where the lane's takes a
-    // column, and params.h's kFxTypeNames for why there are three of them.
+    // **Three across, on one line, with nothing left over to centre**, and the
+    // lane's stage is laid out identically -- see kFxRow, and params.h's
+    // kFxTypeNames for why there are three of them.
     fxType = std::make_unique<ChoiceRow> (context.params.param (Index::fxType),
                                           fxTypeLabels(),
                                           ui::tokens().switchAlt, 12.0f, 3, kFxCellGap);
 
-    // The lane's three rows of cells: the same words off the same lists, with
-    // prefixed component names. See ChoiceRow's class comment.
-    laneCharacter = std::make_unique<ChoiceRow> (context.params.param (Index::laneCharacter),
-                                                 juce::StringArray { "CLEAN", "TAPE", "BUCKET" },
-                                                 ui::tokens().switchAlt, 13.0f, 3, kSwitchGap, "LANE");
-
-    laneStereo = std::make_unique<ChoiceRow> (context.params.param (Index::laneStereo),
-                                              juce::StringArray { "STEREO", "PING-PONG", "DUAL" },
-                                              ui::tokens().switchAlt, 12.0f, 3, kSwitchGap, "LANE");
-
-    // **One column, three down.** The lane's types stand beside its AMOUNT
-    // knob rather than above it, so their slot is 172 px wide and the full
-    // width of it goes to each cell. See kLaneFxListWidth.
+    // The lane's cells: the same words off the same list, with prefixed
+    // component names. See ChoiceRow's class comment.
     laneFxType = std::make_unique<ChoiceRow> (context.params.param (Index::laneFxType),
                                               fxTypeLabels(),
-                                              ui::tokens().switchAlt, 12.0f, 1, kFxCellGap, "LANE");
+                                              ui::tokens().switchAlt, 12.0f, 3, kFxCellGap, "LANE");
 
     duckMeter = std::make_unique<DuckMeter> (context.gainReductionDb, context.def.accent);
 
@@ -628,10 +621,6 @@ DwellPanel::DwellPanel (ui::ModuleContext ctx)
     laneGain.setName     ("LANE TAIL");
     laneTime.setName     ("LANE TIME");
     laneLevel.setName    ("LANE LEVEL");
-    laneLowCut.setName   ("LANE LO CUT");
-    laneHighCut.setName  ("LANE HI CUT");
-    laneModRate.setName  ("LANE RATE");
-    laneModDepth.setName ("LANE DEPTH");
     laneFx.setName       ("LANE FX");
     fxLink.setName       ("FX LINK");
 
@@ -660,8 +649,7 @@ DwellPanel::DwellPanel (ui::ModuleContext ctx)
     }
 
     for (auto* k : { &lowCut, &highCut, &drive, &modRate, &modDepth, &duck,
-                     &laneTime, &laneLevel, &laneLowCut, &laneHighCut,
-                     &laneModRate, &laneModDepth })
+                     &laneTime, &laneLevel })
     {
         k->setKnobSide (kPairKnob);
         k->setCaptionSize (kCaption);
@@ -705,9 +693,9 @@ DwellPanel::DwellPanel (ui::ModuleContext ctx)
     for (auto* s : { &sendHeld, &hold, &chop, &fx })
         s->setLabelSize (14.0f);
 
-    // LINK and the lane's FX gate sit on rules rather than in bands of their
-    // own, so they keep the suite's 26 px switch and are lettered to it.
-    for (auto* s : { &link, &laneFx, &fxLink })
+    // The lane's FX gate and FX LINK sit on a rule rather than in bands of
+    // their own, so they keep the suite's 26 px switch and are lettered to it.
+    for (auto* s : { &laneFx, &fxLink })
         s->setLabelSize (12.0f);
 
     arrow.onClick = [this]
@@ -721,7 +709,6 @@ DwellPanel::DwellPanel (ui::ModuleContext ctx)
 
     lastFxWasOn     = context.params.getReal (Index::fx) > 0.5f;
     lastLaneFxWasOn = context.params.getReal (Index::laneFx) > 0.5f;
-    lastLinkWasOn   = context.params.getReal (Index::link) > 0.5f;
     lastFxLinkWasOn = context.params.getReal (Index::fxLink) > 0.5f;
     lastMovedWasSet = revealedSectionIsMoved();
     lastLaneRegion  = laneRegion();
@@ -729,11 +716,10 @@ DwellPanel::DwellPanel (ui::ModuleContext ctx)
     buildFxAmount (false, juce::roundToInt (context.params.getReal (Index::fxType)));
     buildFxAmount (true,  juce::roundToInt (context.params.getReal (Index::laneFxType)));
 
-    refreshLinkFollowing();
+    refreshFxLinkFollowing();
 
     // Every child's mouse-ups, so the FX switch's own click can be told apart
-    // from the parameter arriving from a host, and LINK's own click from
-    // everything that is not a click at all. See mouseUp.
+    // from the parameter arriving from a host. See mouseUp.
     addMouseListener (this, true);
 
     startTimerHz (15);
@@ -754,16 +740,6 @@ void DwellPanel::requestExpanded (bool expanded)
 {
     if (context.setExpanded)
         context.setExpanded (expanded);
-}
-
-void DwellPanel::seedLaneOnUnlink()
-{
-    // **Deliberately empty.** See the declaration in DwellPanel.h: what has to
-    // happen here is settled -- the lane's six voicing parameters take the
-    // main delay's current values, so unlinking changes nothing audible until
-    // something is turned -- and *when* it may happen is what the spec pass is
-    // defining. Writing six parameters from a guess would be exactly the side
-    // effect params.h spends a paragraph forbidding.
 }
 
 void DwellPanel::mouseUp (const juce::MouseEvent& e)
@@ -787,11 +763,14 @@ void DwellPanel::mouseUp (const juce::MouseEvent& e)
         requestExpanded (true);
     }
 
-    // The unlink gesture, and the only caller of the hook. A click is the one
-    // event here that is unambiguously a user's; a preset arriving with LINK
-    // off is not, and never reaches this.
-    if (cameFrom (link) && context.params.getReal (Index::link) < 0.5f)
-        seedLaneOnUnlink();
+    // **Nothing else listens here, and the unlink gesture is why that is worth
+    // a line.** The voicing LINK used to call a seeding hook from its own
+    // click: unlinking six controls that had been following the main delay had
+    // to leave them where the main delay had them, and doing that from the
+    // parameter's change rather than from a click would have rewritten six
+    // parameters on every automation pass. Both the link and the hook went
+    // with the voicing on 2026-09-22. FX LINK is a plain tie with nothing to
+    // seed, so it needs no gesture at all.
 }
 
 //==============================================================================
@@ -820,9 +799,7 @@ void DwellPanel::showRevealed (bool shown)
         // The depth column.
         &drive, &modRate, &modDepth, &duck, duckMeter.get(), fxType.get(),
         // The lane.
-        &sendHeld, &hold, &chop, &laneGain, &laneTime, &laneLevel, &link,
-        laneCharacter.get(), laneStereo.get(),
-        &laneLowCut, &laneHighCut, &laneModRate, &laneModDepth,
+        &sendHeld, &hold, &chop, &laneGain, &laneTime, &laneLevel,
         &laneFx, &fxLink, laneFxType.get() };
 
     if (fxAmount != nullptr)
@@ -869,8 +846,8 @@ void DwellPanel::buildFxAmount (bool lane, int type)
 
     // A rebuilt knob is a new object with the module accent on it, so the
     // FOLLOWS MAIN colour has to be put back or changing the lane's FX type
-    // would quietly un-follow the knob beside the cells.
-    refreshLinkFollowing();
+    // would quietly un-follow the knob under the cells.
+    refreshFxLinkFollowing();
 }
 
 void DwellPanel::refreshFxEnablement()
@@ -893,35 +870,26 @@ void DwellPanel::refreshFxEnablement()
         laneFxAmount->setKnobEnabled (laneOn);
 }
 
-void DwellPanel::refreshLinkFollowing()
+void DwellPanel::refreshFxLinkFollowing()
 {
     const auto t = panelTokens();
 
     // **Stepped back, not switched off.** The disabled alpha in this suite
     // means "this stage is not running", which is exactly what a followed
     // control is not -- it is running, on the main delay's numbers. So the
-    // colour moves and nothing else does: the knobs keep their size, their
-    // captions and their clicks, the rule above them says in words what has
-    // happened to them, and paintPanel brackets them and points the bracket
-    // back at the column they are following.
+    // colour moves and nothing else does: the cells and the knob keep their
+    // size, their captions and their clicks, the rule above them says in words
+    // what has happened to them, and paintPanel brackets them and points the
+    // bracket back at the column they are following.
     const auto followed = context.def.accent.interpolatedWith (t.hairline, 0.55f);
     const auto own      = context.def.accent;
 
-    // **Two links, two blocks, and the same treatment on each.** LINK governs
-    // the six voicing rows and FX LINK governs the FX trio, and they are
-    // separate because independent FX is the sound the lane's own FX stage
-    // exists to make (params.h, id 32). Drawing both the same way is what
-    // stops that split needing to be explained: whatever a rule says
-    // FOLLOWS MAIN, the controls under it are in the quieter colour.
-    const auto voicing = context.params.getReal (Index::link)   > 0.5f ? followed : own;
+    // **One block now.** This treatment was worked out for two -- the voicing
+    // LINK and this one -- and was written as one lambda over both so that a
+    // reader who had understood one had understood the other. The voicing went
+    // on 2026-09-22 and the treatment stayed exactly as it was, because it was
+    // never about there being two of them.
     const auto laneFxInk = context.params.getReal (Index::fxLink) > 0.5f ? followed : own;
-
-    for (auto* k : { &laneLowCut, &laneHighCut, &laneModRate, &laneModDepth })
-        k->setAccent (voicing);
-
-    for (auto* row : { laneCharacter.get(), laneStereo.get() })
-        if (row != nullptr)
-            row->setRowTint (voicing == own ? ui::tokens().switchAlt : voicing);
 
     if (laneFxType != nullptr)
         laneFxType->setRowTint (laneFxInk == own ? ui::tokens().switchAlt : laneFxInk);
@@ -984,17 +952,15 @@ void DwellPanel::timerCallback()
         repaint();                 // the glow follows both gates
     }
 
-    // Either link changes what its controls look like *and* what its rule
-    // says, so it costs a re-layout rather than only a repaint: a rule's text
-    // is recorded where the rule is laid out.
-    const auto linkOn = context.params.getReal (Index::link) > 0.5f;
+    // FX LINK changes what its controls look like *and* what its rule says, so
+    // it costs a re-layout rather than only a repaint: a rule's text is
+    // recorded where the rule is laid out.
     const auto fxLinkOn = context.params.getReal (Index::fxLink) > 0.5f;
 
-    if (linkOn != lastLinkWasOn || fxLinkOn != lastFxLinkWasOn)
+    if (fxLinkOn != lastFxLinkWasOn)
     {
-        lastLinkWasOn = linkOn;
         lastFxLinkWasOn = fxLinkOn;
-        refreshLinkFollowing();
+        refreshFxLinkFollowing();
         resized();
         repaint();
     }
@@ -1010,7 +976,7 @@ void DwellPanel::timerCallback()
         repaint (laneRegionBand.expanded (2));
     }
 
-    // The state dot. Polled rather than listened for: it reads twenty-three
+    // The state dot. Polled rather than listened for: it reads sixteen
     // parameters, any of them can be moved by a knob, a lane or a preset, and
     // all three have to light it.
     const auto moved = revealedSectionIsMoved();
@@ -1076,27 +1042,6 @@ void DwellPanel::placePair (ui::PlainKnob& leftKnob, ui::PlainKnob& rightKnob,
     rightKnob.setBounds (row);
 }
 
-void DwellPanel::placeQuad (ui::PlainKnob& a, ui::PlainKnob& b, ui::PlainKnob& c,
-                            ui::PlainKnob& d, juce::Rectangle<int> row, int knobSide)
-{
-    // Four across a 400 px column is a 100 px cell, where the longest caption
-    // of the four -- "LO CUT" -- measures about 94 at 15 pt. Four across one of
-    // the 260 px columns would be 65 and would have had to shorten a word,
-    // which is the thing this whole redesign exists to stop doing.
-    for (auto* k : { &a, &b, &c, &d })
-    {
-        k->setKnobSide (knobSide);
-        k->setCaptionSize (kCaption);
-    }
-
-    const auto cell = row.getWidth() / 4;
-
-    a.setBounds (row.removeFromLeft (cell));
-    b.setBounds (row.removeFromLeft (cell));
-    c.setBounds (row.removeFromLeft (cell));
-    d.setBounds (row);
-}
-
 void DwellPanel::placeSingle (ui::PlainKnob& knob, juce::Rectangle<int> row, int knobSide)
 {
     knob.setKnobSide (knobSide);
@@ -1142,14 +1087,20 @@ void DwellPanel::placeRuledSwitch (juce::Rectangle<int> band, const juce::String
     // A section's own switch belongs to the section, and the two other places
     // it could go both say something wrong: in the first row under the rule it
     // reads as a sibling of the controls it governs, and in a band of its own
-    // it spends 28 px of column saying one word. On the rule it reads as what
+    // it spends 40 px of column saying one word. On the rule it reads as what
     // it is.
     //
-    // **The link is always the last thing on a rule.** The lane's FX rule
-    // carries two -- its own gate and FX LINK -- and the gate goes to the
-    // *inside*, so that the rightmost switch on the VOICE rule and the
-    // rightmost switch on the FX rule are the same kind of control and the
-    // eye can read a column of them.
+    // **`band` is the rule's own 16 px row and the switches overhang it**, by
+    // five pixels either way, which the air above and below absorbs. A taller
+    // band would move the hairline off the line the other columns strike
+    // theirs on, which is the whole grid.
+    //
+    // **The link is the last thing on the rule**, with the gate inside it, so
+    // the row reads left to right as "this section, this stage, tied to the
+    // other one". Two rules used this while the lane had a voicing link as
+    // well, and the rule that the rightmost switch is always the same kind of
+    // control is what let the eye read a column of them; one rule keeps the
+    // order anyway, because it is the order the words go in.
     const auto cell = [] (juce::Rectangle<int>& b)
     {
         auto c = b.removeFromRight (kSwitchWidth);
@@ -1163,28 +1114,6 @@ void DwellPanel::placeRuledSwitch (juce::Rectangle<int> band, const juce::String
         inner->setBounds (cell (band));
 
     addRule (band.withSizeKeepingCentre (band.getWidth(), kRule), legend);
-}
-
-void DwellPanel::placeLaneTail (juce::Rectangle<int> row)
-{
-    // TIME, TAIL, LEVEL in thirds -- and the boxes are cut by hand so that all
-    // three captions land on one line. See the declaration for why a shared
-    // trio could not have done it.
-    const auto cell = row.getWidth() / 3;
-    const auto captionLine = row.getY() + kHeroKnob;   // where TAIL's name starts
-
-    const auto box = [&] (juce::Rectangle<int> c, int side)
-    {
-        return juce::Rectangle<int> (c.getX(), captionLine - side,
-                                     c.getWidth(), side + kCaptionRow + kValueRow);
-    };
-
-    auto left = row.removeFromLeft (cell);
-    auto mid  = row.removeFromLeft (cell);
-
-    laneTime.setBounds  (box (left, kPairKnob));
-    laneGain.setBounds  (box (mid,  kHeroKnob));
-    laneLevel.setBounds (box (row,  kPairKnob));
 }
 
 void DwellPanel::placeDuckBand (juce::Rectangle<int> row)
@@ -1240,7 +1169,6 @@ void DwellPanel::resized()
 
     duckMeterCaption = {};
     laneRegionBand = {};
-    linkTieBand = {};
     fxLinkTieBand = {};
     stateDotSpot = {};
     mixNoteBand = {};
@@ -1280,8 +1208,9 @@ void DwellPanel::resized()
     layOutDepth (depthColumn.withTop (delayRuleTop), toneRuleTop);
 
     // The lane takes the band above the first rule as well, because it has
-    // something to put there: its three gates. So it is handed both.
-    layOutLane (area.withTop (delayRuleTop), area.withBottom (delayRuleTop));
+    // something to put there: its three gates. So it is handed both, and the
+    // TONE line too -- it is cut on that line exactly as the depth column is.
+    layOutLane (area.withTop (delayRuleTop), area.withBottom (delayRuleTop), toneRuleTop);
 }
 
 /** The face: nine controls, two ruled sections, a gate and a foot.
@@ -1378,7 +1307,7 @@ void DwellPanel::layOutDepth (juce::Rectangle<int> column, int toneRuleTop)
 
     addRule (bottom.take (kRule), "FX");
     bottom.air();
-    placeSwitchRow (*fxType, bottom.take (kDepthFxRow));
+    placeSwitchRow (*fxType, bottom.take (kFxRow));
     // No second helping: what is left of the segment *is* the gap above the
     // foot-anchored AMOUNT. See kDepthBotAir.
 
@@ -1386,100 +1315,85 @@ void DwellPanel::layOutDepth (juce::Rectangle<int> column, int toneRuleTop)
         fxAmount->setBounds (amountRow);
 }
 
-/** The lane: a second delay, composed as one.
+/** The lane: the throw, composed as one, in the two segments the face's rules
+    cut it into.
 
-    Read top to bottom it says the same things the main delay says, in the same
-    order and in the same words -- what it is doing right now, then how long
-    the tail is and how loud, then what it sounds like, then what is done to
-    it. That is the whole argument for the column: sixteen controls stacked in
-    whatever order they came out of `params.h` would be a bin of leftovers, and
-    the same sixteen in the shape of a delay are a delay. */
-void DwellPanel::layOutLane (juce::Rectangle<int> column, juce::Rectangle<int> topBand)
+    Read top to bottom it says what a throw is -- what it is doing right now
+    (the gates), then how long the tail is and how loud, then what is done to
+    it. That order is the whole argument for the column: ten controls stacked
+    in whatever order they came out of `params.h` would be a bin of leftovers.
+
+    **It is a section now, not a second instrument.** Nine bands of mirrored
+    voicing needed 400 px and its own rhythm, on interior rules kept clear of
+    the line the other two columns share. Five bands sit on that line, so they
+    are put on it. */
+void DwellPanel::layOutLane (juce::Rectangle<int> column, juce::Rectangle<int> topBand,
+                             int toneRuleTop)
 {
     // The gates go in the band above the first rule, which is the band the
     // CHARACTER trio takes over the face -- the same argument, one column
     // over. See placeGates.
     placeGates (topBand.withSizeKeepingCentre (topBand.getWidth(), kGateRow));
 
-    Column lane { column };
-    lane.spend (kLaneRows, kLaneAir);
+    Column top { column.withBottom (toneRuleTop) };
+    top.spend (kLaneTopRows, kLaneTopAir);
 
-    addRule (lane.take (kRule), "LANE");
-    lane.air();
+    addRule (top.take (kRule), "LANE");
+    top.air();
 
-    placeLaneTail (lane.take (kHeroRow));
+    // **The tail alone on its row.** It is the lane's hero and it draws 116 px;
+    // three across a 260 px column would cut its cell to 86. TIME and LEVEL go
+    // under it as an ordinary pair, which is the truer reading anyway -- the
+    // tail is what a hand reaches for, and those two are what it is set
+    // against.
+    placeSingle (laneGain, top.take (kHeroRow), kHeroKnob);
 
     // No air before the region legend: it belongs to the knob above it, the
-    // same way the face's two numbered strips belong to theirs. Centred on the
-    // column and narrower than it, so it sits under TAIL rather than under all
-    // three of them.
-    laneRegionBand = lane.take (kRegionRow)
-                         .withSizeKeepingCentre (kLaneFxAmountWidth, kRegionRow);
+    // same way the face's two numbered strips belong to theirs.
+    laneRegionBand = top.take (kRegionRow)
+                        .withSizeKeepingCentre (kRegionWidth, kRegionRow);
 
-    lane.breakAir();
+    top.air();
+    placePair (laneTime, laneLevel, top.take (kValuePair), kPairKnob);
+    top.air();   // the third helping, under the pair rather than against the rule
 
-    // **The voicing, and LINK on its rule.** The six controls under this line
-    // are exactly the ones LINK governs, so LINK is drawn on the line rather
-    // than among them; see refreshLinkFollowing for what they look like while
-    // it is on, and `linkTieBand` for the bracket that ties them to it.
-    const auto voiceTop = lane.area.getY();
+    Column bottom { column.withTop (toneRuleTop) };
 
-    placeRuledSwitch (lane.take (kRuledSwitchRow),
-                      context.params.getReal (Index::link) > 0.5f ? "VOICE - FOLLOWS MAIN"
-                                                                  : "VOICE",
-                      link);
+    // AMOUNT off the foot, so every column ends on one line.
+    auto amountRow = bottom.takeFoot (kPairRow);
 
-    lane.air();
-    placeSwitchRow (*laneCharacter, lane.take (kSwitchRow));
-    lane.air();
-    placeSwitchRow (*laneStereo, lane.take (kSwitchRow));
-    lane.air();
-    placeQuad (laneLowCut, laneHighCut, laneModRate, laneModDepth,
-               lane.take (kPairRow), kPairKnob);
+    bottom.spend (kLaneBotRows, kLaneBotAir);
 
-    linkTieBand = column.withTop (voiceTop).withBottom (lane.area.getY());
-
-    lane.breakAir();
-
-    // **The FX section, its gate and its own link.** FX LINK ties this trio
-    // and LINK above ties the voicing, and they are separate because
-    // independent FX is the sound the lane's FX stage exists to make
-    // (params.h, id 32). Drawn identically: the same word, on the rule of the
-    // section it governs, with the same FOLLOWS MAIN legend and the same
-    // bracket -- so the split needs no explaining, it just reads.
+    // **The FX section, its gate and the link.** FX LINK is the only link on
+    // the panel now; see refreshFxLinkFollowing for what the trio under it
+    // looks like while it is on, and `fxLinkTieBand` for the bracket that ties
+    // them to it and points at the column they are following.
     //
-    // The gate sits *inside* the link, so the rightmost switch on this rule
-    // and the rightmost on the VOICE rule are the same kind of control.
-    const auto fxTop = lane.area.getY();
+    // **TIED, not FOLLOWS MAIN.** The two switches take 156 px of a 260 px
+    // column, so the rule has 104 left and a legend is drawn as a plate-filled
+    // box of its text plus 14 px. "FX - FOLLOWS MAIN" measures 124 at 13 pt
+    // and needs 138: it was rendered on AURORA, clipped its own F on the left
+    // and butted against the gate on the right with no hairline showing at
+    // all. "FX - TIED" measures 65, needs 79, and leaves 12 px of rule either
+    // side -- and it is the word the tie actually is, with the bracket's spur
+    // saying what it is tied to.
+    const auto fxTop = bottom.area.getY();
 
-    placeRuledSwitch (lane.take (kRuledSwitchRow),
-                      context.params.getReal (Index::fxLink) > 0.5f ? "FX - FOLLOWS MAIN"
-                                                                    : "FX",
+    placeRuledSwitch (bottom.take (kRule),
+                      context.params.getReal (Index::fxLink) > 0.5f ? "FX - TIED" : "FX",
                       fxLink, &laneFx);
-    lane.air();
+    bottom.air();
 
-    // The lane's FX band: the three type cells **beside** its AMOUNT rather
-    // than above it, stacked because their slot is tall and narrow. See
-    // kLaneFxListWidth for why this column can afford an arrangement the
-    // 260 px one cannot, and why the two stages' cells are different shapes.
-    auto fxRow = lane.take (kPairRow);
-    auto list = fxRow.removeFromLeft (kLaneFxListWidth);
-    fxRow.removeFromLeft (fxRow.getWidth() - kLaneFxAmountWidth);
-
-    // Centred on the row rather than on the knob's face beside it: the stack
-    // is 94 px of a 108 px row, so there is nowhere else for it to go, and
-    // centring it keeps the 7 px of plate above and below it equal.
-    // Top-aligned with the row rather than centred in it: the knob beside it
-    // draws its face in the row's top 86 px and hangs its caption under that,
-    // so centring the 94 px stack in the full 108 put it eleven pixels below
-    // the dial and the two read as separate bands. Sharing a top line puts
-    // their centres 4 px apart and they read as one.
-    laneFxType->setBounds (list.getX(), list.getY(), kLaneFxListWidth, kFxListRow);
+    // Three across a row and AMOUNT under them, which is the depth column's FX
+    // section exactly. See kFxRow for why both stages are one shape now.
+    placeSwitchRow (*laneFxType, bottom.take (kFxRow));
+    // No second helping: what is left of the segment *is* the gap above the
+    // foot-anchored AMOUNT, as in the depth column.
 
     if (laneFxAmount != nullptr)
-        laneFxAmount->setBounds (fxRow);
+        laneFxAmount->setBounds (amountRow);
 
-    fxLinkTieBand = column.withTop (fxTop).withBottom (lane.area.getY());
+    fxLinkTieBand = column.withTop (fxTop).withBottom (amountRow.getBottom());
 }
 
 //==============================================================================
@@ -1497,8 +1411,8 @@ void DwellPanel::paintPanel (juce::Graphics& g)
         is painted here, under it, because it has to spill past the button's own
         bounds and a SwitchButton draws only inside them.
 
-        **Still a pending decision** -- it is left exactly as it was, and the
-        three switches that have arrived since are drawn by this same lambda
+        **Still a pending decision** -- it is left exactly as it was, and every
+        switch that has arrived or left since is drawn by this same lambda
         rather than by a second copy of it. */
     const auto glow = [&] (const juce::Component& c, bool lit)
     {
@@ -1514,7 +1428,6 @@ void DwellPanel::paintPanel (juce::Graphics& g)
     glow (chop,     context.params.getReal (Index::chop)   > 0.5f);
     glow (fx,       context.params.getReal (Index::fx)     > 0.5f);
     glow (laneFx,   context.params.getReal (Index::laneFx) > 0.5f);
-    glow (link,     context.params.getReal (Index::link)   > 0.5f);
     glow (fxLink,   context.params.getReal (Index::fxLink) > 0.5f);
 
     /** A short travel strip with one numbered mark on it: what a knob's own
@@ -1597,19 +1510,17 @@ void DwellPanel::paintPanel (juce::Graphics& g)
         }
     }
 
-    /** **The link brackets, one per link.** While a link is on, the controls
-        under its rule are following the main delay's -- see
-        refreshLinkFollowing for the colour half of that, which is what stops
-        them reading as dead. This is the other half: a hairline down the
-        band's left edge with a spur running off into the gutter toward the
-        column they are following, so the tie has a direction and is not only a
-        word on a rule.
+    /** **The link bracket.** While FX LINK is on, the three controls under its
+        rule are following the main delay's -- see refreshFxLinkFollowing for
+        the colour half of that, which is what stops them reading as dead. This
+        is the other half: a hairline down the band's left edge with a spur
+        running off into the gutter toward the column they are following, so
+        the tie has a direction and is not only a word on a rule.
 
-        Two of them since 2026-09-22, drawn by one lambda rather than two
-        copies: LINK brackets the six voicing rows and FX LINK brackets the FX
-        trio. A reader who has worked out what one bracket means has worked out
-        what the other one means, which is the whole reason the two links are
-        drawn the same way. */
+        It is still a lambda over a band rather than three inline calls: it was
+        written for two brackets and one of them went with the voicing link on
+        2026-09-22, and the next tie added to this panel should look exactly
+        like this one rather than nearly like it. */
     const auto bracket = [&] (juce::Rectangle<int> band, bool following)
     {
         if (band.isEmpty() || ! following)
@@ -1630,13 +1541,12 @@ void DwellPanel::paintPanel (juce::Graphics& g)
                                             ui::Tokens::hairlineWeight));
     };
 
-    bracket (linkTieBand,   context.params.getReal (Index::link)   > 0.5f);
     bracket (fxLinkTieBand, context.params.getReal (Index::fxLink) > 0.5f);
 
     /** **The state dot**: the arrow says whether anything behind it has been
         moved.
 
-        A closed reveal whose twenty-three controls are all at their defaults and
+        A closed reveal whose sixteen controls are all at their defaults and
         one whose DRIVE is at 80 % are the same picture, and that is the
         measured cost of hiding anything at all. A filled disc in the module's
         accent, beside the chevrons, is the cheapest thing that answers it: it
@@ -1644,7 +1554,7 @@ void DwellPanel::paintPanel (juce::Graphics& g)
         and it is drawn rather than clicked, so it cannot be mistaken for a
         control.
 
-        It is **not a parameter** -- it is a reading of twenty-three that already
+        It is **not a parameter** -- it is a reading of sixteen that already
         exist, refreshed by the panel's own timer, so a lane, a preset and a
         knob all light it and none of them stores it. And it is drawn only
         while the panel is compact: with the columns open nothing is hidden,

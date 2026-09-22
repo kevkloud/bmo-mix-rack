@@ -75,13 +75,18 @@ a. Delay line, clean mode, feedback law, the dry-held-to-50% MIX law (dry path
    nulls bit-exactly at MIX 0, 25 and 50%), 2000 ms maximum.
 b. Time-change laws, tape and bucket-brigade modes, in-loop LOW CUT / HIGH CUT,
    DC blocker, shaper, safety clip; self-oscillation bounded above ~97%.
-c. **The lane** — a second engine with its own TIME, SEND gating its input, HOLD
-   gating its life (off **clears**), CHOP gating its output, the bipolar LANE
-   GAIN and LANE LEVEL, LINK and FX LINK; then ducking; then stereo modes.
+c. **The lane** — **a second instance of the engine built in (a) and (b)**, not
+   a new one (`10` §11.1 requires one reusable engine held twice, so the module
+   can be split later). Its own TIME, SEND gating its input, HOLD gating its
+   life (off **clears**), CHOP gating its output, the bipolar LANE GAIN, LANE
+   LEVEL and FX LINK; then ducking, **which is main-engine only**; then stereo
+   modes.
    **Corrected 2026-09-22: THROW, BUILD, FREEZE and VOICE are cut** (`15`,
    `10` §11) — the main loop loses its `s` input gate entirely, and the proof
    test is that its output is bit-identical between a throw-held and a
-   throw-never render.
+   throw-never render. **Corrected 2026-09-23: the lane has no voicing of its
+   own** — CHARACTER, STEREO, the cuts, the modulation and DRIVE govern both
+   engines, and `link` with the six lane voicing rows is deleted.
 d. In-loop FX candidates, cheapest first (Crush, Pan/Tremolo, then Diffuse),
    **one stage per engine, no shared state**. FX off must be bit-identical to
    the loop without the FX stage, **per path**. **Corrected 2026-09-22: Octave

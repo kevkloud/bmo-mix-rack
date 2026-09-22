@@ -1,11 +1,10 @@
 /*
     BMO Dwell as a host sees it.
 
-    The golden schema table below is the permanent one: ids 0-32 in the order
-    docs/delay/15-lane-redesign.md's parameter table fixes them, with their
-    ranges, defaults and choice counts. A session keys automation by position,
-    so this table changing is the schema moving -- a decision for Frosty, not a
-    fix.
+    The golden schema table below is the permanent one: ids 0-25 in their
+    frozen order, with their ranges, defaults and choice counts. A session keys
+    automation by position, so this table changing is the schema moving -- a
+    decision for Frosty, not a fix.
 
     tests/dsp/DwellDspTests.cpp writes the same table out without JUCE, because
     that is the one that runs in the DSP-only CI job. Two copies on purpose: if
@@ -53,22 +52,17 @@ namespace
         { P::kFx,        "FX",           0.0f,     1.0f,     0.0f,  2 },
         { P::kFxType,    "FX Type",      0.0f,     2.0f,     0.0f,  3 },
         { P::kFxAmount,  "FX Amount",    0.0f,   100.0f,    35.0f,  0 },
-        // The lane, ids 20-31. LINK is one of the two parameters in this schema
-        // whose default is on; fx_link at id 32 is the other.
-        { P::kLink,          "Link",              0.0f,     1.0f,     1.0f,  2 },
+        // The lane, ids 20-24: what it declares for itself once it shares the
+        // main delay's voicing. Its gates and its tail are up at 13-16, and
+        // the seven rows that used to stand here -- `link` and six `lane_`
+        // voicing values -- went on 2026-09-22 (modules/dwell/params.h).
         { P::kLaneLevel,     "Lane Level",      -24.0f,    24.0f,     0.0f,  0 },
         { P::kLaneTime,      "Lane Time",         1.0f,  2000.0f,   250.0f,  0 },
-        { P::kLaneCharacter, "Lane Character",    0.0f,     2.0f,     0.0f,  3 },
-        { P::kLaneStereo,    "Lane Stereo",       0.0f,     2.0f,     0.0f,  3 },
-        { P::kLaneLowCut,    "Lane Low Cut",     20.0f,  1000.0f,    20.0f,  0 },
-        { P::kLaneHighCut,   "Lane High Cut",  1000.0f, 20000.0f, 20000.0f,  0 },
-        { P::kLaneModRate,   "Lane Mod Rate",     0.1f,     8.0f,     0.6f,  0 },
-        { P::kLaneModDepth,  "Lane Mod Depth",    0.0f,   100.0f,     0.0f,  0 },
         { P::kLaneFx,        "Lane FX",           0.0f,     1.0f,     0.0f,  2 },
         { P::kLaneFxType,    "Lane FX Type",      0.0f,     2.0f,     0.0f,  3 },
         { P::kLaneFxAmount,  "Lane FX Amount",    0.0f,   100.0f,    35.0f,  0 },
-        // Id 32, and the one row deliberately past a rack slot's lanes. See
-        // modules/dwell/params.h and the assertion below.
+        // Id 25, the last row, and the only parameter in this schema whose
+        // default is on.
         { P::kFxLink,        "FX Link",           0.0f,     1.0f,     1.0f,  2 },
     };
 }
@@ -82,45 +76,41 @@ int main()
         auto proc = createDwell();
         checkSchema (*proc, kSchema);
         check (P::specs().size() == (size_t) P::Index::count, "the Index enum matches specs()");
-        check (P::specs().size() == 33, "thirty-three parameters, ids 0-32");
+        check (P::specs().size() == 26, "twenty-six parameters, ids 0-25");
 
-        //== One parameter is off a rack lane, on purpose =====================
+        //== Every parameter gets a rack automation lane again ================
         //
-        // **This assertion used to say every parameter was automatable in a
-        // rack. That is no longer true, and the message must not go on saying
-        // it.** A rack slot has RackProcessor::kParamsPerSlot = 32 host lanes;
-        // SlotOverflow keeps anything past 32 working in the panel, the DSP,
+        // **This assertion said "exactly one row is over the line, and it is
+        // `fx_link`" while the schema had thirty-three rows.** Cutting the
+        // lane's voicing on 2026-09-22 took it to twenty-six, so nothing is
+        // over the line and the message has to say *that* -- an assertion that
+        // went on describing an overflow would pass for the wrong reason the
+        // moment the overflow came back.
+        //
+        // A rack slot has RackProcessor::kParamsPerSlot host lanes.
+        // SlotOverflow keeps anything past that working in the panel, the DSP,
         // presets and saved state, and automatable when the plugin runs
-        // standalone -- but gives it no lane *in a rack*. Dwell now has
-        // exactly one such row.
+        // standalone -- but gives it no lane *in a rack*. What is claimed here
+        // is that BMO Dwell needs none of that: every row it has is a row a
+        // rack can automate.
         //
-        // So what is asserted is not "nothing is over the line" but **exactly
-        // one thing is, and it is the one that was chosen for it**. That is
-        // the claim worth pinning: an accidental 34th parameter would silently
-        // lose its rack lane and nothing else here would notice, and a change
-        // that pushed something *else* over the line would be the schema
-        // moving rather than a fix.
-        //
-        // `fx_link` is the row, and it is last because it is the newest idea
-        // in the table and the likeliest to be argued with -- Frosty,
-        // 2026-09-22: "leave this separate fx link off a lane in case it needs
-        // to be cut later". Cutting the last row renumbers nothing and orphans
-        // no stored lane.
+        // **Read from the rack rather than hardcoded**, which is the half of
+        // the old assertion worth keeping: `kParamsPerSlot` is the rack's
+        // number to change, and a test that typed 32 would keep passing while
+        // meaning something else if it ever did.
         constexpr auto kLanes = (size_t) bmo::RackProcessor::kParamsPerSlot;
 
-        check (kLanes == 32, "a rack slot still has 32 host automation lanes");
-        check (P::specs().size() == kLanes + 1,
-               "exactly one parameter sits past a rack slot's host lanes and has none there");
+        check (P::specs().size() <= kLanes,
+               "every one of BMO Dwell's parameters gets a rack automation lane");
 
-        if (P::specs().size() > kLanes)
-            check (std::string (P::specs()[kLanes].id) == P::kFxLink,
-                   "the one parameter with no rack automation lane is fx_link, deliberately");
+        // Said the other way, because the margin is the point rather than a
+        // coincidence: the cut left room to append, so the next parameter can
+        // be argued on merit instead of against the ceiling.
+        check (kLanes - P::specs().size() == 6,
+               "six of a rack slot's lanes are still spare");
 
-        // The half of the old claim that survives: everything under the line
-        // does get a lane, so nothing but fx_link is in the overflow.
-        for (size_t i = 0; i < kLanes && i < P::specs().size(); ++i)
-            check (std::string (P::specs()[i].id) != P::kFxLink,
-                   "fx_link is the last row, not one of the 32 that do get rack lanes");
+        check (std::string (P::specs().back().id) == P::kFxLink,
+               "fx_link is the last row -- appended-to-the-end is the only free move after ship");
     }
 
     //== Displayed values ======================================================
@@ -211,24 +201,15 @@ int main()
             { P::kFx,           1.0f },
             { P::kFxType,       2.0f },
             { P::kFxAmount,    12.0f },
-            // The lane. LINK goes to 0 because its default is 1: a round trip
-            // that restored every default would prove nothing about it.
-            { P::kLink,           0.0f },
+            // The lane's own five.
             { P::kLaneLevel,     -7.5f },
             { P::kLaneTime,     431.0f },
-            { P::kLaneCharacter,  1.0f },
-            { P::kLaneStereo,     2.0f },
-            { P::kLaneLowCut,   219.0f },
-            { P::kLaneHighCut, 5100.0f },
-            { P::kLaneModRate,    4.3f },
-            { P::kLaneModDepth,  56.0f },
             { P::kLaneFx,         1.0f },
             { P::kLaneFxType,     2.0f },
             { P::kLaneFxAmount,  88.0f },
-            // Id 32, and the one row with no rack automation lane. A round trip
-            // through saved state is exactly where SlotOverflow has to keep
-            // working, so it is in this list rather than exempt from it. 0
-            // because its default is 1, the same argument as LINK above.
+            // FX LINK goes to 0 because its default is 1: a round trip that
+            // restored every default would prove nothing about the one
+            // parameter here that does not start at zero-ish.
             { P::kFxLink,         0.0f },
         };
 

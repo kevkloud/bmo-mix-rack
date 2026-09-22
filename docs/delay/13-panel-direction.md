@@ -44,7 +44,9 @@ controls; see §2's correction for what is on it.
   lasts, how much you hear. *(Still true.)*
 - **Secondary:** DRIVE, MOD RATE, MOD DEPTH; then LOW CUT, HIGH CUT, DUCK.
   DUCK is the one non-loop control in the loop section. *(The "(+ VOICE)" that
-  rode on HIGH CUT is struck.)*
+  rode on HIGH CUT is struck.)* **From 2026-09-23 all of these except DUCK
+  govern both engines** (`10` §11.3), which the panel has to say somewhere: a
+  knob that moves two delay lines should not look like one that moves one.
 - ~~**VOICE** — the creative filter voicing (10 §11's name) — rides as a
   `ui::ConcentricBand` ring on HIGH CUT rather than taking a fourth row.~~
 - **Switch rows (`ui::SwitchButton`, `Tokens::switchWidth` 70):** CHARACTER
@@ -65,11 +67,14 @@ controls; see §2's correction for what is on it.
 The face is **nine controls** — CHARACTER, TIME with SYNC, FEEDBACK, MIX,
 STEREO, LO CUT, HI CUT, FX — at 3.2 per 100 px against the rejected panel's 7.1
 (`15`). Everything else is **revealed, not gated**: every parameter stays live
-and is read at all times. The reveal is **three columns at 980 px**, not the
-single 460 px column §6a describes: 260 face + 260 for the main delay's depth +
-400 for the lane, with 20 px gutters and `kPad` each side, which is why 980 and
-not a round number. The rows, the performance row and the row px below are the
-rejected panel's and are kept only as the record of what was measured.
+and is read at all times. The reveal is **not the single 460 px column §6a
+describes**: it grew to three columns at 980 px — 260 face + 260 for the main
+delay's depth + 400 for the lane — and then the **2026-09-23 pullback took seven
+controls out of it**, the lane's whole second voicing and LINK, so 980 is
+oversized for what is left and **the width is being redrawn**. No width in this
+document is the current one; `modules/dwell/Module.cpp` is. The rows, the
+performance row and the row px below are the rejected panel's and are kept only
+as the record of what was measured.
 
 Width **280** (BMO EQ's; 260 content). `ModulePanel` gives 688 design px: 94
 in, 126 out, **468 in the middle**. Slack re-centres, per `modules/sat`.
@@ -213,12 +218,13 @@ and rack, both appearances, a gate lit, before allocating.
 ## 6a. The FX section, and how expansion works here
 
 > **The mechanism below is correct and is the reason this document is kept.**
-> The widths and the column are not: **CORRECTED 2026-09-22**, expansion is
-> **280 → 980 across three columns**, not 280 → 460 in one. The second width
-> has to carry the main delay's depth *and* the whole lane — two voicings, two
-> FX sections and the lane's gates — which `15` already recorded would not fit
-> 560, let alone 460. What the arrow does, what is a parameter and what is a
-> session-only flag are unchanged.
+> The widths and the column are not, and they have moved twice. The 280 → 460
+> single column was never enough: the second width has to carry the main
+> delay's depth *and* the lane, which took it to 980 across three columns on
+> 2026-09-22. Then the **2026-09-23 pullback** deleted the lane's second
+> voicing and LINK, so the reveal shrank again and **the width is open**. What
+> the arrow does, what is a parameter and what is a session-only flag are
+> unchanged throughout, and that is the part worth reading here.
 
 **How BMO DEQ does it — read this first.** A module declares a second *width*:
 `ModuleDef::expandedWidth` (`core/product/ModuleDef.h:46`, with
@@ -259,9 +265,10 @@ column, not extra rows**.
   Lit in the accent. *(The "eight rows exactly as drawn" this said is §2's
   superseded layout.)*
 - ~~**Expanded 460** (280 + 180) … an FX column running beside rows 5–8.~~
-  **CORRECTED: expanded is 980, three columns** — 260 face, 260 for the main
-  delay's depth, 400 for the lane, 20 px gutters, `kPad` each side. One FX
-  column was never going to hold two FX sections.
+  **CORRECTED, twice.** One FX column was never going to hold two FX sections;
+  it went to 980 across three columns on 2026-09-22, and the 2026-09-23 pullback
+  then removed the lane's second voicing and LINK, so **the width is open
+  again**. `modules/dwell/Module.cpp` carries whatever it currently is.
 - **Caption per type.** `Percent` is the readout throughout, with the caption
   line naming what the percent moves. **CORRECTED 2026-09-22 — there are three
   types and three captions**: `AMOUNT (smear)` Diffuse, `(depth)` Pan/Tremolo,

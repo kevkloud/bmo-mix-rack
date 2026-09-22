@@ -59,30 +59,33 @@ is added, its whole-sample group delay comes off `D`, keeping the figure 0.
 
 ## 3. Parameters
 
-`specs()` order = `enum Index` order. **Thirty-three parameters, ids 0–32**
-(`15`'s table, README Decided items 17 and 24–26) — the twenty-row table this
-replaced carried `voice`, `throw`, `throwMode`, `freeze` and a seven-entry FX
-list, none of which exist. The ids below are the **string ids** as
-`modules/dwell/params.h` declares them; `enum Index` carries the same rows in
-the same order in camel case. The golden tables in
-`tests/plugin/DwellTests.cpp` and `tests/dsp/DwellDspTests.cpp` pin it, and
-`./build-ui/tools/Release/measure_dwell.exe schema` prints it. **`fx_link` (id
-32) and the three-entry FX list are Frosty's 2026-09-22 decisions**; they are in
-`params.h` as of that date, but a **`build-ui/` binary built before it still
-prints the 32-row table with Sweep in the list** — that is a stale exe, not a
-disagreement. Rebuild before believing it.
+`specs()` order = `enum Index` order; all automatable. **Twenty-six parameters,
+ids 0–25** (DECIDED, Frosty 2026-09-23; `15`, README Decided item 28). The ids
+below are the **string ids** as `modules/dwell/params.h` declares them; `enum
+Index` carries the same rows in the same order in camel case. The golden tables
+in `tests/plugin/DwellTests.cpp` and `tests/dsp/DwellDspTests.cpp` pin it, and
+`./build-ui/tools/Release/measure_dwell.exe schema` prints it — **rebuild before
+believing that tool**, since a binary built against an older table prints it
+without complaint.
 
-**Exactly one row is off-lane, and that is deliberate.** A rack slot carries
-`RackProcessor::kParamsPerSlot` = 32 host automation lanes, so ids 0–31 are
-automatable everywhere. **`fx_link` at id 32 is not**: `SlotOverflow` keeps it
-working in the panel, the DSP, presets and saved state, and it automates in the
-standalone plugin, but **in a rack it has no host lane**. Frosty put it there on
-purpose — *"leave this separate fx link off a lane in case it needs to be cut
-later"* (2026-09-22). It is a set-and-forget tie, which is the cheapest kind of
-parameter to spend the overflow on, and being outside the grid is what keeps
-removing it later from renumbering anything. **So "every Dwell parameter is
-rack-automatable" is no longer true**, and any document still saying it means
-ids 0–31.
+**The lane shares the main delay's voicing now, and that is where seven rows
+went.** `link`, `lane_character`, `lane_stereo`, `lane_low_cut`,
+`lane_high_cut`, `lane_mod_rate` and `lane_mod_depth` are **deleted**, and
+everything after them renumbers with **no holes**. `character`, `stereo`, the
+two cuts, the two modulation rows and `drive` now govern **both engines**;
+**DUCK is main-engine only** (10 §6, §11.3); and the lane keeps what makes it a
+lane — its TIME, LEVEL, tail, three gates and its own FX stage, tied to the
+main's by `fx_link`.
+
+**Every parameter is rack-automatable again.** A rack slot carries
+`RackProcessor::kParamsPerSlot` = **32** host automation lanes, and anything past
+that would fall to `SlotOverflow` — still working in the panel, the DSP, presets
+and saved state, still automatable standalone, but with **no host lane in a
+rack**. At 26 rows **Dwell uses none of that**: the whole table is inside the
+grid with room to spare. The constraint is still the one that shaped this module
+— it is why the 2026-09-21 table cut controls to fit, which is the pressure
+Frosty removed by pulling the lane's voicing back (`15`) — but Dwell no longer
+spends a single row outside the lanes.
 
 | # | id | Range / units / law | Default | Smoothing |
 |---|---|---|---|---|
@@ -106,34 +109,26 @@ ids 0–31.
 | 17 | `fx` | bool — the main loop's FX stage | off | none — the stage is skipped, not faded (10 §11a) |
 | 18 | `fx_type` | choice, 3: Diffuse / Pan/Tremolo / Crush | Diffuse | xfade |
 | 19 | `fx_amount` | 0…100 %, lin, step 0.1 | 35 | 20 ms |
-| 20 | `link` | bool — the lane's **voicing** follows the main's (ids 23–28, six rows; never the FX trio) | **on** | none — a flag; the seed is a UI gesture (10 §11.3) |
-| 21 | `lane_level` | −24…+24 dB, lin, step 0.01 | 0 | 20 ms |
-| 22 | `lane_time` | 1…2000 ms, log, step 0.01 | 250 | 10 §2's law; not smoothed |
-| 23 | `lane_character` | choice, 3, the same list as `character` | Clean | xfade |
-| 24 | `lane_stereo` | choice, 3, the same list as `stereo` | Stereo | xfade |
-| 25 | `lane_low_cut` | 20…1000 Hz, log, step 0.1 | 20 | 20 ms |
-| 26 | `lane_high_cut` | 1000…20000 Hz, log, step 0.1 (same cap) | 20000 | 20 ms |
-| 27 | `lane_mod_rate` | 0.1…8 Hz, log, step 0.01 | 0.6 | 20 ms |
-| 28 | `lane_mod_depth` | 0…100 %, lin, step 0.1 | 0 | 20 ms |
-| 29 | `lane_fx` | bool — the lane's own FX stage | off | none — skipped, not faded |
-| 30 | `lane_fx_type` | choice, 3, the same list as `fx_type` | Diffuse | xfade |
-| 31 | `lane_fx_amount` | 0…100 %, lin, step 0.1 | 35 | 20 ms |
-| 32 | `fx_link` | bool — the lane's FX trio (29–31) follows the main's (17–19). **Off-lane: `SlotOverflow`, no host automation lane in a rack** | **on** | none — a flag; the seed is a UI gesture, as `link`'s is |
+| 20 | `lane_level` | −24…+24 dB, lin, step 0.01 | 0 | 20 ms |
+| 21 | `lane_time` | 1…2000 ms, log, step 0.01 | 250 | 10 §2's law; not smoothed |
+| 22 | `lane_fx` | bool — the lane's own FX stage | off | none — skipped, not faded |
+| 23 | `lane_fx_type` | choice, 3, the same list as `fx_type` | Diffuse | xfade |
+| 24 | `lane_fx_amount` | 0…100 %, lin, step 0.1 | 35 | 20 ms |
+| 25 | `fx_link` | bool — the lane's FX trio (22–24) follows the main's (17–19) | **on** | none — a flag; nothing is seeded (10 §11.3) |
 
-**The lane is ids 13–16 and 20–31**, and 10 §11 owns every one of their
+**The lane is ids 13–16 and 20–25**, and 10 §11 owns every one of their
 meanings. Two rows exist because no other row could carry them: `lane_gain` is
 the lane's **tail**, `lane_level` its **loudness**, and one cannot set the other
-(`15`). **Lane DRIVE is deliberately absent** and is the one to reconsider after
-listening: an append lands at id 33, past the rack's lanes beside `fx_link`,
-which costs little for a set-and-forget amount.
+(`15`). **Lane DRIVE is deliberately absent**; `drive` (10) now drives both
+engines, so there is nothing to append.
 
-**The lane has two ties, not one, and they are separate on purpose.** `link`
-(20) mirrors the **voicing** — `lane_character`, `lane_stereo`, the two lane
-cuts and the two lane modulation rows, **six parameters, ids 23–28**.
-`fx_link` (32) mirrors the **FX trio**, 29–31 against 17–19. Frosty chose
-independent FX precisely so a thrown word can be crushed against a clean main
-delay; folding FX into `link` would mean unlinking the whole voicing to get
-that, which is the opposite of what the split is for.
+**One tie remains, and it is the one worth a parameter.** `fx_link` (25) ties
+the lane's FX trio (22–24) to the main's (17–19), default on. FX is the part of
+the lane's voice that stayed its own, because **a thrown word can be crushed
+against a clean main delay** — a second set of cuts and modulation could not
+earn its rows the same way, and those went (see above). **Nothing is seeded when
+the tie releases**: the lane's three values are still there, untouched, so there
+is no UI gesture and no automation pass that writes parameters (10 §11.3).
 
 **Feedback normalisation (10 §3 owns it).** `P_c` is the character's reference
 loop peak, computed at `prepare` and on any change of character, TIME or sample
@@ -141,8 +136,10 @@ rate — clean ≈ 0.999, tape ≈ 1.054, bucket-brigade 0.990–0.999 with TIME
 **not a parameter** and never appears in the schema; it exists so the knob
 position at which the loop stops decaying is the **same on every character**,
 which is what the lane's centre detent promises (15). Unity means the loop's
-loudest band holds; the rest still decays, so a long hold darkens. The lane's
-detent divides by the **lane's own** character's `P_c`, not the main's.
+loudest band holds; the rest still decays, so a long hold darkens. **There is
+one CHARACTER now**, so one `P_c` law serves both engines — but each evaluates
+it at **its own TIME**, which matters on bucket-brigade, whose filters are
+derived from a clock that TIME sets (10 §4).
 
 **FX (10 §11a; candidates until ship).** `fx_type` runs least to most
 intervention, the rule the other lists already follow: **Diffuse, Pan/Tremolo,
@@ -164,7 +161,7 @@ folding Off into the list as index 0, costs a permanent redundant state and make
 "is FX on" two questions; rejected.) **These are candidates**: the list and its
 order may change freely until ship and are **append-only forever afterwards**, so
 any candidate that fails 14 §3's listening must be **removed before ship**, never
-left in as a dead index. **Both engines read the one list** (ids 18 and 30), so
+left in as a dead index. **Both engines read the one list** (ids 18 and 23), so
 there is nothing to keep in step; `fx_link` ties their *values*, which is a
 different thing from sharing the list.
 
@@ -178,10 +175,8 @@ host's `ui::ExpandButton` flag: a touch point beyond DEQ's host-bar-only switch
 compact opens the view once, as a convenience; the arrow then closes it while
 `fx` stays on; turning `fx` off never closes the view. Automation, preset load
 and session recall never resize the module. Rack defaults compact; standalone
-defaults expanded. **Both unlink seeds are the same kind of thing** (10 §11.3):
-a click writes the lane's six mirrored voicing rows — or, for `fx_link`, its FX
-trio — from the main's current values, and the parameter changing writes
-nothing.
+defaults expanded. **`fx_link` is not this kind of thing and needs no gesture**
+(10 §11.3): it writes nothing at all, in either direction, whoever moves it.
 
 **No control is named DWELL** — that is the module. **Permanent at ship**: ids,
 their order, ranges, steps, defaults, and the choice lists **with their index
@@ -236,15 +231,16 @@ sustains yet stays bounded — peak under the ceiling, converging within 1 dB,
 DC ≤ −80 dBFS, no NaN, no denormal slowdown.
 
 **d. In-loop filter stability.** `feedback` 100, both cuts at both extremes,
-60 s at 44.1–192 kHz, **each engine** (the lane at `lane_gain` +100 with its own
-cuts at their extremes): bounded by the safety clip, no divergence, NaN or DC
+60 s at 44.1–192 kHz, **each engine** — the cuts are shared, so the same
+extremes drive both, and the lane is run at `lane_gain` +100 and at its own
+extremes of TIME: bounded by the safety clip, no divergence, NaN or DC
 growth. Since 10 §4's coefficients depend only on `f_c/f_s`, the measured
 response must agree across every rate within 1 %. (`voice` is gone — the cuts
 are plain one-poles again, 10 §11.5 — so there is no resonant peak to compare;
 what is compared is the cascade's magnitude at the corners.)
 
-**e. The lane: send, gain, hold, chop, link** (10 §11; replaces the old throw /
-build / freeze item, whose controls no longer exist).
+**e. The lane: send, gain, hold, chop, fx link** (10 §11; replaces the old throw
+/ build / freeze item, whose controls no longer exist).
 
 1. **The main loop is undisturbed — the headline assertion.** Two renders, 30 s
    of sustained input, `feedback` 50, every character: (A) `send` never touched,
@@ -295,28 +291,28 @@ build / freeze item, whose controls no longer exist).
    reaches the clip.
 6. **Unity holds exactly at the detent, per character.** `lane_gain` exactly 0,
    `hold` on, one impulse, 60 s at 44.1–192 kHz, every character. On **Clean**
-   with both lane cuts on their rails, `drive` 0 and `lane_fx` off the chain is
+   with both cuts on their rails, `drive` 0 and `lane_fx` off the chain is
    neutral and the assertion is level drift over the whole 60 s ≤ 0.1 dB, DC
    ≤ −80 dBFS, no NaN. On **Tape and Bucket-brigade the hold colours by design**
    (10 §11.5), so the assertion there is **per-lap magnitude ≤ 1 and level
    monotone non-increasing**, never a spectrum. This test is the one that proves
    10 §3's `P_c` is doing its job: without the normalisation the detent is not
    unity on tape, and this fails.
-7. **`link` and `fx_link`, tested the same way and tested apart.** With `link`
-   on, two renders in which the **six** mirrored voicing rows (23–28) are set to
-   opposite extremes must null bit-exactly — the lane reads the main, so its own
-   values cannot leak. With `fx_link` on, the same for the FX trio (29–31). The
-   unlink **gesture** writes its own set from the main's current values and
-   nothing jumps (nothing above −60 dBFS across the switch). **Automating
-   either flag writes no parameters**: assert the host-visible parameter-change
-   count across an automation pass of each is exactly **zero**, which is the
-   assertion that catches the failure `15` names. Then the assertion that the
-   split exists for: with **`link` on and `fx_link` off**, the lane's FX values
-   must reach the audio — a lane crushed against a clean linked main delay is
-   the case Frosty chose this shape for, and a test that only exercised both
-   flags together would pass while it was broken. `fx_link` is off-lane, so this
-   is asserted in the standalone plugin's parameter set and in state round-trip,
-   not through a rack automation lane.
+7. **`fx_link`, and the shared voicing it is the exception to.** With `fx_link`
+   on, two renders in which the lane's FX trio (22–24) is set to opposite
+   extremes must null bit-exactly — the lane's stage reads the main's three, so
+   its own values cannot leak. Turning it off must make them reach the audio,
+   which is the case the parameter exists for: **a lane crushed against a clean
+   main delay**. **Automating it writes no parameters**: assert the host-visible
+   parameter-change count across a `fx_link` automation pass is exactly **zero**
+   — there is no seeding left in the module, so that assertion is now simply
+   that nothing writes. Nothing jumps across the switch either (nothing above
+   −60 dBFS).
+   Then the shared voicing itself: moving `character`, `stereo`, either cut,
+   either modulation row or `drive` must change **both** engines' output, and
+   moving `duck` must change **only the main's** — the ducker never reaches the
+   lane (10 §6). Both directions are asserted, because a shared parameter
+   silently reaching one engine only is the failure this shape invites.
 8. **`send`'s ramp.** `send` toggled on and off block boundaries under sustained
    input: no discontinuity above −60 dBFS on either edge; fully open and fully
    closed within 10 §11.4's 5/15 ms ±20 %.
@@ -400,25 +396,24 @@ off" assertion is struck rather than reworded.
 **The independence assertions are run with `fx_link` off**, which is what makes
 them meaningful; with it on the lane's trio is a copy of the main's by
 construction. State: `fx`/`fx_type`/`fx_amount`, the lane's three and `fx_link`
-round-trip in the golden schema and in presets — **`fx_link` in particular, since
-being off-lane means state and presets are the only way it travels in a rack** —
+round-trip in the golden schema and in presets,
 while the **expanded view round-trips in the session only**, separately, and
 differs by default between rack (compact) and standalone (expanded). Test
 direction: automating, preset-loading or recalling `fx` never resizes the
 module; a user click that turns `fx` on from compact opens the view once; the
-arrow toggles the view alone, touching no parameter and no audio. The unlink
-seed is tested the same way, in (e) 7.
+arrow toggles the view alone, touching no parameter and no audio.
 
 **m. Two engines, every invariant.** `15` requires every invariant above to hold
 for **both** engines, so (d), (f), (k) and (l) are each re-run a second time with
-**`hold` on, the lane fed, `link` off and the lane's parameters at their
+**`hold` on, the lane fed, `fx_link` off and the lane's own rows at their
 extremes** — the whole of (k)'s battery included: 44.1–192 kHz, block sizes
 1/32/64/512/1023 and a random schedule identical to −120 dB, silence decaying to
 exact zeros with no CPU rise, no NaN at any extreme, `latencyForParams` exactly
 0. **An injected NaN must be contained within the engine it was injected into**:
 a NaN in the lane must never reach the main's ring, which is (e) 1's claim in a
-different currency. Expect roughly double the work in the handoff's estimate
-(`15`, "What stage 2 now is").
+different currency. **The engine is one type instantiated twice** (10 §11.1), so
+this is one body of code exercised under two parameter sets rather than two code
+paths to keep in step — which is most of why the second run is affordable.
 
 **Tail reporting, both engines.** `tailSecondsForParams` reports **the larger of
 the two engines' tails** from parameters only (10 §11.6): the main's per 10 §9;
@@ -444,11 +439,17 @@ never below the measured time to −60 dBFS — is then run over `lane_time` ×
 (README item 16), so §1's three candidates and 10 §0's gold-gap assumption are
 history rather than a choice. `throwMode` no longer exists, and with it the
 question of BUILD's target and ramp as parameters — 10 §11.2's `lane_gain` law
-is not automatable piecewise. On 2026-09-22 Frosty settled three more: **`link`
-mirrors six** (the voicing rows 23–28) with the FX trio on its own `fx_link` at
-id 32; **Sweep is cut**, leaving three FX types; and **`g_max` is a CALIBRATE
-value**, settled by ear in `14` §3's listening round rather than decided on
-paper.
+is not automatable piecewise. On 2026-09-22 Frosty settled **Sweep is cut**,
+leaving three FX types, and **`g_max` is a CALIBRATE value** settled by ear in
+`14` §3's listening round rather than decided on paper.
+
+**On 2026-09-23 he settled the shape of the module**, which closed the LINK
+questions by removing LINK: the lane **shares** the main delay's voicing, seven
+rows are deleted, the schema is **26**, `fx_link` is an ordinary on-lane
+parameter at id 25, and stage 2 builds **one reusable engine instantiated
+twice** (10 §11.1). The reasoning is in `15`: controls were being cut to fit 32
+lanes rather than on merit, which is a sign the module was doing two modules'
+work.
 
 **Blocking unknown**: 01 has no MEASURED figure for a modern clean delay's
 feedback ceiling or maximum time; 10 sets both by decision (1.05, 2000 ms) and

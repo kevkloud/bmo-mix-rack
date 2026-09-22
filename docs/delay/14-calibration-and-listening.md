@@ -12,6 +12,14 @@ all four controls are cut (`15`, `10` §11). Octave up, Octave down and Reverse
 left the FX round on 2026-09-21 and **Sweep on 2026-09-22**, so **L3 hears
 three candidates, not seven**. What it put in is at the foot of §1.
 
+**And on 2026-09-23 the lane stopped having a voicing of its own** (`15`, "The
+module was pulled back"): CHARACTER, STEREO, the cuts, the modulation and DRIVE
+govern **both engines**, DUCK the main only. So every voicing below is settled
+**once and applies to both** — which shrinks the matrix rather than doubling it,
+but means a voicing chosen on the main delay's repeats is also being chosen for
+thrown words. **Hear both before signing one off**, and say in the verdict which
+you heard it on.
+
 ## 1. The open values
 
 M = measure (§2), L = listen (§3), F = Frosty's call.

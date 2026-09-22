@@ -55,7 +55,7 @@ inline constexpr juce::uint32 kAccent = 0xfff094e6;
 const ModuleDef& module()
 {
     // Two widths, the mechanism BMO DEQ established: 280 compact, which a rack
-    // opens it at, and 980 expanded, which standalone opens it at and which
+    // opens it at, and 840 expanded, which standalone opens it at and which
     // carries the main delay's depth and the whole of the lane. Both are
     // multiples of 20.
     //
@@ -74,26 +74,37 @@ const ModuleDef& module()
         {
             return std::make_unique<DwellPanel> (std::move (ctx));
         },
-        // **980: three columns, and the arithmetic is exact rather than
-        // approximate.** 980 less `kPad` each side is 960 of content, which is
-        // 260 + 20 + 260 + 20 + 400 -- the face's own column, the main delay's
-        // depth, and a 400 px column carrying the whole of the lane. Still a
-        // multiple of 20, as BMO DEQ's two widths are.
+        // **840: three even columns, and the arithmetic is exact rather than
+        // approximate.** 840 less `kPad` each side is 820 of content, which is
+        // 260 + 20 + 260 + 20 + 260 -- the face's own column, the main delay's
+        // depth, and the lane, with 20 px gutters. A multiple of 20, as BMO
+        // DEQ's two widths are.
         //
-        // 560 -- two columns -- is what this was until the lane was drawn, and
-        // 1120 (four even 260s) was the fallback if the lane overran 400. It
-        // does not. Widthwise the lane's widest row is its FX band, a 172 px
-        // 2x2 grid beside a 220 px AMOUNT whose caption measures 209 at 15 pt;
-        // heightwise it is nine bands in the 611 px under the LANE rule, which
-        // leaves 11 px of air between rows against the face's 9. 1120 would
-        // have split the lane across two columns and stopped it reading as one
-        // engine, which is the whole reason for drawing it at all.
+        // **It was 980 while the lane mirrored the main delay.** The lane's
+        // column had to be 400 then: its widest rows were a four-knob voicing
+        // quad and an FX band laid out as a 172 px stack beside a 220 px
+        // AMOUNT. Both are gone -- the voicing with the schema cut of
+        // 2026-09-22, the stacked grid because a plain column takes the three
+        // cells across a row the way the depth column already does -- so the
+        // lane is an ordinary 260 px column and the three are even.
+        //
+        // **Two columns was asked for and does not fit.** Folding the depth
+        // and the lane into one revealed column means 590 px of rows in the
+        // 603 px between the first rule and the foot: the LOOP rule, four
+        // knobs across, the GR bar, the FX rule and its band, the LANE rule,
+        // the tail band, its region caption, the lane's FX rule and its band.
+        // That leaves 13 px to spend as air across eleven helpings, where the
+        // face spends 9 px on each of twelve. It can only be bought by cutting
+        // the GR meter and the THROW / FREEZE / BUILD caption, which are two
+        // of the things this pass was told to keep. Three even columns is what
+        // the sixteen revealed controls actually cost; 140 px of width is what
+        // the schema cut bought.
         //
         // **There is exactly one of these.** Two separate reveals -- one for
         // the main delay's depth and one for the lane -- are not available
         // however much a composition might want them: `ModuleDef` carries a
         // single `expandedWidth` and the view flag behind it is one bool.
-        980,
+        840,
     };
 
     return def;

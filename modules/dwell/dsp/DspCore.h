@@ -17,6 +17,18 @@ namespace bmo::dwell
     through untouched. The ring, the character chain, the feedback matrix and
     the FX stage are stage 2, per docs/delay/10-dsp-spec.md.
 
+    **Stage 2 builds one delay engine and instantiates it twice** -- the main
+    delay and the lane -- rather than one bespoke dual engine with the lane
+    written into it (DECIDED, Frosty 2026-09-22, with the voicing cut that made
+    it obvious). The two engines now take the *same* character, stereo mode,
+    cuts, modulation and drive and differ only in their time, their gain law
+    and their FX stage, which is exactly the shape a reusable engine has: one
+    class, a `Params` of its own, two members here. Written the other way the
+    lane would be a set of branches threaded through the main loop, and pulling
+    it apart later -- if Frosty ever wants the throw lane as its own product,
+    or the main delay without one -- would be a rewrite rather than a
+    deletion. This is the framing to build against, not a preference.
+
     It exists in this state on purpose rather than as a stub: the schema is
     permanent from this release, so the wiring from spec index to named value
     is pinned by tests now, before any DSP can be written against a mis-read
@@ -34,12 +46,17 @@ class DspCore
 {
 public:
     /** Every parameter in the real units the panel and the host show, in the
-        order docs/delay/15's table fixes. `DwellDsp::setParams` fills it.
+        schema's own order. `DwellDsp::setParams` fills it.
 
-        Two engines from 2026-09-21: the main delay, then the lane that a send
-        feeds. Each field's initialiser is its spec default, so a core that has
-        never been handed a parameter array is still the module at its
-        defaults. */
+        **Two engines, one voicing** from 2026-09-22: the lane reads
+        `characterChoice`, `stereoChoice`, both cuts, both modulation values
+        and `drivePct` from the fields below rather than from lane copies of
+        them, because there are no lane copies any more. `duckDb` is the one
+        main-delay value it does *not* read -- the ducker pushes the main wet
+        out of the way of the dry, and the lane's job is to be heard.
+
+        Each field's initialiser is its spec default, so a core that has never
+        been handed a parameter array is still the module at its defaults. */
     struct Params
     {
         float timeMs        = 375.0f;
@@ -67,34 +84,21 @@ public:
         int   fxTypeChoice  = 0;
         float fxAmountPct   = 35.0f;
 
-        /** The lane's mirror of the main delay. `link` defaults on, so an
-            untouched instance is one delay with one set of controls; the
-            seeding that happens when it is switched off is a UI gesture, not
-            something this struct does (docs/delay/15).
-
-            **`link` ties the six voicing rows only** from 2026-09-22 --
-            character, stereo, the two cuts and the two modulation rows. The
-            lane's FX trio answers to `fxLink` at the foot of this struct,
-            because independent FX is what the lane's own FX stage exists for
-            and folding it in would have cost six parameters of divergence to
-            buy one (modules/dwell/params.h, id 32). */
-        bool  link              = true;
+        /** What the lane declares for itself: how loud it is against the main
+            delay's wet, how long its own repeat is, and its own FX stage.
+            Everything else it needs is above -- one set of voicing values, two
+            engines reading them. */
         float laneLevelDb       = 0.0f;
         float laneTimeMs        = 250.0f;
-        int   laneCharacterChoice = 0;
-        int   laneStereoChoice  = 0;
-        float laneLowCutHz      = 20.0f;
-        float laneHighCutHz     = 20000.0f;
-        float laneModRateHz     = 0.6f;
-        float laneModDepthPct   = 0.0f;
         bool  laneFx            = false;
         int   laneFxTypeChoice  = 0;
         float laneFxAmountPct   = 35.0f;
 
         /** Whether the lane's FX trio follows the main delay's. Carried here
-            for the same reason `link` is -- a value that stops arriving is a
-            value the lane could not go back to -- and, like `link`, it is the
-            later stage that acts on it. Defaults on, matching `link`. */
+            whatever it says -- a value that stops arriving is a value the lane
+            could not go back to -- and it is the later stage that acts on it.
+            Defaults on: a fresh instance is one delay with one set of
+            controls. */
         bool  fxLink            = true;
     };
 

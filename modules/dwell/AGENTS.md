@@ -5,17 +5,17 @@ What this folder cannot be read off its own code. The specification is in
 
 ## The schema is permanent, and three things are frozen together
 
-`params.h` holds **ids 0–32 — thirty-three parameters**, which
+`params.h` holds **ids 0–25 — twenty-six parameters**, which
 `docs/delay/11-integration-and-test-plan.md` §3 and `docs/delay/15-lane-redesign.md`
-both list. **Thirty-two of them fit the grid, and the thirty-third is outside it
-on purpose.** A rack slot carries `RackProcessor::kParamsPerSlot` = 32 host
-lanes, and anything past that lives in `SlotOverflow`: working in the panel, the
-DSP, presets and saved state, automatable standalone, but **with no host
-automation lane in a rack**. Ids 0–31 are inside; **`fx_link` at id 32 is not**,
-because Frosty put it there deliberately — *"leave this separate fx link off a
-lane in case it needs to be cut later"* (2026-09-22). **So "every Dwell
-parameter is rack-automatable" is false**: it is true of 0–31, and `fx_link` is
-the exception. Frozen from the first release: **the
+both list. **Every one of them is rack-automatable.** A rack slot carries
+`RackProcessor::kParamsPerSlot` = 32 host lanes, and anything past that would
+live in `SlotOverflow`: working in the panel, the DSP, presets and saved state,
+automatable standalone, but **with no host automation lane in a rack**.
+**Dwell uses none of that** — 26 rows fit inside the grid with six lanes to
+spare. The limit is still worth knowing, because it is the constraint that
+shaped this module: controls were being cut to fit it until Frosty pulled the
+lane's voicing back on 2026-09-23 (`docs/delay/15`, "The module was pulled
+back"). Frozen from the first release: **the
 ids, their order, and the index order of the four choice lists** — `note`,
 `character`, `stereo`, `fx_type`. A session keys automation by position and
 stores a choice as its index, so moving a row or inserting a name into a list
@@ -23,14 +23,15 @@ silently repoints every lane and every preset that referenced it. Nothing errors
 and nothing warns. New parameters append at the end; new choices append at the
 end of their list.
 
-**Nothing has shipped, which is the only reason the 2026-09-21 and 2026-09-22
-tables could do what they did**: VOICE deleted and everything after it
-renumbered, `throw` renamed `send`, `throw_mode` replaced by the bipolar float
-`lane_gain`, `freeze` renamed `hold`, `chop` added, `fx_type` shortened from
-seven entries to four and then to three, twelve `lane_*` rows appended at 20–31,
-and `fx_link` appended at 32. Deletions, reorders, renames and type changes are
-illegal after ship; appends are not. **Lane DRIVE is the one to reconsider** and
-would land at id 33, past the rack's lanes beside `fx_link`.
+**Nothing has shipped, which is the only reason the table could keep moving**:
+VOICE deleted and everything after it renumbered, `throw` renamed `send`,
+`throw_mode` replaced by the bipolar float `lane_gain`, `freeze` renamed `hold`,
+`chop` added, `fx_type` shortened from seven entries to four and then to three,
+`lane_*` rows appended and then **seven of them deleted again on 2026-09-23** —
+`link` and the lane's six voicing rows — with everything after them renumbering
+and **no holes left behind**. Deletions, reorders, renames and type changes are
+illegal after ship; appends are not. **There is no lane DRIVE to reconsider any
+more**: `drive` (10) drives both engines.
 
 `tests/plugin/DwellTests.cpp` writes the whole table out, and
 `tests/dsp/DwellDspTests.cpp` pins the enum-to-spec agreement. Either failing
@@ -101,6 +102,19 @@ hold after it.
 - **The main delay has no input gate.** `docs/delay/10` §3's `s` term is
   removed, not repurposed, so nothing the lane does can disturb the main loop —
   and `11` §4e's headline test asserts exactly that, bit for bit.
+- **The lane shares the main delay's voicing** (DECIDED, Frosty 2026-09-23).
+  `character`, `stereo`, both cuts, both modulation rows and `drive` govern
+  **both engines**; **`duck` is main-engine only** — the ducker never reaches
+  the lane; `mix` governs both, since both sum into the wet before it. The lane
+  owns its TIME, LEVEL, tail, three gates and its FX stage, and **nothing
+  else**. There is **no `link` and no `lane_character`, `lane_stereo`,
+  `lane_low_cut`, `lane_high_cut`, `lane_mod_rate` or `lane_mod_depth`** — all
+  seven were deleted, not defaulted.
+- **The DSP is one reusable engine instantiated twice**, not a bespoke dual
+  engine (`docs/delay/10` §11.1). This is a **requirement**, not a style note:
+  Frosty chose it so the module can be split into a plain delay and a throw
+  delay later without redoing the expensive part. Anything that interleaves the
+  two paths defeats it.
 - **No oversampling parameter exists and none is to be added.** `10` §0 is the
   topology decision the whole CPU budget rests on. Adding a rate later would
   be a schema event, not a feature.
@@ -123,29 +137,29 @@ host bar (`ui::ExpandButton`): Dwell's panel has to be able to ask its host to
 flip the session-only flag. That is panel work, in `panel/`, not in
 `Module.cpp`.
 
-**The two link flags have the same shape of trap, and it is worse if got
-wrong.** Unlinking seeds the lane from the main delay's current values so
-nothing jumps — but **that seeding is a UI gesture, not a side effect of the
-parameter changing** (`docs/delay/10` §11.3). If it fired whenever the flag went
-false, automating it would rewrite its whole set on every automation pass and
-fight the user's own automation. The parameter is a flag; the seed is something
-a *click* does. `11` §4e asserts it by counting host-visible parameter changes
-across an automation pass of each: exactly zero.
+**`fx_link` (id 25) is the one tie left, and it has no gesture.** It makes the
+lane's FX trio (22–24) follow the main's (17–19), default on, and while it is on
+the lane's three values are **ignored, not overwritten** — so they are still
+there when it releases and **nothing is seeded, in either direction**
+(`docs/delay/10` §11.3). The seed-on-unlink machinery this file used to warn
+about went with `link`; there is no longer any parameter in this module whose
+change writes another parameter, and `11` §4e asserts that by counting
+host-visible parameter changes across an `fx_link` automation pass: exactly
+zero.
 
-**There are two flags and they cover different things** (DECIDED, Frosty
-2026-09-22). **`link` (20) covers SIX parameters** — the lane's voicing, ids
-23–28. **`fx_link` (32) covers the FX trio**, 29–31 against 17–19, separately,
-because **independent FX is the feature**: a thrown word can be crushed against
-a clean main delay, and folding FX into `link` would mean unlinking the whole
-voicing to get it. Any "eight" left anywhere is stale — it counted VOICE and
-lane DRIVE before they were cut.
+**FX is the one part of the lane's voice that stayed its own**, because a thrown
+word can be crushed against a clean main delay. A second set of cuts and
+modulation could not earn its rows the same way, which is why they went and this
+did not.
 
 `Module.cpp` and `modules/CMakeLists.txt` already name what the panel has to
 be: `bmo::dwell::DwellPanel`, a `ui::ModulePanel` constructed from a
 `ui::ModuleContext`, declared in `panel/DwellPanel.h` and defined in
 `panel/DwellPanel.cpp`. The panel chooses its layout from the width it is
-given (280 or 560) and needs no other signal. 560 rather than `13` §6a's
-460 is part of the panel redesign of 2026-09-21 and is Frosty's to confirm.
+given and needs no other signal — **which width is in flux**: 280 compact is
+settled, the second width has been 460, 560 and 980 in turn, and the
+2026-09-23 pullback removed seven controls from what the reveal has to hold.
+`Module.cpp` is the record; this file is not.
 
 **The face is nine controls** (DECIDED, Frosty 2026-09-21; `docs/delay/15`):
 CHARACTER, TIME with SYNC, FEEDBACK, MIX, STEREO, LO CUT, HI CUT and FX. That
@@ -155,11 +169,13 @@ the rack; nine is 3.2. Everything else is **revealed**, and it is a
 **visibility** split only: every parameter stays live and is read at all times,
 there is no DSP gate, and `params.h` is untouched.
 
-**The expanded inventory and its width are not settled.** `15` records the
-problem plainly: two mirrored voicings plus two FX sections do not fit the built
-560, and the lane's own gates (SEND, HOLD, CHOP, LANE GAIN, LEVEL, LINK) have to
-live somewhere reachable. That is a panel decision in `panel/`, taken against a
-render, not something to settle from this file.
+**The expanded inventory and its width are not settled, and the 2026-09-23
+pullback made the problem smaller rather than solving it.** What the reveal has
+to hold is now **one** voicing, the main delay's depth, and the lane's own
+controls — SEND, HOLD, CHOP, LANE GAIN, LEVEL, TIME and its FX trio. The second
+mirrored voicing and LINK are gone, so the 980 px three-column layout is
+oversized for what remains. That is a panel decision in `panel/`, taken against
+a render, not something to settle from this file.
 
 ## The accent is decided
 

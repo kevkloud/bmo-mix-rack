@@ -299,8 +299,14 @@ asked, and never touched by the ducker.
 
 This section previously specified THROW as a send gate with a three-way
 `throwMode`, plus BUILD, FREEZE and VOICE. **All four are gone** — the schema
-they belonged to no longer exists (`15`'s table, ids 13–16 and 20–31). What
-replaced them is below; what their removal costs is §11.5.
+they belonged to no longer exists. What replaced them is below; what their
+removal costs is §11.5.
+
+**The lane shares the main delay's voicing** (DECIDED, Frosty 2026-09-23;
+§11.3). It is a second delay *line*, not a second set of controls: one
+CHARACTER, one STEREO, one pair of cuts, one modulation and one DRIVE govern
+both engines. What the lane owns is its TIME, its LEVEL, its tail, its three
+gates and its own FX stage.
 
 **The main loop loses its input gate.** §3's injection is
 `v[n] = x[n] + Σ_j g_ij·C(y_j[n])` — the `s` term is **removed, not
@@ -310,6 +316,24 @@ line's output must be **bit-identical** between a render in which SEND is held
 throughout and one in which it is never touched (`11` §4e, test 1).
 
 ### 11.1 Topology
+
+**REQUIREMENT — one delay engine, instantiated twice** (DECIDED, Frosty
+2026-09-23). The DSP is built as **a single reusable engine type — ring,
+interpolator, time-change law, character chain, modulation, FX stage, clip —
+held twice**, not as one bespoke object that happens to contain two of
+everything. The two instances differ only in the parameters handed to them and
+in what feeds and reads them: the main engine takes the dry input and is ducked,
+the lane takes SEND's gated dry input and is not.
+
+**This is a structural requirement, not a style preference, and it is the reason
+it is written here rather than left to the implementer.** Frosty chose it so
+that Dwell can be **split into a plain delay and a throw delay later** without
+redoing the expensive part — the engine is the expensive part, and an engine
+that is already a standalone, self-contained unit can be lifted into a second
+module as it stands. A dual-purpose object with the two paths interleaved would
+have to be taken apart first, which is exactly the work this avoids. It also
+pays immediately: every invariant in `11` §4 is then asserted against one piece
+of code exercised twice rather than two code paths that must be kept in step.
 
 Let `x[n]` be the module's dry input pair, `y_main` the main loop's read and
 `y_lane` the lane's.
@@ -321,11 +345,13 @@ Let `x[n]` be the module's dry input pair, `y_main` the main loop's read and
    lane's content depend on the main's FEEDBACK, which is the bit-identity
    claim above running backwards. The alternative is recorded here so the
    choice is visible, not hidden (DECISION, Frosty's to overrule).
-2. **`C_lane(·)` is the full character chain of §4 and §11a** with the lane's
-   own parameters: LOW CUT → HIGH CUT → mode filters → FX → DC blocker →
-   shaper → **safety clip**. Same code, **second instance, second state**. No
-   buffer, filter state, LFO phase, follower or crossfade is shared between the
-   engines; see §11a.
+2. **`C_lane(·)` is the full character chain of §4 and §11a**, running the
+   **shared** voicing — LOW CUT → HIGH CUT → mode filters → FX → DC blocker →
+   shaper → **safety clip** — with only its FX stage on its own parameters
+   (§11.3). Same code, **second instance, second state**: sharing a parameter
+   is not sharing a buffer, and no ring, filter state, LFO phase, follower or
+   crossfade is shared between the engines. That separation is what test 1
+   below rests on; see §11a.
 3. **The lane's output is gated by CHOP, scaled by LEVEL, and summed into the
    wet bus after the main's loop tap and after the ducker**:
    `wet = GR·wet_main + chop[n]·10^(lane_level/20)·y_lane`. §6's `GR` never
@@ -343,8 +369,10 @@ three modes**, which is why one control covers them and why the caption —
 THROW / FREEZE / BUILD — changes with the region while nothing in the schema
 does. Default **−40**, in the throw region.
 
-With `L = lane_gain / 100 ∈ [−1, +1]`, and `P_c` the lane character's reference
-loop peak from **§3, which owns it and is not restated here**:
+With `L = lane_gain / 100 ∈ [−1, +1]`, and `P_c` the character's reference loop
+peak from **§3, which owns it and is not restated here** — one `P_c`, since
+CHARACTER is shared (§11.3), though each engine evaluates it at **its own TIME**
+where the character's filters depend on TIME, as bucket-brigade's do:
 
 | region | loop gain |
 |---|---|
@@ -384,50 +412,44 @@ loop peak from **§3, which owns it and is not restated here**:
   ~10 dB/s, a violent swell. Whatever is heard, it is a *starting* gain and not
   a bound — §11.6's clip is the bound, at every value in that range.
 
-### 11.3 What the lane mirrors: LINK (id 20) and FX LINK (id 32)
+### 11.3 What the lane shares, and FX LINK (id 25)
 
-**The lane is a full mirror of the main delay** (README Decided item 11): its
-own TIME, character, stereo mode, cuts, modulation and FX stage, so a thrown
-word can be a different sound from the repeats it lands in. It does **not**
-mirror FEEDBACK, DUCK, DRIVE or MIX — the first two have no counterpart in the
-lane by construction (§11.2, §11.1), lane DRIVE was cut (`15`), and MIX governs
-both engines together. `lane_time` (22) and `lane_level` (21) are never mirrored
-either: differing from the main is the point of them.
+**The lane shares the main delay's voicing rather than mirroring it** (DECIDED,
+Frosty 2026-09-23). `character` (4), `stereo` (5), `low_cut` (6), `high_cut`
+(7), `mod_rate` (8), `mod_depth` (9) and `drive` (10) **govern both engines**:
+there is one set of voicing controls on this module and both delay lines read
+it. There is **no LINK parameter and no voicing mirror** — the seven `lane_*`
+voicing rows that used to exist are deleted, not defaulted-on.
 
-**There are two ties, and they are separate on purpose** (DECIDED, Frosty
-2026-09-22):
+What the lane still has of its own is what makes it a lane rather than a copy:
+**TIME (21), LEVEL (20), the bipolar tail (14), SEND (13), HOLD (15), CHOP (16)
+and its own FX stage (22–24)**. Those are the controls a thrown word needs to
+sit differently from the repeats it lands in — a different time, a different
+loudness, a different tail, and an effect of its own.
 
-- **LINK (id 20, default on) ties the voicing: six parameters, ids 23–28** —
-  `lane_character`, `lane_stereo`, `lane_low_cut`, `lane_high_cut`,
-  `lane_mod_rate`, `lane_mod_depth`. That is the whole set; **it is six, not
-  eight and not nine**, and any earlier count came from a table that still had
-  VOICE and lane DRIVE in it.
-- **FX LINK (id 32, default on) ties the FX trio**, 29–31 to 17–19, and is a
-  parameter of its own rather than part of LINK. **The lane's FX being
-  independent is the feature**: a thrown word can be crushed against a clean
-  main delay. Folding FX into LINK would mean unlinking the whole voicing to get
-  that, which is exactly backwards. **Id 32 is deliberately off-lane** — past
-  `RackProcessor::kParamsPerSlot`, so `SlotOverflow` carries it: it works in the
-  panel, the DSP, presets and saved state, and automates standalone, but has no
-  host automation lane in a rack. Frosty's reason, recorded as he gave it:
-  *"leave this separate fx link off a lane in case it needs to be cut later."*
-  A set-and-forget tie is the cheapest thing to spend the overflow on, and
-  sitting outside the grid is what would let it be removed later without
-  renumbering anything.
+Three exceptions to "both engines", each for its own reason:
 
-**While a tie is on, the lane's parameters under it are ignored, not
-overwritten**: nothing is written to them, they keep whatever they held, and the
-lane reads the main's ids directly.
+- **DUCK (11) is main-engine only.** The ducker never touches the lane (`15`),
+  because the lane's whole job is to be heard; ducking it would duck the
+  emphasis against the source that caused it.
+- **FEEDBACK (3) has no lane counterpart**: the lane's tail is `lane_gain`
+  (§11.2), which is a different control with a different law and a detent.
+- **MIX (12) governs both**, since both sum into the wet bus before it (§11.1).
 
-**Unlinking seeds the lane from the main's current values, and that seeding is a
-UI gesture, not a side effect of the parameter changing** (DECIDED; `15`) — for
-both flags. If it fired whenever the flag went false, automating it would
-rewrite its whole set on every automation pass and fight any automation the user
-had drawn on the lane's own controls. The parameter is a flag; the seed is
-something a **click** does — the same separation `11` §3 already draws between a
-click that opens the expanded view and a parameter change that must never resize
-the module. `11` §4e asserts it by counting host-visible parameter changes
-across an automation pass of each flag: the count is exactly zero.
+**FX LINK (id 25, default on) ties the lane's FX trio (22–24) to the main's
+(17–19).** It is the one tie left, and the lane's FX is the one part of its
+voicing that stayed independent: **a thrown word can be crushed against a clean
+main delay**, which is worth a parameter where a second set of cuts and
+modulation was not. While it is on, the lane's three FX rows are **ignored, not
+overwritten** — nothing is written to them, they keep whatever they held, and
+the lane's stage reads the main's three directly.
+
+**Nothing is seeded when it is turned off.** The old seed-on-unlink machinery
+went with LINK: with no voicing mirror there is nothing to seed, and `fx_link`
+needs none — the lane's own FX values are still there, untouched, and come back
+when the tie releases. So there is no UI gesture to build, no automation pass
+that rewrites parameters, and `11` §4e's assertion is simply that **automating
+`fx_link` writes no parameters at all**.
 
 ### 11.4 SEND (13), HOLD (15) and CHOP (16)
 
@@ -523,7 +545,9 @@ transparent and the hold is close to bit-exact — but "close to" is the honest
 word, and on any other setting a held chord is audibly a different sound after
 thirty seconds than it was at one. That capability leaves v1 deliberately, in
 exchange for a hold that can be filtered, chopped, layered and levelled while it
-runs.
+runs — with the honest footnote that **filtering it filters the main delay too**
+now that the voicing is shared (§11.3). Only CHOP, LEVEL, the tail and the
+lane's FX move the held sound alone.
 
 **Ping-pong** is fully specified in §8 and applies to each engine independently,
 off its own `stereo` id. No WIDTH control in v1: with the dry bit-exact below
@@ -555,7 +579,7 @@ here.
   bounds the lane belongs at **the top of LEVEL's travel and not at unity**
   (`15`): at unity the lane never reaches the clip, so the test would prove
   nothing.
-- **`lane_level` is −24…+24 dB, default 0, step 0.01** (id 21; `15`), matching
+- **`lane_level` is −24…+24 dB, default 0, step 0.01** (id 20; `15`), matching
   every other level in the suite rather than inventing a range. It sets the
   lane's **loudness** against the main delay's wet, which `lane_gain` cannot:
   that one is the **tail**. Without it, the relative volume of a thrown word
@@ -599,10 +623,12 @@ the lane's is `lane_fx`/`lane_fx_type`/`lane_fx_amount`, and everything in this
 section applies to each independently. **The two stages share no state** — no
 allpass buffer, no LFO phase, no sample-and-hold counter, no quantiser state —
 so neither can disturb the other's buffers, and "FX off is bit-identical to the
-loop without the stage" is asserted **per path** (`11` §4l). **`fx_link` (id 32)
+loop without the stage" is asserted **per path** (`11` §4l). **`fx_link` (id 25)
 ties the two stages' parameter *values* and never their state** (§11.3): even
 with both stages set identically they run from separate buffers, and that is
-what keeps the claim above true at every setting of the flag.
+what keeps the claim above true at every setting of the flag. The same holds of
+the voicing the two engines now share — one `character` value, two sets of
+filter state.
 Before the blocker, so an offset an FX introduces is removed rather than
 compounded; before the shaper and clip, so the clip stays the last thing in the
 loop and §3's bound still ends there. The stage recirculates, so every candidate
@@ -699,7 +725,10 @@ why 11 §4k's heaviest-case budget is marked for re-measurement.
 | Crush | 16→3 bits, hold ÷1–32; exempt from the alias floor | CALIBRATE / DECISION |
 | Pan / Tremolo | stepped once per repeat; AMOUNT is depth | CALIBRATE |
 | FX types | Diffuse, Pan/Tremolo, Crush — **three**; Sweep cut because VOICE was | DECIDED (Frosty, 2026-09-22) |
-| Lane ties | LINK (20) = the six voicing rows 23–28; FX LINK (32) = the FX trio, off-lane | DECIDED (Frosty, 2026-09-22) |
+| Voicing | **Shared**: `character`, `stereo`, the cuts, the modulation and `drive` govern both engines; DUCK is main-only | DECIDED (Frosty, 2026-09-23) |
+| Lane's own | TIME, LEVEL, `lane_gain`, SEND, HOLD, CHOP, its FX trio | DECIDED (Frosty, 2026-09-23) |
+| FX LINK | id 25, default on, ties the lane's FX trio to the main's; no seeding | DECIDED (Frosty, 2026-09-23) |
+| Engine structure | **one reusable engine instantiated twice**, so the module can be split later | DECIDED (Frosty, 2026-09-23); §11.1 |
 | FX AMOUNT default | 35 % | DECISION |
 | FX CPU ceiling | ≤ 1.3× FX-off, ≤ 1.5× heaviest | DECISION |
 

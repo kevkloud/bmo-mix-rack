@@ -144,7 +144,8 @@ It was the first module with **two widths**: 320 compact and 600 full. A
 rack opens it compact and standalone opens it full; the switch between them
 is on the host's bar, not on the panel (`ModuleDef::expandedWidth`,
 `ui::ExpandButton`). See `modules/deq/AGENTS.md`. **BMO Dwell is the second**,
-at 280 compact and 460 expanded, and it adds one thing DEQ does not have: an
+at 280 compact and **840 expanded** -- three even columns, the delay, its depth,
+and the throw lane -- and it adds one thing DEQ does not have: an
 arrow on the panel itself that opens and closes the column. The view is still
 session-only and still not a parameter, so automating or preset-loading `fx`
 never resizes the module -- see `modules/dwell/AGENTS.md`.

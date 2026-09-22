@@ -9,12 +9,12 @@ by dispatched agents on AURORA, 2026-09-20, under `HANDOFF-groundwork.md`.
 - `00-repo-conventions.md` — delay-specific repo delta: reusable DSP, no host tempo reaches modules today, tail and latency rules, free accent gaps.
 - `01-reference-behavior.md` — documented behaviour of tape echo, bucket-brigade, early digital and modern delays; target figures with confidence.
 - `02-design-approaches.md` — interpolation, time-change, feedback loop, stereo, ducking and character-modelling survey; neutral shortlist.
-- `10-dsp-spec.md` — the chosen topology: **two loops** (the main delay and the lane) with clean / tape / bucket-brigade modes, no oversampling, zero reported latency, dry-held-to-50% MIX law, the lane's SEND / HOLD / CHOP gates and its bipolar tail, and an in-loop FX stage per engine. Owns DSP meaning and fixed values. §11 was rewritten on 2026-09-22: THROW, BUILD, FREEZE and VOICE are gone.
-- `11-integration-and-test-plan.md` — identity row, registration, the permanent parameter table (**ids 0–31**, rewritten 2026-09-22 from `measure_dwell schema`) and its order, and how to build the test suites. Owns ids, ranges and choice lists.
+- `10-dsp-spec.md` — the chosen topology: **one engine instantiated twice** (the main delay and the lane) with clean / tape / bucket-brigade modes, no oversampling, zero reported latency, dry-held-to-50% MIX law, the lane's SEND / HOLD / CHOP gates and its bipolar tail, and an in-loop FX stage per engine. Owns DSP meaning and fixed values. §11 was rewritten on 2026-09-22 (THROW, BUILD, FREEZE and VOICE are gone) and §11.3 again on 2026-09-23 (the voicing is shared; LINK is gone).
+- `11-integration-and-test-plan.md` — identity row, registration, the permanent parameter table (**26 rows, ids 0–25**, cut back 2026-09-23) and its order, and how to build the test suites. Owns ids, ranges and choice lists.
 - `12-tempo-and-tail-plumbing.md` — host tempo and tail-length plumbing, processor → rack → module; can land as its own PR first.
 - `13-panel-direction.md` — **SUPERSEDED by `15` and by the panel as built**; kept for its account of DEQ's expansion mechanism, its caption and readout conventions, and its permanent-at-ship list. Its layout, performance buttons and accent recommendation are history; the specific wrongs are marked in place (2026-09-22).
 - `14-calibration-and-listening.md` — how every CALIBRATE and DECISION value gets settled, and what freezes at ship.
-- `15-lane-redesign.md` — **read before `10`, `11` and `13`**: the nine-control face, THROW rebuilt as a parallel lane, the schema changes, the tape stability bug, and what stage 2 now is.
+- `15-lane-redesign.md` — **read before `10`, `11` and `13`**: the nine-control face, THROW rebuilt as a parallel lane, the schema changes, the tape stability bug, what stage 2 now is, and **"The module was pulled back" (2026-09-23)** — why the lane shares the main's voicing and why splitting into two modules was deferred.
 - `20-name-clearance.md` — name-clearance note for "Dwell": web search plus a USPTO registry search; not legal advice.
 - `HANDOFF-groundwork.md` — the ruleset that produced this pack.
 - `HANDOFF-add-bmo-dwell.md` — the prompt that starts the build from this pack.
@@ -50,10 +50,11 @@ by dispatched agents on AURORA, 2026-09-20, under `HANDOFF-groundwork.md`.
     delay: its own TIME, fed by SEND, life-gated by HOLD (off **clears**),
     output-gated by CHOP, tail set by one bipolar knob whose sticky centre is
     unity. SEND onto an occupied lane **sums**.
-11. **The lane is a full mirror** of the main delay — its own character, stereo,
-    filters, modulation and FX — with **LINK**, and unlinking **seeds from the
-    main's current values**. *(Amended: the voice and drive this listed were
-    both cut, items 18 and 20, and the FX trio has its own tie, item 25.)*
+11. ~~**The lane is a full mirror** of the main delay, with **LINK**, and
+    unlinking **seeds from the main's current values**.~~ **REVERSED by item 28
+    (2026-09-23)**: the lane **shares** the main's voicing, LINK is deleted and
+    nothing is seeded anywhere. The lane keeps its TIME, LEVEL, tail, three
+    gates and its own FX.
 12. **This supersedes item 2**: the old bit-exact FREEZE is replaced by the
     lane's centre detent, which holds at unity but still laps the character and
     filters, so a long hold colours. The non-eroding hold is gone from v1.
@@ -72,11 +73,10 @@ by dispatched agents on AURORA, 2026-09-20, under `HANDOFF-groundwork.md`.
 
 ## Decided (Frosty, 2026-09-21, second pass) — the table is settled
 
-17. **The schema is 33 parameters**, ids 0–32, renumbered. Ids 0–31 fill a rack
-    slot's 32 host lanes and are automatable everywhere; **id 32 sits outside
-    them on purpose** (item 25), so it is the one parameter that is not. The
-    full table is in `15-lane-redesign.md` and in `11` §3, rewritten from it on
-    2026-09-22.
+17. ~~**The schema is 33 parameters**, ids 0–32, with id 32 outside the rack's
+    lanes.~~ **SUPERSEDED by item 28: it is 26, ids 0–25, and nothing sits
+    outside the lanes.** The full table is in `15-lane-redesign.md` and in `11`
+    §3.
 18. **VOICE and lane VOICE are cut.** LO CUT and HI CUT are already continuous
     sweeps; VOICE only added resonance on top. Cutting it also retires the
     state-variable filters and their closed-form peak normalisation.
@@ -86,7 +86,8 @@ by dispatched agents on AURORA, 2026-09-20, under `HANDOFF-groundwork.md`.
     after ship, so this was the last moment. **Superseded in part by item 26:
     Sweep went too, and the list is three.**
 20. **lane DRIVE is cut, and is the one to reconsider** if the sound wants it —
-    appends are permitted after ship.
+    appends are permitted after ship. *(Moot from item 28: `drive` governs both
+    engines, so there is nothing to append.)*
 21. **Both FX buttons stay.** "Amount at 0 means bypassed" was considered and
     rejected: it costs the one-click A/B, and Crush's bit depth does not read
     zero as a no-op.
@@ -110,20 +111,16 @@ by dispatched agents on AURORA, 2026-09-20, under `HANDOFF-groundwork.md`.
 
 ## Decided (Frosty, 2026-09-22) — answering the spec rewrite's open questions
 
-24. **LINK ties SIX parameters**, the lane's voicing: `lane_character`,
-    `lane_stereo`, `lane_low_cut`, `lane_high_cut`, `lane_mod_rate`,
-    `lane_mod_depth` (ids 23–28). Not eight, which counted VOICE and lane DRIVE
-    before they were cut, and not nine: the FX trio is **deliberately outside
-    LINK**, because independent FX is the feature — a thrown word can be
-    crushed against a clean main delay, and folding FX in would mean unlinking
-    the voicing to get it.
-25. **`fx_link` is added at id 32**, a bool defaulting on, tying the lane's FX
-    trio (29–31) to the main's (17–19). It is **off-lane on purpose**: past
-    `kParamsPerSlot`, so `SlotOverflow` carries it — working in the panel, the
-    DSP, presets and saved state, automatable standalone, but with **no host
-    automation lane in a rack**. Frosty: *"leave this separate fx link off a
-    lane in case it needs to be cut later."* This is the one Dwell parameter
-    that is not rack-automatable, and item 17 is written accordingly.
+24. ~~**LINK ties SIX parameters**, the lane's voicing (ids 23–28), with the FX
+    trio deliberately outside it.~~ **SUPERSEDED by item 28: LINK is deleted
+    with the six rows it tied.** The reason it was kept out of FX still stands
+    and is why `fx_link` survived the cut.
+25. ~~**`fx_link` is added at id 32** and is **off-lane on purpose** — *"leave
+    this separate fx link off a lane in case it needs to be cut later"* — the
+    one Dwell parameter that is not rack-automatable.~~ **AMENDED by item 28**:
+    `fx_link` stays, at **id 25**, and is an **ordinary on-lane parameter** —
+    at 26 rows there is no overflow to sit in. It still ties the lane's FX trio
+    (22–24) to the main's (17–19), default on.
 26. **Sweep is cut**, leaving `fx_type` at **three** — Diffuse, Pan/Tremolo,
     Crush. **It was cut because VOICE was cut**: Sweep moved VOICE's resonant
     centre per repeat, and replacing that with a band-pass of its own inside the
@@ -133,6 +130,32 @@ by dispatched agents on AURORA, 2026-09-20, under `HANDOFF-groundwork.md`.
     §3's listening round rather than fixed on paper. The safety clip bounds the
     lane at every value in the range, so this is a musical choice, not a
     stability one.
+
+## Decided (Frosty, 2026-09-23) — the module is pulled back
+
+28. **The lane shares the main delay's voicing instead of mirroring it, and the
+    schema is 26, ids 0–25.** `link`, `lane_character`, `lane_stereo`,
+    `lane_low_cut`, `lane_high_cut`, `lane_mod_rate` and `lane_mod_depth` are
+    **deleted** — seven rows — and everything after them renumbers with no
+    holes. `character`, `stereo`, the cuts, the modulation and `drive` govern
+    **both engines**; **DUCK is main-engine only**; MIX governs both. The lane
+    keeps TIME, LEVEL, its tail, SEND / HOLD / CHOP and its own FX.
+    **Why**: the module had reached 33 parameters, a 980 px three-column panel
+    and one row pushed off the rack's 32 lanes, and controls were being cut **to
+    fit a budget rather than on merit** — VOICE, lane DRIVE and Sweep all went
+    that way. That is one module doing two modules' work. Frosty reeled it in
+    rather than splitting it.
+29. **`fx_link` is on-lane and nothing is seeded.** At 26 rows every parameter
+    is rack-automatable again and Dwell uses no `SlotOverflow`. With LINK gone
+    there is nothing to seed, and `fx_link` needs no gesture — it overwrites
+    nothing, so the lane's FX values are still there when the tie releases.
+30. **Stage 2 builds one reusable delay engine instantiated twice**, not a
+    bespoke dual engine (`10` §11.1). Chosen so Dwell **can be split into a
+    plain delay and a throw delay later** without redoing the expensive part.
+    **Splitting now was considered and deferred**: two modules in a rack run
+    **in series**, so a separate throw module would catch the main delay's
+    output rather than the dry signal, losing the parallel-from-dry topology
+    the lane exists for.
 
 ## Still open after that pass
 

@@ -63,18 +63,17 @@ namespace
                     "diffuse", "rate", "depth", "rotation", "asymmetry" } },
         { "ltvcomp", { "amount", "gate", "output", "complex", "attack", "release",
                      "arc", "sidechain", "low_thru", "high_thru" } },
-        // **Thirty-two, which is exactly a slot's lanes**: every one of BMO
-        // Dwell's parameters gets one, and the thirty-third would not. The
-        // order is permanent -- docs/delay/15-lane-redesign.md's table, which
-        // is what `11` §3's twenty-row version became on 2026-09-21.
+        // **Twenty-six, six under a slot's lanes**: every one of BMO Dwell's
+        // parameters gets one, with room to append. The order is permanent.
+        // It was thirty-three, one row over the ceiling, until the lane was
+        // given the main delay's voicing on 2026-09-22 and `link` and the six
+        // `lane_` voicing rows came out of the middle of this list.
         { "dwell", { "time", "sync", "note", "feedback", "character", "stereo",
                      "low_cut", "high_cut", "mod_rate", "mod_depth",
                      "drive", "duck", "mix", "send", "lane_gain", "hold", "chop",
                      "fx", "fx_type", "fx_amount",
-                     "link", "lane_level", "lane_time", "lane_character",
-                     "lane_stereo", "lane_low_cut", "lane_high_cut",
-                     "lane_mod_rate", "lane_mod_depth",
-                     "lane_fx", "lane_fx_type", "lane_fx_amount" } },
+                     "lane_level", "lane_time",
+                     "lane_fx", "lane_fx_type", "lane_fx_amount", "fx_link" } },
     };
 
     std::vector<juce::String> chainIds (RackProcessor& rack)

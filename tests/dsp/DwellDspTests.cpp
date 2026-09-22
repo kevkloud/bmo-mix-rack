@@ -5,13 +5,14 @@
     docs/delay/11-integration-and-test-plan.md §4 lists the suites this file
     grows into -- time accuracy, feedback decay, the mix law, the FX stage.
     None of them can be written yet. What can be written, and is worth writing
-    first, is everything that is *permanent*: ids 0-31 in their frozen order,
+    first, is everything that is *permanent*: ids 0-25 in their frozen order,
     the three choice lists in their frozen index order, and the mapping from
     spec index to named value in DwellDsp::setParams.
 
-    **The table is docs/delay/15's, settled 2026-09-21: thirty-two parameters,
-    two engines.** `11` §3 still prints the twenty-parameter checkpoint and is
-    stale until its own pass rewrites it.
+    **The table settled at twenty-six on 2026-09-22: two engines, one
+    voicing.** The lane runs the main delay's character, stereo, cuts,
+    modulation and drive rather than mirroring them, which deleted `link` and
+    six `lane_` rows and renumbered everything after them.
 
     That last one is the reason this file exists now rather than with the DSP.
     The schema cannot move after release, so a lane read off by one here would
@@ -101,45 +102,35 @@ const Row kSchema[]
     { 17, "fx",         0.0f,    1.0f,     0.0f,  0 },
     { 18, "fx_type",    0.0f,    2.0f,     0.0f,  3 },
     { 19, "fx_amount",  0.0f,  100.0f,    35.0f,  0 },
-    // The lane, ids 20-31. LINK is the one bool in this schema that defaults
-    // **on**: a mirror nobody has asked to differ follows the main delay.
-    { 20, "link",            0.0f,     1.0f,     1.0f,  0 },
-    { 21, "lane_level",    -24.0f,    24.0f,     0.0f,  0 },
-    { 22, "lane_time",       1.0f,  2000.0f,   250.0f,  0 },
-    { 23, "lane_character",  0.0f,     2.0f,     0.0f,  3 },
-    { 24, "lane_stereo",     0.0f,     2.0f,     0.0f,  3 },
-    { 25, "lane_low_cut",   20.0f,  1000.0f,    20.0f,  0 },
-    { 26, "lane_high_cut", 1000.0f, 20000.0f, 20000.0f, 0 },
-    { 27, "lane_mod_rate",   0.1f,     8.0f,     0.6f,  0 },
-    { 28, "lane_mod_depth",  0.0f,   100.0f,     0.0f,  0 },
-    { 29, "lane_fx",         0.0f,     1.0f,     0.0f,  0 },
-    { 30, "lane_fx_type",    0.0f,     2.0f,     0.0f,  3 },
-    { 31, "lane_fx_amount",  0.0f,   100.0f,    35.0f,  0 },
-    // Id 32, the one row deliberately past a rack slot's 32 host lanes.
-    // SlotOverflow carries it everywhere but a rack automation lane; see
-    // modules/dwell/params.h, and testSchemaIsWhatItWillAlwaysBe below for
-    // the assertion that it is the only one.
-    { 32, "fx_link",          0.0f,     1.0f,     1.0f,  0 },
+    // The lane, ids 20-24: what it declares for itself once it runs the main
+    // delay's voicing. `link` and the six `lane_` voicing rows that stood here
+    // went on 2026-09-22; see modules/dwell/params.h.
+    { 20, "lane_level",    -24.0f,    24.0f,     0.0f,  0 },
+    { 21, "lane_time",       1.0f,  2000.0f,   250.0f,  0 },
+    { 22, "lane_fx",         0.0f,     1.0f,     0.0f,  0 },
+    { 23, "lane_fx_type",    0.0f,     2.0f,     0.0f,  3 },
+    { 24, "lane_fx_amount",  0.0f,   100.0f,    35.0f,  0 },
+    // Id 25, the last row, and the one bool in this schema that defaults
+    // **on**: a stage nobody has asked to differ follows the main delay.
+    { 25, "fx_link",         0.0f,     1.0f,     1.0f,  0 },
 };
 
 void testSchemaIsWhatItWillAlwaysBe()
 {
     const auto& specs = P::specs();
 
-    check (specs.size() == 33, "thirty-three parameters, ids 0-32");
+    check (specs.size() == 26, "twenty-six parameters, ids 0-25");
     check (specs.size() == (size_t) P::Index::count, "the Index enum matches specs()");
-    check ((int) P::Index::count == 33, "Index::count is 33");
+    check ((int) P::Index::count == 26, "Index::count is 26");
 
-    // The same shape tests/plugin/DwellTests.cpp asserts, checked here too
-    // because this is the suite a DSP-only container runs. **Not "everything
-    // fits" any more**: past 32 a parameter keeps working everywhere but a
-    // rack automation lane (SlotOverflow), and `fx_link` is deliberately the
-    // one row over that line. Exactly one, and exactly that one.
-    check (specs.size() == 33, "exactly one parameter sits past a rack slot's 32 host lanes");
-    check (std::string (specs[32].id) == P::kFxLink,
-           "the one parameter with no rack automation lane is fx_link, deliberately");
+    // The same shape tests/plugin/DwellTests.cpp asserts, minus the one thing
+    // this suite cannot see: it is JUCE-free and does not link the rack, so
+    // `kParamsPerSlot` is not in scope here. That assertion lives over there;
+    // what is checked here is the count and the last row, which is what would
+    // have to move for it to start failing.
+    check (std::string (specs[25].id) == P::kFxLink, "fx_link closes the table at id 25");
 
-    if (specs.size() != 33)
+    if (specs.size() != 26)
         return;
 
     for (const auto& row : kSchema)
@@ -160,9 +151,9 @@ void testSchemaIsWhatItWillAlwaysBe()
     check (std::string (specs[(size_t) P::Index::mix].id)      == P::kMix,      "Index::mix is mix");
     check (std::string (specs[(size_t) P::Index::send].id)     == P::kSend,     "Index::send is send");
     check (std::string (specs[(size_t) P::Index::fxAmount].id) == P::kFxAmount, "Index::fxAmount is fx_amount");
-    check (std::string (specs[(size_t) P::Index::link].id)     == P::kLink,     "Index::link is link");
-    check (std::string (specs[(size_t) P::Index::laneFxAmount].id) == P::kLaneFxAmount,
-           "Index::laneFxAmount is lane_fx_amount, and it is the last one");
+    check (std::string (specs[(size_t) P::Index::laneLevel].id) == P::kLaneLevel, "Index::laneLevel is lane_level");
+    check (std::string (specs[(size_t) P::Index::fxLink].id)    == P::kFxLink,
+           "Index::fxLink is fx_link, and it is the last one");
 }
 
 /** Choice lists are stored by index, so the order is as permanent as the ids.
@@ -172,9 +163,11 @@ void testSchemaIsWhatItWillAlwaysBe()
     two run least to most intervention so that index 0 is the neutral value a
     corrupt state lands on.
 
-    The lane's three choices are the *same lists*, so checking the main
-    delay's checks both -- and the pair of assertions at the end is what
-    catches them being split into two lists that can drift apart. */
+    The lane reuses the FX list rather than declaring its own, so checking the
+    main delay's checks both -- and the assertion at the end is what catches
+    them being split into two lists that can drift apart. It has nothing to
+    reuse for CHARACTER and STEREO: from 2026-09-22 there is one of each
+    parameter and the lane runs it. */
 void testChoiceListsKeepTheirOrder()
 {
     const auto& specs = P::specs();
@@ -228,15 +221,11 @@ void testChoiceListsKeepTheirOrder()
         check (std::string (fxType.choices[(size_t) i]) != "Off",
                "no FX type is called Off -- fx owns off");
 
-    // The lane mirrors the main delay off the same three lists rather than
-    // declaring its own, which is the only way the two cannot drift apart.
-    const auto& laneCharacter = specs[(size_t) P::Index::laneCharacter];
-    const auto& laneStereo    = specs[(size_t) P::Index::laneStereo];
-    const auto& laneFxType    = specs[(size_t) P::Index::laneFxType];
+    // The lane's FX types come off the main delay's list rather than a list of
+    // its own, which is the only way the two cannot drift apart.
+    const auto& laneFxType = specs[(size_t) P::Index::laneFxType];
 
-    check (laneCharacter.choices == character.choices, "the lane's characters are the main delay's");
-    check (laneStereo.choices    == stereo.choices,    "the lane's stereo modes are the main delay's");
-    check (laneFxType.choices    == fxType.choices,    "the lane's FX types are the main delay's");
+    check (laneFxType.choices == fxType.choices, "the lane's FX types are the main delay's");
 }
 
 /** Every value reaches the core under the name it was given.
@@ -272,23 +261,14 @@ void testEveryParameterIsWiredToItsOwnValue()
     v[P::Index::fxType]    = 1.0f;
     v[P::Index::fxAmount]  = 12.0f;
 
-    v[P::Index::link]          = 0.0f;   // the only one whose default is on
     v[P::Index::laneLevel]     = -7.5f;
     v[P::Index::laneTime]      = 431.0f;
-    v[P::Index::laneCharacter] = 1.0f;
-    v[P::Index::laneStereo]    = 2.0f;
-    v[P::Index::laneLowCut]    = 219.0f;
-    v[P::Index::laneHighCut]   = 5100.0f;
-    v[P::Index::laneModRate]   = 4.3f;
-    v[P::Index::laneModDepth]  = 56.0f;
     v[P::Index::laneFx]        = 1.0f;
     v[P::Index::laneFxType]    = 2.0f;
     v[P::Index::laneFxAmount]  = 88.0f;
 
-    // Id 32. Past a rack slot's lanes and wired like every row under it --
-    // SlotOverflow's whole point is that it still reaches here. Set to the
-    // opposite of its default, as `link` above is, because a bool that
-    // defaults on is one a forgotten assignment would still read correctly.
+    // Set to the opposite of its default, because a bool that defaults on is
+    // one a forgotten assignment would still read correctly.
     v[P::Index::fxLink]        = 0.0f;
 
     dsp.setParams (v.data(), (int) v.size());
@@ -314,27 +294,20 @@ void testEveryParameterIsWiredToItsOwnValue()
     check (p.fxTypeChoice    == 1,       "FX TYPE reaches the core");
     check (p.fxAmountPct     == 12.0f,   "FX AMOUNT reaches the core");
 
-    check (! p.link,                            "LINK reaches the core");
     check (p.laneLevelDb         == -7.5f,      "LANE LEVEL reaches the core");
     check (p.laneTimeMs          == 431.0f,     "LANE TIME reaches the core");
-    check (p.laneCharacterChoice == 1,          "LANE CHARACTER reaches the core");
-    check (p.laneStereoChoice    == 2,          "LANE STEREO reaches the core");
-    check (p.laneLowCutHz        == 219.0f,     "LANE LOW CUT reaches the core");
-    check (p.laneHighCutHz       == 5100.0f,    "LANE HIGH CUT reaches the core");
-    check (p.laneModRateHz       == 4.3f,       "LANE MOD RATE reaches the core");
-    check (p.laneModDepthPct     == 56.0f,      "LANE MOD DEPTH reaches the core");
     check (p.laneFx,                            "LANE FX reaches the core");
     check (p.laneFxTypeChoice    == 2,          "LANE FX TYPE reaches the core");
     check (p.laneFxAmountPct     == 88.0f,      "LANE FX AMOUNT reaches the core");
     check (! p.fxLink,                          "FX LINK reaches the core");
 
-    // The lane's twelve are a mirror of the main delay's rows and the pairs
-    // sit next to each other in this struct, which is exactly the shape a
-    // copy-paste reads the wrong lane into. Every pair above is set to a
-    // different number for that reason; these are the two that would still
-    // pass if a lane row were wired to the main's.
+    // **The one pair left that a copy-paste could cross.** The lane's twelve
+    // mirrored rows sat next to the main delay's in this struct until
+    // 2026-09-22 and were exactly the shape a duplicated line reads the wrong
+    // lane into; five of them are gone and only the two times are still a
+    // pair. Set to different numbers above for that reason.
     check (p.timeMs != p.laneTimeMs, "TIME and LANE TIME are not the same lane");
-    check (p.lowCutHz != p.laneLowCutHz, "LOW CUT and LANE LOW CUT are not the same lane");
+    check (p.fxTypeChoice != p.laneFxTypeChoice, "FX TYPE and LANE FX TYPE are not the same lane");
 }
 
 /** SYNC is in the schema and switched off at the source.

@@ -50,26 +50,19 @@ public:
         p.fxTypeChoice    = (int) v[Index::fxType];
         p.fxAmountPct     = v[Index::fxAmount];
 
-        // The lane, ids 20-31. Carried whether or not LINK is on: what LINK
-        // does with them is the DSP's business in stage 2, and a value that
-        // stops arriving here is a value the lane could not go back to.
-        p.link                  = v[Index::link] > 0.5f;
+        // The lane, ids 20-24. **Five values, and no voicing among them**: the
+        // lane runs the character, stereo mode, cuts, modulation and drive
+        // read above, so there is nothing here to keep in step with them
+        // (modules/dwell/params.h, 2026-09-22).
         p.laneLevelDb           = v[Index::laneLevel];
         p.laneTimeMs            = v[Index::laneTime];
-        p.laneCharacterChoice   = (int) v[Index::laneCharacter];
-        p.laneStereoChoice      = (int) v[Index::laneStereo];
-        p.laneLowCutHz          = v[Index::laneLowCut];
-        p.laneHighCutHz         = v[Index::laneHighCut];
-        p.laneModRateHz         = v[Index::laneModRate];
-        p.laneModDepthPct       = v[Index::laneModDepth];
         p.laneFx                = v[Index::laneFx] > 0.5f;
         p.laneFxTypeChoice      = (int) v[Index::laneFxType];
         p.laneFxAmountPct       = v[Index::laneFxAmount];
 
-        // Id 32, past a rack slot's automation lanes and carried exactly like
-        // every row under it: SlotOverflow's whole job is that a parameter
-        // over the line still reaches the DSP, presets and saved state. See
-        // modules/dwell/params.h for why this is the row that went over it.
+        // Id 25, the last row: whether the lane's FX trio follows the main
+        // delay's. Carried whatever it says -- a value that stops arriving
+        // here is a value the lane could not go back to.
         p.fxLink                = v[Index::fxLink] > 0.5f;
 
         core.setParams (p);

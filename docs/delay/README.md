@@ -69,10 +69,6 @@ by dispatched agents on AURORA, 2026-09-20, under `HANDOFF-groundwork.md`.
 16. **The accent is the orchid `#f094e6`** (2026-09-21), measured 6.49:1 dark
     and 1.81:1 pale off a render. It spends the last wide hue arc in the rack.
 
-**Blocking, found 2026-09-21:** `10` §3's stability premise is wrong for tape.
-The +2 dB head bump puts unity at FEEDBACK 84 %, not 97 %, and a freeze parked
-at the detent tilts into a 55 Hz boom. Bucket-brigade's compander is unchecked.
-
 ## Decided (Frosty, 2026-09-21, second pass) — the table is settled
 
 17. **The schema is 32 parameters**, ids renumbered, every one inside a rack
@@ -91,3 +87,20 @@ at the detent tilts into a 55 Hz boom. Bucket-brigade's compander is unchecked.
 21. **Both FX buttons stay.** "Amount at 0 means bypassed" was considered and
     rejected: it costs the one-click A/B, and Crush's bit depth does not read
     zero as a no-op.
+
+22. **The tape stability bug is FIXED in the spec** (2026-09-21). `10` §3 now
+    normalises the feedback law by each character's reference loop peak `P_c`,
+    computed at `prepare` by sweeping the built coefficients — never hardcoded.
+    Unity is 97.0 % on **every** character, so the panel carries one tick. The
+    earlier "unity at 84 %" figure was wrong: that is the shelf's nameplate in
+    isolation, but the 10 Hz blocker and LOW CUT eat its asymptote, so tape's
+    real chain peak is **1.054 at 63 Hz, unity at 93.9 %** before normalisation.
+    Normalising by the nameplate 1.2589 would have made tape *decay* 1.55 dB a
+    lap.
+23. **Bucket-brigade stays** (Frosty, 2026-09-21). Its filters were cleared —
+    Butterworth at `Q = 1/√2`, chain peak 0.990–0.999 — but its compander is now
+    specified with the expander reading the compressor's stored gain rather than
+    re-detecting, so the pair is unity through transients. A re-detecting pair
+    would add up to +3.7 dB on a 20 dB transient, in-loop, on every lap. That
+    figure is **modelled, not measured — bench it**, and the clamp fallback
+    remains Frosty's decision.

@@ -52,23 +52,65 @@ is the expensive option). Read position `w − D`, real-valued.
 Per line, into the ring: `v[n] = s·x[n] + Σ_j g_ij·C(y_j[n])` — `y_j` line j's read,
 `C(·)` the character chain (§4), `g_ij` §8's matrix, `s` §11's send gate.
 
-Stability requires `|g|·|H(e^{jω})|·|I(e^{jω})|·κ < 1` for all ω — `H` the filter
-cascade, `I` the interpolator, `κ` the shaper's incremental gain. All are ≤ 1 by
-construction (TPT filters, peak-normalised per §11; interpolators unity-or-less at
-every phase; a tanh-family shaper), so the bound is **|g| < 1**.
+Stability requires `|g|·|H(e^{jω})|·|I(e^{jω})|·κ < 1` for all ω — `H` the
+filter cascade, `I` the interpolator, `κ` the shaper's incremental gain.
+`κ ≤ 1` (a tanh-family shaper), and `I` is unity at DC on every phase and falls
+from there. **`|H|` is not ≤ 1 on every character.** §4 gives tape a +2 dB
+head-bump shelf, and the bump sits at 55–65 Hz, where the interpolator's loss —
+which is at the top — cannot offset it. The two **tilt** rather than cancel: a
+note held at nominal unity on tape gains low end and loses top on every lap.
+The earlier claim that every in-loop magnitude is ≤ 1 by construction was false
+(found 2026-09-21).
 
-FEEDBACK maps to `g = 1.05·fb^1.6` (DECIDED, Frosty 2026-09-20): the exponent puts
-resolution in the 2–8-repeat region, `g = 1` lands at ~97%, full travel gives 1.05 —
-deliberate self-oscillation, the ~97–100% zone accepted and marked on the panel
-(13 §4) (01: above ~100% regeneration recirculates without decay). Above
-unity a **safety clip** bounds the loop: fixed tanh, ceiling 1.0 (0 dBFS), active
-regardless of DRIVE. Its describing-function gain `G(A)` falls monotonically from 1,
-so oscillation settles where `g·|H|·G(A) = 1` — a limit cycle just under the
-ceiling, not divergence. The clip sits **after** the filters, so howl inherits the
-mode's tone (02 flags the trade).
+The fix is **not** to take the bump out of the loop — accumulation per repeat is
+what a head bump is for, and a bump applied only to the output would stop tape
+getting warmer as it repeats. Instead, define the character's **reference loop
+peak**
 
-## 4. In-loop filters, saturation, DC
+```
+P_c = max over ω of |H(e^{jω}) · I(e^{jω})|
+```
 
+evaluated with the character's own mode filters and compander at the current
+TIME and sample rate, the 10 Hz blocker in, and the **user stages at their
+neutral limits** — LOW CUT 20 Hz, HIGH CUT at the 18 kHz cap, FX off, DRIVE 0.
+That reference is also the worst case over all user settings, since every one of
+those stages is `≤ 1` at every setting (§4, §11a) and can only attenuate
+further. **`P_c` is computed, never hardcoded**: at `prepare`, and on any change
+of character, TIME or sample rate, sweep the built coefficients on a log grid of
+at least 512 points from 10 Hz to 0.45·f_s and take the maximum. It costs
+microseconds off the audio thread and cannot drift from the coefficients a
+CALIBRATE pass actually lands on.
+
+FEEDBACK then maps to
+
+```
+g = (1.05 · fb^1.6) / P_c
+```
+
+(DECIDED, Frosty 2026-09-20; normalisation added 2026-09-21). The exponent puts
+resolution in the 2–8-repeat region; the loop's peak magnitude reaches **1.000
+at fb = 97.0 % and 1.05 at full travel, on every character** — Decided item 4
+holds as written, and the panel carries **one** self-oscillation tick rather
+than one per character. Expected `P_c`: clean **0.999**, tape **1.054**,
+bucket-brigade **0.990–0.999** with TIME. Tape's tail is therefore slightly
+shorter than clean's at the same knob position, which is what tape does.
+
+**Unity means the loudest band neither grows nor decays**, not that every band
+holds; a non-flat loop cannot do the latter and stay bounded. Every other band
+still decays at `|H·I|/P_c` per lap, so a held sound darkens and colours (15).
+Because `P_c` is fixed at the reference and not tracked live, the user's cuts
+and FX only ever shorten the tail — on tape, LOW CUT at 200 Hz costs 0.84 dB a
+lap. Tracking them live would hold the tail at any tone; rejected.
+
+Full travel gives 1.05 — deliberate self-oscillation, the ~97–100% zone accepted
+and marked on the panel (13 §4) (01: above ~100% regeneration recirculates
+without decay). Above unity a **safety clip** bounds the loop: fixed tanh,
+ceiling 1.0 (0 dBFS), active regardless of DRIVE. Its describing-function gain
+`G(A)` falls monotonically from 1, so oscillation settles where
+`g·|H|·G(A) = 1` — a limit cycle just under the ceiling, not divergence. The
+clip sits **after** the filters, so howl inherits the mode's tone (02 flags the
+trade).
 TPT one-poles/biquads, prewarped `g = tan(π f_c/f_s)`. Since `g` depends only on
 `f_c/f_s`, every coefficient is sample-rate invariant over 44.1–192 kHz. Loop order:
 LOW CUT → HIGH CUT → mode filters → DC blocker → shaper → clip.
@@ -77,12 +119,44 @@ LOW CUT → HIGH CUT → mode filters → DC blocker → shaper → clip.
   `min(18 kHz, 0.45·f_s)`. The cap is load-bearing: it keeps the shaper's input from
   Nyquist, where first-order ADAA is weakest.
 - **tape** adds a 1-pole LP at 4.5 kHz (CALIBRATE, 01's per-pass rolloff) and a
-  +2 dB shelf at 55 Hz for head bump (01: ~50–60 Hz at 15 ips).
+  +2 dB low shelf at 55 Hz for head bump (01: ~50–60 Hz at 15 ips). It is the
+  **only in-loop stage whose magnitude exceeds unity**, and it stays that way on
+  purpose: the bump must compound per repeat. Its nameplate gain is 1.2589, but
+  that asymptote lives below the 10 Hz blocker and LOW CUT's 20 Hz floor, so what
+  the loop actually sees is **+0.45 dB at 63 Hz** — the chain peak is **1.054**,
+  and §3's `P_c` divides exactly that out. **The shelf's corner convention is not
+  yet pinned** (CALIBRATE): 55 Hz read as the pole gives 1.054 at 63 Hz, 55 Hz
+  read as the +1 dB midpoint gives 1.040 at 64 Hz. Pick one at implementation;
+  §3's runtime sweep takes the figure from the built coefficients either way, so
+  the choice moves the sound, not the stability.
 - **bucket-brigade** derives filters from a modelled clock: N = 4096 stages,
   `f_clk = N/(2T)`; anti-alias and reconstruction are each a 2-pole Butterworth at
   `f_c = 0.6·f_clk/2`, clamped to [800 Hz, 16 kHz]. At T = 205 ms that is
-  f_clk ≈ 10 kHz, f_c ≈ 3 kHz — 01's datasheet pair, and its darkening with time. A
-  2:1 compander (5/50 ms, CALIBRATE) straddles the line.
+  f_clk ≈ 10 kHz, f_c ≈ 3 kHz — 01's datasheet pair, and its darkening with time.
+  Each Butterworth is `Q = 1/√2` exactly — the no-peaking boundary — so the pair
+  is monotonic with `|H| ≤ 1`, equality only at DC; with the blocker and the cuts
+  in front, BBD's chain peak is **0.990–0.999 depending on TIME**, and its filters
+  need no correction.
+
+  A **2:1 compander (5/50 ms, CALIBRATE)** straddles the line, and **the expander
+  does not re-detect**: the compressor's gain is written to a control ring beside
+  the audio and read at the same fractional position, and the expander applies its
+  exact reciprocal. The pair is then unity at every instant, transient included,
+  and `P_bbd` comes from the filters alone. **This is a stability requirement, not
+  a refinement.** A re-detecting pair with identical ballistics on both halves has
+  net gain `Δ = 0.5·(Ê − S[Ê])` in dB — zero in steady state, but through a rising
+  envelope it peaks at **0.184 dB per dB of envelope step**, one attack constant
+  in: +3.7 dB on a 20 dB transient, unbounded in the step, *inside the loop*, at
+  the same point in the circulating word on every lap. It sharpens attacks and
+  thins decays each pass, so a percussive word parked at the lane's centre detent
+  grows into the clip instead of holding. No choice of ballistics fixes it: a
+  faster expander detector overshoots on attacks by up to the full step, a slower
+  one moves the overshoot to releases. If the delayed-gain construction is
+  rejected for authenticity, the fallback is to clamp the pair's net gain to
+  `≤ 0 dB` from the two envelopes already in hand (DECISION for Frosty). The
+  overshoot figure is **modelled, not measured** — it assumes log-domain one-pole
+  detectors and a feed-forward pair, and a feedback RMS cell tracks better; bench
+  it before quoting it.
 - **Saturation**: the repo's ADAA residual shaper (`modules/sat/dsp/Shaper.h`,
   00 §1), driven by DRIVE, returning `shape(x) − x` anti-aliased by the first-order
   antiderivative quotient at zero latency. 02 warns aliases accumulate *per repeat*,
@@ -273,18 +347,16 @@ Candidates — list and order free until ship (11 §3):
   **exempt from the −60 dBFS alias floor** (§4), which is measured FX-off; its own
   acceptance is only that the non-harmonic floor stops growing by repeat 10.
   Negligible cost and memory.
-- **Octave up / Octave down** — ±12 semitones, two-grain overlap-add, equal-power
-  crossfade, grain 60 ms (CALIBRATE). The grain's read offset is **absorbed into
-  `D`** (the ring is read one grain earlier), so the repeat still lands at T and
-  reported latency stays 0. AMOUNT is the shifted/unshifted blend inside the stage.
-  Pitch compounds as ±12k semitones, so content leaves the band within a few laps —
-  self-limiting, with both cuts in front of it. ~2 reads and a window per sample;
-  ≤ 24 kB per channel at 192 kHz.
-- **Reverse** — a second buffer of one delay length per channel, filled forward
-  while the previous fill is read backward, swapping at the delay period, 5 ms
-  raised-cosine seam (CALIBRATE). `|F| = 1`. **Memory doubles**: +2.0 MB per
-  channel, +4.0 MB per instance at 192 kHz (§10), allocated at `prepare` from the
-  fixed maximum whether FX is on or not.
+> **Octave up, Octave down and Reverse were CUT on 2026-09-21** (Frosty; see
+> `15`). The octaves compound in a feedback loop — pitch moves ±12k semitones, so
+> three repeats is three octaves and the content leaves the band — and Reverse was
+> the only type needing a second buffer, +2.0 MB per channel allocated whether FX
+> was on or not, with the standing requirement that it must never be allocated on
+> the audio thread. Cutting them removes that allocation problem entirely and
+> leaves four types, which also tile as a 2×2 grid. Choice lists are append-only
+> after ship, so this was the last moment to remove them. Their specifications are
+> deleted rather than kept as dead text; the reasoning is here and in `15`.
+
 - **Pan / Tremolo** — one LFO stepped at the delay period, so each repeat gets its
   own position or level rather than a wobble inside one; equal-power law, AMOUNT is
   depth. Chops rather than pans on the mono bus (§8). Negligible cost.
@@ -324,8 +396,6 @@ heaviest (DECISION; bench per 11 §4k). Only Diffuse and the octaves should meas
 | FX loop bound | `\|F\| ≤ 1` for every candidate, normalised in closed form | DECISION |
 | Diffuse | 6-stage allpass, 7–37 ms × AMOUNT | CALIBRATE; 00 §1 |
 | Crush | 16→3 bits, hold ÷1–32; exempt from the alias floor | CALIBRATE / DECISION |
-| Octave grain | 60 ms, ±12 st, read offset absorbed into `D` | CALIBRATE |
-| Reverse buffer | one delay length extra per channel, 5 ms seam | CALIBRATE |
 | Pan / Sweep | stepped once per repeat; AMOUNT is depth | CALIBRATE |
 | FX AMOUNT default | 35 % | DECISION |
 | FX CPU ceiling | ≤ 1.3× FX-off, ≤ 1.5× heaviest | DECISION |

@@ -61,7 +61,7 @@ is added, its whole-sample group delay comes off `D`, keeping the figure 0.
 | 0 | `time` | 1…2000 ms, log | 375 | 10 §2's law |
 | 1 | `sync` | bool | off | crossfade |
 | 2 | `note` | choice, 16 | 1/8D | as `time` |
-| 3 | `feedback` | 0…100 %, lin (`g = 1.05·fb^1.6`; unity ≈97 %, 97–100 % self-oscillates) | 35 | 30 ms |
+| 3 | `feedback` | 0…100 %, lin (`g = (1.05·fb^1.6)/P_c`, 10 §3; unity **97.0 % on every character**, 97–100 % self-oscillates) | 35 | 30 ms |
 | 4 | `character` | Clean/Tape/Bucket-brigade | Clean | xfade |
 | 5 | `stereo` | Stereo/Ping-pong/Dual offset | Stereo | xfade |
 | 6 | `lowCut` | 20…1000 Hz, log | 20 | 20 ms |
@@ -79,9 +79,20 @@ is added, its whole-sample group delay comes off `D`, keeping the figure 0.
 | 18 | `fxType` | choice, 7 | Diffuse | xfade |
 | 19 | `fxAmount` | 0…100 %, lin | 35 | 20 ms |
 
+**Feedback normalisation (10 §3 owns it).** `P_c` is the character's reference
+loop peak, computed at `prepare` and on any change of character, TIME or sample
+rate — clean ≈ 0.999, tape ≈ 1.054, bucket-brigade 0.990–0.999 with TIME. It is
+**not a parameter** and never appears in the schema; it exists so the knob
+position at which the loop stops decaying is the **same on every character**,
+which is what the lane's centre detent promises (15). Unity means the loop's
+loudest band holds; the rest still decays, so a long hold darkens.
+
 **FX (10 §11a; reserved now, candidates until ship).** `fxType` runs least to most
 intervention, the rule the other three lists already follow: **Diffuse, Sweep,
-Pan/Tremolo, Octave up, Octave down, Reverse, Crush**. **Index 0 is Diffuse, not
+Pan/Tremolo, Crush**. Octave up, Octave down and Reverse were **cut on
+2026-09-21** (docs/delay/15): the octaves compound in a feedback loop -- three
+repeats is three octaves -- and Reverse was the only type needing a second
+buffer, which must not be allocated on the audio thread. **Index 0 is Diffuse, not
 Off** — `fx` owns off, so a corrupt state landing on index 0 gives the gentlest
 type with the stage still gated by a bool that defaults off. (The alternative,
 folding Off into the list as index 0, costs a permanent redundant state and makes
@@ -211,8 +222,9 @@ sweeping `fxType` on and off block boundaries: nothing above −60 dBFS on eithe
 edge. `bench` per candidate against the FX-off loop: ≤ 1.3× any one, ≤ 1.5×
 heaviest, and FX off within noise of the pre-FX build. FREEZE held 60 s with each
 candidate selected: identical to FREEZE with `fx` off, because the stage is
-bypassed. Reverse's second buffer is allocated in `prepare()` from the fixed
-maximum whether `fx` is on or not — no allocation in `process()` when it turns on.
+bypassed. No candidate now allocates a second buffer -- Reverse was cut on
+2026-09-21 -- so the FX stage allocates nothing at all, and `process()` must
+allocate nothing when `fx` turns on.
 State: `fx`/`fxType`/`fxAmount` round-trip in the golden schema and in presets,
 while the **expanded view round-trips in the session only**, separately, and
 differs by default between rack (compact) and standalone (expanded). Test

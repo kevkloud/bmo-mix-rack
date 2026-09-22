@@ -72,30 +72,45 @@ is why the cuts below had to happen now and why lane DRIVE can come back later.
 `feedback`'s law also changes: divided by the character's peak in-loop
 magnitude, so unity lands at 97 % on every character. See below.
 
-## The stability bug this uncovered, which now blocks
+## The stability bug this uncovered — FIXED in the spec 2026-09-21
 
-`10` §3 rests its bound on all in-loop magnitudes being ≤ 1 — "all are ≤ 1 by
-construction". But §4 gives tape a **+2 dB shelf at 55 Hz**, which is |H| = 1.26.
-Derived on AURORA: tape reaches unity at FEEDBACK **84.0 %**, not the 97.0 % that
-`10` §3, `11` §3 and the panel's planned tick all state, and at full feedback the
-tape loop sits at **1.322**.
+`10` §3 rested its bound on all in-loop magnitudes being ≤ 1 ("all are ≤ 1 by
+construction"). §4 gives tape a +2 dB shelf at 55 Hz, so that was false.
 
-It is not merely early. The bump is at 55 Hz while the interpolator's loss is at
-high frequencies — `10` §11 already notes Hermite is below unity at fractional
-phases — so the two **tilt** rather than cancel. A note parked in the freeze
-detent on tape gains 2 dB of 55 Hz and loses top end every lap: within seconds a
-held chord becomes a boom.
+**The first figure recorded here was wrong and is corrected.** 1.2589 is the
+shelf's nameplate gain, and unity at 84 % is what that would imply — but the
+asymptote lives below the 10 Hz blocker and LOW CUT's 20 Hz floor, so the loop
+never sees it. Tape's real chain peak is **1.054 at 63 Hz**, unity at **93.9 %**
+before normalisation. Normalising by 1.2589 would have made tape *decay*
+**1.55 dB per lap**.
 
-**A detent labelled FREEZE is a promise that centre is unity**, so this must be
-fixed for the lane to be honest. The recommended mechanism is to normalise the
-feedback law by each character's peak in-loop magnitude, rather than removing
-the bump from the loop — removing it would stop the bump accumulating per
-repeat, and accumulation is what a head bump is for. The cost is that tape's
-tail is slightly shorter than clean's at the same knob position, which is what
-tape does anyway. **Bucket-brigade has not been checked**: its 2:1 compander
-straddles the delay line, and with 5/50 ms constants on both halves the pair
-will not track through transients, so the loop may momentarily exceed unity.
-That needs deriving.
+It is not merely early. The bump is at 55–65 Hz while the interpolator's loss is
+at the top, so the two **tilt** rather than cancel: a note held at nominal unity
+on tape gains low end and loses top every lap.
+
+**The fix, now in `10` §3:** the feedback law divides by `P_c`, the character's
+reference loop peak, swept from the built coefficients at `prepare` and on any
+change of character, TIME or sample rate — **computed, never hardcoded**, so it
+cannot drift from whatever a CALIBRATE pass actually lands on. Clean ≈ 0.999,
+tape ≈ 1.054, bucket-brigade 0.990–0.999 with TIME. Unity is then 97.0 % on
+every character and the panel carries one tick. The head bump stays **inside**
+the loop, so it still compounds per repeat — taking it out would stop tape
+getting warmer as it repeats, which is the point of a head bump.
+
+Unity means the loop's **loudest band** holds, not every band; a non-flat loop
+cannot do the latter and stay bounded. So a note parked at the lane's centre
+detent still darkens as it sustains.
+
+**Bucket-brigade was cleared, then wasn't.** Its Butterworths are `Q = 1/√2`
+exactly — the no-peaking boundary — so the filters are fine at 0.990–0.999. But
+a compander whose expander re-detects has net gain `0.5·(Ê − S[Ê])`: zero in
+steady state, and up to **+0.184 dB per dB of envelope step** through a rising
+one — +3.7 dB on a 20 dB transient, unbounded, in-loop, at the same point in the
+circulating word every lap. `10` §4 now specifies the expander reading the
+compressor's **stored** gain at the same fractional position and applying its
+exact reciprocal, so the pair is unity at every instant. The clamp fallback
+remains Frosty's call, and **the overshoot figure is modelled, not measured** —
+it needs a bench.
 
 ## What stage 2 now is
 

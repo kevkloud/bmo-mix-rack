@@ -29,6 +29,17 @@ enum Character
     kBucketBrigade = 2
 };
 
+/** The three stereo modes, by the index the schema's STEREO choice carries
+    (10 §8). Like a character, a mode is **a parameter** -- it governs both
+    engines from one control (10 §11.3), and an engine handed it still cannot
+    ask which instance it is. */
+enum StereoMode
+{
+    kStereoIndependent = 0,   ///< identity matrix, both lines at T
+    kPingPong = 1,            ///< input summed to mono, the matrix is the swap
+    kDualOffset = 2           ///< identity matrix, D_L = T and D_R = (2/3) T
+};
+
 //==============================================================================
 /** One-pole parameter smoother, the shape used in modules/dim, modules/sat and
     modules/opto -- see those for why it snaps once inside epsilon. */
@@ -294,7 +305,12 @@ inline double companderGainFor (double levelDb) noexcept
     two engines handed the same values produce the same colour, and neither can
     ask which one it is.
 
-    The FX stage, the ducker, the stereo matrix and the lane's gates are 2c.
+    **Stage 2d adds 10 §8's stereo matrix**, and it is the last thing that
+    belongs in here: the mode is one shared control governing both engines, so
+    it is a parameter like the character and reaches the engine the same way.
+    The ducker and the lane's three gates are **not** here and must not be --
+    they are the caller's, because they are what tells the two instances
+    apart. The FX stage is a later stage.
 
     Latency is 0 and stays 0: no oversampling, no lookahead, and the wet delay
     time is not latency (10 §0, `00` §4).
@@ -424,6 +440,20 @@ public:
         a wow is. */
     static constexpr double kTapeWowFloor = 0.0003;
 
+    /** **Dual offset's ratio: the right line runs at 2/3 of the left's**
+        (10 §8, §12 -- CALIBRATE there, and taken here as the figure the spec
+        names rather than as a second guess at it). It is a ratio of the
+        *steered* delay, so it survives a TIME move, the glide and the
+        crossfade without a second law: whatever §2 does to `D`, the right line
+        reads two thirds of the way along it.
+
+        Note what the ratio does **not** move: `P_c` is swept at the left
+        line's delay (§3), so the right line's interpolator phase is not in the
+        sweep. Both interpolators are unity at DC and fall from there, so the
+        right line cannot be the hotter of the two; the reading is recorded
+        rather than hidden. */
+    static constexpr double kDualOffsetRatio = 2.0 / 3.0;
+
     //==========================================================================
     /** What an engine is told. Note what is **not** here: which instance it
         is, what feeds it, and how its gain was arrived at.
@@ -435,6 +465,7 @@ public:
     {
         float timeMs      = 375.0f;     ///< the requested delay, in ms
         int   character   = kClean;     ///< clean, tape or bucket-brigade
+        int   stereoMode  = kStereoIndependent;  ///< 10 §8's matrix, shared by both engines
         float lowCutHz    = 20.0f;      ///< in-loop HP, 20 Hz - 1 kHz
         float highCutHz   = 20000.0f;   ///< in-loop LP, capped at min(18k, 0.45 fs)
         float modRateHz   = 0.6f;       ///< wow, 0.1 - 8 Hz
@@ -648,7 +679,15 @@ public:
         gain read at the same fractional position. That pair is unity at every
         instant, transient included, which is why `P_bbd` comes from the
         filters alone (10 §4). There is no second detector, so there is nothing
-        to overshoot. */
+        to overshoot.
+
+        **10 §8's stereo matrix is here, between the read and the write**, and
+        it is the reason the loop is written as two passes over the channels
+        rather than one: ping-pong's injection needs *both* lines' post-chain
+        signals before either can be written, so `C(.)` has to have run on
+        every channel before the first ring write. Stereo and dual offset are
+        the identity matrix and would not need it; running one shape for all
+        three is what keeps the mode a parameter rather than three loops. */
     void process (const float* const* input, float* const* output, int numChannels, int numSamples) noexcept
     {
         if (mask <= 0 || numSamples <= 0 || numChannels <= 0)
@@ -657,6 +696,11 @@ public:
         const auto nch = std::min (numChannels, channels);
         const auto glide = usesGlide();
         const auto compand = usesCompander();
+
+        // 10 §8's mono bus rule: with one line there is no second output to
+        // alternate into, so ping-pong collapses to plain stereo. Dual offset
+        // collapses too -- `lineRatio` only ever moves line 1.
+        const auto pingPong = params.stereoMode == kPingPong && nch >= 2;
 
         for (int n = 0; n < numSamples; ++n)
         {
@@ -681,11 +725,21 @@ public:
                 fadeNew = std::sin (0.5 * kPiD * u);
             }
 
-            const auto readCurrent = readPosition (delayCurrent, modulated);
-            const auto readNext    = fading ? readPosition (delayNext, modulated) : readCurrent;
+            // Pass one: read every line, publish the tap, and run the
+            // character chain. Nothing is written to a ring here, because
+            // ping-pong's write needs the *other* channel's `c`.
+            std::array<double, kMaxChannels> chain {};
 
             for (int ch = 0; ch < nch; ++ch)
             {
+                // 10 §8's dual offset: line 1 reads two thirds of the way
+                // along the same steered delay, so §2's law and §5's
+                // modulation carry over untouched.
+                const auto ratio = lineRatio (ch);
+                const auto readCurrent = readPosition (delayCurrent * ratio, modulated);
+                const auto readNext    = fading ? readPosition (delayNext * ratio, modulated)
+                                                : readCurrent;
+
                 const auto* line = ring[(size_t) ch].data();
 
                 auto y = readAt (line, readCurrent);
@@ -711,11 +765,40 @@ public:
 
                 output[ch][n] = (float) y;
 
-                auto& f = filters[(size_t) ch];
-                const auto c = character (f, y, blend, curve);
+                chain[(size_t) ch] = character (filters[(size_t) ch], y, blend, curve);
+            }
 
-                const auto x = (double) input[ch][n];
-                auto v = (std::isfinite (x) ? x : 0.0) + gain * c;
+            // Pass two: 10 §8's matrix, then the write. **There is still no
+            // input gate** -- `v = u + g . C(y)`, and the `s` term 10 §11
+            // removed is not reintroduced here under another name. What the
+            // matrix changes is *which* line a sample is injected into and
+            // *which* line's chain output feeds it back, never whether the
+            // input arrives.
+            for (int ch = 0; ch < nch; ++ch)
+            {
+                double u = 0.0;
+                double back = 0.0;
+
+                if (pingPong)
+                {
+                    // `u' = (L + R)/2` into line L only; the matrix is the
+                    // swap, so repeats alternate sides every T.
+                    if (ch == 0)
+                    {
+                        const auto l = (double) input[0][n], r = (double) input[1][n];
+                        u = 0.5 * ((std::isfinite (l) ? l : 0.0) + (std::isfinite (r) ? r : 0.0));
+                    }
+
+                    back = gain * chain[(size_t) (ch ^ 1)];
+                }
+                else
+                {
+                    const auto x = (double) input[ch][n];
+                    u = std::isfinite (x) ? x : 0.0;
+                    back = gain * chain[(size_t) ch];
+                }
+
+                auto v = u + back;
 
                 // A NaN that reached the ring would circulate for ever, so it
                 // is stopped at the write rather than at the output.
@@ -726,6 +809,7 @@ public:
 
                 if (compand)
                 {
+                    auto& f = filters[(size_t) ch];
                     gc = companderGainFor (f.compressor.tick (LevelDetectorDb::levelDb (v)));
                     v *= gc;
 
@@ -776,6 +860,13 @@ private:
     bool usesCompander() const noexcept        { return params.character == kBucketBrigade; }
     bool modeFiltersFollowTime() const noexcept { return params.character == kBucketBrigade; }
     bool usesSinc() const noexcept             { return params.character == kClean; }
+
+    /** How far along the steered delay this line reads, as a fraction of it.
+        1 everywhere except dual offset's right line (10 §8). */
+    double lineRatio (int ch) const noexcept
+    {
+        return (params.stereoMode == kDualOffset && ch == 1) ? kDualOffsetRatio : 1.0;
+    }
 
     /** 10 §4's loop order: LOW CUT -> HIGH CUT -> mode filters -> (FX, 2c) ->
         shaper -> DC blocker -> clip. **The last two are swapped against what

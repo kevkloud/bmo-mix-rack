@@ -49,6 +49,26 @@ struct ParamSpec
         (rangeFor, core/state/Parameters.h), so the two cannot disagree. */
     bool         logarithmic = false;
 
+    /** The value string, for a parameter whose number does not say what it
+        means on its own. Null for every parameter that has ever shipped, so
+        `format` still decides for all of them.
+
+        BMO FET's ATTACK and RELEASE are why. Their parameter *is* the knob
+        position, 1..7, so the format is Plain and a host leaning on the raw
+        number would print a bare "4" -- which says nothing about the time it
+        selects. The displayed value has to carry both, "4 (126 us)", and that
+        string is arithmetic on the position rather than a unit appended to it.
+
+        A plain function pointer, not a std::function: a ParamSpec is copied
+        into the lambdas that build a JUCE parameter (core/state/Parameters.h)
+        and into the rack's slot parameters, and it is captured by value in
+        static spec lists, so it stays cheap to copy and free of allocation.
+
+        It is read by `text()` below, which is the one place a value becomes a
+        string -- so the panel, the host's automation lane and a rack slot all
+        print the same words. */
+    std::string (*textFn) (float) = nullptr;
+
     static ParamSpec floatParam (const char* id, const char* name, float min, float max,
                                  float step, float def, ParamFormat format = ParamFormat::Plain)
     {
@@ -63,6 +83,17 @@ struct ParamSpec
     {
         auto s = floatParam (id, name, min, max, step, def, format);
         s.logarithmic = min > 0.0f;
+        return s;
+    }
+
+    /** A continuous parameter that prints itself. See `textFn`. The format is
+        Plain by construction: a parameter that needs its own string has no
+        unit the table of formats already knows. */
+    static ParamSpec textParam (const char* id, const char* name, float min, float max,
+                                float step, float def, std::string (*text) (float))
+    {
+        auto s = floatParam (id, name, min, max, step, def, ParamFormat::Plain);
+        s.textFn = text;
         return s;
     }
 
@@ -140,6 +171,11 @@ struct ParamSpec
     std::string text (float real) const
     {
         char buf[64];
+
+        // A parameter that prints itself does so before anything else. Only a
+        // continuous one ever sets this -- a choice already has its names.
+        if (textFn != nullptr && kind == ParamKind::Float)
+            return textFn (real);
 
         switch (kind)
         {

@@ -116,4 +116,7 @@ find this out for itself.
 **1.49:1**, against 6.29:1 for the dark set's near-black pointer on the same
 face. This is suite-wide, not BMO DEQ's — BMO CEQ's cap is `#ffffff` on
 `#f7c5d9`, 1.51:1 — so every knob in the light appearance is at that number.
-Worth its own look; deliberately not folded in here.
+Handed to the Ableton pass rather than fixed here -- see
+`ableton-pass-handoff-2026-09-17.md` §3, "The knob pointer in the light
+appearance". The number says the margin is thin; whether it reads is a
+looking question, and that pass is the looking.

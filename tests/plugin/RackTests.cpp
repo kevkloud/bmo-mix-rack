@@ -63,7 +63,13 @@ namespace
                     "diffuse", "rate", "depth", "rotation", "asymmetry" } },
         { "ltvcomp", { "amount", "gate", "output", "complex", "attack", "release",
                      "arc", "sidechain", "low_thru", "high_thru" } },
-        // **Twenty-six, six under a slot's lanes**: every one of BMO Dwell's
+        // BMO Defang. Five parameters and no more: attack, release, mix,
+        // lookahead, oversampling and a stereo-link switch were all considered
+        // and left out, and ADAPT's blend is an internal constant -- see
+        // modules/deesser/params.h. The order is the table in
+        // docs/deesser/11-integration-and-test-plan.md section 3.
+        { "deesser", { "freq", "q", "thresh", "range", "shape" } },
+        // **Twenty-seven, five under a slot's lanes**: every one of BMO Dwell's
         // parameters gets one, with room to append. The order is permanent.
         // It was thirty-three, one row over the ceiling, until the lane was
         // given the main delay's voicing on 2026-09-22 and `link` and the six
@@ -72,7 +78,7 @@ namespace
                      "low_cut", "high_cut", "mod_rate", "mod_depth",
                      "drive", "duck", "mix", "send", "lane_gain", "hold", "chop",
                      "fx", "fx_type", "fx_amount",
-                     "lane_level", "lane_time",
+                     "lane_level", "lane_time", "lane_note",
                      "lane_fx", "lane_fx_type", "lane_fx_amount", "fx_link" } },
     };
 
@@ -213,7 +219,8 @@ int main()
         auto rack = createRack();
         const auto& registry = rack->getRegistry();
 
-        check (registry.size() == 8, "the registry holds util, eq, sat, opto, dim, deq, vcomp and dwell");
+        
+        check (registry.size() == 9, "the registry holds util, eq, sat, opto, dim, deq, vcomp, deesser and dwell");
 
         // A bank is a module's host lanes, so it stops at 32 even if the
         // module does not. Past that, its golden schema test pins the order.

@@ -1,7 +1,7 @@
-#include "LevelBars.h"
+#include "core/ui/LevelBars.h"
 #include "core/ui/ModulePanel.h"
 
-namespace bmo::vcomp
+namespace bmo::ui
 {
 
 namespace
@@ -445,4 +445,4 @@ void LevelBar::mouseUp (const juce::MouseEvent&)
     threshold->endChangeGesture();
 }
 
-} // namespace bmo::vcomp
+} // namespace bmo::ui

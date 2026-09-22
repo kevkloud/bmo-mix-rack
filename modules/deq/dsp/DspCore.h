@@ -1,8 +1,7 @@
 #pragma once
 
-#include "modules/deq/dsp/Design.h"
+#include "modules/deq/dsp/Filters.h"
 #include "modules/deq/dsp/Dynamics.h"
-#include "modules/deq/dsp/Svf.h"
 #include "core/dsp/AnalyserTap.h"
 #include <array>
 #include <atomic>

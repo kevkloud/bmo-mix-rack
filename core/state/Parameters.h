@@ -66,7 +66,12 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout makeLayout (const Par
                 juce::AudioParameterFloatAttributes attr;
                 const auto spec = s;   // copied into the lambda: specs() lists are static
 
-                if (s.format != ParamFormat::Plain)
+                // A spec that prints itself takes the same route a formatted
+                // one does, so the host's lane, the panel's value line and a
+                // rack slot all read what ParamSpec::text says. Plain's label
+                // is the empty string, which is what JUCE would have shown
+                // anyway, so nothing a formatted parameter reports changes.
+                if (s.format != ParamFormat::Plain || s.textFn != nullptr)
                     attr = attr.withLabel (s.label())
                                .withStringFromValueFunction ([spec] (float v, int)
                                {

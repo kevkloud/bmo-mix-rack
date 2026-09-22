@@ -1,14 +1,20 @@
 # Handoff: add BMO Linger (panel first, renders, open questions)
 
 **Historical. This brief was carried out on AURORA on 2026-09-21 and all five
-of its open questions are now settled** — the accent is `#e694e0`, the schema is
-**twenty-four** parameters and not thirty, the panel is a paged handheld at one
-380 px width rather than a main face plus an expanded section, the display is
-three pictures behind three page keys, tail reporting *and* mono-in→stereo-out
-both shipped, and era colour stayed out of v1 with the fields reserved. Kept
-because it is where the questions came from and what the answers were answers
-to. `modules/reverb/params.h` and `modules/reverb/AGENTS.md` are the source of
+of its open questions are now settled** — the accent is `#e694e0`, the panel is
+a paged handheld at one 380 px width rather than a main face plus an expanded
+section, tail reporting *and* mono-in→stereo-out both shipped, and era colour
+stayed out of v1 with the fields reserved. Kept because it is where the
+questions came from and what the answers were answers to.
+`modules/reverb/params.h` and `modules/reverb/AGENTS.md` are the source of
 truth; `11-integration-and-test-plan.md` §4 is the schema table.
+
+**Two of those answers have since moved, and the page below still gives the
+older ones.** The schema came down to **twenty-four** on the day this brief was
+carried out and is **thirty** again — the Reverb EQ spent six of the eight lanes
+the trim bought, the same day (`11` §4c). And the display's **three page keys
+are gone from the plate**: the menu is the top 26 px of the screen itself, and
+the third page is captioned EQ rather than TONE (`11` §4e). Read both there.
 
 For a fresh session. Written on AURORA, 2026-09-21. The groundwork pack is
 done; this session builds what is needed to put real renders in front of
@@ -87,7 +93,9 @@ survey. All are permanent once shipped.
    > *Answered.* The count came down to **twenty-four** — six controls proved to
    > be character and became per-type constants (11 §4a) — and the split became
    > **three pages at one 380 px width** rather than two widths (11 §4e).
-   > `inhicut` survived and is **still** marked "owner confirm", now at index 19.
+   > `inhicut` survived and is **still** marked "owner confirm" — at index 19
+   > when this was written, and at **25** since the EQ change put ten lanes
+   > ahead of it.
 3. **The display.** 11 asks whether a static time-domain sketch (ER taps plus
    decay envelope, redrawn from the parameters, like BMO Defang's band sketch)
    earns its space. Render it with real parameter values at two or three

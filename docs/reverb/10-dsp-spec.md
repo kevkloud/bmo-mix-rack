@@ -112,10 +112,18 @@ and impossible when this was written, and shipped on 2026-09-21** in
 slot 1, so no slot ever sees an asymmetric layout (`11` §2b). The reverb sees
 the mono input duplicated into both channels and is free to decorrelate its tail
 from it. Fixed 20 Hz high-pass plus an input high-cut
-2–20 kHz. The **Reverb EQ** (low shelf 16–1600 Hz, high shelf 1000–2100 Hz, each
-−24…+12 dB) sits here, because Reference A's EQ is *pre* both generators
-(`01` A). Input diffusion (2 allpasses per channel, 4 for Plate) is tail-path
-only.
+2–20 kHz. The **Reverb EQ** sits here, because Reference A's EQ is *pre* both
+generators (`01` A) — and *where* it sits is the sentence of this paragraph that
+survives every change to *what* it is. It is a **three-node parametric** since
+2026-09-21: a low shelf 16–1600 Hz, a bell 20 Hz–20 kHz and a high shelf
+1 kHz–20 kHz, each −24…+12 dB with its own Q, plus a four-position FILTER mode
+(`Off` / `Lo Cut` / `Hi Cut` / `Bandpass`) that turns the two outer nodes into
+cuts. **It was two shelves, with the high one spanning 1000–2100 Hz** — 1.07
+octaves, a high shelf that could not reach air — which is Reference A's own
+figure and was inherited rather than chosen; `11` §4c carries both changes and
+`11` §4 is the schema. The shape rule is that a cut keeps its corner and its
+resonance and **has no gain**, so GAIN stops reaching a node the mode has made a
+cut. Input diffusion (2 allpasses per channel, 4 for Plate) is tail-path only.
 
 **Pre-delay** is **tail-only and wet-path-only**, 0…+250 ms. Dry is never delayed
 nor summed against a delayed copy of itself — the phasing trap behind the "100 %
@@ -429,7 +437,10 @@ the rack figure is the **sum** over occupied slots, not the maximum.
 ## 6. CPU and memory
 
 Per instance, stereo, 48 kHz, ops/sample — order of magnitude from the
-structures, nothing measured. Input conditioning and EQ ≈ 40; ER taps ≈ 130 plus
+structures, nothing measured. Input conditioning and EQ ≈ 40 — **estimated when
+the EQ was two first-order shelves; it is three biquads now** (§2), so read that
+term as low by roughly 20 ops/sample until `measure_reverb` says otherwise, and
+note that it is the one term the parametric changed; ER taps ≈ 130 plus
 band filters ≈ 25 and diffuser ≈ 60; input allpasses ≈ 16; FDN ≈ 132 (reads,
 Householder, absorbent filters, output taps); output stage ≈ 20. **≈ 425
 ops/sample**, ~20 M ops/s at 48 kHz, doubling on ER taps during a crossfade and
@@ -452,16 +463,20 @@ with modulation headroom, diffuser and allpasses ≈ 0.1 s — ≈1.55 s
 mono-equivalent → **≈300 kB at 48 kHz, ≈1.2 MB at 192 kHz** per instance, ≈10 MB
 for a full rack at 192 kHz. Allocated in `prepare()` from `sampleRate`.
 
-**Parameters: 24**, inside one slot's 32 host params with no overflow state,
-unlike DEQ, leaving **eight** spare lanes. The permanent order is `11` §4's
+**Parameters: 30**, inside one slot's 32 host params with no overflow state,
+unlike DEQ, leaving **two** spare lanes. The permanent order is `11` §4's
 schema table, which is the authoritative copy, and this is the same list in the
-same order: Type, Size, Pre-delay, Decay, Source, 2 damping ratios, 2 EQ knees,
-2 EQ gains, ER Mode, ER Density, ER Spread, ER High Cut, ER Variation, Mod
-Depth, Mod Rate, Width, In High Cut, ER Level, Reverb Level, Mix, Output. Era
-fields are constants, not parameters (§1).
+same order: Type, Size, Pre-delay, Decay, Source, 2 damping ratios, **the EQ
+block — Filter mode, then each of the three nodes as freq / gain / Q, ten in
+all** — ER Mode, ER Density, ER Spread, ER High Cut, ER Variation, Mod Depth,
+Mod Rate, Width, In High Cut, ER Level, Reverb Level, Mix, Output. Era fields
+are constants, not parameters (§1).
 
-*This list said thirty until the control-set trim of 2026-09-21, which cut six
-before anything shipped.* **None of the six left the design; each became a
+*This list said thirty, then twenty-four, and is thirty again — and the two
+thirties are not the same thirty.* Both changes happened on 2026-09-21, before
+anything shipped, which is what made them free.
+
+**The trim cut six.** **None of the six left the design; each became a
 constant** in the per-type block §1 already describes, so everything this
 document says about what they *do* stands unchanged — the tail-onset contour in
 §2, the decay truncation in §1, the damping knees in §2, the rise exponent *p*
@@ -476,12 +491,26 @@ with the dry signal** and §2's Link switch is no longer offered. Every cut was 
 float or a bool, and those re-append safely, since state is plain values keyed
 by id; the two choices, Type and ER Mode, were not touched and must not be.
 
-*Also decided and not yet built:* the four shelf rows above — 2 EQ knees and 2
-EQ gains — are to be replaced by a **3-node parametric EQ** (low shelf, bell,
-high shelf; FREQ, GAIN and Q each) plus a **filter bool** that turns nodes 1 and
-3 into cuts, taking the schema to **30** and leaving two spare lanes. `11` §4c
-carries it. This document's §2 sentence about where the Reverb EQ sits — *pre*
-both generators — is what survives that change; the node count is not.
+**The Reverb EQ then spent six of the eight lanes that bought, the same day.**
+It is now a three-node parametric — low shelf, bell, high shelf, shapes fixed
+with no selector anywhere — and the change was **purely additive**: `eqlofreq`
+/`eqlo` already *were* node 1's frequency and gain and `eqhifreq`/`eqhi` node
+3's, so no id changed meaning and a state file written against the twenty-four
+restores every value it still holds. The six new ids are `eqfilter`, `eqloq`,
+`eqmidfreq`, `eqmid`, `eqmidq` and `eqhiq`. `eqfilter` became a **four-position
+choice** on 2026-09-22 — `Off` / `Lo Cut` / `Hi Cut` / `Bandpass`, on the lane a
+bool used to hold, so it cost nothing — and **that count is now permanent at
+first ship**, on the same normalisation argument Type and ER Mode carry. Node
+3's range was widened to 1 kHz–20 kHz in the same pass. `11` §4c carries all of
+it. This document's §2 sentence about where the EQ sits — *pre* both generators
+— is what survived; the node count was never load-bearing here.
+
+**The cut/shelf rule is a DSP statement and belongs here.** A node the mode has
+made a cut keeps FREQ and Q — a corner is a corner and a resonance is a
+resonance — and has **no gain at all**, so its gain never reaches the design.
+The gain parameter is *withheld rather than zeroed*, so a trip through a cut
+position and back restores the shelf. The middle node is a bell in every
+position and FILTER does not touch it.
 
 *This section also said 29 while listing 30.* The odd one is **In High Cut**: §2 introduces it
 inside the *Input* sentence beside an explicitly fixed 20 Hz high-pass, §6's CPU
@@ -516,6 +545,7 @@ is permanent.
 | Pre-delay / Size | 0…+250 ms tail-only; 0.5–80 m | `03`; `02` r7 | High / Med |
 | Decay, damping, EQ, faders | 0.1–20 s; 0.10–2.00× at 16–1600 / 1000–2100 Hz; −24…+12 dB; 0…−40 dB | `01` A | High |
 | *(note)* the two damping knee spans above are **per-type constants, not knob ranges**, since the 2026-09-21 trim (§6); they are still the spans a type's knee must fall inside | — | `11` §4a | High |
+| *(note)* the row above gives **Reference A's** EQ, which was two shelves. The Reverb EQ's own node ranges are `11` §4's table: 16–1600 Hz, 20 Hz–20 kHz and **1 kHz–20 kHz**, opening at 200 Hz / 1 kHz / 6 kHz, each with a Q (outer nodes to `kShelfMaxQ` = 2, the bell to 40). Node 3 carried Reference A's 1000–2100 Hz until 2026-09-22 and it was inherited rather than chosen | — | `11` §4c | High |
 | FDN lines / τ̄ | 8; 18–80 ms by type | `04` | **CALIBRATE** |
 | Modal density | Σ*m*ᵢ ≥ 0.15·**T60**·*f*s | `05` §8 | High — corrects `04` |
 | Echo density / mixing | 1000/s (not 10 000); √V ms, R² 78.6 % | `05` §8, §11 | High |

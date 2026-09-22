@@ -1,6 +1,6 @@
 #pragma once
 
-#include "modules/deq/dsp/Design.h"
+#include "modules/deq/dsp/Filters.h"
 #include "modules/deq/dsp/DspCore.h"
 #include <cmath>
 #include <complex>

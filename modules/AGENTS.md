@@ -36,6 +36,13 @@ own tests could not see. What belongs *here* is anything every module shares.
   measurement harness caught that no test had: a band split that silently
   stopped compressing above 10.8 kHz, and a clipped caption that ui_layout
   never saw because the module was missing from its product list.
+- [`deesser/AGENTS.md`](deesser/AGENTS.md) -- BMO Defang, the de-esser. Panel
+  and schema so far; the DSP is a marked placeholder. Why THRESHOLD is in
+  prominence dB rather than dBFS and why its value string carries the word
+  "over", why listen is momentary state and not a parameter, why the meter
+  reports band reduction rather than a wideband figure, why there are no trim
+  knobs and so no preset level check, and the shelf's Q cap -- which a render
+  found and which every test had passed straight over.
 - [`tune/AGENTS.md`](tune/AGENTS.md) -- BMO Tune RT. **A product of this
   repository, not a rack module**: nothing of it is in the rack's registry or
   on its link line, and `-DBMO_BUILD_TUNE=OFF` / `-DBMO_BUILD_RACK=OFF` keep

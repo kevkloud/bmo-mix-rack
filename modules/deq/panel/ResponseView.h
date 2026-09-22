@@ -1,7 +1,7 @@
 #pragma once
 
 #include "core/state/ParamSet.h"
-#include "modules/deq/dsp/Design.h"
+#include "modules/deq/dsp/Filters.h"
 #include "modules/deq/dsp/DspCore.h"
 #include "modules/deq/panel/Analyser.h"
 #include "modules/deq/params.h"

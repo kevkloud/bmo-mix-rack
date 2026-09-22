@@ -4,20 +4,24 @@
 #include "core/ui/Fonts.h"
 #include "core/ui/Tokens.h"
 
-namespace bmo::vcomp
+namespace bmo::ui
 {
 
 //==============================================================================
 /** One horizontal bar meter: a caption, a well, and a fill that grows from one
     end.
 
-    **Module-local on purpose.** A horizontal dBFS bar is generic enough to
-    belong in core/ui one day, and it will go there the moment a second module
-    wants one -- the same rule modules/AGENTS.md applies to DynamicsMeter's
-    scale ("the point at which to lift ScalePoint out into the caller -- not
-    before"). Lifting it now would mean designing for a caller that does not
-    exist. BMO DEQ's ResponseView is the precedent for a panel owning its own
-    view.
+    **Shared, on the trigger this comment itself set.** It used to say this
+    class was module-local and would move to core/ui "the moment a second
+    module wants one" -- the same rule modules/AGENTS.md applies to
+    DynamicsMeter's scale ("the point at which to lift ScalePoint out into the
+    caller -- not before"). BMO Defang is that second module: Frosty asked for
+    its gain reduction on a bar rather than on BMO Opto's needle, for the
+    reason the next paragraph already gives. So this is that rule being
+    followed rather than an exception to it, and the move was a rename of the
+    namespace and nothing else -- LTV Comp's panel re-renders to the same
+    pixel hash either side of it. BMO DEQ's ResponseView stays the precedent
+    for a panel owning a view nobody else wants.
 
     **Why this and not DynamicsMeter.** BMO Opto's needle VU is a period
     instrument: it reads average level with VU ballistics on a scale borrowed
@@ -231,4 +235,4 @@ private:
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (LevelBar)
 };
 
-} // namespace bmo::vcomp
+} // namespace bmo::ui

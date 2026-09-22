@@ -63,6 +63,12 @@ namespace
                     "diffuse", "rate", "depth", "rotation", "asymmetry" } },
         { "ltvcomp", { "amount", "gate", "output", "complex", "attack", "release",
                      "arc", "sidechain", "low_thru", "high_thru" } },
+        // BMO Defang. Five parameters and no more: attack, release, mix,
+        // lookahead, oversampling and a stereo-link switch were all considered
+        // and left out, and ADAPT's blend is an internal constant -- see
+        // modules/deesser/params.h. The order is the table in
+        // docs/deesser/11-integration-and-test-plan.md section 3.
+        { "deesser", { "freq", "q", "thresh", "range", "shape" } },
         // BMO FET. ATTACK and RELEASE are knob positions, 1..7 with 7 fastest,
         // not milliseconds -- see modules/fetcomp/params.h. The order is the
         // table in docs/1176-comp/11-integration-and-test-plan.md section 2.
@@ -207,7 +213,7 @@ int main()
         auto rack = createRack();
         const auto& registry = rack->getRegistry();
 
-        check (registry.size() == 8, "the registry holds util, eq, sat, opto, dim, deq, vcomp and fetcomp");
+        check (registry.size() == 9, "the registry holds util, eq, sat, opto, dim, deq, vcomp, deesser and fetcomp");
 
         // A bank is a module's host lanes, so it stops at 32 even if the
         // module does not. Past that, its golden schema test pins the order.

@@ -19,6 +19,7 @@ Permanent. Allocate here before the first build of anything new.
 | BMO Dimension | `dim` | `Bdim` | `com.lt3audio.bmodimension` | `.bmodim` |
 | BMO Mix Rack | -- | `Brck` | `com.lt3audio.bmomixrack` | `.bmorack` |
 | BMO DEQ | `deq` | `Bpar` | `com.lt3audio.bmodeq` | `.bmodeq` |
+| BMO Defang | `deesser` | `Bdes` | `com.lt3audio.bmodefang` | `.bmodeesser` |
 | BMO FET | `fetcomp` | `Bfet` | `com.lt3audio.bmofet` | `.bmofetcomp` |
 | BMO Tune RT -- **not in the rack** | `tune` | `Btun` | `com.lt3audio.bmotunert` | `.bmotune` |
 | LTV Comp -- **not a BMO product** | `ltvcomp` | `Ltvc` | `com.lt3audio.ltvcomp` | `.ltvcomp` (reads `.bmovcomp`) |
@@ -145,6 +146,31 @@ rack opens it compact and standalone opens it full; the switch between them
 is on the host's bar, not on the panel (`ModuleDef::expandedWidth`,
 `ui::ExpandButton`). See `modules/deq/AGENTS.md`.
 
+**BMO Defang** is the de-esser, and the row above is its identity. `Bdes` was
+reserved here as "de-esser" and is spent on it. The module id stays `deesser`
+while the display name is Defang, on purpose: the id says what the module is
+to anyone reading the tree, a preset extension or a test name, and the name is
+what the plugin is called. A web name-collision scan on 2026-09-20 found no
+audio product called Defang -- a collision check, not a trademark clearance.
+Considered and not chosen: BMO Ess, BMO DES (one letter from BMO DEQ in a
+plugin list), BMO Sift, and De-Ess, Tame, Sizzle, Hiss and Sibilance, the last
+clashing with an existing commercial product.
+
+It is **a single dynamic-EQ cut on a level-independent detector**, not a
+wideband or split-band de-esser: a bell or shelf has no split to reconstruct,
+so reconstruction error is identically zero at every depth. **THRESHOLD is in
+prominence dB and reads "+3.0 dB over"** -- how far the band stands out above
+the rest of the track, not dBFS -- so it does not need re-riding across a take,
+which is the whole product. Five parameters, frozen at first ship: `freq`,
+`q`, `thresh`, `range`, `shape` (Bell / High Shelf, Bell default). **Latency is
+0 at every setting and permanently**, there being no lookahead and no
+oversampling. Listen is momentary panel state on the `setSolo` hook and never
+a parameter. ADAPT, attack, release, mix and a stereo-link switch were all
+considered and left out; each could be appended after `shape`, and none can be
+inserted. See `modules/deesser/AGENTS.md` and `docs/deesser/`.
+
+Reserved for later products (not built, do not reuse): `Bfet` FET comp,
+`Bdyn` dynamics, `Bovr` overdrive,
 **BMO FET** is the 1176-style FET compressor, and the row above is its
 identity. `Bfet` was reserved here as "FET comp" and is spent on it; the bundle
 id and the preset extension follow the existing rows -- bundle from the display
@@ -299,6 +325,7 @@ there are distinguishable ones.
 | BMO Dimension | `#d4a4ff` | 271.6° | 6.80 | 1.73 |
 | *(not an accent)* utility azure `#4fb8e8` | | 198.8° | 6.02 | -- |
 | BMO DEQ | `#5ecfc0` teal | 172.0° | **7.19** | 1.64 |
+| BMO Defang | `#ea9f9a` muted coral | 3.8° | 6.39 | 1.84 |
 | BMO Tune RT (not in the rack) | `#b6e35d` lime | 80.1° | **9.10** | **1.29** |
 | LTV Comp -- **unsigned, and on the LTV ground** | `#a2a8ff` periwinkle | 236.1° | 6.17 | 1.91 |
 | BMO FET -- **an owner-approved exception to both rules below** | `#5489d4` deep blue | 215.2° | **3.80** | **3.09** |
@@ -338,6 +365,23 @@ only thing that will catch a problem. The figures were computed by the WCAG
 formula on AURORA and confirmed against real renders with
 `tools/inspect/Inspect.exe ratio`; the candidate table and the reasoning are
 `docs/1176-comp/11-integration-and-test-plan.md` §4c.
+
+**BMO Defang's coral passes both rules, with no exception and no near-miss.**
+Hue 3.8° sits in the red gap, 27.8° from BMO EQ's pink and 28.0° from the
+Saturator's orange — both clear of the 26.8° bar, which is the worst separation
+this table has ever accepted (the teal's, recorded below). Its 6.39 on the dark
+plate and 1.84 on the pale one are both inside the shipped bands, 5.87-7.19 and
+1.64-2.00. Six candidates were drawn on both plates in a colour mock on AURORA
+and **all six passed**; Frosty took D, the muted coral, on 2026-09-20 because it
+is warm and because it leaves the violet window free for a later module. The
+candidate table is `docs/deesser/11-integration-and-test-plan.md` §2.
+
+Both figures were **confirmed against a real render** with
+`tools/inspect/Inspect.exe ratio`, in both appearances, rather than left as
+formula output: 6.39:1 and 1.84:1 exactly, off the caption ink in
+`snapshots/deesser-dark-bell.png` and `snapshots/deesser-light-bell.png`
+(`testing-notes/ui-pass-deesser-2026-09-20.md`). The two windows §2 identified
+were 298.4-309.2° and 2.8-4.9°; **the violet one is still free.**
 
 **The lime was picked outside this table**, while Tune was still its own
 repository, and its two figures are computed by the WCAG formula on AURORA

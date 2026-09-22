@@ -5,8 +5,7 @@
 // bilinear transform, which is exactly what the module exists to avoid. They
 // are kept so every accuracy claim is made against a named alternative.
 
-#include "modules/deq/dsp/Biquad.h"
-#include "modules/deq/dsp/Prototype.h"
+#include "modules/deq/dsp/Filters.h"
 #include <algorithm>
 #include <cmath>
 #include <complex>

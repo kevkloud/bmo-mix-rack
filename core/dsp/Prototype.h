@@ -1,8 +1,8 @@
 #pragma once
 
-#include "modules/deq/dsp/Biquad.h"
+#include "core/dsp/Biquad.h"
 
-namespace bmo::deq
+namespace bmo::dsp
 {
 
 /** The shapes a band can take. This order is internal; params.h maps its own
@@ -75,4 +75,4 @@ struct Prototype
     }
 };
 
-} // namespace bmo::deq
+} // namespace bmo::dsp

@@ -1,9 +1,9 @@
 #pragma once
 
-#include "modules/deq/dsp/Prototype.h"
+#include "core/dsp/Prototype.h"
 #include <array>
 
-namespace bmo::deq
+namespace bmo::dsp
 {
 
 /** Limits every design is clamped to before it is computed. Degenerate input
@@ -88,4 +88,4 @@ double clampFrequency (double frequencyHz, double sampleRate) noexcept;
 double clampQ (double q) noexcept;
 double clampGainDb (double gainDb) noexcept;
 
-} // namespace bmo::deq
+} // namespace bmo::dsp

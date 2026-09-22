@@ -131,6 +131,38 @@ record and mostly open items**, and BMO DEQ has a record with none of its four
 checklist items ticked. All eight are to be walked before the pass is called
 done — see the checklist's own §D.
 
+### The knob pointer in the light appearance — eyes, not a number
+
+Measured on **AURORA**, 2026-09-21, with `tools/inspect ratio` off
+`tools/snapshot` renders. It came out of the BMO DEQ ring-accent work (PR #20)
+and is deliberately not fixed there, because what to do about it is a looking
+question and this pass is the looking.
+
+The pointer is the mark that says where a knob is set. In the dark set it is
+near-black on the knob face; in the light set it is white on a pale face, and
+that is a very different amount of contrast:
+
+| appearance | pointer | on face | ratio |
+|---|---|---|---|
+| dark  | `#2b2b2e` | `#4fb8e8` | **6.29:1** |
+| light | `#ffffff` | `#97ddff` | **1.49:1** |
+
+**It is suite-wide, not one module's.** BMO CEQ's character cap is `#ffffff`
+on `#f7c5d9`, 1.51:1 — the same treatment, the same number. Every knob in the
+light appearance is at roughly this figure, so any module is a fair place to
+look at it.
+
+What the pass owes here is a judgement, not a measurement: **in Ableton, in
+the light appearance, on a real screen, can you see where a knob is pointing
+at a glance?** A contrast floor is written for text and a pointer is a shape,
+so the number alone does not settle it — it only says the margin is thin
+enough to be worth a deliberate look. Record the answer either way; "it reads
+fine" is as useful a result as "it disappears", and without it the number will
+come back around and cost another session the same argument.
+
+`testing-notes/deq-ring-accent-2026-09-21.md` has the full ratio tables and
+how they were taken.
+
 ---
 
 ## 3a. Carried into this pass: BMO FET's CPU cost

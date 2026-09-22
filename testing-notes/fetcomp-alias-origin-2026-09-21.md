@@ -4,7 +4,7 @@
 `build-dsp` with `BMO_DSP_ONLY=ON` (Release), build exit 0 with no error lines.
 Branch `frosty-add-bmo-fetcomp`, PR #22.
 
-This settles item 1 of `docs/1176-comp/HANDOFF-dsp-fixes.md`. The short version:
+This settles item 1 of `docs/fet-comp/HANDOFF-dsp-fixes.md`. The short version:
 **the DSP is behaving correctly and the pack's oversampled alias targets are
 not reachable by oversampling.** Nothing here was heard; it is all measurement.
 

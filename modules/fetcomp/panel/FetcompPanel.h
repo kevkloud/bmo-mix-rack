@@ -29,7 +29,7 @@ namespace bmo::fetcomp
     luminance rather than by hue, which is the failure mode the suite has
     already fixed once on its switch colours. The rack accent stays blue in
     both states and nothing else on the panel changes colour. See
-    docs/1176-comp/11-integration-and-test-plan.md 4b, which carries the
+    docs/fet-comp/11-integration-and-test-plan.md 4b, which carries the
     figures and the three rejected pairs.
 
     **No section rules.** This is one compressor, the same argument BMO Opto

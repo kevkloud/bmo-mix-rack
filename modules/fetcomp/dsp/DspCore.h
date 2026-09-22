@@ -22,7 +22,7 @@ namespace bmo::fetcomp
 
     INPUT, OUTPUT and MIX each get one. All three are steady knobs most of the
     time and all three are automatable, and stepping a gain block to block with
-    no ramp is an audible zipper. 20 ms, per docs/1176-comp/10-dsp-spec.md 10.
+    no ramp is an audible zipper. 20 ms, per docs/fet-comp/10-dsp-spec.md 10.
 
     ATTACK and RELEASE deliberately have none: they are the knob *position*,
     they set coefficients rather than a level, and 11 section 2 marks them
@@ -55,7 +55,7 @@ private:
 };
 
 //==============================================================================
-/** BMO FET: a 1176-style FET compressor.
+/** BMO FET: a FET compressor.
 
         INPUT drive -> input transformer/amp -> FET shunt cell
                     -> output amplifier -> output transformer
@@ -113,8 +113,8 @@ private:
       by construction and the shapers are soft, so a slammed signal degrades
       into the stage models rather than into a clip.
 
-    The spec is docs/1176-comp/10-dsp-spec.md; what the tests ask of it is
-    docs/1176-comp/11-integration-and-test-plan.md 3. */
+    The spec is docs/fet-comp/10-dsp-spec.md; what the tests ask of it is
+    docs/fet-comp/11-integration-and-test-plan.md 3. */
 class DspCore
 {
 public:

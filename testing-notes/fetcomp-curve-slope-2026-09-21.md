@@ -1,6 +1,6 @@
 # BMO FET: what adds slope above 20 dB GR, and why it is the input amplifier
 
-**AURORA, 2026-09-21.** Closes item 2 of `docs/1176-comp/HANDOFF-dsp-fixes.md`.
+**AURORA, 2026-09-21.** Closes item 2 of `docs/fet-comp/HANDOFF-dsp-fixes.md`.
 Measured with `measure_fetcomp slopeorigin`, built in `build-dsp` with
 `BMO_DSP_ONLY=ON` (Release), build exit 0 with no error lines. Branch
 `frosty-add-bmo-fetcomp`, PR #22.

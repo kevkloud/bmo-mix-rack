@@ -171,7 +171,7 @@ inserted. See `modules/deesser/AGENTS.md` and `docs/deesser/`.
 
 Reserved for later products (not built, do not reuse): `Bfet` FET comp,
 `Bdyn` dynamics, `Bovr` overdrive,
-**BMO FET** is the 1176-style FET compressor, and the row above is its
+**BMO FET** is the FET compressor, and the row above is its
 identity. `Bfet` was reserved here as "FET comp" and is spent on it; the bundle
 id and the preset extension follow the existing rows -- bundle from the display
 name, extension from the module id, which is `fetcomp` rather than `fet` so
@@ -189,7 +189,7 @@ to honour. Two voicings, **Blue** and **Black** (default Black), shown as the
 border around the VU and nowhere else. MIX ships, its dry path delay-matched to
 the oversampler. Stereo is always linked and there is no sidechain filter, both
 of which could be appended later and neither of which can be inserted. See
-`modules/fetcomp/AGENTS.md` and `docs/1176-comp/`.
+`modules/fetcomp/AGENTS.md` and `docs/fet-comp/`.
 
 Reserved for later products (not built, do not reuse):
 `Bdyn` dynamics, `Bdes` de-esser, `Bovr` overdrive,
@@ -364,7 +364,7 @@ nothing in CI and needs no suppression, which also means the render pass is the
 only thing that will catch a problem. The figures were computed by the WCAG
 formula on AURORA and confirmed against real renders with
 `tools/inspect/Inspect.exe ratio`; the candidate table and the reasoning are
-`docs/1176-comp/11-integration-and-test-plan.md` §4c.
+`docs/fet-comp/11-integration-and-test-plan.md` §4c.
 
 **BMO Defang's coral passes both rules, with no exception and no near-miss.**
 Hue 3.8° sits in the red gap, 27.8° from BMO EQ's pink and 28.0° from the

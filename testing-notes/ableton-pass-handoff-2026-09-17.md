@@ -175,7 +175,7 @@ taken on the bench's word.
 The numbers, Release, 48 kHz / 512, stereo, against LTV Comp in the same
 session: **145.5 ns/sample at defaults against LTV Comp's 26.6 — 5.47×** — and
 **993.0 at 4x with all buttons in, 14.11×**. The budget in
-`docs/1176-comp/11-integration-and-test-plan.md` §3 was 2.0× and 3.0×; it now
+`docs/fet-comp/11-integration-and-test-plan.md` §3 was 2.0× and 3.0×; it now
 reads 6.5× and 17×, set about 20% above what was measured. Almost all of the
 heaviest figure is the oversampler: 4x alone takes the module from 145.5 to
 993.0.

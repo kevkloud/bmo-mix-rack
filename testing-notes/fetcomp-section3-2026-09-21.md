@@ -1,6 +1,6 @@
 # BMO FET: the four missing suites, and the two missing tool modes
 
-**AURORA, 2026-09-21.** Closes item 3 of `docs/1176-comp/HANDOFF-dsp-fixes.md`.
+**AURORA, 2026-09-21.** Closes item 3 of `docs/fet-comp/HANDOFF-dsp-fixes.md`.
 Built in `build-dsp` with `BMO_DSP_ONLY=ON` (Release), build exit 0 with no
 error lines. Branch `frosty-add-bmo-fetcomp`, PR #22.
 

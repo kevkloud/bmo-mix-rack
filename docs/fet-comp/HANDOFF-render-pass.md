@@ -79,7 +79,7 @@ groundwork; this one keeps the panel.
   `fetcomp-bezel-gate-sheet.png`. The GR needle is at rest in all of them
   because the DSP was a placeholder.
 - The UI pass note is `testing-notes/ui-pass-fetcomp-2026-09-20.md`. The tools
-  and the step order are in `docs/1176-comp/11-integration-and-test-plan.md`
+  and the step order are in `docs/fet-comp/11-integration-and-test-plan.md`
   section 4 (`tools/snapshot`, `tools/inspect`, `ui_layout_tests --dump`,
   `.bmo-fontdir`). `scripts/build.sh --snapshots` was broken and is fixed in
   `c142f37`.

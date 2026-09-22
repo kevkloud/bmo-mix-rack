@@ -20,7 +20,7 @@ const ModuleDef& module()
     // declined to try. The passing alternative was a violet and was refused
     // for not being blue. The full note and the candidate table are in
     // products/AGENTS.md's Accents section and in
-    // docs/1176-comp/11-integration-and-test-plan.md 4c; do not raise the
+    // docs/fet-comp/11-integration-and-test-plan.md 4c; do not raise the
     // arithmetic again as a new finding.
     //
     // `accent` is only ever a UI colour: nothing in the schema or the state

@@ -1,6 +1,6 @@
 # BMO FET
 
-A FET compressor in the 1176 style: fast, coloured, and happiest when it is
+A FET compressor: fast, coloured, and happiest when it is
 working harder than it needs to.
 
 **It has no threshold.** You set INPUT — how hard the signal arrives — and the
@@ -78,4 +78,4 @@ unit are measured on one bench. No listening pass has happened.
 The presets still do not set OUTPUT: those makeup figures are solved and
 measured with an ear, which is the next thing this module needs.
 `modules/fetcomp/AGENTS.md` says what is decided and what is still owed, and
-`docs/1176-comp/` is the full specification.
+`docs/fet-comp/` is the full specification.

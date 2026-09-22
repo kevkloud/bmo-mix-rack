@@ -9,7 +9,7 @@ regenerate rather than look for these files.
 `gaps` mode. `csc -out:Inspect.exe -r:System.Drawing.dll Inspect.cs`.
 
 **The module's DSP is still the placeholder**, so two things in
-`docs/1176-comp/11-integration-and-test-plan.md` §4d could not be done and are
+`docs/fet-comp/11-integration-and-test-plan.md` §4d could not be done and are
 not claimed: step 4's GR render "driven to 20 dB+" — `currentGainReductionDb()`
 is a flat zero, so the GR needle can only be rendered at rest — and anything
 that depends on the meter moving. Both belong with the DSP.
@@ -116,7 +116,7 @@ DEQ expanded's 30 — tight, and nowhere near BMO Opto's 48 or the Saturator's 6
 # Render and layout pass
 
 **On AURORA, 2026-09-20**, second session, working to
-`docs/1176-comp/HANDOFF-render-pass.md`. Built in a **separate `build-ui/`
+`docs/fet-comp/HANDOFF-render-pass.md`. Built in a **separate `build-ui/`
 tree** (Debug, snapshot + `ui_layout_tests` targets only), because another agent
 was implementing the real DSP in `build/` and `build-dsp/` at the same time. No
 tracked source file was edited in this pass; renders and measurements only.
@@ -309,7 +309,7 @@ needle tracks up to the limit, stops there, and does not wrap -- which is what
 
 `testing-notes/fetcomp-dsp-2026-09-20.md` is referenced from **four** committed
 or working documents -- `11-integration-and-test-plan.md:539`,
-`docs/1176-comp/README.md:56`, `modules/fetcomp/AGENTS.md:17` and
+`docs/fet-comp/README.md:56`, `modules/fetcomp/AGENTS.md:17` and
 `modules/fetcomp/README.md:69` -- and **is not in the tree**. By those
 references it carries "every figure", "every CALIBRATE" value, and "the three
 places the plan turned out to be unachievable as written".

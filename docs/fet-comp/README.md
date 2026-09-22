@@ -1,6 +1,6 @@
 # BMO FET — groundwork pack
 
-Spec, theory, math and test direction for a 1176-style FET compressor module.
+Spec, theory, math and test direction for a FET compressor module.
 No implementation code lives here; the dev team writes it from this pack.
 Assembled on AURORA, 2026-09-20. The module has since been built and measured
 on AURORA, but **nothing in it has been heard yet** — see the live handoffs
@@ -80,5 +80,5 @@ it goes stale.
 
 Ratio sag at depth is derived, not measured — no source gives a real unit's GR
 curve past the knee, and revision-specific figures are missing for both
-voicings. No 1176-specific circuit-modelling paper was found. Everything marked
+voicings. No FET-specific circuit-modelling paper was found. Everything marked
 CALIBRATE needs measurement and ear.

@@ -21,7 +21,7 @@ enum class Ratio { four = 0, eight, twelve, twenty, allButtons };
 enum class Voicing { blue = 0, black };
 
 //==============================================================================
-// **Every constant docs/1176-comp/10-dsp-spec.md marks CALIBRATE is in this
+// **Every constant docs/fet-comp/10-dsp-spec.md marks CALIBRATE is in this
 // file, and every one of them is a first-pass value awaiting measurement and
 // an ear.** Nothing here is fitted. The spec's own tables are where the
 // numbers come from; where the spec gives only a direction ("above G_20",

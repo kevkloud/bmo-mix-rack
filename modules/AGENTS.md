@@ -43,7 +43,7 @@ own tests could not see. What belongs *here* is anything every module shares.
   reports band reduction rather than a wideband figure, why there are no trim
   knobs and so no preset level check, and the shelf's Q cap -- which a render
   found and which every test had passed straight over.
-- [`fetcomp/AGENTS.md`](fetcomp/AGENTS.md) -- BMO FET, the 1176-style FET
+- [`fetcomp/AGENTS.md`](fetcomp/AGENTS.md) -- BMO FET, the FET
   compressor. Why ATTACK and RELEASE are the knob position rather than a time,
   why the accent and the switch colours are both documented exceptions, why the
   GR meter is not widened for a 30 dB design target, and what the placeholder

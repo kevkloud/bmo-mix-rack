@@ -9,7 +9,7 @@ namespace bmo::fetcomp
 
 /** The oversampling detent as the factor it names. Off / 2x / 4x -- there is
     no 8x here, unlike the Saturator's row: the FET cell is what costs, and
-    docs/1176-comp/10-dsp-spec.md 9 stops at 4x. */
+    docs/fet-comp/10-dsp-spec.md 9 stops at 4x. */
 inline int oversamplingFactor (int index) noexcept
 {
     constexpr int factors[] { 1, 2, 4 };

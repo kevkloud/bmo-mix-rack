@@ -18,7 +18,7 @@ namespace
         the voicing: against `meterFace` the two states separate by 3.88:1 at
         0.7 and by 5.91:1 at 1.0, measured on the renders. Frosty took the call
         on those renders, 2026-09-20 on AURORA
-        (docs/1176-comp/11-integration-and-test-plan.md 4d step 6) -- render
+        (docs/fet-comp/11-integration-and-test-plan.md 4d step 6) -- render
         the other one with `ui.bezel=stock` rather than by editing this. */
     constexpr float kStockBezelAlpha = 0.7f;
     constexpr float kFullBezelAlpha = 1.0f;

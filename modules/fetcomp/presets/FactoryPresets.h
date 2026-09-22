@@ -26,7 +26,7 @@ namespace bmo::fetcomp
     would otherwise sit.
 
     The four are the listening checklist in
-    docs/1176-comp/11-integration-and-test-plan.md 3, which is where the
+    docs/fet-comp/11-integration-and-test-plan.md 3, which is where the
     settings come from: a lead vocal driven hard at 4:1, a room mic with every
     button in and both knobs fast, a bass at 20:1 with the release long enough
     to grind, and a light bus setting that leans on MIX rather than on depth. */

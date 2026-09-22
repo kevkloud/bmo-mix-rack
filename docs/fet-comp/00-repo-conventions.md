@@ -1,4 +1,4 @@
-# Repo conventions for a new 1176-style FET compressor module
+# Repo conventions for a new FET compressor module
 
 Researched by walking `modules/vcomp` (LTV Comp) end to end as the reference
 compressor. No files modified. Ignore `build/`, `build-dsp/`, `build-rel/`.
@@ -117,7 +117,7 @@ module/directory needs its own `AGENTS.md` (why + context) and `README.md`
 include root (`#include "core/..."`), namespaces `bmo::`/`bmo::<module>`/`bmo::ui`
 (AGENTS.md:248-251); licensed fonts in `assets/fonts` are gitignored, never
 looked up by name at runtime; do not use UA/Urei branding — refer to the new
-module only as "1176-style"/FET compressor per this task's own instruction,
+module only as "FET-style"/FET compressor per this task's own instruction,
 consistent with how LTV Comp avoids naming its hardware references directly
 in code/schema (it uses reference points in prose only, `products/AGENTS.md`
 "LTV Comp" section).

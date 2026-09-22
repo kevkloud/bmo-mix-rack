@@ -1,10 +1,10 @@
 # modules/fetcomp — BMO FET
 
-A 1176-style FET compressor. What is here is what a contributor would otherwise
+A FET compressor. What is here is what a contributor would otherwise
 have to re-derive: the decisions that are already taken, the two house rules
 this module knowingly breaks, and what the placeholder DSP owes the real one.
 
-The long-form spec is `docs/1176-comp/` — `10-dsp-spec.md` for the topology and
+The long-form spec is `docs/fet-comp/` — `10-dsp-spec.md` for the topology and
 the maths, `11-integration-and-test-plan.md` for the parameter table, the test
 plan, the panel and the visual verification. **Read those before changing
 anything in here.** Nothing in this module was heard or measured at the time it
@@ -77,7 +77,7 @@ cannot print different words. "us" rather than the micro sign because the two
 display faces are licensed individually and live outside the repository, so a
 glyph outside ASCII is one this suite cannot promise it can draw.
 
-**`docs/1176-comp/11` illustrates the release string as "4 (234 ms)"** against
+**`docs/fet-comp/11` illustrates the release string as "4 (234 ms)"** against
 the 234.5 ms the law gives. That is the figure truncated where this rounds it,
 and the example is an illustration of the shape rather than of the rounding.
 

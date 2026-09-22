@@ -1,6 +1,6 @@
 # BMO FET visual pass: the voicing colours the panel
 
-**AURORA, 2026-09-21.** Step 6 of `docs/1176-comp/HANDOFF-render-pass.md` —
+**AURORA, 2026-09-21.** Step 6 of `docs/fet-comp/HANDOFF-render-pass.md` —
 final hashes and every measured figure. Continues
 `testing-notes/ui-pass-fetcomp-2026-09-20.md`, which covers the skeleton and
 the bezel-alpha call; this one covers the pass run after the DSP landed.

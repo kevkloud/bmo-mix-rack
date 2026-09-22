@@ -20,7 +20,7 @@ namespace P = bmo::fetcomp;
 namespace
 {
     // Permanent and append-only from the first release. The table is
-    // docs/1176-comp/11-integration-and-test-plan.md section 2, and the two
+    // docs/fet-comp/11-integration-and-test-plan.md section 2, and the two
     // gain ranges are the wide ones on purpose: +45 dB of input is about 5 dB
     // short of 30 dB of reduction at 4:1 from a -18 dBFS source, and +/-24 dB
     // of output cannot restore 30 dB of it. If either is ever narrowed, this

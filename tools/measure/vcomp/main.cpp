@@ -721,7 +721,7 @@ std::string flagString (int argc, char** argv, const char* flag, const std::stri
 //==============================================================================
 /** ns/sample, as the baseline BMO FET's CPU budget is stated against.
 
-    `docs/1176-comp/11-integration-and-test-plan.md` section 3 sets BMO FET at
+    `docs/fet-comp/11-integration-and-test-plan.md` section 3 sets BMO FET at
     "<= 2.0x LTV Comp per sample at defaults, <= 3.0x at the heaviest setting"
     and says to run this tool in the same session on the same box, because a
     ns/sample figure on its own says nothing -- it is a number about the

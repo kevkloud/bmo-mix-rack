@@ -1,7 +1,7 @@
 /*
     Tests for BMO FET's DSP core. No JUCE, no host.
 
-    The suite docs/1176-comp/11-integration-and-test-plan.md 3 asks for, plus
+    The suite docs/fet-comp/11-integration-and-test-plan.md 3 asks for, plus
     the frame tests that were written against the placeholder and still hold:
     the position-to-time law, which is the permanent definition of what ATTACK
     and RELEASE mean; the latency table and the fact that the reported figure
@@ -1530,7 +1530,7 @@ void testAdapterUnpacksInIndexOrder()
 //==============================================================================
 // 11 section 3's four remaining suites. Added 2026-09-21 on AURORA; before
 // this the file was green with all four missing, which is what
-// docs/1176-comp/HANDOFF-dsp-fixes.md section 3 was about. Every figure they
+// docs/fet-comp/HANDOFF-dsp-fixes.md section 3 was about. Every figure they
 // assert was measured first with measure_fetcomp and written up in
 // testing-notes/fetcomp-section3-2026-09-21.md -- nothing here is a bound
 // invented at the keyboard.

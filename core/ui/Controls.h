@@ -461,7 +461,7 @@ public:
         apart against `meterFace` #464649, which is the same colour in both
         appearances. Measured off real renders on AURORA, the pair separates by
         3.88:1 at the stock 0.7 and by 5.91:1 at full alpha
-        (docs/1176-comp/11-integration-and-test-plan.md 4b predicts 3.88 and
+        (docs/fet-comp/11-integration-and-test-plan.md 4b predicts 3.88 and
         5.13; the second was the pessimistic one). Which of those ships is a
         call taken on renders, so both had to be renderable, and the 0.7
         literal in `paint` could not simply move.

@@ -12,7 +12,7 @@ namespace bmo::fetcomp
 // and tests/plugin/FetcompTests.cpp for the table that holds them.
 //
 // The list, its order, the ranges, the steps, the defaults and the two choice
-// lists are the table in docs/1176-comp/11-integration-and-test-plan.md 2.
+// lists are the table in docs/fet-comp/11-integration-and-test-plan.md 2.
 // They freeze at first ship; a later control appends at the end.
 //==============================================================================
 
@@ -76,7 +76,7 @@ inline constexpr int kSchemaVersion = 1;
 // knowingly: that module models no hardware knob and has no direction to
 // honour, this one does.
 //
-// The laws are docs/1176-comp/10-dsp-spec.md 10, and they live here rather
+// The laws are docs/fet-comp/10-dsp-spec.md 10, and they live here rather
 // than in the DSP because they are the permanent *definition* of what these
 // two parameters mean -- the value string and the coefficient both derive
 // from them, and the two may not be allowed to disagree.
@@ -145,7 +145,7 @@ namespace detail
         ever wants the decimal ParamFormat::Milliseconds keeps for times under
         10.
 
-        docs/1176-comp/11-integration-and-test-plan.md 2 illustrates this as
+        docs/fet-comp/11-integration-and-test-plan.md 2 illustrates this as
         "4 (234 ms)" against the 234.5 ms the law gives; that is the figure
         truncated where this rounds it. The example is an illustration of the
         shape, not of the rounding. */

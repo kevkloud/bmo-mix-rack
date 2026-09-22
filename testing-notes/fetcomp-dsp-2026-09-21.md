@@ -2,13 +2,13 @@
 
 **On AURORA, 2026-09-21**, `frosty-add-bmo-fetcomp`, from `build-dsp/`
 (Release). Figures are `measure_fetcomp`; the protocol is
-`docs/1176-comp/11-integration-and-test-plan.md` §3 and the targets are
-`docs/1176-comp/10-dsp-spec.md`.
+`docs/fet-comp/11-integration-and-test-plan.md` §3 and the targets are
+`docs/fet-comp/10-dsp-spec.md`.
 
 **Why this note exists.** The session that wrote the DSP on 2026-09-20 ended
 without writing its own note. Four documents cite
 `testing-notes/fetcomp-dsp-2026-09-20.md` — `11-integration-and-test-plan.md`,
-`docs/1176-comp/README.md`, `modules/fetcomp/AGENTS.md` and
+`docs/fet-comp/README.md`, `modules/fetcomp/AGENTS.md` and
 `modules/fetcomp/README.md` — and **that file was never in the tree**. Its
 figures, including what AGENTS.md calls "the three places the plan turned out to
 be unachievable as written", are lost. Everything below is a **fresh

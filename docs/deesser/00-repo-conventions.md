@@ -2,8 +2,8 @@
 
 General module layout, `bmo::ModuleDsp`, ParamSpec/ParamSet, registration and
 build/test conventions are already covered in
-`docs/1176-comp/00-repo-conventions.md` — read that first, not repeated here.
-Researched read-only; `modules/fetcomp`, in-flight `docs/1176-comp` edits, and
+`docs/fet-comp/00-repo-conventions.md` — read that first, not repeated here.
+Researched read-only; `modules/fetcomp`, in-flight `docs/fet-comp` edits, and
 `build*/` were ignored per instructions.
 
 ## 1. Reusable DSP a de-esser needs
@@ -47,7 +47,7 @@ narrowband dynamic-EQ cut, and DEQ already is one:
   (generic ratio/knee reduction curve, feedforward vs feedback slope math,
   used by Opto/Vcomp — a different shape than DEQ's own), `Meter.h` (not
   inspected in depth), `ModuleDsp.h` (the base interface).
-- **Reuse rule**: per `docs/1176-comp/00-repo-conventions.md` §2, anything in
+- **Reuse rule**: per `docs/fet-comp/00-repo-conventions.md` §2, anything in
   a module's own `dsp/` folder (DEQ's `Svf.h`, `Dynamics.h`, `Design.*`) is
   **module-local** — there is no precedent in this repo for one module
   `#include`-ing another's `dsp/` files. A de-esser needing DEQ's SVF/detector
@@ -118,7 +118,7 @@ narrowband dynamic-EQ cut, and DEQ already is one:
 
 ## 4. Render/visual tools and test targets
 
-Full detail is in `docs/1176-comp/11-integration-and-test-plan.md` — reference
+Full detail is in `docs/fet-comp/11-integration-and-test-plan.md` — reference
 it, not repeated here. Short list of what a new module must pass:
 
 | tool/target | path |

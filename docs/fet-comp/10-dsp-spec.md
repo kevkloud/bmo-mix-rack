@@ -12,7 +12,7 @@ shunt cell whose *divider law* is the gain computer, driven by a linear
 feedback sidechain (§3–§4), with static LNL blocks for the stages and
 transformers whose constants the voicing switch changes (§8).
 
-A3 approach 3 (DK/WDF) rejected — no 1176-specific circuit derivation exists,
+A3 approach 3 (DK/WDF) rejected — no FET-specific circuit derivation exists,
 and a per-sample Newton solve across eight rack instances fails the CPU
 constraint. A3 approach 4 (neural) rejected for want of hardware to capture; it
 remains the upgrade path.

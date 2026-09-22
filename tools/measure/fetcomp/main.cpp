@@ -19,7 +19,7 @@
 
     **Every recorded result names the machine it ran on (AURORA / ICE QUEEN) in
     testing-notes/.** The numbers this prints are measurements of *this code*,
-    not of any hardware: everything docs/1176-comp/10-dsp-spec.md marks
+    not of any hardware: everything docs/fet-comp/10-dsp-spec.md marks
     CALIBRATE is a first-pass value in modules/fetcomp/dsp/Calibration.h and
     has not been heard.
 */
@@ -193,7 +193,7 @@ int latency()
     }
 
     std::printf ("\n0 / 40 / 60 at Off / 2x / 4x, zero at the default, and the same\n"
-                 "in both voicings -- docs/1176-comp/10-dsp-spec.md 11.\n");
+                 "in both voicings -- docs/fet-comp/10-dsp-spec.md 11.\n");
 
     return failures == 0 ? 0 : 1;
 }

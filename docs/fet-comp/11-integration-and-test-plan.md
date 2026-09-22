@@ -17,7 +17,7 @@ module id `fetcomp`, plugin code **`Bfet`** (reserved as "FET comp" at
 `products/AGENTS.md:147`, spent here), bundle id **`com.lt3audio.bmofet`**,
 presets **`.bmofetcomp`**, `ui::bmoLine()`. That follows the existing rows
 (`products/AGENTS.md:13-23`): bundle id from the display name, preset extension
-from the module id. No hardware branding anywhere; prose says "1176-style"/FET
+from the module id. No hardware branding anywhere; prose says "FET-style"/FET
 only.
 
 The **accent colour** (§4c) is the one identity item still open, and it blocks

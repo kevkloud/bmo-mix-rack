@@ -71,7 +71,7 @@ namespace
         { "deesser", { "freq", "q", "thresh", "range", "shape" } },
         // BMO FET. ATTACK and RELEASE are knob positions, 1..7 with 7 fastest,
         // not milliseconds -- see modules/fetcomp/params.h. The order is the
-        // table in docs/1176-comp/11-integration-and-test-plan.md section 2.
+        // table in docs/fet-comp/11-integration-and-test-plan.md section 2.
         { "fetcomp", { "input", "output", "attack", "release", "ratio", "mix",
                        "voicing", "oversampling" } },
     };

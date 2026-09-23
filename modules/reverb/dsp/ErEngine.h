@@ -123,6 +123,15 @@ public:
         where the knob says. */
     static constexpr float kHiCutOpenHz = 20000.0f;
 
+    /** DENSITY recomputes the tap weights every this many samples and
+        interpolates them linearly in between. The grid is counted from
+        `prepare()` and `reset()`, never from a block's start, so the same
+        values in any block size make the same output. 0.67 ms at 48 kHz;
+        the weights are a ramp across `kRampWidth` of the knob, so a
+        straight line between two points 32 samples apart is not audible
+        as anything but the ramp. */
+    static constexpr int kControlInterval = 32;
+
     /** Size law with the window clamp: the factor every table time is
         multiplied by and every table gain divided by. `S / S_ref`, clamped so
         the table's window stays inside [5 ms, windowClampMs]. The pattern is
@@ -199,7 +208,10 @@ private:
         float base  [2][kErMaxTaps] {};   ///< gain before density weighting and renormalisation
         float theta [2][kErMaxTaps] {};
         int   band  [2][kErMaxTaps] {};
-        float gain  [2][kErMaxTaps] {};   ///< what is played
+        float gain  [2][kErMaxTaps] {};   ///< what is played, this sample
+        float next  [2][kErMaxTaps] {};   ///< the gains at the latest control point
+        float step  [2][kErMaxTaps] {};   ///< per-sample increment toward `next`
+        int   rampLeft = 0;               ///< samples until `gain` lands on `next`
         int   num   [2] {};
         float energy[2] {};               ///< the renormalisation target, per channel
         float eta   [kErBands] {};        ///< each band filter's impulse energy
@@ -224,7 +236,8 @@ private:
     };
 
     void build (TapSet& set, const Settings& s) noexcept;
-    void applyDensity (TapSet& set, float d) noexcept;
+    void applyDensity (TapSet& set, float d, bool immediately) noexcept;
+    void advanceRamp (TapSet& set) noexcept;
     float weightedEnergy (TapSet& set, int ch, float d) noexcept;
     void buildPairs (TapSet& set, int ch) noexcept;
     void prime() noexcept;
@@ -261,7 +274,8 @@ private:
 
     // Smoothed coefficients and their targets.
     float smoothCoeff = 1.0f;
-    float density = 0.5f, densityApplied = -1.0f;
+    float density = 0.5f, densityApplied = -1.0f, stageDensity = -1.0f;
+    int   controlPhase = 0;   ///< samples since the last control point, counted from reset()
     float hiCutA = 0.0f, hiCutTarget = 0.0f;
     float bandA[kErBands] {};
     float stageW[kDiffuserStages] {}, stageNorm[kDiffuserStages] {};

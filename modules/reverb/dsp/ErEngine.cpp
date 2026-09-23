@@ -252,6 +252,7 @@ void ErEngine::reset()
 {
     std::fill (line.begin(), line.end(), 0.0f);
     writePos = 0;
+    controlPhase = 0;
 
     for (auto& channel : diffuser)
         for (auto& stage : channel)
@@ -473,7 +474,7 @@ void ErEngine::buildPairs (TapSet& set, int ch) noexcept
 float ErEngine::weightedEnergy (TapSet& set, int ch, float d) noexcept
 {
     // The energy the band filters actually put out for the gains a_k w_k(D),
-    // written into `gain` on the way: the sum of each tap's squared gain
+    // written into `next` on the way: the sum of each tap's squared gain
     // times its band's pulse energy, plus twice each overlapping pair's
     // product times its overlap. **The per-band weighting is not in 10
     // section 3's formula** and has to be: the four bands pass different
@@ -486,32 +487,67 @@ float ErEngine::weightedEnergy (TapSet& set, int ch, float d) noexcept
     for (int i = 0; i < set.num[ch]; ++i)
     {
         const auto g = set.base[ch][i] * densityWeight (set.theta[ch][i], d, rampWidth);
-        set.gain[ch][i] = g;
+        set.next[ch][i] = g;
         sum += g * g * set.eta[set.band[ch][i]];
     }
 
     for (int p = 0; p < set.numPairs[ch]; ++p)
     {
         const auto& pair = set.pairs[ch][p];
-        sum += 2.0f * set.gain[ch][pair.i] * set.gain[ch][pair.j] * pair.overlap;
+        sum += 2.0f * set.next[ch][pair.i] * set.next[ch][pair.j] * pair.overlap;
     }
 
     return std::max (sum, 0.0f);
 }
 
-void ErEngine::applyDensity (TapSet& set, float d) noexcept
+void ErEngine::applyDensity (TapSet& set, float d, bool immediately) noexcept
 {
     // 10 section 3's bridge: a_k * w_k(D), renormalised so the ER energy is
     // the same at every density -- the energy out of the band filters, which
     // is what `weightedEnergy` measures.
+    //
+    // **Into `next`, and then either straight into `gain` or a ramp to it.**
+    // A freshly built set (a crossfade's incoming set, the TYPE swap, the
+    // first block) takes its gains at once, since nothing is playing them
+    // yet. A set that is sounding while DENSITY moves ramps linearly to the
+    // new gains across one control interval -- which is what lets this run
+    // once every `kControlInterval` samples rather than every sample.
     for (int ch = 0; ch < (set.side ? 1 : 2); ++ch)
     {
         const auto sum = weightedEnergy (set, ch, d);
         const auto scale = sum > 0.0f ? std::sqrt (set.energy[ch] / sum) : 0.0f;
 
         for (int i = 0; i < set.num[ch]; ++i)
-            set.gain[ch][i] *= scale;
+        {
+            set.next[ch][i] *= scale;
+
+            if (immediately)
+            {
+                set.gain[ch][i] = set.next[ch][i];
+                set.step[ch][i] = 0.0f;
+            }
+            else
+            {
+                set.step[ch][i] = (set.next[ch][i] - set.gain[ch][i]) / (float) kControlInterval;
+            }
+        }
     }
+
+    set.rampLeft = immediately ? 0 : kControlInterval;
+}
+
+void ErEngine::advanceRamp (TapSet& set) noexcept
+{
+    if (set.rampLeft <= 0)
+        return;
+
+    // The last step lands exactly on `next` rather than on however close 32
+    // additions came to it, so a ramp never leaves a residue behind.
+    const auto landing = --set.rampLeft == 0;
+
+    for (int ch = 0; ch < (set.side ? 1 : 2); ++ch)
+        for (int i = 0; i < set.num[ch]; ++i)
+            set.gain[ch][i] = landing ? set.next[ch][i] : set.gain[ch][i] + set.step[ch][i];
 }
 
 void ErEngine::prime() noexcept
@@ -520,8 +556,10 @@ void ErEngine::prime() noexcept
     build (sets[0], target);
 
     density = target.density;
-    applyDensity (sets[0], density);
+    applyDensity (sets[0], density, true);
     densityApplied = density;
+    stageDensity = density;
+    controlPhase = 0;
 
     for (int s = 0; s < kDiffuserStages; ++s)
     {
@@ -613,7 +651,7 @@ void ErEngine::process (const float* in, float* outL, float* outR, int numSample
             if (! swapped && (int) dipPhase == crossfadeSamples / 2)
             {
                 build (sets[active], target);
-                applyDensity (sets[active], density);
+                applyDensity (sets[active], density, true);
                 fading = false;
                 accumulated = 0.0f;
                 swapped = true;
@@ -640,7 +678,7 @@ void ErEngine::process (const float* in, float* outL, float* outR, int numSample
             {
                 auto& incoming = sets[1 - active];
                 build (incoming, target);
-                applyDensity (incoming, density);
+                applyDensity (incoming, density, true);
                 fading = true;
                 fadePhase = 0.0f;
                 accumulated = 0.0f;
@@ -659,13 +697,31 @@ void ErEngine::process (const float* in, float* outL, float* outR, int numSample
                 density = target.density;
         }
 
-        if (density != densityApplied)
+        // The tap weights, on the control grid: recomputed once every
+        // kControlInterval samples, counted from reset(), and ramped to in
+        // between. The smoother above still moves every sample; this reads it
+        // at the grid points.
+        if (controlPhase == 0 && density != densityApplied)
         {
-            applyDensity (sets[active], density);
+            applyDensity (sets[active], density, false);
 
             if (fading)
-                applyDensity (sets[1 - active], density);
+                applyDensity (sets[1 - active], density, false);
 
+            densityApplied = density;
+        }
+
+        advanceRamp (sets[active]);
+
+        if (fading)
+            advanceRamp (sets[1 - active]);
+
+        if (++controlPhase == kControlInterval)
+            controlPhase = 0;
+
+        // The diffuser's three stage weights are cheap and stay per sample.
+        if (density != stageDensity)
+        {
             for (int s = 0; s < kDiffuserStages; ++s)
             {
                 const auto w = diffuserStageWeight (s, density);
@@ -673,7 +729,7 @@ void ErEngine::process (const float* in, float* outL, float* outR, int numSample
                 stageNorm[s] = 1.0f / std::sqrt ((1.0f - w) * (1.0f - w) + w * w);
             }
 
-            densityApplied = density;
+            stageDensity = density;
         }
 
         const auto& newest = fading ? sets[1 - active] : sets[active];

@@ -1045,6 +1045,57 @@ namespace
             }
 
             check (identical, "block sizes 1/16/32/64/127/512/2048 produce bit-identical output");
+
+            // **And while DENSITY moves**, which is what the control grid is
+            // for: the tap weights are recomputed every kControlInterval
+            // samples counted from reset(), not from a block's start, so a
+            // sweep lands on the same samples at every block size. The move
+            // has to start on the same sample for all of them, so the engine
+            // is primed at DENSITY 0 by a zero-length call and handed DENSITY
+            // 100 % before the first sample: the smoother then carries it
+            // across some thirty grid points, through the bridge and all
+            // three diffuser stages.
+            {
+                auto p = erOnly (room);
+                p.erDensity = 0.0f;
+
+                const auto moving = [&] (int block)
+                {
+                    DspCore core;
+                    core.prepare (rate, block, 2);
+                    core.setParams (p);
+                    core.erEngine().process (nullptr, nullptr, nullptr, 0);
+
+                    auto q = p;
+                    q.erDensity = 1.0f;
+                    core.setParams (q);
+
+                    Stereo io;
+                    io.l.assign (9600, 0.0f);
+                    unsigned int seed = 404u;
+
+                    for (auto& x : io.l)
+                    {
+                        seed = seed * 1664525u + 1013904223u;
+                        x = (float) (seed >> 8) * (1.0f / 8388608.0f) - 1.0f;
+                    }
+
+                    io.r = io.l;
+                    run (core, io, block);
+                    return io;
+                };
+
+                const auto reference = moving (512);
+                bool same = true;
+
+                for (const auto block : { 1, 16, 32, 64, 127, 2048 })
+                {
+                    const auto io = moving (block);
+                    same = same && io.l == reference.l && io.r == reference.r;
+                }
+
+                check (same, "with DENSITY moving, block sizes 1/16/32/64/127/512/2048 produce bit-identical output");
+            }
         }
 
         //== Sample rates: tap times in ms, and latency exactly 0 ===============

@@ -4,11 +4,10 @@
     Links the DSP core directly -- no plugin host, no GUI, no JUCE -- the same
     shape as tools/measure/deq and tools/measure/vcomp.
 
-    **It is registered before it is useful, and that is deliberate.** The core
-    it drives is still the placeholder in modules/reverb/dsp/DspCore.h, so
-    there is no impulse response, no decay and no echo density to print yet.
-    What it can answer honestly today are the things that are true of the
-    placeholder and will still be true of the finished module:
+    **It was registered before it was useful, and that was deliberate.** The
+    core it drives has early reflections since M2 and no tail until M3, so
+    there is still no decay and no echo density to print. What it answers
+    today:
 
         measure_reverb latency      the reported delay at every setting, and
                                     the delay actually measured by running an
@@ -25,6 +24,9 @@
         measure_reverb constants    the internal constants v1 ships, so the
                                     value being argued about is the value in
                                     the build
+        measure_reverb bench        10 section 6's CPU budget, measured: the
+                                    worst case first, then the transients.
+                                    Release only; see printBench
 
     docs/reverb/11-integration-and-test-plan.md section 6 lists the modes this
     grows when the engine lands -- `ir t60 er density mono sweep bench` -- with
@@ -46,6 +48,8 @@
 #include "modules/reverb/dsp/ReverbDsp.h"
 #include "modules/reverb/dsp/TapTables.h"
 
+#include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -249,9 +253,142 @@ void printSchema()
     }
 }
 
+/** 10 section 6's budget, measured: 60 s of noise through the whole module at
+    block size 128, the median of five runs, printed as processing time over
+    audio time. **Only a Release build's figure means anything**; a Debug one
+    is printed with a warning rather than refused, because the ratio between
+    rows is still worth reading.
+
+    The first row is 10 section 8's worst case, which is what the budget is
+    held against: DENSITY at 100 % so all 48 taps per channel play and all
+    three diffuser stages are in, stereo, Taps mode, a Variation with two
+    per-channel sets. The rows under it are the costlier *transient* states
+    -- a crossfade running on every block, and DENSITY moving so the weights
+    are recomputed every sample -- which a session passes through rather than
+    sits in, and which are printed so nobody has to guess what they cost. */
+void printBench()
+{
+#ifndef NDEBUG
+    std::printf ("  ** DEBUG BUILD: these figures are not the budget's. Build Release. **\n\n");
+#endif
+
+    constexpr int kBlock = 128;
+    constexpr double kSeconds = 60.0;
+    constexpr int kRuns = 5;
+
+    struct Row
+    {
+        const char* name;
+        int variation;
+        int mode;
+        bool moveSize;
+        bool moveDensity;
+    };
+
+    const Row rows[] {
+        { "worst case: 48 taps, 3 stages",  2, (int) ErMode::taps,   false, false },
+        { "  the same, Variation 6 (comb)", 6, (int) ErMode::taps,   false, false },
+        { "  the same, Energy mode",        2, (int) ErMode::energy, false, false },
+        { "  crossfading on every block",   2, (int) ErMode::taps,   true,  false },
+        { "  DENSITY moving every block",   2, (int) ErMode::taps,   false, true  },
+    };
+
+    std::printf ("bench -- whole module, stereo, block %d, %.0f s of noise, median of %d\n",
+                 kBlock, kSeconds, kRuns);
+    std::printf ("  budget (10 section 6): <= 1.5 %% of a core at 48 kHz, <= 5 %% at 192 kHz\n\n");
+    std::printf ("  %-34s %10s %10s %12s\n", "setting", "48 kHz", "192 kHz", "memory");
+
+    for (const auto& row : rows)
+    {
+        double percent[2] {};
+        size_t memory = 0;
+
+        for (int r = 0; r < 2; ++r)
+        {
+            const auto rate = r == 0 ? 48000.0 : 192000.0;
+            const auto total = (long long) (rate * kSeconds);
+
+            // One second of fixed-seed noise, cycled. Generating it inside the
+            // timed loop would charge the generator to the reverb.
+            std::vector<float> noise ((size_t) rate);
+            unsigned int seed = 12345u;
+
+            for (auto& s : noise)
+            {
+                seed = seed * 1664525u + 1013904223u;
+                s = 0.5f * ((float) (seed >> 8) * (1.0f / 8388608.0f) - 1.0f);
+            }
+
+            std::vector<double> times;
+
+            for (int run = 0; run < kRuns; ++run)
+            {
+                ReverbDsp dsp;
+                dsp.prepare (rate, kBlock, 2);
+
+                auto v = defaults();
+                v[Index::erdensity]   = 100.0f;
+                v[Index::ervariation] = (float) row.variation;
+                v[Index::ermode]      = (float) row.mode;
+                v[Index::mix]         = 50.0f;
+                dsp.setParams (v.data(), (int) v.size());
+
+                memory = dsp.getCore().erEngine().memoryBytes();
+
+                std::vector<float> left ((size_t) kBlock), right ((size_t) kBlock);
+                float* channels[] { left.data(), right.data() };
+
+                double elapsed = 0.0;
+                size_t cursor = 0;
+                long long block = 0;
+
+                for (long long done = 0; done < total; done += kBlock, ++block)
+                {
+                    for (int i = 0; i < kBlock; ++i)
+                    {
+                        left[(size_t) i]  = noise[cursor];
+                        right[(size_t) i] = noise[(cursor + 7919) % noise.size()];
+                        cursor = (cursor + 1) % noise.size();
+                    }
+
+                    if (row.moveSize)
+                    {
+                        v[Index::size] = (block & 1) != 0 ? 12.0f : 12.6f;
+                        dsp.setParams (v.data(), (int) v.size());
+                    }
+
+                    if (row.moveDensity)
+                    {
+                        v[Index::erdensity] = (block & 1) != 0 ? 100.0f : 90.0f;
+                        dsp.setParams (v.data(), (int) v.size());
+                    }
+
+                    const auto t0 = std::chrono::steady_clock::now();
+                    dsp.process (channels, 2, kBlock);
+                    const auto t1 = std::chrono::steady_clock::now();
+
+                    elapsed += std::chrono::duration<double> (t1 - t0).count();
+                }
+
+                times.push_back (elapsed);
+            }
+
+            std::sort (times.begin(), times.end());
+            percent[r] = 100.0 * times[(size_t) kRuns / 2] / kSeconds;
+        }
+
+        std::printf ("  %-34s %9.3f%% %9.3f%% %9.1f kB\n", row.name, percent[0], percent[1],
+                     (double) memory / 1024.0);
+    }
+
+    std::printf ("\n  Memory is the ER engine's at 192 kHz: the delay line and the\n"
+                 "  diffuser's lines. Record every figure in testing-notes/ naming\n"
+                 "  the machine.\n");
+}
+
 void usage()
 {
-    std::printf ("usage: measure_reverb <latency|tail|taps [size]|constants|schema>\n");
+    std::printf ("usage: measure_reverb <latency|tail|taps [size]|constants|schema|bench>\n");
 }
 
 } // namespace
@@ -270,6 +407,7 @@ int main (int argc, char** argv)
     if (mode == "tail")      { printTail();      return 0; }
     if (mode == "constants") { printConstants(); return 0; }
     if (mode == "schema")    { printSchema();    return 0; }
+    if (mode == "bench")     { printBench();     return 0; }
 
     if (mode == "taps")
     {

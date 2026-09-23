@@ -113,6 +113,17 @@ bmo_add_module(reverb
         ${CMAKE_CURRENT_SOURCE_DIR}/reverb/panel/ReverbPanel.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/reverb/Module.cpp)
 
+# BMO Linger's early-reflection generator and its audits. Offline only: the
+# plugin carries the tables they emitted (reverb/dsp/ErTableData.inc, read by
+# ErTable.cpp), not the machinery, so these are deliberately not in the
+# module's DSP_SOURCES -- which would compile them into every product carrying
+# the module. reverb_dsp_tests links this to regenerate every table and hold
+# it equal to the committed data; measure_reverb links it to emit and audit.
+add_library(bmo_reverb_ergen STATIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/reverb/dsp/ImageSource.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/reverb/dsp/ErAudit.cpp)
+target_link_libraries(bmo_reverb_ergen PUBLIC bmo_reverb_dsp)
+
 endif()
 
 # BMO Tune RT. The same two targets as a rack module -- bmo_tune_dsp for the

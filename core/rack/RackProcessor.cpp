@@ -1,5 +1,8 @@
 #include "RackProcessor.h"
 #include "RackEditor.h"
+#include "core/product/BusLayouts.h"
+
+#include <algorithm>
 
 namespace bmo
 {
@@ -179,7 +182,7 @@ void RackProcessor::rebuild (std::vector<std::pair<const ModuleDef*, std::unique
             slot.engine = std::make_unique<ModuleEngine> (*slot.def, ParamSet (slot.def->specs, assigned));
 
             if (auto* state = chain[(size_t) s].second.get())
-                slot.engine->params().applyXml (*state);
+                slot.engine->restoreState (*state);
 
             if (prepared)
                 slot.engine->prepare (currentRate, currentBlock, currentChannels);
@@ -407,12 +410,32 @@ int RackProcessor::totalLatency() const
     return total;
 }
 
+double RackProcessor::totalTail() const
+{
+    double total = 0.0;
+
+    // Summed, not maxed -- see the declaration. An empty rack adds nothing up
+    // and reports 0.0, which is what it did when this was hardcoded.
+    for (const auto& s : slots)
+        if (s.engine != nullptr)
+            total += s.engine->tailSeconds();
+
+    // And clamped at the suite's own ceiling, exactly as a module clamps its
+    // own figure: `addModule` counts slots and never looks for duplicates, so
+    // eight BMO Lingers is a legal chain and eight honest thirties is a
+    // four-minute tail rendered onto the end of every offline bounce. See
+    // `bmo::kMaxTailSeconds`, which is where both clamps get the number.
+    return std::min (total, kMaxTailSeconds);
+}
+
 void RackProcessor::handleAsyncUpdate()
 {
     const auto latency = totalLatency();
 
     if (reportedLatency.exchange (latency, std::memory_order_relaxed) != latency)
         setLatencySamples (latency);
+
+    reportedTail.store (totalTail(), std::memory_order_relaxed);
 }
 
 //==============================================================================
@@ -432,6 +455,8 @@ void RackProcessor::prepareToPlay (double sampleRate, int maximumExpectedSamples
     const auto latency = totalLatency();
     reportedLatency.store (latency, std::memory_order_relaxed);
     setLatencySamples (latency);
+
+    reportedTail.store (totalTail(), std::memory_order_relaxed);
 }
 
 void RackProcessor::releaseResources()
@@ -445,12 +470,24 @@ void RackProcessor::releaseResources()
 
 bool RackProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
-    const auto& out = layouts.getMainOutputChannelSet();
+    // The same contract a standalone module states -- see
+    // core/product/BusLayouts.h. The rack can hold this one because the
+    // widening happens once, at its input, ahead of slot 1: every slot still
+    // sees the same channel count as every other, and no module has to know
+    // that the instance is fed from a single channel.
+    //
+    // **Mono in to stereo out is offered if any module the rack can host opts
+    // in** (ModuleDef::acceptsMonoInput), which today means BMO Linger. A host
+    // fixes the layout before there is a chain and does not ask again when the
+    // chain changes, so the answer cannot depend on what is loaded; the rack
+    // offers what its registry could use. A module that did not opt in and is
+    // loaded into such a rack is handed the duplicated pair BusLayouts.h
+    // describes, which is the signal a stereo instance fed the same input on
+    // both sides has always had.
+    const auto anyAcceptsMono = std::any_of (registry.begin(), registry.end(),
+                                             [] (const ModuleDef* d) { return d->acceptsMonoInput; });
 
-    if (out != juce::AudioChannelSet::mono() && out != juce::AudioChannelSet::stereo())
-        return false;
-
-    return layouts.getMainInputChannelSet() == out;
+    return buses::isSupported (layouts, anyAcceptsMono);
 }
 
 void RackProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
@@ -461,8 +498,9 @@ void RackProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
     const auto numIn      = getTotalNumInputChannels();
     const auto numOut     = getTotalNumOutputChannels();
 
-    for (int ch = numIn; ch < numOut; ++ch)
-        buffer.clear (ch, 0, numSamples);
+    // Mono in, stereo out: the chain is given the input in both channels, not
+    // one channel and silence. BusLayouts.h says why at length.
+    buses::spreadInputAcrossOutputs (buffer, numIn, numOut);
 
     const juce::ScopedTryLock lock (chainLock);
 

@@ -22,9 +22,13 @@
 #include "products/sat/Product.h"
 #include "modules/eq/params.h"
 #include "modules/opto/params.h"
+#include "modules/reverb/params.h"
 #include "modules/sat/params.h"
 #include "modules/util/Module.h"
 #include "modules/util/params.h"
+
+#include <atomic>
+#include <thread>
 
 using namespace test;
 using bmo::RackProcessor;
@@ -74,6 +78,29 @@ namespace
         // table in docs/fet-comp/11-integration-and-test-plan.md section 2.
         { "fetcomp", { "input", "output", "attack", "release", "ratio", "mix",
                        "voicing", "oversampling" } },
+        // BMO Linger. **Thirty parameters against a slot's thirty-two lanes**,
+        // so the whole schema gets a lane, none of BMO DEQ's SlotOverflow
+        // machinery is needed, and two are left over. It was thirty with two
+        // spare, then twenty-four with eight after the 2026-09-21 control-set
+        // trim moved prelink, decayshape, attack, damplofreq, damphifreq and
+        // ershape into the per-type constants. The order of what survived that
+        // is unchanged, and this list is the second copy of it.
+        //
+        // And then back to **thirty** the same day, when the Reverb EQ spent
+        // six of the eight lanes the trim had bought. Its six went in
+        // **between `damphi` and `ermode`** rather than on the end, so every
+        // lane after them moved -- legal exactly once, before first ship, and
+        // never again: a lane is the thing a DAW records automation on.
+        // modules/reverb/params.h's `Index` carries the argument.
+        { "reverb", { "type", "size", "predelay", "decay", "feed",
+                      "damplo", "damphi",
+                      "eqfilter",
+                      "eqlofreq", "eqlo", "eqloq",
+                      "eqmidfreq", "eqmid", "eqmidq",
+                      "eqhifreq", "eqhi", "eqhiq",
+                      "ermode", "erdensity", "erspread", "erhicut",
+                      "ervariation", "moddepth", "modrate", "width", "inhicut",
+                      "erlevel", "verblevel", "mix", "output" } },
     };
 
     std::vector<juce::String> chainIds (RackProcessor& rack)
@@ -213,7 +240,8 @@ int main()
         auto rack = createRack();
         const auto& registry = rack->getRegistry();
 
-        check (registry.size() == 9, "the registry holds util, eq, sat, opto, dim, deq, vcomp, deesser and fetcomp");
+        check (registry.size() == 10,
+               "the registry holds util, eq, sat, opto, dim, deq, vcomp, deesser, fetcomp and reverb");
 
         // A bank is a module's host lanes, so it stops at 32 even if the
         // module does not. Past that, its golden schema test pins the order.
@@ -240,6 +268,70 @@ int main()
                 check (juce::String (def->specs[i].id) == bank->ids[i],
                        juce::String (def->id) + " p" + juce::String ((int) i + 1) + " should be '"
                            + bank->ids[i] + "', is '" + def->specs[i].id + "'");
+        }
+    }
+
+    //== Which modules have an analyser tap, and which must not ===============
+    //
+    // **The cost of adding one, stated as the thing it must not have moved.**
+    // `ModuleDsp::analyser()` returns null by default and BMO DEQ was its only
+    // overrider until BMO Linger's EQ page got a spectrum on 2026-09-21. A
+    // virtual with a default is exactly the kind of change that looks free and
+    // is only free if nobody else quietly picks it up, so the seven that have no
+    // tap are named here rather than assumed.
+    //
+    // Through the rack, one slot at a time, because that is where a wrong
+    // answer would cost the most: a tap nobody asked for is written on the
+    // audio thread for every block a rack processes.
+    {
+        auto rack = createRack();
+
+        struct Tapped { const char* id; bool hasOne; };
+
+        const Tapped kTaps[] {
+            { "util", false }, { "eq", false }, { "sat", false }, { "opto", false },
+            { "dim", false }, { "ltvcomp", false }, { "fetcomp", false },
+            // BMO DEQ's is post-EQ; BMO Linger's is at the point the Reverb EQ
+            // acts on, and shows the dry input until there is a reverb under
+            // it (modules/reverb/dsp/DspCore.h, `eqAnalyser`); BMO Defang's is
+            // the sibilance ribbon's, four floats a frame, enabled only while
+            // its panel is open (modules/deesser/dsp/DeesserDsp.h).
+            { "deq", true }, { "reverb", true }, { "deesser", true },
+        };
+
+        check ((int) std::size (kTaps) == (int) rack->getRegistry().size(),
+               "every registered module is listed here, tap or no tap");
+
+        for (const auto& t : kTaps)
+        {
+            rack->clearChain();
+
+            auto* def = rack->findModule (t.id);
+            check (def != nullptr, juce::String ("no module '") + t.id + "' in the registry");
+
+            if (def == nullptr)
+                continue;
+
+            rack->addModule (*def);
+            rack->prepareToPlay (48000.0, 512);
+
+            auto* engine = rack->getEngineAt (0);
+            check (engine != nullptr, juce::String (t.id) + " has no engine in slot 1");
+
+            if (engine == nullptr)
+                continue;
+
+            check ((engine->analyser() != nullptr) == t.hasOne,
+                   juce::String (t.id) + (t.hasOne ? " should have an analyser tap and has none"
+                                                   : " should have no analyser tap and has one"));
+
+            // And a tap that exists is **off** until a panel asks for it.
+            // There is no editor anywhere in this file, so nothing should have
+            // enabled one -- which is the property that makes a closed session
+            // cost nothing rather than nearly nothing.
+            if (auto* tap = engine->analyser())
+                check (! tap->isEnabled(),
+                       juce::String (t.id) + "'s tap is enabled with no editor open");
         }
     }
 
@@ -378,6 +470,72 @@ int main()
             auto r = createRack();
             r->setStateInformation (block.getData(), (int) block.getSize());
             check (chainIds (*r) == std::vector<juce::String> { "util" }, "an unknown module is dropped");
+        }
+    }
+
+    //== A BMO Linger slot restored off the message thread keeps its levels ====
+    //
+    // `setStateInformation` takes a MessageManagerLock when a host calls it
+    // from another thread. That is a mutex, not a change of thread: the TYPE
+    // write in the restore still arrives off the message thread, so the slot's
+    // `TypeVoicing` only queues it, and the queued callback -- delivered once
+    // the lock is gone -- used to stamp the stored type's block over the nine
+    // levels the session had just put back. ReverbTests holds the same case
+    // for the standalone product; this is the rack's path, through `rebuild`.
+    //
+    // The lock needs a running message loop to be granted, so the main thread
+    // pumps until the host thread is done, and once more afterwards to deliver
+    // whatever the restore queued.
+    {
+        namespace R = bmo::reverb;
+
+        const std::pair<int, float> kStored[] {
+            { R::Index::size, 33.3f }, { R::Index::erdensity, 17.0f }, { R::Index::erspread, 123.0f },
+            { R::Index::moddepth, 0.63f }, { R::Index::modrate, 0.93f }, { R::Index::inhicut, 11111.0f },
+            { R::Index::feed, 41.0f }, { R::Index::erlevel, -17.0f }, { R::Index::verblevel, -29.0f },
+        };
+
+        juce::MemoryBlock state;
+
+        {
+            auto rack = createRack();
+            rack->addModule (*rack->findModule ("reverb"));
+            auto& p = rack->getEngineAt (0)->params();
+
+            p.setReal (R::Index::type, (float) R::cavern);
+
+            for (const auto& [index, value] : kStored)
+                p.setReal (index, value);
+
+            rack->getStateInformation (state);
+        }
+
+        auto rack = createRack();
+        std::atomic<bool> done { false };
+
+        std::thread host ([&]
+        {
+            rack->setStateInformation (state.getData(), (int) state.getSize());
+            done = true;
+        });
+
+        while (! done)
+            juce::MessageManager::getInstance()->runDispatchLoopUntil (5);
+
+        host.join();
+        juce::MessageManager::getInstance()->runDispatchLoopUntil (50);
+
+        check (chainIds (*rack) == std::vector<juce::String> { "reverb" }, "the reverb slot restores");
+
+        if (auto* engine = rack->getEngineAt (0))
+        {
+            checkClose (engine->params().getReal (R::Index::type), (double) R::cavern, 1.0e-6,
+                        "the restored slot is on Cavern");
+
+            for (const auto& [index, value] : kStored)
+                checkClose (engine->params().getReal (index), (double) value, 0.05,
+                            juce::String ("an off-thread rack restore keeps the file's '")
+                                + engine->params().spec (index).id + "'");
         }
     }
 

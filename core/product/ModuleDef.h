@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/dsp/ModuleDsp.h"
+#include "core/state/ParamLink.h"
 #include "core/state/ParamSpec.h"
 #include "core/ui/Line.h"
 #include "core/ui/ModulePanel.h"
@@ -55,6 +56,45 @@ struct ModuleDef
         statics in eight translation units; resolving it at the point of use
         keeps it out of static initialisation order entirely. */
     const ui::Line* line = nullptr;
+
+    /** Makes this module's `ParamLink`, or null if it has none -- which is
+        every module but BMO Linger.
+
+        **After `line`, for the reason `line` is where it is**: these defs are
+        built by positional aggregate initialisation, so a field inserted
+        anywhere but the end silently re-binds another module's members. A
+        module that wants this has to spell out `line` as well, which is a
+        nullptr and costs nothing; a module that does not wants neither and
+        writes neither.
+
+        A plain function pointer rather than a `std::function`, like
+        `ParamSpec::textFn`: there is exactly one of these in the suite, it is
+        a free function in the module's own header, and a def is a
+        function-local static that should not be allocating at first use.
+
+        The engine calls it once, at construction, and owns what comes back.
+        See `core/state/ParamLink.h` for why an engine and not a panel. */
+    ParamLinkFactory createParamLink = nullptr;
+
+    /** Whether this module's standalone plugin offers a host the mono-in,
+        stereo-out layout -- true for BMO Linger alone.
+
+        **Opt-in, by Frosty's decision on 2026-09-23.** A module that makes
+        stereo out of one input -- a reverb decorrelating its tail -- is what
+        the layout exists for; every other module was built and heard as mono
+        to mono or stereo to stereo, and keeps exactly those. The input is
+        duplicated into both channels when the layout is in use
+        (`core/product/BusLayouts.h`), so nothing a module does changes; what
+        the flag decides is only whether a host is offered the choice.
+
+        The rack offers it if any module it can host sets this, since a
+        layout is fixed before a chain exists; `RackProcessor` says so.
+
+        **Last, after `createParamLink`, for the reason every field since
+        `line` is last**: positional aggregate initialisation re-binds another
+        module's members if a field goes anywhere else. A module that sets it
+        spells out the two before it. */
+    bool acceptsMonoInput = false;
 
     /** The line this module is drawn as -- BMO if it names none. */
     const ui::Line& lineOf() const noexcept

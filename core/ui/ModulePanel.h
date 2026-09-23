@@ -206,6 +206,21 @@ public:
     {
         juce::Rectangle<int> row;
         juce::String text;          ///< empty for a bare rule
+
+        /** How far across the panel the hairline runs, in panel pixels.
+
+            **Empty means edge to edge**, which is what every rule in the suite
+            was and all but one still are: a section device that reached
+            different distances on different panels would stop being one
+            device. The exception is a rule that legends *some* of the row
+            under it -- BMO Linger's LEVEL, which names three faders in a strip
+            whose fourth column is TYPE over DECAY. A full-width rule there
+            claims the column it does not name, and the module owned that as a
+            wrinkle in a comment for a release rather than drawing the truth.
+
+            It is a span rather than a second kind of rule: same hairline, same
+            knocked-out legend, same `addRule`. Only the ends move. */
+        juce::Range<int> span;
     };
 
     /** The rules this panel laid out, in the order `resized` added them. */
@@ -256,10 +271,14 @@ protected:
     /** Call at the top of `resized`, before laying any rule out again. */
     void clearRules() { rules.clear(); }
 
-    /** Records a rule so the panel paints it and a test can see it. */
-    void addRule (juce::Rectangle<int> row, juce::String text = {})
+    /** Records a rule so the panel paints it and a test can see it.
+
+        `span` is the horizontal reach; empty is edge to edge, which is what
+        every call site but one passes. See `Rule::span`. */
+    void addRule (juce::Rectangle<int> row, juce::String text = {},
+                  juce::Range<int> span = {})
     {
-        rules.push_back ({ row, std::move (text) });
+        rules.push_back ({ row, std::move (text), span });
     }
 
 private:
@@ -271,12 +290,16 @@ private:
 
 protected:
 
-    /** A hairline through the middle of a row, inset by the padding. */
-    void drawRule (juce::Graphics& g, juce::Rectangle<int> row) const
+    /** A hairline through the middle of a row, inset by the padding -- or
+        across `span` when one is given. See `Rule::span`. */
+    void drawRule (juce::Graphics& g, juce::Rectangle<int> row,
+                   juce::Range<int> span = {}) const
     {
+        const auto reach = span.isEmpty() ? juce::Range<int> (kPad, getWidth() - kPad) : span;
+
         g.setColour (tokens().hairline);
-        g.fillRect (juce::Rectangle<float> ((float) kPad, (float) row.getCentreY(),
-                                            (float) (getWidth() - kPad * 2), Tokens::hairlineWeight));
+        g.fillRect (juce::Rectangle<float> ((float) reach.getStart(), (float) row.getCentreY(),
+                                            (float) reach.getLength(), Tokens::hairlineWeight));
     }
 
     /** A section name drawn on a rule, in the module's own colour.
@@ -287,7 +310,7 @@ protected:
         readable thing on it. */
     void drawRuleLegend (juce::Graphics& g, juce::Rectangle<int> row,
                          const juce::String& text, juce::Colour accent,
-                         juce::Colour plate) const
+                         juce::Colour plate, juce::Range<int> span = {}) const
     {
         // The module's accent stepped until it is legible. A section legend is
         // the smaller of the two labels on a panel -- 13 pt against a knob
@@ -300,12 +323,20 @@ protected:
         // survive being set in the raw accent at 2.00:1. It keeps the size:
         // the two labels want to be different sizes whichever way the colours
         // fall, and this is the one a panel is navigated by.
-        drawRule (g, row);
+        drawRule (g, row, span);
 
         const auto font = labelFont (kLegendSize, true);
         const auto width = juce::GlyphArrangement::getStringWidth (font, text) + 14.0f;
+
+        // Centred on the hairline it knocks a hole in, which for a spanning
+        // rule is the span rather than the row: a legend centred on the panel
+        // while its rule stopped two thirds of the way across would sit off
+        // the end of its own line.
+        const auto centreX = span.isEmpty() ? (float) row.getCentreX()
+                                            : (float) span.getStart() + (float) span.getLength() * 0.5f;
+
         const auto box = juce::Rectangle<float> (width, (float) row.getHeight())
-                             .withCentre (row.toFloat().getCentre());
+                             .withCentre ({ centreX, (float) row.getCentreY() });
 
         // The panel's plate, passed in rather than read from tokens(): a
         // legend knocks a hole in the rule it sits on, and on an LTV panel

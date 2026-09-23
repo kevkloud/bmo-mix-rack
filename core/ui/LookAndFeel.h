@@ -166,6 +166,35 @@ public:
         makes a list of names slower to read, so that keeps the system font. */
     juce::Font getTextButtonFont (juce::TextButton&, int buttonHeight) override;
 
+    /** A dropdown's closed text is panel text, so it is set in the panel face
+        -- the same call and the same size `getTextButtonFont` uses, because a
+        `ui::ChoiceBox` and the preset strip's buttons are the same 26 px row.
+
+        Without this a choice reads in JUCE's default sans while everything
+        around it is Minerva, which on a render looks like a control belonging
+        to some other program. **The open menu is deliberately left alone**:
+        `getPopupMenuFont` keeps the system font for the reason above, and a
+        six-name type list is not worth splitting that decision over. */
+    juce::Font getComboBoxFont (juce::ComboBox&) override;
+
+    /** Where a dropdown's closed text is drawn.
+
+        One definition, read by `positionComboBoxText` and by
+        `comboTextOverflow` -- the discipline `toggleLabelBox` is under, and for
+        the reason stated there: a fit test that measured the box its own way
+        could agree with the very clip it exists to catch. The width is JUCE's
+        own, `width - 30`, which is what LookAndFeel_V4's arrow zone leaves. */
+    static juce::Rectangle<int> comboTextBox (const juce::ComboBox&);
+    void positionComboBoxText (juce::ComboBox&, juce::Label&) override;
+
+    /** How much wider a dropdown's **widest item** is than the room it has, in
+        pixels; zero or less fits.
+
+        Every item, not the one selected: a list that fits at "Room" and clips
+        at "Chamber" renders perfectly until somebody turns it, which is how
+        MAKEUP survived a whole release. */
+    static float comboTextOverflow (const juce::ComboBox&);
+
     /** The box a toggle's label is drawn in, and the face it is set in.
 
         One definition each, read by `drawToggleButton` and by the layout test

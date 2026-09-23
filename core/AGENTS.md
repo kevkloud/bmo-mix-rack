@@ -54,6 +54,41 @@ rack/     SlotParameter (one generic host parameter, remapped live),
 - `ConcentricBand::setLegend` puts words on a stepped dial in place of the
   spec's choices (DEQ's BELL / LS / HS / LC / HC). `legendOverflow` measures
   them against the 38 px legend box, and `ui_layout_tests` checks every dial.
+- A **choice parameter whose positions are names rather than amounts** gets
+  `ui::ChoiceBox`, a dropdown with its caption underneath: a knob says less and
+  more, and Chamber is not more than Room. BMO Linger's TYPE and ER MODE are
+  the two. `BmoLookAndFeel` already themes `juce::ComboBox` and
+  `juce::PopupMenu` against the tokens, so the wrapper sets only the arrow,
+  which the shared scheme leaves in the utility azure. `captionOverflow`
+  measures the caption *and the widest item*, and `ui_layout_tests` checks
+  every dropdown. A choice whose positions are an ordered amount stays a knob
+  — and is better off a stepped float, which normalises without the
+  index/(n−1) trap.
+- A module whose **parameters write each other** supplies a
+  `ModuleDef::createParamLink` (`state/ParamLink.h`), and `ModuleEngine` builds
+  one per running module — so it works in the standalone plugin and in every
+  rack slot, with or without an editor open. **BMO Linger's TYPE is the only
+  one**: selecting a type re-applies that type's ten constants, so a type is a
+  voicing rather than a table lookup. The writes go through `ParamSet::apply`,
+  the path a preset recall already uses, and reach the parameters on the
+  message thread through a `juce::ParameterAttachment` — never from the audio
+  thread, which is where automation delivers the change that triggers them. A
+  state restore goes through `ModuleEngine::restoreState`, which tells the link
+  once the last value has landed (`ParamLink::stateRestored`): off the message
+  thread the attachment only queues the TYPE write, and the late call used to
+  stamp the type's block over the levels the session had just restored. The
+  field is null for every module but BMO Linger. A second one has
+  to argue for itself the way `modules/reverb/AGENTS.md` argues for the first.
+- **Mono in, stereo out is opt-in per module** (`ModuleDef::acceptsMonoInput`,
+  Frosty's decision on 2026-09-23). The bus contract is one function,
+  `product/BusLayouts.h`, which both processors answer from: mono to mono and
+  stereo to stereo for everyone, stereo to mono for no one, and mono to stereo
+  only for a module that sets the flag -- **BMO Linger alone** -- or for the
+  rack when any module it can host does, because a host fixes the layout
+  before there is a chain. Where the layout is in use the input is duplicated
+  into both channels, never cleared. The flag is the last field in
+  `ModuleDef` and false for every other module, which keeps each of them on
+  exactly the layouts it had before; `bus_tests` holds the table per product.
 - `SlotParameter::assign` keeps a pointer into the module's static
   `specs()` vector. Never hand it a temporary.
 - A slot's `SlotOverflow` is an `AudioProcessor` only so that its

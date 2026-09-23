@@ -97,6 +97,21 @@ bmo_add_module(fetcomp
         ${CMAKE_CURRENT_SOURCE_DIR}/fetcomp/panel/FetcompPanel.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/fetcomp/Module.cpp)
 
+# BMO Linger is the third caller of the shared matched-Z filter design, after
+# BMO DEQ -- which still carries its own copy under modules/deq/dsp -- and BMO
+# Defang, which is where the five files moved to core/dsp. It does not list
+# `core/dsp/Design.cpp` here: `bmo_add_module` links every module's DSP target
+# against the `bmo_dsp` static library above, which is where that file is
+# compiled exactly once. Listing it as a source as well would compile it into
+# bmo_reverb_dsp and into every product carrying the module, and duplicate the
+# symbols bmo_dsp already provides.
+bmo_add_module(reverb
+    DSP_SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/reverb/dsp/DspCore.cpp
+    UI_SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/reverb/panel/ReverbPanel.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/reverb/Module.cpp)
+
 endif()
 
 # BMO Tune RT. The same two targets as a rack module -- bmo_tune_dsp for the

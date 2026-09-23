@@ -60,6 +60,50 @@ juce::Font BmoLookAndFeel::getTextButtonFont (juce::TextButton&, int buttonHeigh
 }
 
 //==============================================================================
+namespace
+{
+    /** The face a dropdown's closed text is set in, from its height alone, so
+        `getComboBoxFont` and the static overflow measurement -- which has no
+        non-const ComboBox to hand -- cannot come to different answers. */
+    juce::Font comboFontFor (int boxHeight)
+    {
+        return labelFont (juce::jmin (13.0f, (float) boxHeight * 0.55f));
+    }
+}
+
+juce::Font BmoLookAndFeel::getComboBoxFont (juce::ComboBox& box)
+{
+    return comboFontFor (box.getHeight());
+}
+
+juce::Rectangle<int> BmoLookAndFeel::comboTextBox (const juce::ComboBox& box)
+{
+    // LookAndFeel_V4's own geometry, written out rather than inherited: its
+    // arrow is drawn into `Rectangle (width - 30, 0, 20, height)`, so 30 px off
+    // the right is the room the text actually has. Here so that the label's
+    // bounds and the fit measurement are one number rather than two.
+    return { 1, 1, box.getWidth() - 30, box.getHeight() - 2 };
+}
+
+void BmoLookAndFeel::positionComboBoxText (juce::ComboBox& box, juce::Label& label)
+{
+    label.setBounds (comboTextBox (box));
+    label.setFont (getComboBoxFont (box));
+}
+
+float BmoLookAndFeel::comboTextOverflow (const juce::ComboBox& box)
+{
+    const auto font = comboFontFor (box.getHeight());
+    auto widest = 0.0f;
+
+    for (int i = 0; i < box.getNumItems(); ++i)
+        widest = juce::jmax (widest,
+                             juce::GlyphArrangement::getStringWidth (font, box.getItemText (i)));
+
+    return widest - (float) comboTextBox (box).getWidth();
+}
+
+//==============================================================================
 void BmoLookAndFeel::drawDottedArc (juce::Graphics& g, juce::Point<float> centre, float radius,
                                     float startAngle, float endAngle, juce::Colour colour,
                                     float dotSize)

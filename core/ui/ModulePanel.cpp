@@ -17,11 +17,11 @@ void ModulePanel::paintRules (juce::Graphics& g) const
     for (const auto& r : rules)
     {
         if (r.text.isEmpty())
-            drawRule (g, r.row);
+            drawRule (g, r.row, r.span);
         else
             drawRuleLegend (g, r.row, r.text,
                             inkFor (context.def.lineOf()).value_or (context.def.accent),
-                            t.plate);
+                            t.plate, r.span);
     }
 }
 

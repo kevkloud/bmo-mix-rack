@@ -37,6 +37,10 @@ bmo_add_dsp_tool(fetcomp_dsp_tests dsp/FetcompDspTests.cpp)
 target_link_libraries(fetcomp_dsp_tests PRIVATE bmo_fetcomp_dsp)
 add_test(NAME fetcomp_dsp COMMAND fetcomp_dsp_tests)
 
+bmo_add_dsp_tool(reverb_dsp_tests dsp/ReverbDspTests.cpp)
+target_link_libraries(reverb_dsp_tests PRIVATE bmo_reverb_dsp)
+add_test(NAME reverb_dsp COMMAND reverb_dsp_tests)
+
 endif()
 
 # BMO Tune RT's suites. Their sources keep the names they were written under,
@@ -113,16 +117,62 @@ bmo_add_tool(fetcomp_tests plugin/FetcompTests.cpp)
 target_link_libraries(fetcomp_tests PRIVATE bmo_fetcomp)
 add_test(NAME fetcomp COMMAND fetcomp_tests)
 
+bmo_add_tool(reverb_tests plugin/ReverbTests.cpp)
+target_link_libraries(reverb_tests PRIVATE bmo_reverb)
+# The one plugin test that restores from a thread other than the message
+# thread, and it has to deliver what that restore queued before it can assert
+# anything -- which is MessageManager::runDispatchLoopUntil, and JUCE only
+# compiles that in with modal loops permitted. Every JUCE source is compiled
+# into the executable itself, so the define is consistent across it.
+target_compile_definitions(reverb_tests PRIVATE JUCE_MODAL_LOOPS_PERMITTED=1)
+add_test(NAME reverb COMMAND reverb_tests)
+
 bmo_add_tool(rack_tests plugin/RackTests.cpp ${BMO_ROOT}/products/rack/Registry.cpp)
-target_link_libraries(rack_tests PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp bmo_deesser bmo_fetcomp)
+target_link_libraries(rack_tests PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp bmo_deesser bmo_fetcomp bmo_reverb)
+# As reverb_tests: the off-thread restore needs a message loop to grant its
+# MessageManagerLock and to deliver what it queued.
+target_compile_definitions(rack_tests PRIVATE JUCE_MODAL_LOOPS_PERMITTED=1)
 add_test(NAME rack COMMAND rack_tests)
+
+# Bus layouts, across every product at once: the accepted-layout table, and the
+# golden renders that prove mono-in/stereo-out cost the existing layouts
+# nothing. Linked like rack_tests because it walks the registry.
+bmo_add_tool(bus_tests plugin/BusTests.cpp ${BMO_ROOT}/products/rack/Registry.cpp)
+target_link_libraries(bus_tests PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp bmo_deesser bmo_fetcomp bmo_reverb)
+add_test(NAME bus COMMAND bus_tests)
+
+# Tail-length reporting, across every product at once: the exact zero every
+# shipped module is required to report, BMO Linger's own stated figures, and
+# the rack's sum over its occupied slots. Linked like bus_tests because it
+# walks the registry.
+bmo_add_tool(tail_tests plugin/TailTests.cpp ${BMO_ROOT}/products/rack/Registry.cpp)
+target_link_libraries(tail_tests PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp bmo_deesser bmo_fetcomp bmo_reverb)
+add_test(NAME tail COMMAND tail_tests)
 
 # Layout assertions on the real panels. JUCE, not bmo_add_dsp_tool: no
 # rendering happens, but Tokens.h includes juce_gui_basics, so a UI assertion
 # cannot run in the DSP-only job whatever docs/ui-workflow-brief.md §4 says.
 bmo_add_tool(ui_layout_tests ui/LayoutTests.cpp ${BMO_ROOT}/products/rack/Registry.cpp)
-target_link_libraries(ui_layout_tests PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp bmo_deesser bmo_fetcomp)
+target_link_libraries(ui_layout_tests PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp bmo_deesser bmo_fetcomp bmo_reverb)
 add_test(NAME ui_layout COMMAND ui_layout_tests)
+
+# The shared controls in core/ui, asserted on their own rather than through a
+# panel that happens to use one. Links `bmo_core` and no module: the claims are
+# the control's, and `ui::Fader` has no call site yet -- BMO Linger's panel is
+# the pass after the one that added it.
+bmo_add_tool(ui_control_tests ui/ControlTests.cpp)
+target_link_libraries(ui_control_tests PRIVATE bmo_core)
+add_test(NAME ui_control COMMAND ui_control_tests)
+
+# The render loop's own plumbing. Links no module and instantiates no panel: it
+# asserts that writing a PNG over an existing one replaces it, after a period
+# where `snapshot` appended instead and every render reviewed was the previous
+# one. Cheap enough to always run -- it writes three small images to temp.
+bmo_add_tool(snapshot_io_tests tools/SnapshotIoTests.cpp)
+# Links no module, so unlike its neighbours it inherits no include path from
+# one: it needs the root spelled out to reach tools/snapshot/PngOut.h.
+target_include_directories(snapshot_io_tests PRIVATE ${BMO_ROOT})
+add_test(NAME snapshot_io COMMAND snapshot_io_tests)
 
 endif()
 

@@ -7,6 +7,33 @@
 namespace bmo
 {
 
+/** The longest tail anything in this repository reports to a host, in seconds
+    -- **one number for the whole product, per module and per rack.**
+
+    A module clamps its own figure at this (`reverb::DspCore::tailSecondsFor`)
+    and the rack clamps the sum over its occupied slots at the same ceiling
+    (`RackProcessor::totalTail`), so there is one rule rather than two: no BMO
+    Mix Rack instance ever tells a host it rings for more than thirty seconds.
+
+    **The rack needs its own clamp and the per-module one is not enough.**
+    `RackProcessor::addModule` checks the slot count and not for duplicates, so
+    eight BMO Lingers is a legal chain and eight honest 30 s figures summed is a
+    four-minute tail. Over-reporting costs a host some idle pulling at transport
+    stop, which is why the sum is the right answer there; it is not free for an
+    offline bounce, where the reported tail is rendered onto the end of every
+    export. Frosty approved the rack clamp on 2026-09-21.
+
+    It lives here rather than in a module because the two clampers have to
+    agree and only one of them can see the other: `core` cannot include
+    `modules/reverb`, and a second 30.0 written out in `RackProcessor.cpp` is
+    exactly the drift a shared constant exists to prevent.
+
+    Thirty rather than a round larger number: 20 s of decay at a 2.0 damping
+    multiplier is an effective T60 of 40 s, and handing a host 40 s of idle
+    pulling per instance is worse than truncating the last few dB of something
+    already inaudible. */
+inline constexpr double kMaxTailSeconds = 30.0;
+
 /** The audio side of a module, with no dependency on JUCE or on a host.
 
     A module's DSP is driven by an array of real-unit parameter values in the
@@ -32,6 +59,34 @@ public:
         Computed from the values rather than from the DSP's state, so the host
         can be told about a change before the audio thread has picked it up. */
     virtual int latencyForParams (const float* values, int count) const = 0;
+
+    /** How long the module keeps making sound after its input stops, in
+        seconds, for the current parameters.
+
+        Mirrors `latencyForParams` above deliberately: computed from the values
+        rather than from DSP state, so the host can be told about a change
+        before the audio thread has picked it up, and so a test can ask the
+        question without preparing or running anything.
+
+        **Defaulted to zero rather than pure**, unlike its neighbour. Every
+        module that has shipped is a filter, a gain stage or a compressor;
+        none of them rings on past its input, and BMO Linger is the first for
+        which the honest answer is anything else. Making this pure would put
+        an identical `return 0.0;` in eight adapters and in every module
+        written after them -- eight places for one of them to drift. The
+        default is the right answer for all eight, and
+        tests/plugin/TailTests.cpp asserts it for all eight rather than
+        trusting it.
+
+        Both processors feed this into `getTailLengthSeconds()`, which a host
+        may poll from any thread, so what they publish is cached in an atomic
+        and refreshed on parameter change rather than computed in the getter. */
+    virtual double tailSecondsForParams (const float* values, int count) const
+    {
+        (void) values;
+        (void) count;
+        return 0.0;
+    }
 
     /** Gain this module is currently moving, in dB, **signed: positive is gain
         taken away, negative is gain added**.

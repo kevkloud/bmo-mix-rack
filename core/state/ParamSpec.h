@@ -30,7 +30,29 @@ enum class ParamFormat
     Pan,         ///< "L 50", "C", "R 50"
     Hertz,       ///< "850 Hz", "2.10 kHz"
     Milliseconds,///< "5.0 ms", "120 ms"
-    Ratio        ///< "3.0:1"
+    Ratio,       ///< "3.0:1"
+
+    //== Added on top of the shared textParam/textFn hunk, for BMO Linger ======
+    //
+    // Everything else in this file is byte-identical with `c142f37` and
+    // `86095a5` -- the BMO FET and BMO Defang branches -- so that whichever of
+    // the three lands first the others reproduce the hunk rather than stack on
+    // it. **These two rows are BMO Linger's own addition and are in neither of
+    // those branches**, so the byte-identical claim covers the file as it
+    // stood before this block, not as it stands now.
+    //
+    // Appended rather than inserted, for the habit a permanent parameter list
+    // teaches: nothing serialises a ParamFormat today, and nothing should have
+    // to care whether that stays true.
+    //
+    // Neither is expressible as a `textParam`. A textParam prints itself but
+    // is Plain by construction, so it reports no unit to the host and takes no
+    // typed-entry parser -- right for BMO FET's "4 (126 us)", wrong for a
+    // plain quantity in seconds or metres, where a host's automation lane
+    // should say "s" and "m" the way it already says "dB" and "Hz".
+
+    Seconds,     ///< "1.80 s", "12.0 s" -- BMO Linger's DECAY, 0.1..20 s
+    Metres       ///< "12.0 m" -- BMO Linger's SIZE, a room dimension, 0.5..80 m
 };
 
 struct ParamSpec
@@ -126,6 +148,8 @@ struct ParamSpec
             case ParamFormat::Percent:      return "%";
             case ParamFormat::Hertz:        return "Hz";
             case ParamFormat::Milliseconds: return "ms";
+            case ParamFormat::Seconds:      return "s";    // BMO Linger
+            case ParamFormat::Metres:       return "m";    // BMO Linger
             case ParamFormat::Pan:          return "";
             case ParamFormat::Ratio:        return "";
             case ParamFormat::Plain:        return "";
@@ -195,8 +219,34 @@ struct ParamSpec
         switch (format)
         {
             case ParamFormat::Decibels:
-                std::snprintf (buf, sizeof (buf), "%s%.1f dB", real > 0.0f ? "+" : "", (double) real);
+            {
+                // **Round first, then take the sign from the rounded value.**
+                // Sign from the unrounded float with digits from `%.1f` makes
+                // the two disagree: anything in (0, 0.05) printed "+0.0 dB",
+                // anything in (-0.05, 0) printed "-0.0 dB".
+                //
+                // This is the suite-wide copy of the bug BMO Defang fixed in
+                // its own THRESH readout in a0bc817. **Every module's dB
+                // display came through here**, so every one of them had it.
+                //
+                // It hides on Windows. A parameter round-trips through the
+                // host's 32-bit normalised float, and `min + t * range` is not
+                // obliged to land exactly on a value for every target: BMO
+                // Linger's EQ gains default to 0 dB on a -24..+12 range, whose
+                // normalised position is 2/3 and is not exactly representable,
+                // so macOS handed back a hair above zero where Windows handed
+                // back zero. macOS CI is the only reason this was found.
+                //
+                // The `== 0.0` branch is **not** a no-op: -0.0 == 0.0 is true,
+                // so it is reached and the sign bit goes with it.
+                auto r = std::round ((double) real * 10.0) / 10.0;
+
+                if (r == 0.0)
+                    r = 0.0;
+
+                std::snprintf (buf, sizeof (buf), "%s%.1f dB", r > 0.0 ? "+" : "", r);
                 return buf;
+            }
 
             case ParamFormat::Percent:
                 std::snprintf (buf, sizeof (buf), "%d %%", (int) std::lround (real));
@@ -223,6 +273,21 @@ struct ParamSpec
 
             case ParamFormat::Ratio:
                 std::snprintf (buf, sizeof (buf), "%.1f:1", (double) real);
+                return buf;
+
+            // BMO Linger. Two decimals under ten seconds and one above it, so
+            // DECAY reads "1.80 s" where a tenth is the JND-ish step and
+            // "12.0 s" where it is not -- the same thinning Milliseconds and
+            // Hertz already do at a decade boundary, rather than a new habit.
+            case ParamFormat::Seconds:
+                std::snprintf (buf, sizeof (buf), real < 10.0f ? "%.2f s" : "%.1f s", (double) real);
+                return buf;
+
+            // BMO Linger. One decimal the whole way: SIZE is a room dimension
+            // and 0.1 m is already finer than anyone hears across a 0.5-80 m
+            // travel, so "0.5 m" and "80.0 m" both read as lengths.
+            case ParamFormat::Metres:
+                std::snprintf (buf, sizeof (buf), "%.1f m", (double) real);
                 return buf;
 
             case ParamFormat::Plain:

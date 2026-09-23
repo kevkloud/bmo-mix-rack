@@ -29,6 +29,19 @@ public:
           values ((size_t) d.numParams(), 0.0f)
     {
         jassert (paramSet.size() == moduleDef.numParams());
+
+        // A module whose parameters write each other gets its link here and
+        // nowhere else. **One engine exists per running module in both
+        // products** -- the standalone's own, and one per occupied rack slot
+        // -- so this single line covers both, with or without an editor open.
+        // `core/state/ParamLink.h` carries the argument for why the engine and
+        // not a panel; BMO Linger's TYPE is the only module that has one.
+        //
+        // After `paramSet` is in place, and bound to the engine's own copy: a
+        // link keeps a reference to it for the engine's whole life, which is
+        // what makes the ParamSet a member rather than something passed round.
+        if (moduleDef.createParamLink != nullptr)
+            paramLink = moduleDef.createParamLink (paramSet);
     }
 
     const ModuleDef& def() const noexcept    { return moduleDef; }
@@ -85,6 +98,36 @@ public:
         return dsp->latencyForParams (now.data(), (int) now.size());
     }
 
+    /** The tail for the parameters as they are now, in seconds. Safe from any
+        thread.
+
+        Here and not in the processors for `latency()`'s reason: the DSP is
+        private to the engine, so neither processor can ask it directly, and
+        neither should be growing its own copy of the read-all into a scratch
+        array. Every module but BMO Linger takes `ModuleDsp`'s zero default. */
+    double tailSeconds() const
+    {
+        std::vector<float> now ((size_t) paramSet.size());
+        paramSet.readAll (now.data());
+        return dsp->tailSecondsForParams (now.data(), (int) now.size());
+    }
+
+    /** Applies a saved state -- a session, a rack slot's carried state, a
+        preset file -- and then tells the module's link that it happened.
+
+        **Every state restore goes through here rather than straight to
+        `params().applyXml`**, in both products, because the order matters: the
+        link has to hear about the restore after the last value has landed, and
+        only the engine holds both. `ParamLink::stateRestored` says what went
+        wrong without it. */
+    void restoreState (const juce::XmlElement& xml)
+    {
+        paramSet.applyXml (xml);
+
+        if (paramLink != nullptr)
+            paramLink->stateRestored();
+    }
+
     /** Momentary, from the panel; -1 clears it. Not a parameter, so it is not
         in paramSet, not in a preset and not in a saved session. */
     void setSolo (int index) noexcept { dsp->setSolo (index); }
@@ -97,6 +140,11 @@ private:
 
     const ModuleDef& moduleDef;
     ParamSet paramSet;
+
+    /** Declared after `paramSet` and before everything it does not touch, so
+        it is destroyed before the parameters it is listening to go away. */
+    std::unique_ptr<ParamLink> paramLink;
+
     std::unique_ptr<ModuleDsp> dsp;
     std::vector<float> values;
     Meter outputMeter;

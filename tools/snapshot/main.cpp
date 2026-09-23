@@ -1,14 +1,14 @@
 // Renders a product's editor to a PNG without a display, so a layout change
 // can be reviewed in a pull request rather than described in one.
 //
-//   snapshot <eq|sat|util|opto|dim|deq|ltvcomp|deesser|fetcomp|rack> out.png [width height] [param=value ...]
+//   snapshot <eq|sat|util|opto|dim|deq|ltvcomp|deesser|fetcomp|reverb|rack> out.png [width height] [param=value ...]
 //
 // For the rack, "chain=util,eq,sat,opto" sets the modules and "N.id=value"
 // sets a parameter of the module in slot N (1-based), e.g. 2.mid_gain=4.
 //
-// "view=compact|expanded" picks the width of a module that has two (BMO
-// DEQ), standalone; "N.view=..." does the same for rack slot N. Standalone
-// opens expanded and a rack compact, so these render the other one.
+// "view=compact|expanded" picks the width of a module that has two (BMO DEQ
+// and BMO Linger), standalone; "N.view=..." does the same for rack slot N.
+// Standalone opens expanded and a rack compact, so these render the other one.
 //
 // "appearance=dark|light" renders the other palette. Set for this process
 // only: it neither writes nor reads the machine-wide preference, so it cannot
@@ -47,12 +47,14 @@
 #include "products/eq/Product.h"
 #include "products/fetcomp/Product.h"
 #include "products/opto/Product.h"
+#include "products/reverb/Product.h"
 #include "products/vcomp/Product.h"
 #include "products/sat/Product.h"
 #include "products/util/Product.h"
 #include "products/rack/Product.h"
 
 #include "core/ui/ModulePanel.h"
+#include "tools/snapshot/PngOut.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <iostream>
@@ -73,8 +75,12 @@ namespace
         if (product == "dim")  return createDim();
         if (product == "deq")  return createDeq();
         if (product == "ltvcomp") return createVcomp();
+        // By the module's id rather than its display name, as every row here
+        // is: BMO Defang is `deesser`, BMO FET is `fetcomp` and BMO Linger is
+        // `reverb`.
         if (product == "deesser") return createDeesser();
         if (product == "fetcomp") return createFetcomp();
+        if (product == "reverb") return createReverb();
         if (product == "rack") return createRack();
         return nullptr;
     }
@@ -233,7 +239,7 @@ int main (int argc, char** argv)
 
     if (argc < 3)
     {
-        std::cerr << "usage: snapshot <eq|sat|util|opto|dim|deq|ltvcomp|deesser|fetcomp|rack> out.png [width height] [param=value ...]\n";
+        std::cerr << "usage: snapshot <eq|sat|util|opto|dim|deq|ltvcomp|deesser|fetcomp|reverb|rack> out.png [width height] [param=value ...]\n";
         return 2;
     }
 
@@ -675,24 +681,22 @@ int main (int argc, char** argv)
 
     const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), false, 2.0f);
 
-    juce::PNGImageFormat png;
-
-    // Truncate first. `createOutputStream` opens an existing file **at the
-    // end**, so re-rendering over a snapshot appended a second PNG instead of
-    // replacing the first -- and every viewer reads the leading image and
-    // ignores the trailing bytes, so the tool reported "wrote" and the file
-    // still showed the previous render. A panel change then looked like it had
-    // done nothing. Found on AURORA, 2026-09-21, when three renders of the
-    // same path came to exactly the sum of their three sizes.
+    // PngOut.h, not an inline createOutputStream: writing over an existing
+    // render used to append rather than replace, and tests/tools/SnapshotIoTests
+    // now holds that line. See the header for what it cost.
     //
-    // This bit every module, not just BMO FET, and it bit hardest exactly when
-    // someone was iterating: first render correct, every one after it stale.
-    // Any recorded hash taken from a re-rendered file is suspect.
-    out.deleteFile();
-
-    std::unique_ptr<juce::FileOutputStream> stream (out.createOutputStream());
-
-    if (stream == nullptr || ! png.writeImageToStream (image, *stream))
+    // The same fault was fixed twice, independently -- inline here on `main` for
+    // BMO FET, and behind this seam on BMO Linger's branch. One survives, and it
+    // is the seam, because it is the one a test can call: the inline version was
+    // `deleteFile()` alone, this one keeps the truncate behind it as well, and
+    // `snapshot_io` is the only regression test the bug has.
+    //
+    // Carried over from the inline fix, because it is the part that is easy to
+    // forget: this bit every module, not just BMO FET, and it bit hardest
+    // exactly when someone was iterating -- first render correct, every one
+    // after it stale. **Any recorded hash taken from a re-rendered file before
+    // this landed is suspect.**
+    if (! bmo::snapshot::writePng (out, image))
     {
         std::cerr << "could not write " << out.getFullPathName() << '\n';
         return 1;

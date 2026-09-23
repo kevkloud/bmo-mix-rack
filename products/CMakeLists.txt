@@ -12,6 +12,7 @@ if(BMO_BUILD_RACK)
     add_subdirectory(vcomp)
     add_subdirectory(deesser)
     add_subdirectory(fetcomp)
+    add_subdirectory(reverb)
     add_subdirectory(rack)
 endif()
 

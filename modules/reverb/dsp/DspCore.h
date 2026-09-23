@@ -75,13 +75,12 @@ enum class ErMode { taps = 0, energy, blend };
       the Reverb EQ acts on -- see it for why it shows the dry input until
       there is an engine, and why that is honest rather than broken. EARLY and
       TAIL stay parameter-driven.
-    - `tailSecondsFor` below is the figure the host should be told, and
-      **nothing tells it yet**: both processors still hardcode
-      `getTailLengthSeconds()` to 0.0 and `ModuleDsp` has no tail accessor.
-      Adding `tailSecondsForParams` to `ModuleDsp` touches every module's
-      vtable, so it is milestone M5 and its own reviewed commit (11 section
-      2a). The arithmetic lives here now so that when the accessor lands it has
-      nothing to invent.
+    - `tailSecondsFor` below is the figure the host is told. It reaches a host
+      through `ModuleDsp::tailSecondsForParams` (milestone M5, 11 section 2a),
+      which `ReverbDsp` answers by unpacking the values and calling it, and
+      both processors report it from a cache refreshed where their latency is.
+      The arithmetic lives here and only here, so the accessor had nothing to
+      invent when it landed.
 */
 class DspCore
 {
@@ -321,7 +320,9 @@ public:
         The rack **sums** this across occupied slots rather than taking the
         maximum: slots are in series, so 4 s feeding 2 s rings longer than
         either. Under-reporting truncates tails; over-reporting only costs idle
-        pulling. The ceiling below is therefore per module, not per rack. */
+        pulling. The ceiling below is the module's, and the rack clamps its sum
+        at the same `kMaxTailSeconds` (`RackProcessor::totalTail`), because
+        eight maxed reverbs in one chain would otherwise report four minutes. */
     static float tailSecondsFor (const Params& p) noexcept
     {
         const auto longest = std::max (1.0f, std::max (p.dampLo, p.dampHi));

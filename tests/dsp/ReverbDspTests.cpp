@@ -588,32 +588,43 @@ namespace
         // in, and a per-channel feed-forward diffuser can only hold the level
         // on average (ErEngine.cpp, kDiffuserMs): what it does to one table's
         // IR depends on how that table's taps interfere with its 64 paths.
-        // That range is held to 0.3 dB, which is a guard against a gross
-        // error -- the DC-gain bug this file caught ran to 0.39 -- and not the
-        // spec's figure. The owner decides whether 0.3 is acceptable or the
-        // diffuser changes.
+        // A gain for the diffuser's own share, tabulated from its impulse
+        // response in prepare(), was built and measured on 2026-09-23 and moved
+        // no type by more than 0.01 dB: the drift is the table's pattern
+        // meeting the paths, not the diffuser alone (testing note).
+        //
+        // Swept at 48, 96 and 192 kHz, every type. That range is held to
+        // 0.3 dB, which is a guard against a gross error -- the DC-gain bug
+        // this file caught ran to 0.39 -- and not the spec's figure.
         {
             double bridgeDb = 0.0, diffuserDb = 0.0;
+            double perType[numTypes][3] {};
+            const double rates[] { 48000.0, 96000.0, 192000.0 };
 
+            for (int ri = 0; ri < 3; ++ri)
             for (int type = 0; type < numTypes; ++type)
             {
+                const auto sweepRate = rates[ri];
                 auto p = erOnly (type);
                 p.erDensity = 0.0f;
 
                 const auto seconds = (double) (erTableFor (type).windowClampMs + ErEngine::diffuserSpreadMs() + 30.0f) * 0.001;
-                const auto ref = impulse (p, rate, seconds);
+                const auto ref = impulse (p, sweepRate, seconds);
                 const auto e0l = energyOf (ref.l), e0r = energyOf (ref.r);
 
                 for (int step = 1; step <= 20; ++step)
                 {
                     p.erDensity = (float) step / 20.0f;
-                    const auto ir = impulse (p, rate, seconds);
+                    const auto ir = impulse (p, sweepRate, seconds);
 
                     const auto error = std::max (std::abs (db (energyOf (ir.l) / e0l)),
                                                  std::abs (db (energyOf (ir.r) / e0r)));
 
                     auto& worst = p.erDensity <= ErEngine::kDiffuserStartDensity ? bridgeDb : diffuserDb;
                     worst = std::max (worst, error);
+
+                    if (p.erDensity > ErEngine::kDiffuserStartDensity)
+                        perType[type][ri] = std::max (perType[type][ri], error);
                 }
             }
 
@@ -621,6 +632,10 @@ namespace
             check (diffuserDb <= 0.3, "ER energy stays within 0.3 dB across DENSITY 60..100 %, the diffuser's range");
             std::cout << "  density sweep: worst energy error " << bridgeDb << " dB over the bridge, "
                       << diffuserDb << " dB over the diffuser\n";
+
+            for (int type = 0; type < numTypes; ++type)
+                std::cout << "    " << kTypeNames[type] << ": worst over the diffuser " << perType[type][0]
+                          << " dB at 48 kHz, " << perType[type][1] << " at 96, " << perType[type][2] << " at 192\n";
         }
 
         // **No tap appears at a non-zero level.** On the weights themselves,

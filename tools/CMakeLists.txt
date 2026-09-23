@@ -25,7 +25,7 @@ bmo_add_dsp_tool(measure_fetcomp ${CMAKE_CURRENT_SOURCE_DIR}/measure/fetcomp/mai
 target_link_libraries(measure_fetcomp PRIVATE bmo_fetcomp_dsp)
 
 bmo_add_dsp_tool(measure_reverb ${CMAKE_CURRENT_SOURCE_DIR}/measure/reverb/main.cpp)
-target_link_libraries(measure_reverb PRIVATE bmo_reverb_dsp)
+target_link_libraries(measure_reverb PRIVATE bmo_reverb_dsp bmo_reverb_ergen)
 
 if(NOT BMO_DSP_ONLY)
     bmo_add_tool(snapshot

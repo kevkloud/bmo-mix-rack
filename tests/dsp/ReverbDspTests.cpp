@@ -1058,7 +1058,7 @@ namespace
                         }
 
                         l[(size_t) i] = x;
-                        r[(size_t) i] = -x;
+                        r[(size_t) i] = 0.5f * x;   // not -x: the ER hears the mono sum, and -x would feed it silence
                     }
 
                     dsp.process (ch, 2, 256);
@@ -1068,6 +1068,20 @@ namespace
                 }
 
                 dsp.reset();
+
+                // **An audible setting before the silence is checked.** The
+                // last random corner is as likely as not to have the ER fader
+                // at -40 or MIX at 0, and a reset that left the delay line
+                // full would then still pass. At the defaults the ER is on
+                // and fully in the mix, so anything reset() leaves is heard.
+                {
+                    auto audible = defaults();
+                    audible[Index::type] = (float) type;
+                    audible[Index::erlevel] = 0.0f;
+                    audible[Index::mix] = 100.0f;
+                    audible[Index::erdensity] = 100.0f;
+                    dsp.setParams (audible.data(), (int) audible.size());
+                }
 
                 for (int block = 0; block < 200; ++block)
                 {
@@ -1129,6 +1143,59 @@ namespace
                 check (db (bottom / steady) <= -20.0, "a TYPE change dips the wet bus, and the swap is at the bottom of it");
                 std::cout << "  type change: worst 1 ms step at level " << step << " dB, dip bottom "
                           << db (bottom / steady) << " dB\n";
+            }
+
+            // **And in the waveform.** A 1 ms energy criterion cannot see a
+            // fall to silence in one sample -- the window it lands in is below
+            // the dip's floor -- and that is a click. So both changes are made
+            // again on a 100 Hz sine and held to the density sweep's
+            // second-difference detector: 1 % of the ER's peak, against about
+            // 0.02 % for a smooth 100 Hz signal.
+            for (const auto typeToo : { false, true })
+            {
+                auto p = erOnly (room);
+                p.erDensity = 0.3f;
+
+                DspCore core;
+                core.prepare (rate, 48, 2);
+                core.setParams (p);
+
+                Stereo io { std::vector<float> (48), std::vector<float> (48) };
+                std::vector<float> out;
+                size_t n = 0;
+
+                for (int w = 0; w < 700; ++w)
+                {
+                    if (w == 400)
+                    {
+                        auto q = p;
+                        q.sizeM *= 0.5f;
+
+                        if (typeToo)
+                            q.type = Type::chamber;
+
+                        core.setParams (q);
+                    }
+
+                    for (int i = 0; i < 48; ++i, ++n)
+                        io.l[(size_t) i] = io.r[(size_t) i] = 0.5f * (float) std::sin (2.0 * 3.14159265358979323846 * 100.0 * (double) n / rate);
+
+                    run (core, io, 48);
+                    out.insert (out.end(), io.l.begin(), io.l.end());
+                }
+
+                float peak = 0.0f, worst = 0.0f;
+
+                for (size_t i = (size_t) (0.3 * rate); i < out.size(); ++i)
+                {
+                    peak  = std::max (peak, std::abs (out[i]));
+                    worst = std::max (worst, std::abs (out[i] - 2.0f * out[i - 1] + out[i - 2]));
+                }
+
+                check (worst <= 0.01f * peak, typeToo ? "a TYPE change does not click in the waveform"
+                                                      : "a SIZE change does not click in the waveform");
+                std::cout << (typeToo ? "  type" : "  size") << " change: worst second difference "
+                          << worst / peak * 100.0f << " % of peak\n";
             }
         }
 

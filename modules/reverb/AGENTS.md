@@ -17,11 +17,14 @@ and the schema says thirty, and they are not the same thirty** — the
 control-set trim below cut six and the Reverb EQ added six others, neither
 edited `docs/`, so read this file for what the schema is.
 
-**The DSP is a marked placeholder.** `dsp/DspCore.h` passes audio through
-untouched, produces no tail, and reports zero latency — which, unlike the
-silence, is the *shipped* figure and not a stand-in. What is real today is the
-schema, the panel, the display, the registration and the latency contract. The
-DSP pass owns `dsp/` and nothing outside it, with one exception named below.
+**The early reflections are real; the tail is not yet.** Milestone M2 is in:
+`dsp/ErEngine` plays the ER table behind the ER fader, MIX and OUTPUT work, and
+latency is zero — the *shipped* figure. There is **no late network** (M3), so
+REVERB, DECAY, damping, SOURCE, WIDTH, PRE-DELAY, the modulation pair, IN
+HI-CUT and the Reverb EQ reach `DspCore::Params` and go no further. The ER
+tables themselves are a **stand-in** (`dsp/ErTable.cpp`) until the table
+generator replaces it. See "The early reflections (M2)" below. The DSP pass
+owns `dsp/` and nothing outside it, with one exception named below.
 
 ## What this reverb is
 
@@ -967,11 +970,12 @@ the Reverb EQ acts on** — pre both generators, which is where `10` section 2
 puts the EQ. That is where it belongs once there is an engine, so no rewiring
 is owed.
 
-**Until then it shows the dry input, and that is honest rather than broken.**
-`DspCore::process` is a marked pass-through, so the module's input, the point
-the EQ acts on and the module's output are the same samples; there is no third
-thing the tap could be showing. A reader who finds the spectrum "not reacting
-to the EQ knobs" has found the placeholder. **Do not move the tap to fix it.**
+**Until M3 it shows the dry input, and that is honest rather than broken.**
+The early reflections exist since M2, but the input conditioning and the
+Reverb EQ do not, so the point the EQ acts on is still the module's input —
+which is exactly what `DspCore::process` writes to the tap, before the ER
+engine sees a sample. A reader who finds the spectrum "not reacting to the EQ
+knobs" has found the missing EQ. **Do not move the tap to fix it.**
 
 Adding the override costs the other modules nothing — `ModuleDsp::analyser()`
 returns null by default and BMO DEQ was its only overrider — and
@@ -1005,6 +1009,84 @@ None of `11` section 6's comb, spacing, level-ceiling or flamming rules is
 claimed of them. When the real tables land, a failing table is **re-seeded, not
 patched**, and the audits run *after* the jitter.
 
+## The early reflections (M2)
+
+`dsp/ErEngine.h/.cpp`, wired into `DspCore::prepare/reset/process`. The class
+comment is the signal path; what follows is what a later reader would
+otherwise have to re-derive, and the places where the engine had to decide
+something the spec did not. Figures are in
+`testing-notes/linger-m2-engine-2026-09-23.md`, measured on AURORA.
+
+**`ErTable.h` is the contract and the engine plays whatever it is handed.**
+Nothing in the engine or its tests reads a number out of the stand-in in
+`ErTable.cpp`; every expected tap in `reverb_dsp` is computed at run time from
+`erTableFor (type)` through 10 section 3's laws. When the generator's tables
+land, the tests follow them.
+
+**Decisions the spec left open, each marked in the code:**
+
+- **The input is the mono sum**, into one delay line. One source in one room;
+  the table's per-channel sets are what the two ears hear of it. The dry path
+  carries a stereo source's image.
+- **Taps read whole-sample delays and never move while they sound.** SIZE,
+  ER MODE, VARIATION and (in Energy and Blend) ER SPREAD build a second tap set
+  and crossfade to it; the retrigger is 1 % of accumulated relative change,
+  **or** the control holding still for a crossfade's length, because a lone
+  0.1 m nudge on a 12 m room is under 1 % and would otherwise never land.
+- **The Size law's window clamp scales the pattern, it drops no tap**: the
+  factor `S / S_ref` is clamped so the table's window stays inside
+  [5 ms, `windowClampMs`], and gains and band cutoffs follow the clamped
+  factor. Above the clamp SIZE stops changing the ER.
+- **A threshold of 0 is always on.** 10 section 3's ramp
+  `clamp((D − θ)/Δ, 0, 1)` would switch the core taps off at D = 0, which
+  `ErTable.h` says they never are. Taken literally it also means **an infill
+  tap with θ = 1 never sounds** (it reaches zero weight at the top of the
+  knob); the stand-in has one. The generator half should keep θ ≤ 1 − Δ, or
+  the ramp should become `clamp((D − θ)/Δ + 1, 0, 1)` — a decision for both
+  halves, not made here.
+- **The density renormalisation is on the energy the band filters put out**,
+  not on the raw gains: each tap weighted by its band's pulse energy, and
+  pairs of taps close enough to overlap carrying their closed-form overlap.
+  Without the first the level drifts by most of a decibel with density;
+  without the second, two taps a sample apart (the stand-in has them) move it
+  by a quarter. With both, the bridge holds to about 1e-6 dB.
+- **The diffuser holds the level only on average.** Up to DENSITY 0.6 the
+  bridge is exact; above it the three stages fade in and the level moves by up
+  to **0.24 dB** on the stand-in table. That is a property of taking one
+  output per channel from a feed-forward network — only an allpass preserves
+  every input's energy — and not of the delays. **11 section 6 asks for
+  0.2 dB over the whole sweep; this range does not meet it**, and the test
+  holds it to 0.3 dB and says so. The owner decides. Its fourth line enters
+  inverted, which is what keeps its DC gain at 1 (see the code).
+- **The end-of-cluster ramp** fades taps across the last 5 ms of the window
+  to zero at its end, so the cluster ends on a ramp at every size.
+- **ER HI-CUT is a one-pole solved to be exactly −3 dB at its setting**, and
+  at the top of its range, 20 kHz, it is exactly a wire.
+- **Variation 6 is `L = E + g E(t − δ)`, `R = E − g E(t − δ)` as `ErTable.h`
+  writes it**, so the mono sum is `2E`: the *comb* vanishes in mono, not the
+  ER. The "ER vanish in mono entirely" wording elsewhere in this file and in
+  `10` section 3 describes Schroeder's original pair (M = dry), not the
+  contract; one of the two needs correcting, and it is not this pass's call.
+- **Energy and Blend are deterministic and unheard.** Energy is 48 velvet
+  pulses per channel, one per equal cell of the window, seeded from the
+  table's seed, the type, the variation and the channel; every pulse is on at
+  every density and the diffuser still follows DENSITY. Blend is Taps' times
+  with the envelope's gains. Both are renormalised to Taps' core energy, so a
+  mode change is not a level change.
+- **The MIX law is provisional**: linear, dry·(1 − m) + wet·m, pending the
+  owner's choice. Only "MIX 0 is exactly dry, MIX 1 has no dry" is tested.
+- **ER LEVEL at −40 is exactly zero**, not −40 dB.
+
+**The CPU budget was measured before anything was tuned**, as `10` section 8
+asks: the worst case (48 taps a channel, three diffuser stages) is about 0.6 %
+of a core at 48 kHz and 2.4 % at 192 kHz on AURORA, Release — the ER alone, so
+the late network has what is left of 1.5 % and 5 %. **One transient is already
+over**: with DENSITY moving on every block the weights are recomputed every
+sample, and that costs 5.3 % at 192 kHz. A session passes through it rather
+than sitting in it, but with the tail added it is the first place to spend
+effort (a control-rate recompute aligned to the sample clock would keep block
+invariance). `measure_reverb bench`.
+
 ## What is not here yet, and where it goes
 
 - **Tail reporting is done** (`11` section 2a, milestone M5).
@@ -1024,15 +1106,19 @@ patched**, and the audits run *after* the jitter.
   bounce, where the figure is rendered onto the end of every export. Both
   clamps read the one constant in `core/dsp/ModuleDsp.h`; do not write 30.0
   anywhere else.
-- **The engine.** `11` section 1 names the headers it grows —
-  `ErGenerator.h`, `TapTables.h`, `Fdn.h`, `Absorbent.h`. Milestones M2–M4.
-- **The test suite.** `tests/dsp/ReverbDspTests.cpp` asserts the frame; `11`
-  section 6 is the list it grows into, and the one to read before writing the
-  first line of engine. **Write the modal-density test before Plate is tuned
-  and expect it red** — `10` section 4 records eight lines covering Plate to
-  barely 1 s, and the fix is 16 lines, a larger mean delay, or accepting
-  sparsity.
-- **Nothing has been heard.** Not one setting.
+- **The late network.** M3: `Fdn.h`, `Absorbent.h`, the input stage and the
+  Reverb EQ, pre-delay, SOURCE, modulation — and the wet bus gains a tail term
+  beside the ER in `DspCore::process`. M4 is the six types' constants.
+- **The real ER tables.** `dsp/ErTable.cpp` is a stand-in, replaced wholesale
+  by the generator half of M2 on its own branch. The engine and its tests
+  already read whatever table is linked.
+- **The test suite.** `tests/dsp/ReverbDspTests.cpp` asserts the frame and
+  `11` section 6's ER block as it applies to the engine. The table's own
+  audits — comb, flamming, mono γ, lateral fraction — belong with the
+  generator. **Write the modal-density test before Plate is tuned and expect
+  it red** — `10` section 4 records eight lines covering Plate to barely 1 s,
+  and the fix is 16 lines, a larger mean delay, or accepting sparsity.
+- **Nothing has been heard.** Not one setting — not the ER either.
 
 ## The build rules, which are not optional
 

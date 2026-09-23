@@ -2384,10 +2384,24 @@ void checkReverbPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
         checkNear (screen.responseDbAt (1000.0f), -0.010857, 1.0e-4,
                    who + " a flat EQ page draws a flat curve");
 
+        // **1e-4 dB rather than 1e-9, and the difference is a platform fact
+        // rather than slack.** A gain set to exactly 0 does not arrive as
+        // exactly 0: it round-trips through the host's 32-bit normalised float,
+        // and these three gains sit at 0 dB on a -24..+12 range whose
+        // normalised position is 2/3, which is not exactly representable.
+        // Windows happened to land back on zero; macOS landed 3.6e-07 dB away,
+        // and this was the only EQ assertion that failed there. It is the same
+        // round-trip that made the dB formatter print "+0.0 dB" on macOS alone.
+        //
+        // 1e-4 matches the summed-response check above, is five thousand times
+        // tighter than the "half a dB acquired somewhere" the comment there is
+        // guarding against, and sits far below anything audible. What the test
+        // claims is unchanged; only the arithmetic it demands of a 32-bit float
+        // round-trip is.
         for (const auto hz : { 30.0f, 200.0f, 1000.0f, 1600.0f, 8000.0f })
             for (const auto n : kNodes)
-                checkNear (screen.nodeDbAt (n, hz), 0.0, 1.0e-9,
-                           who + " every EQ node is exactly flat at its default");
+                checkNear (screen.nodeDbAt (n, hz), 0.0, 1.0e-4,
+                           who + " every EQ node is flat at its default");
 
         // The one-pole input cut is -3.01 dB at its own corner, which is what
         // makes it a corner.

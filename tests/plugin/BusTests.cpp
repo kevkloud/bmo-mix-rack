@@ -221,7 +221,21 @@ void checkGolden (double actual, double expected, double absTol, const juce::Str
     // A failure message that cannot separate those two is not worth reading.
     const auto delta = std::abs (actual - expected);
 
-    checkClose (actual, expected, juce::jmax (absTol, 1.0e-9 * std::abs (expected)),
+    // **The proportional term, and why it is 1e-5 rather than 1e-9.**
+    //
+    // Raising the absolute tolerances alone did not fix macOS, because for the
+    // rows measured in tens of thousands -- BMO DEQ swept, whose peak is 67366
+    // -- `jmax` picks the proportional term and it dominated: 1e-9 x 67366 is
+    // 6.7e-05, tighter than the absolute figure it was meant to back up. The
+    // measured divergence there is 0.0703 on 67366, a **relative** 1.04e-6, so
+    // the proportional term was a thousand times too tight while the absolute
+    // one was fine.
+    //
+    // 1e-5 relative is ten times the observed divergence and still a hundred
+    // times tighter than the 1e-3 relative a real regression would have to
+    // stay under to hide. The two terms now fail at comparable scales instead
+    // of one quietly overriding the other.
+    checkClose (actual, expected, juce::jmax (absTol, 1.0e-5 * std::abs (expected)),
                 what + " (delta " + juce::String (delta, 9) + ")");
 }
 

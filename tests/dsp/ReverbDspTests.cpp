@@ -1,33 +1,40 @@
 /*
     BMO Linger's DSP, JUCE-free.
 
-    **There is no reverb under this yet.** `modules/reverb/dsp/DspCore.h` is a
-    marked placeholder that passes audio through, so what can be asserted here
-    is everything that is true of the *frame* rather than of the engine: the
+    **The early reflections are real since M2; the tail is not yet.** The
+    first half of this file is everything that is true of the *frame* -- the
     adapter's unpacking, the latency contract, the tail arithmetic, the Size
-    law, and the tap table's shape.
+    law, the tap table's shape and the Reverb EQ's design. The second half,
+    `erEngineTests`, is 11 section 6's ER block as it applies to the engine:
+    tap times and gains against the table in play, the density bridge, ER
+    HI-CUT, termination, the level laws and the phasing trap, and the
+    invariance, fuzz, click, allocation and tail-report items. Every ER item
+    runs with the tail at -40.
 
-    That is a short list, and the long one is written down where it will be
-    read rather than discovered. `docs/reverb/11-integration-and-test-plan.md`
-    section 6 is the whole suite this file grows into -- T60 by Schroeder
-    backward integration fitted over two ranges, per-octave damping ratios, tap
-    times to the sample against the image-source table, the comb and flamming
-    rules as assertions, mono correlation at all seven VARIATION positions,
-    normalised echo density and mixing time, the modal-density rule that 10
-    section 4 expects Plate to *fail*, the modulation pitch bound, the level
-    laws and the two phasing nulls, and the invariance matrix over rate and
-    block size. None of it can be written against a wire.
+    **No assertion reads a number out of the stand-in table.** `ErTable.cpp`
+    is replaced wholesale by the table generator; every expected tap here is
+    computed from `erTableFor (type)` at run time through 10 section 3's laws,
+    so the tests follow whatever table is linked. The table's own audits --
+    comb, flamming, mono gamma, lateral fraction -- are the generator's, and
+    are not written here.
 
-    What this file does instead is make sure the wire is a wire, and that
-    everything the engine will be built on top of already agrees with itself.
+    Still to come with M3: T60, damping ratios, echo density and mixing time,
+    modal density (which 10 section 4 expects Plate to *fail*), modulation,
+    pre-delay and the tail's own phasing null.
 */
 
 #include "modules/reverb/dsp/ReverbDsp.h"
 #include "modules/reverb/dsp/TapTables.h"
 
+#include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
+#include <complex>
+#include <cstdint>
+#include <cstdlib>
 #include <iostream>
+#include <new>
 #include <string>
 #include <vector>
 
@@ -55,6 +62,1153 @@ namespace
             v.push_back (s.def);
 
         return v;
+    }
+}
+
+//==============================================================================
+// Counting allocations. `process()` must allocate nothing, ever, and the only
+// honest way to say so is to count: every global `operator new` in this
+// executable goes through here, and the count is only armed around the calls
+// under test.
+namespace
+{
+    std::atomic<long> allocations { 0 };
+    std::atomic<bool> countingAllocations { false };
+}
+
+void* operator new (std::size_t n)
+{
+    if (countingAllocations.load (std::memory_order_relaxed))
+        allocations.fetch_add (1, std::memory_order_relaxed);
+
+    if (auto* p = std::malloc (n > 0 ? n : 1))
+        return p;
+
+    throw std::bad_alloc();
+}
+
+void* operator new[] (std::size_t n) { return operator new (n); }
+void operator delete (void* p) noexcept { std::free (p); }
+void operator delete[] (void* p) noexcept { std::free (p); }
+void operator delete (void* p, std::size_t) noexcept { std::free (p); }
+void operator delete[] (void* p, std::size_t) noexcept { std::free (p); }
+
+namespace
+{
+    //== Driving the core ======================================================
+
+    /** The ER on its own: the tail at -40 (off), the ER fader at 0 dB, MIX
+        fully wet, OUTPUT at 0 dB, ER HI-CUT open -- and the type's own row for
+        everything a type sets, so each type is heard as itself. 11 section 6
+        runs every ER item with `verblevel` at -40, and this is that. */
+    DspCore::Params erOnly (int type = room)
+    {
+        const auto& c = constantsFor (type);
+
+        DspCore::Params p;
+        p.type        = typeFor (type);
+        p.sizeM       = c.sizeM;
+        p.erDensity   = c.erDensity * 0.01f;
+        p.erShape     = c.erShape;
+        p.erSpreadMs  = c.erSpreadMs;
+        p.erHiCutHz   = ErEngine::kHiCutOpenHz;
+        p.erMode      = ErMode::taps;
+        p.erVariation = 2;
+        p.erLevelDb   = 0.0f;
+        p.verbLevelDb = -40.0f;
+        p.mix         = 1.0f;
+        p.outputDb    = 0.0f;
+        return p;
+    }
+
+    struct Stereo
+    {
+        std::vector<float> l, r;
+    };
+
+    void run (DspCore& core, Stereo& io, int block)
+    {
+        const auto n = io.l.size();
+
+        for (size_t i = 0; i < n; i += (size_t) block)
+        {
+            const auto len = (int) std::min ((size_t) block, n - i);
+            float* ch[] { io.l.data() + i, io.r.data() + i };
+            core.process (ch, 2, len);
+        }
+    }
+
+    /** An impulse response, captured into vectors and never written anywhere
+        (11 section 6). A unit impulse in both channels is a unit impulse in
+        the mono sum the ER engine is fed. */
+    Stereo impulse (const DspCore::Params& p, double rate, double seconds, int block = 256)
+    {
+        DspCore core;
+        core.prepare (rate, block, 2);
+        core.setParams (p);
+
+        Stereo io;
+        io.l.assign ((size_t) (rate * seconds), 0.0f);
+        io.r = io.l;
+        io.l[0] = io.r[0] = 1.0f;
+
+        run (core, io, block);
+        return io;
+    }
+
+    double energyOf (const std::vector<float>& x, size_t from = 0, size_t to = SIZE_MAX)
+    {
+        double e = 0.0;
+
+        for (size_t i = from; i < std::min (to, x.size()); ++i)
+            e += (double) x[i] * (double) x[i];
+
+        return e;
+    }
+
+    double db (double ratio) { return 10.0 * std::log10 (std::max (ratio, 1.0e-300)); }
+
+    /** The Size law as 10 section 3 states it, re-derived here from the table's
+        own fields rather than read from the engine: t scales by S / S_ref and
+        a by S_ref / S, and the window is held inside [5 ms, windowClampMs]. */
+    float scaleFor (const ErTable& t, float sizeM)
+    {
+        const auto lo = 5.0f / t.windowMs;
+        const auto hi = std::max (lo, t.windowClampMs / t.windowMs);
+        return std::clamp (sizeM / kReferenceSizeM, lo, hi);
+    }
+
+    struct Expected
+    {
+        int   sample;
+        float gain;
+    };
+
+    /** The core taps of one channel of the table in play, where they should
+        land and at what gain, at DENSITY 0 -- where only the core taps sound
+        and the renormalisation is exactly unity, because the set it
+        renormalises to is the set that is playing. The gain is the table's,
+        divided by the Size factor, and faded by the end-of-cluster ramp,
+        which is the engine's own law (`ErEngine::endTaper`) and the one piece
+        of this that is not in the table. */
+    std::vector<Expected> coreTaps (const ErChannel& c, const ErTable& t, float sizeM,
+                                    double rate, int shift = 0, float gainScale = 1.0f)
+    {
+        const auto k = scaleFor (t, sizeM);
+        std::vector<Expected> out;
+
+        for (int i = 0; i < c.numTaps; ++i)
+            if (c.taps[i].theta <= 0.0f)
+            {
+                const auto ms = c.taps[i].timeMs * k;
+                out.push_back ({ (int) std::lround ((double) ms * rate * 0.001) + shift,
+                                 gainScale * c.taps[i].gain / k * ErEngine::endTaper (ms, t.windowMs * k) });
+            }
+
+        return out;
+    }
+
+    struct TapScore
+    {
+        int checked = 0, timeMisses = 0, gainMisses = 0, skipped = 0;
+        double worstDb = 0.0;
+        int worstSamples = 0;
+    };
+
+    /** Peak-pick each expected tap in `ir` and read its gain.
+
+        **How a tap's gain is isolated from its band filter:** every filter
+        between a tap and the output is a one-pole low-pass with unity gain at
+        DC, whose impulse response is positive, peaks on its first sample and
+        decays monotonically. So a filtered pulse's *area* -- the sum of the
+        IR over the samples it owns -- is the tap's gain exactly, whatever the
+        band's cutoff, and its *peak* is on the tap's own sample. A sample
+        belongs to the nearest expected tap; what leaks across a boundary
+        half a tap spacing away is the filter's tail at a^(gap/2), which for
+        the darkest band at the closest spacing the table allows (0.9 ms) is
+        under 1e-3 of the area. Peak-picking the raw IR instead would read
+        the gain of the *filter*, which is (1 - a), not of the tap. */
+    void scoreTaps (const std::vector<float>& ir, std::vector<Expected> taps, TapScore& score)
+    {
+        std::sort (taps.begin(), taps.end(), [] (auto& a, auto& b) { return a.sample < b.sample; });
+
+        for (size_t i = 0; i < taps.size(); ++i)
+        {
+            const auto n = taps[i].sample;
+            const auto prev = i > 0 ? taps[i - 1].sample : n - 64;
+            const auto next = i + 1 < taps.size() ? taps[i + 1].sample : n + 256;
+
+            // Two taps within a few samples of each other cannot be told apart
+            // by either measure; they are counted and skipped, not guessed at.
+            if (n - prev < 4 || next - n < 4 || std::abs (taps[i].gain) < 1.0e-4f)
+            {
+                ++score.skipped;
+                continue;
+            }
+
+            const auto lo = std::max (0, (prev + n) / 2 + 1);
+            const auto hi = std::min ((int) ir.size(), (next + n) / 2 + 1);
+
+            int peak = lo;
+            double area = 0.0;
+
+            for (int j = lo; j < hi; ++j)
+            {
+                area += ir[(size_t) j];
+
+                if (std::abs (ir[(size_t) j]) > std::abs (ir[(size_t) peak]))
+                    peak = j;
+            }
+
+            ++score.checked;
+
+            if (std::abs (peak - n) > 1)
+                ++score.timeMisses;
+
+            const auto errDb = 20.0 * std::log10 (std::max (std::abs (area), 1.0e-30) / std::abs ((double) taps[i].gain));
+
+            if (std::abs (errDb) > 0.2)
+                ++score.gainMisses;
+
+            score.worstDb = std::max (score.worstDb, std::abs (errDb));
+            score.worstSamples = std::max (score.worstSamples, std::abs (peak - n));
+        }
+    }
+
+    /** |H(f)| of a real sequence, directly. */
+    std::complex<double> dft (const std::vector<float>& x, double hz, double rate)
+    {
+        std::complex<double> sum {};
+        const auto w = -2.0 * 3.14159265358979323846 * hz / rate;
+
+        for (size_t n = 0; n < x.size(); ++n)
+            sum += (double) x[n] * std::polar (1.0, w * (double) n);
+
+        return sum;
+    }
+
+    /** A 1 ms window's energy, summed over an ensemble of fixed-seed noise
+        runs. One noise run's 48-sample windows wander by a decibel from
+        window to window on their own, which would swamp a 3 dB criterion; the
+        sum over sixteen independent seeds is steady to a few tenths, and a
+        real click -- a step in level or pattern that a crossfade or a dip
+        should have spread over 30 ms -- still stands out of it by the whole
+        step. `change` is applied at window `at`. */
+    template <typename Change>
+    std::vector<double> ensembleWindows (const DspCore::Params& start, Change change,
+                                         int windows, int at, int seeds = 16)
+    {
+        constexpr double rate = 48000.0;
+        constexpr int win = 48;
+
+        std::vector<double> energy ((size_t) windows, 0.0);
+
+        for (int s = 0; s < seeds; ++s)
+        {
+            DspCore core;
+            core.prepare (rate, win, 2);
+            core.setParams (start);
+
+            unsigned int seed = 977u + 7919u * (unsigned int) s;
+            Stereo io;
+            io.l.resize ((size_t) win);
+            io.r.resize ((size_t) win);
+
+            for (int w = 0; w < windows; ++w)
+            {
+                if (w == at)
+                {
+                    auto p = start;
+                    change (p);
+                    core.setParams (p);
+                }
+
+                for (int i = 0; i < win; ++i)
+                {
+                    seed = seed * 1664525u + 1013904223u;
+                    io.l[(size_t) i] = io.r[(size_t) i] = (float) (seed >> 8) * (1.0f / 8388608.0f) - 1.0f;
+                }
+
+                run (core, io, win);
+                energy[(size_t) w] += energyOf (io.l) + energyOf (io.r);
+            }
+        }
+
+        return energy;
+    }
+
+    /** The largest 1 ms step, in dB, between neighbouring windows from `from`
+        on, counting only windows above `floor`. The floor is there for the
+        TYPE dip, which goes to silence on purpose: a raised cosine's rise
+        out of zero is steep in decibels and smooth in the waveform, and the
+        one thing a dip must not do is click at level -- which is what the
+        floor leaves in view. */
+    double worstStepDb (const std::vector<double>& e, int from, double floor)
+    {
+        double worst = 0.0;
+
+        for (size_t w = (size_t) std::max (from, 1); w < e.size(); ++w)
+            if (e[w] > floor && e[w - 1] > floor)
+                worst = std::max (worst, std::abs (db (e[w] / e[w - 1])));
+
+        return worst;
+    }
+
+    /** The end of the ER in samples: the last sample at which the Schroeder
+        backward integral is still within 60 dB of the whole. */
+    int minus60 (const std::vector<float>& l, const std::vector<float>& r)
+    {
+        double total = energyOf (l) + energyOf (r);
+        double remaining = total;
+        int last = 0;
+
+        for (size_t i = 0; i < l.size(); ++i)
+        {
+            if (remaining >= total * 1.0e-6)
+                last = (int) i;
+
+            remaining -= (double) l[i] * l[i] + (double) r[i] * r[i];
+        }
+
+        return last;
+    }
+
+    //==========================================================================
+    void erEngineTests()
+    {
+        constexpr double rate = 48000.0;
+
+        //== ER taps: times to the sample, gains to 0.2 dB, against the table ==
+        //
+        // DENSITY minimum, hi-cut open, every type, every per-channel
+        // VARIATION set, both channels, and three sizes -- the reference, half
+        // of it, and twice it, where the table's own window clamp may bind.
+        // Expected values are the table in play read through the Size law, so
+        // nothing here pins a number from the stand-in table.
+        {
+            TapScore score;
+
+            for (int type = 0; type < numTypes; ++type)
+            {
+                const auto& table = erTableFor (type);
+
+                for (int v = 0; v < kErCombVariation; ++v)
+                    for (const auto size : { kReferenceSizeM, kReferenceSizeM * 0.5f, kReferenceSizeM * 2.0f })
+                    {
+                        auto p = erOnly (type);
+                        p.erDensity = 0.0f;
+                        p.erVariation = v;
+                        p.sizeM = size;
+
+                        const auto ir = impulse (p, rate, (double) (table.windowClampMs + 20.0f) * 0.001);
+
+                        scoreTaps (ir.l, coreTaps (table.variation[v].left,  table, size, rate), score);
+                        scoreTaps (ir.r, coreTaps (table.variation[v].right, table, size, rate), score);
+                    }
+            }
+
+            check (score.checked >= numTypes * 6 * 3 * 2 * 10,
+                   "the tap check reached at least ten core taps per channel and setting");
+            check (score.timeMisses == 0, "every core tap lands within 1 sample of the table's time under the Size law");
+            check (score.gainMisses == 0, "every core tap's gain is the table's under the Size law, within 0.2 dB");
+
+            std::cout << "  er taps: " << score.checked << " checked, " << score.skipped
+                      << " skipped, worst " << score.worstDb << " dB, " << score.worstSamples << " samples\n";
+        }
+
+        //== Variation 6 is the complementary pair the contract describes =====
+        //
+        // Not the comb *rule* -- whether the pair sums flat in mono is the
+        // table half's audit -- but whether the engine plays what the contract
+        // says: L = E + g E(t - delta) and R = E - g E(t - delta), with E the
+        // mono set. So (L + R) / 2 must be E's taps and (L - R) / 2 must be
+        // the same taps delta later at g times the gain.
+        {
+            TapScore sum, diff;
+
+            for (int type = 0; type < numTypes; ++type)
+            {
+                const auto& table = erTableFor (type);
+                auto p = erOnly (type);
+                p.erDensity = 0.0f;
+                p.erVariation = kErCombVariation;
+                p.sizeM = kReferenceSizeM;
+
+                const auto ir = impulse (p, rate, (double) (table.windowClampMs + 20.0f) * 0.001);
+
+                std::vector<float> half ((size_t) ir.l.size()), side ((size_t) ir.l.size());
+
+                for (size_t i = 0; i < ir.l.size(); ++i)
+                {
+                    half[i] = 0.5f * (ir.l[i] + ir.r[i]);
+                    side[i] = 0.5f * (ir.l[i] - ir.r[i]);
+                }
+
+                const auto k = scaleFor (table, kReferenceSizeM);
+                const auto delta = (int) std::lround ((double) (table.combDelayMs * k) * rate * 0.001);
+                const auto& e = table.variation[kErCombVariation].left;
+
+                scoreTaps (half, coreTaps (e, table, kReferenceSizeM, rate), sum);
+                scoreTaps (side, coreTaps (e, table, kReferenceSizeM, rate, delta, table.combGain), diff);
+            }
+
+            check (sum.checked > 0 && sum.timeMisses == 0 && sum.gainMisses == 0,
+                   "Variation 6: (L + R) / 2 is the mono set E, tap for tap");
+            check (diff.checked > 0 && diff.timeMisses == 0 && diff.gainMisses == 0,
+                   "Variation 6: (L - R) / 2 is g E(t - delta), tap for tap");
+        }
+
+        //== Density sweep: constant energy, no tap appearing, no click =======
+        //
+        // **Two ranges, and only the first meets 11 section 6's 0.2 dB.**
+        // Up to DENSITY 0.6 the bridge is the tap weights alone, renormalised
+        // on the energy the band filters actually put out, and it holds to a
+        // millionth of a decibel on any table. Above 0.6 the diffuser fades
+        // in, and a per-channel feed-forward diffuser can only hold the level
+        // on average (ErEngine.cpp, kDiffuserMs): what it does to one table's
+        // IR depends on how that table's taps interfere with its 64 paths.
+        // That range is held to 0.3 dB, which is a guard against a gross
+        // error -- the DC-gain bug this file caught ran to 0.39 -- and not the
+        // spec's figure. The owner decides whether 0.3 is acceptable or the
+        // diffuser changes.
+        {
+            double bridgeDb = 0.0, diffuserDb = 0.0;
+
+            for (int type = 0; type < numTypes; ++type)
+            {
+                auto p = erOnly (type);
+                p.erDensity = 0.0f;
+
+                const auto seconds = (double) (erTableFor (type).windowClampMs + ErEngine::diffuserSpreadMs() + 30.0f) * 0.001;
+                const auto ref = impulse (p, rate, seconds);
+                const auto e0l = energyOf (ref.l), e0r = energyOf (ref.r);
+
+                for (int step = 1; step <= 20; ++step)
+                {
+                    p.erDensity = (float) step / 20.0f;
+                    const auto ir = impulse (p, rate, seconds);
+
+                    const auto error = std::max (std::abs (db (energyOf (ir.l) / e0l)),
+                                                 std::abs (db (energyOf (ir.r) / e0r)));
+
+                    auto& worst = p.erDensity <= ErEngine::kDiffuserStartDensity ? bridgeDb : diffuserDb;
+                    worst = std::max (worst, error);
+                }
+            }
+
+            check (bridgeDb <= 0.2, "ER energy is constant across DENSITY 0..60 %, the tap bridge, within 0.2 dB per channel");
+            check (diffuserDb <= 0.3, "ER energy stays within 0.3 dB across DENSITY 60..100 %, the diffuser's range");
+            std::cout << "  density sweep: worst energy error " << bridgeDb << " dB over the bridge, "
+                      << diffuserDb << " dB over the diffuser\n";
+        }
+
+        // **No tap appears at a non-zero level.** On the weights themselves,
+        // because an IR smears them: DENSITY is driven along a slow ramp one
+        // sample at a time, and every tap that goes from silent to sounding
+        // must do so at a small fraction of where it ends up. A switch rather
+        // than a ramp would bring a tap in at its whole level.
+        {
+            auto p = erOnly (room);
+            p.erDensity = 0.0f;
+
+            DspCore core;
+            core.prepare (rate, 1, 2);
+            core.setParams (p);
+
+            const auto& er = core.erEngine();
+            constexpr int steps = 24000;
+            float previous[2][kErMaxTaps] {};
+            float appeared[2][kErMaxTaps] {};
+
+            Stereo io { { 0.0f }, { 0.0f } };
+
+            for (int n = 0; n <= steps + 4800; ++n)
+            {
+                p.erDensity = std::min (1.0f, (float) n / (float) steps);
+                core.setParams (p);
+                run (core, io, 1);
+
+                for (int ch = 0; ch < 2; ++ch)
+                    for (int k = 0; k < er.currentTapCount (ch); ++k)
+                    {
+                        const auto g = er.currentTapGain (ch, k);
+
+                        if (n > 0 && previous[ch][k] == 0.0f && g != 0.0f && appeared[ch][k] == 0.0f)
+                            appeared[ch][k] = std::abs (g);
+
+                        previous[ch][k] = g;
+                    }
+            }
+
+            double worstFraction = 0.0;
+            int appearedCount = 0;
+
+            for (int ch = 0; ch < 2; ++ch)
+                for (int k = 0; k < er.currentTapCount (ch); ++k)
+                    if (appeared[ch][k] > 0.0f)
+                    {
+                        ++appearedCount;
+                        worstFraction = std::max (worstFraction,
+                                                  (double) appeared[ch][k] / std::abs ((double) er.currentTapGain (ch, k)));
+                    }
+
+            check (appearedCount > 0, "the density ramp brought taps in, so the next check is not vacuous");
+            check (worstFraction <= 0.01, "no tap appears at more than 1 % of its level: the bridge is a ramp, not a switch");
+            std::cout << "  density: " << appearedCount << " taps appeared, the loudest at "
+                      << 100.0 * worstFraction << " % of its final level\n";
+        }
+
+        // **No click while DENSITY sweeps the whole range in one second.**
+        //
+        // Not by the energy per millisecond, which the renormalisation holds
+        // steady whether a tap ramps in or switches in -- a switched tap is
+        // still a step in the waveform, and that is what a click is. So the
+        // input is a 100 Hz sine, whose ER is a sum of 100 Hz sines and so
+        // itself smooth, and the detector is the second difference: for a
+        // smooth signal of amplitude A it is (2 pi 100 / 48000)^2 A, under
+        // 2e-4 A, while a tap of gain g arriving in one sample puts a step of
+        // g A into it. Held to 1 % of the ER's own peak.
+        {
+            auto p = erOnly (room);
+            p.erDensity = 0.0f;
+
+            DspCore core;
+            core.prepare (rate, 48, 2);
+            core.setParams (p);
+
+            constexpr int windows = 1600;
+            Stereo io { std::vector<float> (48), std::vector<float> (48) };
+            std::vector<float> out;
+            size_t n = 0;
+
+            for (int w = 0; w < windows; ++w)
+            {
+                auto q = p;
+                q.erDensity = std::clamp ((float) (w - 400) / 1000.0f, 0.0f, 1.0f);
+                core.setParams (q);
+
+                for (int i = 0; i < 48; ++i, ++n)
+                    io.l[(size_t) i] = io.r[(size_t) i] = 0.5f * (float) std::sin (2.0 * 3.14159265358979323846 * 100.0 * (double) n / rate);
+
+                run (core, io, 48);
+                out.insert (out.end(), io.l.begin(), io.l.end());
+            }
+
+            // The sine starts abruptly at sample 0, and its onset through the
+            // taps is a legitimate edge; the ER has settled by 300 ms.
+            const auto from = (size_t) (0.3 * rate);
+            float peak = 0.0f, worst = 0.0f;
+
+            for (size_t i = from; i < out.size(); ++i)
+            {
+                peak  = std::max (peak, std::abs (out[i]));
+                worst = std::max (worst, std::abs (out[i] - 2.0f * out[i - 1] + out[i - 2]));
+            }
+
+            check (worst <= 0.01f * peak, "sweeping DENSITY does not click: the second difference stays under 1 % of the ER's peak");
+            std::cout << "  density sweep: worst second difference " << worst / peak * 100.0f << " % of peak\n";
+        }
+
+        // At the top, the pulse rate clears 2000/s: local maxima of |h| over
+        // the stretch of the IR that is within 60 dB of its peak.
+        {
+            double worstRate = 1.0e30;
+
+            for (int type = 0; type < numTypes; ++type)
+            {
+                auto p = erOnly (type);
+                p.erDensity = 1.0f;
+
+                const auto ir = impulse (p, rate, (double) (erTableFor (type).windowClampMs + 40.0f) * 0.001);
+
+                float peak = 0.0f;
+                for (const auto x : ir.l)
+                    peak = std::max (peak, std::abs (x));
+
+                const auto floor = peak * 1.0e-3f;
+                int first = -1, last = -1, pulses = 0;
+
+                for (size_t i = 1; i + 1 < ir.l.size(); ++i)
+                {
+                    const auto a = std::abs (ir.l[i]);
+
+                    if (a < floor)
+                        continue;
+
+                    if (first < 0)
+                        first = (int) i;
+
+                    last = (int) i;
+
+                    if (a > std::abs (ir.l[i - 1]) && a >= std::abs (ir.l[i + 1]))
+                        ++pulses;
+                }
+
+                const auto seconds = (double) std::max (1, last - first) / rate;
+                worstRate = std::min (worstRate, (double) pulses / seconds);
+            }
+
+            check (worstRate >= 2000.0, "at DENSITY 100 % the ER clears 2000 pulses per second, every type");
+            std::cout << "  density top: at least " << worstRate << " pulses/s\n";
+        }
+
+        //== ER HI-CUT: -3 dB where the knob says, and no tap moves ============
+        //
+        // The hi-cut is the last filter on the bus and the path is linear, so
+        // the ratio of the ER's spectrum with the hi-cut at X to its spectrum
+        // with the hi-cut open *is* the hi-cut's response, whatever the taps
+        // and bands in front of it do. At the top of its range the hi-cut is
+        // exactly a wire, which is what makes "open" a reference.
+        {
+            auto p = erOnly (room);
+            const auto open = impulse (p, rate, 0.15);
+
+            for (const auto corner : { 2000.0f, 4000.0f, 8000.0f, 16000.0f })
+            {
+                p.erHiCutHz = corner;
+                const auto cut = impulse (p, rate, 0.15);
+
+                const auto refMax = std::abs (dft (open.l, 1000.0, rate));
+                double previousF = 0.0, previousR = 1.0, found = -1.0;
+
+                for (double f = 0.4 * corner; f < std::min (2.0 * (double) corner, 0.49 * rate); f *= 1.004)
+                {
+                    const auto h0 = dft (open.l, f, rate);
+
+                    if (std::abs (h0) < 1.0e-3 * refMax)
+                        continue;
+
+                    const auto ratio = std::norm (dft (cut.l, f, rate) / h0);
+
+                    if (ratio <= 0.5 && previousF > 0.0 && previousR > 0.5)
+                    {
+                        found = previousF + (f - previousF) * (previousR - 0.5) / (previousR - ratio);
+                        break;
+                    }
+
+                    previousF = f;
+                    previousR = ratio;
+                }
+
+                check (found > 0.0 && std::abs (found - corner) <= 0.1 * corner,
+                       "ER HI-CUT is -3 dB within 10 % of its setting");
+                std::cout << "  er hi-cut " << corner << " Hz: -3 dB at " << found << " Hz\n";
+
+                // No tap moves: the cross-correlation of the two IRs peaks at
+                // lag 0, +-1.
+                int bestLag = 0;
+                double best = -1.0e30;
+
+                for (int lag = -8; lag <= 8; ++lag)
+                {
+                    double c = 0.0;
+
+                    for (size_t i = 8; i + 8 < open.l.size(); ++i)
+                        c += (double) open.l[i] * cut.l[(size_t) ((int) i + lag)];
+
+                    if (c > best)
+                    {
+                        best = c;
+                        bestLag = lag;
+                    }
+                }
+
+                check (std::abs (bestLag) <= 1, "ER HI-CUT moves no tap: cross-correlation peaks at lag 0 +-1");
+            }
+        }
+
+        //== ER-only: the cluster terminates ====================================
+        //
+        // Energy after (span + 5 ms) is at least 60 dB below the whole. The
+        // span is the window at this size -- the end-of-cluster ramp reaches
+        // zero there, so nothing is played later -- plus the diffuser's spread
+        // once any of it is in.
+        {
+            double worst = -1.0e300;
+
+            for (int type = 0; type < numTypes; ++type)
+                for (const auto density : { 0.5f, 1.0f })
+                    for (const auto mode : { ErMode::taps, ErMode::energy, ErMode::blend })
+                        for (const auto size : { 0.5f, kReferenceSizeM, 80.0f })
+                        {
+                            const auto& table = erTableFor (type);
+                            auto p = erOnly (type);
+                            p.erDensity = density;
+                            p.erMode = mode;
+                            p.sizeM = size;
+
+                            const auto spanMs = table.windowMs * scaleFor (table, size)
+                                              + (density > ErEngine::kDiffuserStartDensity ? ErEngine::diffuserSpreadMs() : 0.0f);
+
+                            const auto ir = impulse (p, rate, (double) (spanMs + 60.0f) * 0.001);
+                            const auto cut = (size_t) std::lround ((double) (spanMs + 5.0f) * rate * 0.001);
+
+                            const auto total = energyOf (ir.l) + energyOf (ir.r);
+                            const auto after = energyOf (ir.l, cut) + energyOf (ir.r, cut);
+
+                            worst = std::max (worst, db (after / total));
+                        }
+
+            check (worst <= -60.0, "ER-only: energy after the span plus 5 ms is at least 60 dB down, every type, mode and size");
+            std::cout << "  er-only: energy after span + 5 ms at worst " << worst << " dB\n";
+        }
+
+        //== Level laws =========================================================
+        {
+            auto p = erOnly (room);
+            const auto e0 = [&]
+            {
+                const auto ir = impulse (p, rate, 0.15);
+                return energyOf (ir.l) + energyOf (ir.r);
+            };
+
+            const auto reference = e0();
+            bool exact = true;
+
+            for (const auto level : { -6.0f, -12.0f, -24.0f })
+            {
+                p.erLevelDb = level;
+                exact = exact && std::abs (db (e0() / reference) - (double) level) <= 0.1;
+            }
+
+            check (exact, "ER LEVEL at -6, -12 and -24 moves the IR energy by exactly that, within 0.1 dB");
+
+            p.erLevelDb = -40.0f;
+            check (db (e0() / reference) <= -100.0, "ER LEVEL at -40 is off: at least 100 dB down");
+        }
+
+        //== The phasing trap, and MIX's two ends ===============================
+        {
+            auto noise = [] (size_t n)
+            {
+                std::vector<float> x (n);
+                unsigned int seed = 4242u;
+
+                for (auto& s : x)
+                {
+                    seed = seed * 1664525u + 1013904223u;
+                    s = (float) (seed >> 8) * (1.0f / 8388608.0f) - 1.0f;
+                }
+
+                return x;
+            };
+
+            const auto dry = noise (24000);
+
+            const auto through = [&] (const DspCore::Params& p)
+            {
+                DspCore core;
+                core.prepare (rate, 256, 2);
+                core.setParams (p);
+
+                Stereo io { dry, dry };
+                run (core, io, 256);
+                return io;
+            };
+
+            // MIX 50 %, both wet faders off, pre-delay 40 ms: the output is
+            // half the dry signal and nothing else. Were the dry path delayed,
+            // or summed against a delayed copy of itself, this would not null.
+            {
+                auto p = erOnly (room);
+                p.mix = 0.5f;
+                p.erLevelDb = -40.0f;
+                p.verbLevelDb = -40.0f;
+                p.preDelayMs = 40.0f;
+
+                const auto out = through (p);
+                double residual = 0.0, reference = 0.0;
+
+                for (size_t i = 0; i < dry.size(); ++i)
+                {
+                    const auto scaled = 0.5 * (double) dry[i];
+                    residual  += std::pow ((double) out.l[i] - scaled, 2.0) + std::pow ((double) out.r[i] - scaled, 2.0);
+                    reference += 2.0 * scaled * scaled;
+                }
+
+                check (db (residual / reference) <= -80.0,
+                       "the phasing trap: MIX 50 % with the wet faders off nulls against half the dry to -80 dB");
+            }
+
+            {
+                auto p = erOnly (room);
+                p.mix = 0.0f;
+
+                const auto out = through (p);
+                check (out.l == dry && out.r == dry, "MIX 0 is exactly the dry signal, to the bit, with the ER at 0 dB");
+            }
+
+            {
+                auto p = erOnly (room);
+                p.mix = 1.0f;
+                p.erLevelDb = -40.0f;
+
+                const auto out = through (p);
+                check (energyOf (out.l) + energyOf (out.r) == 0.0,
+                       "MIX 100 % has no dry in it: with the ER off, the output is silence");
+            }
+        }
+
+        //== Block sizes: bit-identical ========================================
+        {
+            auto a = erOnly (room);
+            a.erDensity = 0.8f;
+            a.erHiCutHz = 5000.0f;
+
+            auto b = erOnly (hall);
+            b.erDensity = 1.0f;
+            b.erMode = ErMode::energy;
+            b.erVariation = kErCombVariation;
+
+            auto c = erOnly (ambience);
+            c.erMode = ErMode::blend;
+            c.mix = 0.35f;
+            c.erLevelDb = -9.0f;
+            c.outputDb = -3.0f;
+
+            bool identical = true;
+
+            for (const auto& p : { a, b, c })
+            {
+                const auto input = [&]
+                {
+                    Stereo io;
+                    io.l.assign (30000, 0.0f);
+                    io.r = io.l;
+                    io.l[0] = 1.0f;
+                    unsigned int seed = 99u;
+
+                    for (size_t i = 12000; i < io.l.size(); ++i)
+                    {
+                        seed = seed * 1664525u + 1013904223u;
+                        io.l[i] = (float) (seed >> 8) * (1.0f / 8388608.0f) - 1.0f;
+                        io.r[i] = 0.5f * io.l[i];
+                    }
+
+                    return io;
+                };
+
+                Stereo reference = input();
+                {
+                    DspCore core;
+                    core.prepare (rate, 512, 2);
+                    core.setParams (p);
+                    run (core, reference, 512);
+                }
+
+                for (const auto block : { 1, 16, 32, 64, 127, 2048 })
+                {
+                    Stereo io = input();
+                    DspCore core;
+                    core.prepare (rate, block, 2);
+                    core.setParams (p);
+                    run (core, io, block);
+
+                    identical = identical && io.l == reference.l && io.r == reference.r;
+                }
+            }
+
+            check (identical, "block sizes 1/16/32/64/127/512/2048 produce bit-identical output");
+        }
+
+        //== Sample rates: tap times in ms, and latency exactly 0 ===============
+        {
+            TapScore score;
+            bool timesHold = true;
+            bool zeroLatency = true;
+
+            for (const auto r : { 44100.0, 48000.0, 88200.0, 96000.0, 176400.0, 192000.0 })
+            {
+                const auto& table = erTableFor (room);
+                auto p = erOnly (room);
+                p.erDensity = 0.0f;
+
+                const auto ir = impulse (p, r, (double) (table.windowClampMs + 20.0f) * 0.001, 512);
+                const auto k = scaleFor (table, p.sizeM);
+
+                // Peak-pick every core tap, then read its time back in ms.
+                const auto& c = table.variation[2].left;
+
+                for (int i = 0; i < c.numTaps; ++i)
+                {
+                    if (c.taps[i].theta > 0.0f || ErEngine::endTaper (c.taps[i].timeMs * k, table.windowMs * k) < 0.05f)
+                        continue;
+
+                    const auto ms = c.taps[i].timeMs * k;
+                    const auto n = (int) std::lround ((double) ms * r * 0.001);
+                    int peak = n;
+
+                    // Searched over +-0.4 ms, under half the 0.9 ms the table
+                    // keeps between taps, so a tap in the wrong place is found
+                    // in the wrong place rather than missed.
+                    const auto reach = (int) (0.4 * r * 0.001);
+
+                    for (int j = n - reach; j <= n + reach; ++j)
+                        if (j >= 0 && j < (int) ir.l.size() && std::abs (ir.l[(size_t) j]) > std::abs (ir.l[(size_t) peak]))
+                            peak = j;
+
+                    timesHold = timesHold && std::abs ((double) peak * 1000.0 / r - (double) ms) <= 0.1;
+                }
+
+                ReverbDsp dsp;
+                dsp.prepare (r, 512, 2);
+                const auto v = defaults();
+                zeroLatency = zeroLatency && DspCore::latencySamples() == 0
+                           && dsp.latencyForParams (v.data(), (int) v.size()) == 0;
+
+                // And the dry path, measured: an impulse at MIX 0 comes out on
+                // sample 0 at every rate.
+                auto dryOnly = p;
+                dryOnly.mix = 0.0f;
+                const auto wire = impulse (dryOnly, r, 0.01);
+                zeroLatency = zeroLatency && wire.l[0] == 1.0f && energyOf (wire.l, 1) == 0.0;
+            }
+
+            check (timesHold, "at 44.1 to 192 kHz every tap is at the table's time in ms, within 0.1 ms");
+            check (zeroLatency, "latency is exactly 0 at every rate, reported and measured");
+        }
+
+        //== The diffuser's path delays are all distinct =======================
+        //
+        // What makes a stage energy-preserving on a pulse: if two of a pulse's
+        // paths land on one sample they add or cancel rather than sit side by
+        // side. Only one stage is ever partly in -- stage s fades while every
+        // earlier stage is fully in and every later one fully out -- so the
+        // paths that coexist are the earlier stages' sums with and without
+        // stage s's four delays: 5, then 20, then 80 of them, at every rate.
+        {
+            bool distinct = true;
+
+            for (const auto r : { 44100.0, 48000.0, 88200.0, 96000.0, 176400.0, 192000.0 })
+            {
+                const auto d = [r] (int s, int l) { return ErEngine::diffuserDelaySamples (s, l, r); };
+                const auto unique = [] (std::vector<int> v)
+                {
+                    std::sort (v.begin(), v.end());
+                    return std::adjacent_find (v.begin(), v.end()) == v.end();
+                };
+
+                std::vector<int> first { 0 }, second, third;
+
+                for (int a = 0; a < 4; ++a)
+                {
+                    first.push_back (d (0, a));
+                    second.push_back (d (0, a));
+
+                    for (int b = 0; b < 4; ++b)
+                    {
+                        second.push_back (d (0, a) + d (1, b));
+                        third.push_back (d (0, a) + d (1, b));
+
+                        for (int c = 0; c < 4; ++c)
+                            third.push_back (d (0, a) + d (1, b) + d (2, c));
+                    }
+                }
+
+                distinct = distinct && unique (first) && unique (second) && unique (third);
+            }
+
+            check (distinct, "the diffuser's coexisting paths land on different samples at every rate");
+        }
+
+        //== NaN and fuzz over the schema's corners, at every type ==============
+        {
+            bool finite = true;
+            bool silent = true;
+            unsigned int seed = 2026u;
+
+            const auto pick = [&seed] (const auto& s)
+            {
+                seed = seed * 1664525u + 1013904223u;
+                const auto which = (seed >> 16) % 3u;
+                return which == 0u ? s.min : (which == 1u ? s.max : s.def);
+            };
+
+            for (int type = 0; type < numTypes; ++type)
+            {
+                ReverbDsp dsp;
+                dsp.prepare (rate, 256, 2);
+
+                std::vector<float> l (256), r (256);
+                float* ch[] { l.data(), r.data() };
+
+                for (int block = 0; block < 400; ++block)
+                {
+                    auto v = defaults();
+
+                    for (size_t i = 0; i < v.size(); ++i)
+                        v[i] = pick (specs()[i]);
+
+                    v[Index::type] = (float) type;
+                    dsp.setParams (v.data(), (int) v.size());
+
+                    for (int i = 0; i < 256; ++i)
+                    {
+                        const auto n = block * 256 + i;
+                        float x = 0.0f;
+
+                        switch ((block / 50) % 4)
+                        {
+                            case 0:  x = (n / 50) % 2 == 0 ? 1.0f : -1.0f; break;   // +-1 square
+                            case 1:  x = 1.0f; break;                               // DC step
+                            case 2:  x = 1.0e-40f; break;                           // a denormal
+                            default:
+                                seed = seed * 1664525u + 1013904223u;
+                                x = (float) (seed >> 8) * (1.0f / 8388608.0f) - 1.0f;
+                        }
+
+                        l[(size_t) i] = x;
+                        r[(size_t) i] = -x;
+                    }
+
+                    dsp.process (ch, 2, 256);
+
+                    for (int i = 0; i < 256; ++i)
+                        finite = finite && std::isfinite (l[(size_t) i]) && std::isfinite (r[(size_t) i]);
+                }
+
+                dsp.reset();
+
+                for (int block = 0; block < 200; ++block)
+                {
+                    std::fill (l.begin(), l.end(), 0.0f);
+                    std::fill (r.begin(), r.end(), 0.0f);
+                    dsp.process (ch, 2, 256);
+
+                    for (int i = 0; i < 256; ++i)
+                        silent = silent && l[(size_t) i] == 0.0f && r[(size_t) i] == 0.0f;
+                }
+            }
+
+            check (finite, "every sample is finite over square, DC, denormal and noise inputs at every type's schema corners");
+            check (silent, "after reset(), zeros in give exactly zeros out");
+        }
+
+        //== SIZE and TYPE changes do not click ================================
+        {
+            // SIZE halves, which doubles every gain: a 6 dB step if it were a
+            // switch, spread over the 30 ms crossfade instead.
+            {
+                auto p = erOnly (room);
+                p.erDensity = 0.3f;
+
+                const auto e = ensembleWindows (p, [] (DspCore::Params& q) { q.sizeM *= 0.5f; }, 400, 200);
+                const auto step = worstStepDb (e, 150, 0.0);
+
+                check (step <= 3.0, "a SIZE change does not click: no 1 ms energy step above 3 dB");
+                std::cout << "  size change: worst 1 ms step " << step << " dB\n";
+            }
+
+            // TYPE changes, bringing a different size with it as a type
+            // change does through the host: the wet bus dips to nothing and
+            // the table is swapped at the bottom.
+            {
+                auto p = erOnly (room);
+                p.erDensity = 0.3f;
+
+                const auto e = ensembleWindows (p, [] (DspCore::Params& q)
+                {
+                    q.type = Type::chamber;
+                    q.sizeM *= 0.5f;
+                }, 400, 200);
+
+                double steady = 0.0, after = 0.0;
+                for (int w = 150; w < 200; ++w)
+                {
+                    steady += e[(size_t) w] / 50.0;
+                    after  += e[(size_t) w + 200] / 50.0;
+                }
+
+                // The floor is 10 dB under the louder of the two steady
+                // levels, because the dip climbs out of silence *to* the new
+                // level, and it is at the new level that a click would be.
+                const auto step = worstStepDb (e, 150, 0.1 * std::max (steady, after));
+                const auto bottom = *std::min_element (e.begin() + 200, e.begin() + 240);
+
+                check (step <= 3.0, "a TYPE change does not click at level: no 1 ms step above 3 dB outside the dip");
+                check (db (bottom / steady) <= -20.0, "a TYPE change dips the wet bus, and the swap is at the bottom of it");
+                std::cout << "  type change: worst 1 ms step at level " << step << " dB, dip bottom "
+                          << db (bottom / steady) << " dB\n";
+            }
+        }
+
+        //== Zero allocation in process(), with every parameter moving =========
+        {
+            ReverbDsp dsp;
+            dsp.prepare (rate, 64, 2);
+
+            std::vector<float> l (64), r (64);
+            float* ch[] { l.data(), r.data() };
+            unsigned int seed = 7u;
+
+            const auto next = [&seed] { seed = seed * 1664525u + 1013904223u; return (float) (seed >> 8) * (1.0f / 16777216.0f); };
+
+            auto v = defaults();
+            allocations = 0;
+            long observed = 0;
+
+            for (int block = 0; block < 1500; ++block)
+            {
+                // Every parameter, every eighth block, somewhere in its range;
+                // choices on their detents. Between moves the smoothers,
+                // crossfades and dips are running.
+                if (block % 8 == 0)
+                    for (size_t i = 0; i < v.size(); ++i)
+                    {
+                        const auto& s = specs()[i];
+                        v[i] = s.min + next() * (s.max - s.min);
+
+                        if (i == (size_t) Index::type || i == (size_t) Index::ermode
+                            || i == (size_t) Index::eqfilter || i == (size_t) Index::ervariation)
+                            v[i] = std::round (v[i]);
+                    }
+
+                for (int i = 0; i < 64; ++i)
+                    l[(size_t) i] = r[(size_t) i] = next() - 0.5f;
+
+                countingAllocations = true;
+                dsp.setParams (v.data(), (int) v.size());
+                dsp.process (ch, 2, 64);
+                countingAllocations = false;
+            }
+
+            observed = allocations.load();
+            check (observed == 0, "process() and setParams() allocate nothing while every parameter moves");
+        }
+
+        //== The reported tail covers the ER ====================================
+        //
+        // `DspCore::tailSecondsFor` is not changed here and neither is
+        // TailTests; what is asserted is that the figure it already reports is
+        // at least the ER-only -60 dB time the engine now actually produces,
+        // at the shortest DECAY, every type, mode, size and the density ends.
+        {
+            bool covered = true;
+            double margin = 1.0e30;
+
+            for (int type = 0; type < numTypes; ++type)
+                for (const auto mode : { ErMode::taps, ErMode::energy })
+                    for (const auto density : { 0.0f, 1.0f })
+                        for (const auto size : { 0.5f, kReferenceSizeM, 80.0f })
+                        {
+                            auto p = erOnly (type);
+                            p.erMode = mode;
+                            p.erDensity = density;
+                            p.sizeM = size;
+                            p.decaySeconds = 0.1f;
+                            p.dampLo = p.dampHi = 0.1f;
+
+                            const auto ir = impulse (p, rate, 0.5);
+                            const auto measured = (double) minus60 (ir.l, ir.r) / rate;
+                            const auto reported = (double) DspCore::tailSecondsFor (p);
+
+                            covered = covered && reported >= measured;
+                            margin = std::min (margin, reported - measured);
+                        }
+
+            check (covered, "the reported tail is at least the measured ER-only -60 dB time, every type, mode and size");
+            std::cout << "  tail: smallest margin of the report over the ER " << margin * 1000.0 << " ms\n";
+        }
     }
 }
 
@@ -872,6 +2026,9 @@ int main()
 
         check (true, "prepare and reset survive the rate and block matrix");
     }
+
+    //== The early reflections (M2) ===========================================
+    erEngineTests();
 
     if (failures == 0)
         std::cout << "reverb_dsp: all checks passed\n";

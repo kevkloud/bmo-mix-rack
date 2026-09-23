@@ -395,12 +395,17 @@ int main()
                "zero latency with every parameter at its minimum");
     }
 
-    //== The placeholder is a wire, and says so ==============================
+    //== MIX 0 is a wire ======================================================
+    //
+    // The pass-through this block used to assert is gone -- the early
+    // reflections are real since M2 -- but the dry path is still a wire at
+    // MIX 0, to the bit, which is the half of it that has to survive.
     {
         ReverbDsp dsp;
         dsp.prepare (48000.0, 512, 2);
 
-        const auto v = defaults();
+        auto v = defaults();
+        v[Index::mix] = 0.0f;
         dsp.setParams (v.data(), (int) v.size());
 
         constexpr int n = 512;
@@ -411,12 +416,12 @@ int main()
         float* channels[] { left.data(), right.data() };
         dsp.process (channels, 2, n);
 
-        bool unchanged = near (left[0], 1.0f) && near (right[0], 1.0f);
+        bool unchanged = left[0] == 1.0f && right[0] == 1.0f;
 
         for (int i = 1; i < n; ++i)
             unchanged = unchanged && left[(size_t) i] == 0.0f && right[(size_t) i] == 0.0f;
 
-        check (unchanged, "the placeholder passes audio through untouched and adds no tail");
+        check (unchanged, "at MIX 0 the module passes audio through untouched");
     }
 
     //== The Size law ========================================================

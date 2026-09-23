@@ -5,11 +5,13 @@
 // figure, and two 30.0s written down in two folders is how they come to differ.
 #include "core/dsp/ModuleDsp.h"
 #include "modules/reverb/dsp/EqNodes.h"
+#include "modules/reverb/dsp/ErEngine.h"
 #include "modules/reverb/dsp/TapTables.h"
 #include "modules/reverb/params.h"
 
 #include <algorithm>
 #include <cmath>
+#include <vector>
 
 namespace bmo::reverb
 {
@@ -39,12 +41,25 @@ enum class Type { room = 0, chamber, hall, cavern, plate, ambience };
     Blend is: defined, reachable, and **not yet heard**. */
 enum class ErMode { taps = 0, energy, blend };
 
-//==============================================================================
-/** **Placeholder core. There is no reverb in this file yet.**
+// ErEngine names the three modes as ints because it sits below this header;
+// these are what keep the two lists one list.
+static_assert ((int) ErMode::taps   == ErEngine::kModeTaps,   "ER Mode ordinals");
+static_assert ((int) ErMode::energy == ErEngine::kModeEnergy, "ER Mode ordinals");
+static_assert ((int) ErMode::blend  == ErEngine::kModeBlend,  "ER Mode ordinals");
 
-    Samples come out as they went in. Latency is zero -- which, unlike the
-    silence, is the *shipped* figure rather than a stand-in -- and no tail is
-    produced, so nothing downstream has to pretend one is there.
+//==============================================================================
+/** **The early reflections are real; the tail is silent until M3.**
+
+    Milestone M2 (11 section 7) is here. `ErEngine` plays the ER table for the
+    selected type -- image-source taps under the Size law and its crossfade,
+    four order-banded low-passes, the density bridge and its feed-forward
+    diffuser, VARIATION, ER HI-CUT and the three ER modes -- and this class
+    puts it on the wet bus behind the ER fader, mixes it against a dry signal
+    that is never delayed, and applies OUTPUT. **There is no late network
+    yet**: REVERB, DECAY, the damping multipliers, SOURCE, WIDTH, PRE-DELAY,
+    the modulation pair, IN HI-CUT and the Reverb EQ reach `Params` and go no
+    further, so the wet bus is the ER and nothing else. Latency is zero, which
+    is the *shipped* figure and not a stand-in.
 
     The spec is `docs/reverb/10-dsp-spec.md`; what the tests will ask of it is
     `docs/reverb/11-integration-and-test-plan.md` section 6, which is the
@@ -164,7 +179,9 @@ public:
     // and not parameters is a schema decision -- there are only two spare host
     // lanes -- and it is this file's job to hold it.
     //
-    // The placeholder ignores every one of them.
+    // `kRampWidth`, `kCrossfadeMs` and `kSmoothingMs` are live since M2: the
+    // ER engine is built on them. `kNumLines` and `kBypassFadeMs` wait for the
+    // late network (M3).
 
     /** Eight FDN lines, Householder matrix. **10 section 4 is the live risk
         here**: the mode-density rule scales with decay, Sum(m_i) >= 0.15 * T60
@@ -232,16 +249,36 @@ public:
 
     EqSettings eqSettings() const noexcept { return eqSettingsFor (params); }
 
+    /** Starts at the default `Params`, so a core that is prepared and run
+        before anyone calls `setParams` plays a Room and not silence. */
+    DspCore() { setParams (params); }
+
     void prepare (double newSampleRate, int maxBlockSize, int numChannels)
     {
-        // Recorded so the real engine has them, and so a test can see that
-        // prepare() was reached. The placeholder allocates nothing because it
-        // needs nothing; the real one allocates **here and only here**, sized
-        // for the largest type at this rate (~300 kB at 48 k, ~1.2 MB at
-        // 192 k), and `process()` allocates nothing ever.
+        // Everything the engine will ever need is allocated **here and only
+        // here**, sized for the largest type at this rate, and `process()`
+        // allocates nothing ever. The ER half is the ER delay line and the
+        // diffuser's twenty-four short lines; the late network's lines land
+        // here in M3.
         sampleRate = newSampleRate;
         blockSize  = maxBlockSize;
         channels   = numChannels;
+
+        er.prepare (newSampleRate, kRampWidth, kCrossfadeMs, kSmoothingMs);
+
+        // The ER is run a chunk at a time through these, so a host that sends
+        // more than it promised in `maxBlockSize` is chunked rather than
+        // allocated for.
+        const auto chunk = (size_t) std::clamp (maxBlockSize, 64, 4096);
+        scratchIn.assign (chunk, 0.0f);
+        scratchL.assign (chunk, 0.0f);
+        scratchR.assign (chunk, 0.0f);
+
+        const auto rate = newSampleRate > 0.0 ? newSampleRate : 48000.0;
+        const auto tau = (double) kSmoothingMs * 0.001 / std::log (100.0);
+        levelCoeff = (float) (1.0 - std::exp (-1.0 / (tau * rate)));
+
+        reset();
 
         // The design grid the real EQ will build its three nodes on, built
         // once per rate change because 48 pow() and sin() calls is most of a
@@ -256,9 +293,48 @@ public:
         eqTap.prepare (1 << 13);
     }
 
-    void reset() {}
+    /** Clears every line and filter, and makes the next block start with the
+        smoothers **at** their targets rather than gliding to them -- so after
+        `reset()` zeros in are exactly zeros out, and an impulse sent right
+        after a `prepare` measures the setting and not the approach to it. */
+    void reset()
+    {
+        er.reset();
+        levelsPrimed = false;
+    }
 
-    void setParams (const Params& p) { params = p; }
+    void setParams (const Params& p)
+    {
+        params = p;
+        er.setSettings (erSettingsFor (p));
+
+        // -40 is **off**, not -40 dB (10 section 2, 11 section 6): the fader's
+        // bottom detent is silence, and a level law that stopped at 1 % would
+        // leave the ER audible under a mix that was told it was gone.
+        erGainTarget  = p.erLevelDb <= kLevelOffDb ? 0.0f : std::pow (10.0f, p.erLevelDb / 20.0f);
+        mixTarget     = std::clamp (p.mix, 0.0f, 1.0f);
+        outGainTarget = std::pow (10.0f, p.outputDb / 20.0f);
+    }
+
+    /** The ER engine's view of `Params`. */
+    static ErEngine::Settings erSettingsFor (const Params& p) noexcept
+    {
+        ErEngine::Settings s;
+        s.type      = (int) p.type;
+        s.mode      = (int) p.erMode;
+        s.sizeM     = p.sizeM;
+        s.density   = std::clamp (p.erDensity, 0.0f, 1.0f);
+        s.shape     = p.erShape;
+        s.spreadMs  = p.erSpreadMs;
+        s.hiCutHz   = p.erHiCutHz;
+        s.variation = p.erVariation;
+        return s;
+    }
+
+    /** Where the two level faders are off. */
+    static constexpr float kLevelOffDb = -40.0f;
+
+    ErEngine& erEngine() noexcept { return er; }
 
     const Params& getParams() const noexcept { return params; }
 
@@ -271,12 +347,13 @@ public:
         placeholder decision -- it is where the tap belongs once there is a
         reverb, and putting it on the output would have to be undone.
 
-        **Until the engine exists this shows the dry input, and that is
-        honest.** `process` below is a marked pass-through, so the module's
-        input, the point the EQ acts on and the module's output are the same
-        samples; there is no third thing the tap could be showing. A reader who
-        finds the spectrum "not reacting to the EQ knobs" has found the
-        placeholder, not a broken analyser. **Do not move the tap to fix it.**
+        **Until M3 builds the input stage this shows the dry input, and that
+        is honest.** The early reflections exist since M2, but the Reverb EQ
+        and the input conditioning ahead of it do not, so the point the EQ
+        acts on is still the module's input -- which is what is written here,
+        before the ER engine sees a sample. A reader who finds the spectrum
+        "not reacting to the EQ knobs" has found the missing EQ, not a broken
+        analyser. **Do not move the tap to fix it.**
         See modules/reverb/AGENTS.md, "The analyser is real and the signal
         under it is not yet".
 
@@ -286,15 +363,83 @@ public:
         neither the sound nor the latency, and why. */
     AnalyserTap& eqAnalyser() noexcept { return eqTap; }
 
-    /** **Pass-through.** Marked, not forgotten: see the class comment.
+    /** Dry, plus the early reflections behind the ER fader, then OUTPUT.
 
-        The one thing it does do is write the analyser window, and only while a
-        panel has asked for it. That is a copy and a relaxed store on the way
-        past: nothing downstream reads it, no state survives a block boundary,
-        so block-size invariance and the zero latency are both untouched. */
+        The analyser window is written first, off the input, exactly where it
+        always was (see `eqAnalyser`). Then the ER engine is given the mono
+        sum, and each output sample is
+
+            (dry * (1 - mix) + erGain * ER * mix) * outGain
+
+        with `erGain`, `mix` and `outGain` each smoothed per sample. **The dry
+        sample is the input sample** -- never delayed, never summed against a
+        delayed copy of itself (10 section 2) -- so MIX 0 is the input to the
+        bit and the phasing trap has nothing to catch. The tail joins the wet
+        term at M3; until then it is silent at every REVERB setting.
+
+        One channel is a mono bus: the ER's two channels are mono-summed onto
+        it, which is what a listener summing the stereo module would hear. */
     void process (float* const* channelData, int numChannels, int numSamples)
     {
         eqTap.write (channelData, numChannels, numSamples);
+
+        if (channelData == nullptr || numChannels <= 0 || numSamples <= 0 || scratchIn.empty())
+            return;
+
+        if (! levelsPrimed)
+        {
+            erGain = erGainTarget;
+            mix = mixTarget;
+            outGain = outGainTarget;
+            levelsPrimed = true;
+        }
+
+        float* left  = channelData[0];
+        float* right = numChannels > 1 ? channelData[1] : nullptr;
+
+        const auto chunk = (int) scratchIn.size();
+
+        for (int done = 0; done < numSamples; done += chunk)
+        {
+            const auto n = std::min (chunk, numSamples - done);
+            float* l = left + done;
+            float* r = right != nullptr ? right + done : nullptr;
+
+            for (int i = 0; i < n; ++i)
+                scratchIn[(size_t) i] = r != nullptr ? 0.5f * (l[i] + r[i]) : l[i];
+
+            er.process (scratchIn.data(), scratchL.data(), scratchR.data(), n);
+
+            for (int i = 0; i < n; ++i)
+            {
+                erGain  = smooth (erGain, erGainTarget);
+                mix     = smooth (mix, mixTarget);
+                outGain = smooth (outGain, outGainTarget);
+
+                // **The MIX law is provisional.** A plain linear dry*(1-m) +
+                // wet*m, pending the owner's choice between this and an
+                // equal-power or a dry-held law (11 section 7, "owner confirm,
+                // still open: the MIX law and its default"). Nothing but
+                // "MIX 0 is exactly dry, MIX 1 has no dry" is asserted of it,
+                // so changing it moves no test.
+                const auto dryGain = 1.0f - mix;
+                const auto wetGain = erGain * mix;
+
+                if (r != nullptr)
+                {
+                    l[i] = (l[i] * dryGain + scratchL[(size_t) i] * wetGain) * outGain;
+                    r[i] = (r[i] * dryGain + scratchR[(size_t) i] * wetGain) * outGain;
+                }
+                else
+                {
+                    const auto er1 = 0.5f * (scratchL[(size_t) i] + scratchR[(size_t) i]);
+                    l[i] = (l[i] * dryGain + er1 * wetGain) * outGain;
+                }
+            }
+        }
+
+        // A third channel and beyond is left as it came: the layouts the
+        // module accepts are mono and stereo, and neither reaches here.
     }
 
     /** Zero, at every setting, always. Not computed from the values, because
@@ -338,7 +483,7 @@ private:
     Params params;
 
     /** The grid the three EQ nodes are designed on, at the running rate.
-        Unused by the placeholder; rebuilt in `prepare` so the engine has it.
+        Unused until the EQ is built (M3); rebuilt in `prepare` so it has it.
         `kEqDesignRate` until a host says otherwise, which is BMO DEQ's
         `kDesignRate` and its argument. */
     dsp::DesignGrid grid = dsp::DesignGrid::make (kEqDesignRate);
@@ -355,6 +500,30 @@ private:
     double sampleRate = 0.0;
     int blockSize = 0;
     int channels = 0;
+
+    ErEngine er;
+
+    /** The ER engine's input and output, one chunk at a time. Sized in
+        `prepare`. */
+    std::vector<float> scratchIn, scratchL, scratchR;
+
+    // The three level smoothers: one pole, `kSmoothingMs` to 99 %, per
+    // sample. Snapped to exactly the target once within a millionth, so an
+    // ER fader at -40 settles on exactly zero and not on a denormal.
+    float levelCoeff = 1.0f;
+    float erGain = 0.0f, erGainTarget = 0.0f;
+    float mix = 1.0f, mixTarget = 1.0f;
+    float outGain = 1.0f, outGainTarget = 1.0f;
+    bool  levelsPrimed = false;
+
+    float smooth (float value, float targetValue) const noexcept
+    {
+        if (value == targetValue)
+            return value;
+
+        value += levelCoeff * (targetValue - value);
+        return std::abs (targetValue - value) <= 1.0e-6f ? targetValue : value;
+    }
 };
 
 } // namespace bmo::reverb

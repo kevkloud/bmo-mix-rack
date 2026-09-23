@@ -76,5 +76,11 @@ if [[ ${1:-} == --snapshots ]]; then
         "$snapshot" "$module" "snapshots/$module.png"
     done
 
-    "$snapshot" rack snapshots/rack.png chain=util,eq,sat,opto,dim,deq,ltvcomp,deesser,fetcomp,reverb
+    # The rack has eight slots (`RackProcessor::kSlots`) and the registry has ten
+    # modules, so one rack render cannot hold them all: `addModule` refuses a
+    # ninth without a word, and the ten-module chain this used to name rendered
+    # exactly these eight. BMO FET and BMO Linger are the two left out, and each
+    # is covered by its own snapshot in the loop above. Written as eight so the
+    # picture is what the line says.
+    "$snapshot" rack snapshots/rack.png chain=util,eq,sat,opto,dim,deq,ltvcomp,deesser
 fi

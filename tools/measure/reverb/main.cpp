@@ -27,6 +27,9 @@
         measure_reverb bench        10 section 6's CPU budget, measured: the
                                     worst case first, then the transients.
                                     Release only; see printBench
+        measure_reverb hash         FNV-1a of the ER output per VARIATION,
+                                    so a change can prove which positions
+                                    it left bit-identical
 
     docs/reverb/11-integration-and-test-plan.md section 6 lists the modes this
     grows when the engine lands -- `ir t60 er density mono sweep bench` -- with
@@ -51,6 +54,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -386,9 +390,86 @@ void printBench()
                  "  the machine.\n");
 }
 
+/** A fingerprint of the ER, never the audio itself: FNV-1a over the bytes of
+    the output samples, per VARIATION position, across every type, all three
+    ER modes, four densities and three sizes, at 48 kHz, fully wet. Printed so
+    that a change meant to leave some positions alone can prove it did, by
+    running this before and after. The WAV-free way to say "bit-identical". */
+void printHash()
+{
+    constexpr double rate = 48000.0;
+    constexpr int length = 12032;   // a whole number of 256-sample blocks
+
+    std::printf ("ER hash -- FNV-1a 64 over the output, per VARIATION, %g Hz\n", rate);
+
+    std::uint64_t all = 1469598103934665603ull;
+
+    for (int variation = 0; variation <= 6; ++variation)
+    {
+        std::uint64_t h = 1469598103934665603ull;
+
+        for (int type = 0; type < numTypes; ++type)
+            for (int mode = 0; mode < numErModes; ++mode)
+                for (const auto density : { 0.0f, 30.0f, 70.0f, 100.0f })
+                    for (const auto size : { 6.0f, 12.0f, 30.0f })
+                    {
+                        ReverbDsp dsp;
+                        dsp.prepare (rate, 256, 2);
+
+                        auto v = defaults();
+                        v[Index::type]        = (float) type;
+                        v[Index::ermode]      = (float) mode;
+                        v[Index::erdensity]   = density;
+                        v[Index::size]        = size;
+                        v[Index::ervariation] = (float) variation;
+                        v[Index::erlevel]     = 0.0f;
+                        v[Index::mix]         = 100.0f;
+                        dsp.setParams (v.data(), (int) v.size());
+
+                        std::vector<float> l ((size_t) length, 0.0f), r ((size_t) length, 0.0f);
+                        l[0] = r[0] = 1.0f;
+                        unsigned int seed = 777u;
+
+                        for (int i = length / 2; i < length; ++i)
+                        {
+                            seed = seed * 1664525u + 1013904223u;
+                            l[(size_t) i] = (float) (seed >> 8) * (1.0f / 8388608.0f) - 1.0f;
+                            r[(size_t) i] = 0.3f * l[(size_t) i];
+                        }
+
+                        for (int i = 0; i < length; i += 256)
+                        {
+                            float* ch[] { l.data() + i, r.data() + i };
+                            dsp.process (ch, 2, 256);
+                        }
+
+                        for (const auto* x : { &l, &r })
+                        {
+                            const auto* bytes = reinterpret_cast<const unsigned char*> (x->data());
+
+                            for (size_t b = 0; b < x->size() * sizeof (float); ++b)
+                            {
+                                h ^= bytes[b];
+                                h *= 1099511628211ull;
+                            }
+                        }
+                    }
+
+        std::printf ("  Var %d  %016llx\n", variation, (unsigned long long) h);
+
+        if (variation < 6)
+        {
+            all ^= h;
+            all *= 1099511628211ull;
+        }
+    }
+
+    std::printf ("  Var 0-5 combined  %016llx\n", (unsigned long long) all);
+}
+
 void usage()
 {
-    std::printf ("usage: measure_reverb <latency|tail|taps [size]|constants|schema|bench>\n");
+    std::printf ("usage: measure_reverb <latency|tail|taps [size]|constants|schema|bench|hash>\n");
 }
 
 } // namespace
@@ -408,6 +489,7 @@ int main (int argc, char** argv)
     if (mode == "constants") { printConstants(); return 0; }
     if (mode == "schema")    { printSchema();    return 0; }
     if (mode == "bench")     { printBench();     return 0; }
+    if (mode == "hash")      { printHash();      return 0; }
 
     if (mode == "taps")
     {

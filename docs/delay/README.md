@@ -194,7 +194,7 @@ it, and three of them were things this pack had wrong or hedged.
 35. **The compander overshoot is measured, not modelled.** A re-detecting pair
     benches at **+3.67 dB on a 20 dB step = 0.184 dB per dB** (AURORA,
     2026-09-23), confirming the model exactly. **That was one of the two parked
-    benches; the CPU one is still outstanding** (`11` §4k against two engines).
+    benches; the CPU one is now done too** — see item 39.
 36. **Memory is 16 MB per instance at 192 kHz**, not 8.0. The compander's
     control ring is the same length as the audio ring, per channel per engine,
     and is allocated whichever character is selected — so two engines means two
@@ -213,6 +213,25 @@ it, and three of them were things this pack had wrong or hedged.
     gives the 1.054 already written into `10` §3's acceptance. Measured `P_c`:
     clean **0.99939**, tape **1.05361 at 63.4 Hz**, bucket-brigade **0.99611**
     (0.9946–0.9983 with TIME), 48 kHz — unity at **97.0 % on all three**.
+39. **The CPU budget is an absolute ceiling plus a regression guard, not a
+    ratio** (DECIDED, Frosty 2026-09-23). The old "≤ 1.5× at defaults, ≤ 3.0×
+    heaviest" named a mode and a tool that do not exist and never said what its
+    denominator was set to — one silence worth 2.7× — and it was breached on
+    every reading (6.81× and 23.74×). It is replaced by a percentage of one
+    core per instance, stereo, block 512: **≤ 1.15 % at defaults and ≤ 4.0 % at
+    the heaviest at 48 kHz, ≤ 4.1 % and ≤ 15.0 % at 192 kHz**, with separate
+    rows for a control automated per block, plus **no configuration more than
+    1.15× its recorded baseline**. **MEASURED on AURORA, 2026-09-22** at
+    720b8b7: 0.880 % at defaults, 3.062 % at the heaviest, 48 kHz. Every
+    ceiling is baseline × 1.30, which is three times the method's worst noise
+    and still tight enough for the guard to fire first; `11` §4k carries the
+    conditions, the full baseline and the argument. **The heaviest case is
+    Clean + Diffuse, not bucket-brigade** — Clean's 32-tap sinc is the single
+    largest cost in the module, and **reducing the taps is now a separate piece
+    of work in flight**, so re-base the baseline downward if it lands. **The
+    lane costs nothing at the defaults** (HOLD ships off and the second engine
+    genuinely does not run) and **84–102 % when it runs**. `11` §4l's ≤ 1.3×
+    per FX type **holds** — Diffuse 1.200×, Pan/Tremolo 1.022×, Crush 0.949×.
 
 ## Still open after that pass
 

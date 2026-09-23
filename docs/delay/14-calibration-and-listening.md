@@ -63,9 +63,32 @@ to move.
 **That bench is done.** The re-detecting compander's overshoot was **measured on
 AURORA, 2026-09-23** (stage 2b, c4d2d33) at **+3.67 dB on a 20 dB step, which is
 0.184 dB per dB** — the modelled figure, confirmed exactly. `10` §4 and README
-item 23 now state it as a measurement, and it may be quoted as one. **The CPU
-bench is the one still outstanding** (`11` §4k's heaviest-case budget against
-two engines).
+item 23 now state it as a measurement, and it may be quoted as one.
+
+**The CPU bench is done too** — **AURORA, 2026-09-22**, at 720b8b7 with both
+engines. `11` §4k is no longer a ratio: it is an absolute ceiling per instance
+(**≤ 1.15 % of one core at defaults and ≤ 4.0 % at the heaviest, 48 kHz / 512
+stereo**; ≤ 4.1 % and ≤ 15.0 % at 192 kHz) plus a **1.15× regression guard**
+against a recorded baseline of **0.880 % at defaults and 3.062 % at the
+heaviest**. §4k carries the measurement conditions, and they are normative —
+Release against the repo's own DSP libs, 100 × 10 s per gated row, the process
+pinned to one core and 20 s of spin-up before anything is timed, or the reading
+measures the laptop rather than the module.
+
+**Two things that bear on the listening rounds.** The heaviest case is **Clean
++ Diffuse**, not bucket-brigade, with DRIVE about a third of it — so **for L3,
+if Diffuse wins on sound it costs about a fifth of a delay engine to keep
+(1.200× the FX-off loop) and the other two are free** (Pan/Tremolo 1.022×,
+Crush 0.949×, the last of those an unexplained reading that §4k flags rather
+than smooths). And **Clean's 32-tap sinc is the single largest cost in the
+module**; reducing the taps and weighing it in quality is **a separate piece of
+work now in flight**, so a listening round that compares Clean before and after
+it may be wanted — the outcome is not pre-judged here.
+
+**What is still outstanding is §2's own requirement, not the numbers.** The
+baseline came from a harness outside the repository; no tool in the tree has a
+CPU mode. Landing one in `tools/measure/dwell/main.cpp`, carrying §4k's pinning
+and spin-up, is the follow-up.
 
 Open decision 1 in 10's closing list (ping-pong routing) is Frosty's alone. Do not settle it by ear.
 

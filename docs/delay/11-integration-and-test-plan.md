@@ -403,18 +403,223 @@ MOD DEPTH 0** (10 §5a). That holds structurally rather than by a gate: the floo
 moves the **read position**, so a zeroed ring still reads zero. **Run the
 silence case on every character**, since a floor implemented as an output gain
 instead would pass on clean and fail here. No NaN at any extreme; an injected
-NaN contained within one tail. `bench`, Release, 100 × 10 s at 48 kHz/512 against `measure_ltvcomp`
-on the same box: ≤ 1.5× at defaults, ≤ 3.0× heaviest.
+NaN contained within one tail.
 
-**The ≤ 3.0× heaviest figure predates the second engine and is NOT re-set here —
-it needs re-measuring against two engines before it is trusted or changed.** At
-defaults the module is unaffected: `hold` ships off, the lane is cleared and
-dead and costs a branch, so "≤ 1.5× at defaults" stands as written. The heaviest
-case is now two Clean sinc loops each with an FX stage at 192 kHz, which by
-arithmetic is around 2.6–3.0× a single FX-off loop before anything else is
-counted, so 3.0× against `measure_ltvcomp` is unlikely to survive. `bench`
-settles it; **a budget known to fail is worse than no budget**, so the number
-moves on a measurement and not on this paragraph.
+**CPU: an absolute ceiling plus a regression guard** (DECIDED, Frosty
+2026-09-23). The old wording — "≤ 1.5× at defaults, ≤ 3.0× heaviest" against a
+named reference tool — **is struck, and the ratio form goes with it.** It was
+unusable in three independent ways, all found by the bench of 2026-09-22 on
+AURORA: it named a "bench" mode that exists in no measurement tool in this
+tree; it named a tool "measure_ltvcomp", which is not a target (the module id went
+`vcomp` → `ltvcomp` for the product, not for the tool — it is `measure_vcomp`);
+and it never said what settings the reference ran at, a silence that moves the
+answer by **2.7×** on its own. It was also breached on every reading of it:
+**6.81× at defaults against ≤ 1.5×, and 23.74× at the true heaviest against
+≤ 3.0×** — and still breached, by 3.0× over, against the most generous
+denominator available. A budget nobody can reproduce is not a budget, so the
+unreproducible denominator is fixed by **not having one**.
+
+What replaces it is a **percentage of one core per instance at a named sample
+rate and block size** — the figure a loaded rack actually cares about — plus a
+**regression guard against the recorded baseline**, so a change that makes the
+module heavier is caught without a reference that can drift underneath it.
+
+**The ceiling** (a line not to cross, per instance, stereo, block 512):
+
+| | 48 kHz | 192 kHz |
+|---|---|---|
+| at defaults | **≤ 1.15 %** of one core | **≤ 4.1 %** |
+| at defaults with a control automated per block | **≤ 2.35 %** | **≤ 9.1 %** |
+| at the heaviest, static | **≤ 4.0 %** | **≤ 15.0 %** |
+| at the heaviest with a control automated per block | **≤ 5.2 %** | **≤ 19.9 %** |
+
+**The regression guard:** no configuration in the recorded baseline below may
+measure **more than 1.15×** its recorded figure on the same machine.
+
+**Why these numbers.** Every ceiling is the measured baseline **× 1.30**, and
+the guard is **× 1.15**; neither is a round number and both are set by what the
+method can resolve. Within one process the spread is 1–3 %, but the *same*
+Dwell configuration shifts by up to **~10 % between processes**, because the
+rings are power-of-two sized and where the allocator puts them changes the
+cache-conflict pattern. A guard tighter than ~10 % would fire on the allocator;
+15 % will not, and it is half the distance to the ceiling, so **the guard
+always fires first and the ceiling is the thing it protects**. Thirty per cent
+of headroom is about three times the worst observed noise — enough that the
+gate is not flaky, tight enough that a real regression (an extra filter, a
+second sweep, a tap count going the wrong way) trips it long before anyone
+hears it. **The ceiling is not a target to beat.** Re-base it *downward* freely
+and say so; raising it costs a fresh measurement and Frosty's word, the same
+ratchet BMO Tune RT's latency curve runs on.
+
+**And the eight slots are why the top rate is not generous.** At the 48 kHz
+heaviest ceiling, eight Dwells in a full rack is **32 % of one core** —
+comfortable. At 192 kHz the same arithmetic is **120 %, over one core
+already**, against **92.5 % measured**. (Both figures are arithmetic on a
+single measured instance; **eight instances were never run.**) A rack that is
+eight Dwells all on Clean + Diffuse with both engines live is not a session
+anyone builds — two or three of them beside other modules is — but there is no
+room at the top rate to hand out headroom for its own sake, which is why the
+192 kHz rows track their measurements as closely as the 48 kHz ones do. The
+same case is ~130 MB of rings (`10` §10), so CPU is not the binding constraint
+at 192 kHz; memory is.
+
+**Measurement conditions — the reproducibility is the point of this rewrite, so
+these are normative.** A reading taken any other way is not comparable and must
+not be recorded as a baseline.
+
+- **Build:** Release, x64, `BMO_DSP_ONLY=ON`, linked against **the
+  repository's own Release static libraries** (`bmo_dwell_dsp`, `bmo_dsp`).
+  Name the targets explicitly — an untargeted build installs plugins over the
+  user's set. Flags as `build-dsp/` gives its own targets in Release
+  (`/O2 /Ob2 /MD /std:c++20 /DNDEBUG` under MSVC); the baseline below was taken
+  under MSVC 19.44.35228.
+- **Signal path:** `prepare`, then per block `setParams` **then** `process`,
+  stereo, through the ordinary `ModuleDsp` interface, no host and no JUCE.
+  `setParams` is called once per block *because a host does*, and it is inside
+  the timed region deliberately — it is where the loop-peak sweep lives, and
+  leaving it out hides the automated-control rows entirely.
+- **Rate and block:** 48 kHz and 192 kHz, **block 512**, both gated. 44.1 and
+  96 kHz are recorded but not gated.
+- **Input:** a deterministic pseudo-noise bed at about −14 dBFS RMS under a slow
+  amplitude envelope, so the ducker's follower, the compander and the gate all
+  see something that moves. **The same samples feed every configuration.**
+- **Run count and duration:** **100 runs × 10 s of audio** for every gated row,
+  25 × 10 s for exploratory rows; **two warm-up runs discarded per
+  configuration**; the **median** is the reported figure. Every timed run is
+  followed by an untimed output check — a row with any non-finite sample is not
+  a reading.
+- **Core pinning.** Pin the process to **one logical CPU at high priority.**
+  On a hybrid part (AURORA is an i7-12700H) an unpinned run migrates between
+  P-cores and E-cores and the timings go **bimodal**; pinning cut the
+  run-to-run spread by about **3×**. This is not optional — without it the
+  numbers are not repeatable on the same machine, let alone across machines.
+- **Clock spin-up.** Burn **20 s of the heaviest case before timing
+  anything.** The first sweep of the 2026-09-22 bench measured its *early*
+  configurations 2–3× slow and its *late* ones at full speed inside one
+  process: a core ramping to its working clock, not a property of any
+  configuration. **That whole first sweep was discarded.** With the spin-up in
+  place, an isolated process and a 60-configuration process agree to within a
+  few per cent.
+- **Machine quiet.** Three heaviest-case rows in the discarded sweep came back
+  with a standard deviation of 67–99 ms against a normal 2–8, from nothing more
+  than someone polling the machine while it measured. Nothing in the baseline
+  below has a standard deviation above **3 %** of its median.
+
+**The baseline — what the guard guards.** All **MEASURED on AURORA,
+2026-09-22**, worktree `bmo-mix-rack-333-dwell` at **720b8b7** (stages 2a–2e,
+the DSP complete), under the conditions above. Milliseconds of CPU per 10 s of
+audio, and the same figure as a percentage of one pinned P-core.
+
+| configuration, 48 kHz / 512 | med ms / 10 s | % of one core |
+|---|---|---|
+| **at defaults** | **88.04** | **0.880** |
+| at defaults, HOLD on and the lane fed | 178.08 | 1.781 |
+| at defaults, TIME automated per block | 179.97 | 1.800 |
+| **at the heaviest, static** | **306.19** | **3.062** |
+| at the heaviest, TIME automated per block | 399.11 | 3.991 |
+
+Reproducibility of the two headline rows across four independent 48 kHz
+measurements: defaults 88.04 / 88.13 / 89.34 / 90.45 ms; heaviest 300.49 /
+301.22 / 306.19 / 308.03 ms.
+
+| % of one core | 44.1 kHz | 48 kHz | 96 kHz | 192 kHz |
+|---|---|---|---|---|
+| at defaults | 0.812 | 0.880 | 1.632 | 3.170 |
+| at defaults, TIME automated per block | — | 1.800 | — | 6.962 |
+| at the heaviest, static | 2.787 | 3.062 | 5.914 | 11.561 |
+| at the heaviest, TIME automated per block | — | 3.991 | — | 15.287 |
+
+Each ceiling above is its 48 kHz or 192 kHz entry here **× 1.30**, rounded up
+to three significant figures. The 44.1 and 96 kHz columns are recorded so the
+scaling can be checked; they are not gated, and neither is the
+HOLD-on-at-defaults row.
+
+**Cost scales close to linearly with sample rate** — there is no per-block
+cliff — and **block size is flat**: at 32, 64, 128 and 1023 samples, defaults
+measure 91.1–92.2 ms and the heaviest 301.8–315.0 ms. That is because the
+1024-point loop-peak sweep does not run while the parameters are static, which
+is exactly what the automated rows price.
+
+**What the heaviest case actually is, because it is not what this section used
+to predict.** It is **Clean + Diffuse on both paths**, both engines live, DRIVE
+100, modulation 8 Hz / 100 %, FEEDBACK 95, DUCK 24, MIX 50, dual offset, TIME
+and LANE TIME at 2000 ms, FX AMOUNT 100 on both. **It is not bucket-brigade** —
+BBD, with its clock-derived Butterworths and its compander control ring, sits
+*between* Clean and Tape (Clean + Diffuse 306.19 ms, BBD + Diffuse 244.76,
+Tape + Diffuse 209.71). **Nobody should assume the compander is the cost.**
+Unlinking the two paths' FX types buys nothing worse (mixed Crush/Diffuse,
+`fx_link` off: 224.65 ms), and nineteen single-knob probes off the worst case
+moved **nothing upward**, so 306 ms is the static ceiling and not a guess at
+one. **DRIVE is the single dominant control on top of the character**: DRIVE
+100 → 0 takes 31.0 % off, the ADAA residual shaper being about a third of the
+heaviest case on its own and branched past entirely at DRIVE 0. Nothing else
+moves it more than 10 %, and TIME is flat from 17.5 ms to 2000 ms.
+
+**The automated rows are a deliberate widening of what this budget covers,
+because the old one did not say and the answer differs by a factor of two.**
+`DelayEngine::setParams` re-sweeps a 1024-point grid whenever TIME moves, and
+each point does a sinc read; on bucket-brigade a TIME move is also a filter
+move (`f_clk = N/2T`), so the filter magnitudes re-sweep too. TIME alternating
+between 370 and 380 ms every block — an ordinary thing for a host to do —
+costs **2.04× at defaults**, 1.43× on BBD at its heaviest, 1.30× on Clean at
+its heaviest. **The genuine worst case anywhere in the bench is Clean at the
+heaviest with TIME automated: 3.99 % of one core at 48 kHz, 15.29 % at
+192 kHz**, and that is the row the 5.2 % / 19.9 % ceilings are cut from.
+
+**Two findings that read better than any ratio suggested.**
+
+1. **The lane costs nothing at the shipped defaults, and it is not a
+   rounding.** HOLD ships off, and the second engine **genuinely does not
+   run**: 88.04 ms with the lane dead against 178.08 ms with it live, same
+   process, everything else identical. This section's long-standing claim —
+   "`hold` ships off, the lane is cleared and dead and costs a branch" — is
+   **confirmed as measured**, not merely argued. **When it does run it adds
+   84–102 %** of the engine it sits beside (+102 % at defaults, +84–88 % on
+   the heavy BBD cases, +85–97 % at 192 kHz). **One engine is half the module**
+   — the largest structural cost in it, larger than DRIVE, larger than any
+   character, larger than any FX type — and if the split question ever
+   returns, that is the number.
+2. **§4l's ≤ 1.3× per FX type holds, with margin, and §4l is not touched
+   here.** Measured per engine against the FX-off loop at otherwise identical
+   settings in the same process, medians of six independent processes:
+   **Diffuse 1.200×, Pan/Tremolo 1.022×, Crush 0.949×** on Clean at defaults;
+   1.125× / 1.047× / 0.967× on bucket-brigade driven. Worst candidate 1.200×
+   against ≤ 1.3×. Diffuse is the only one that costs anything material, which
+   is what a six-stage Schroeder allpass chain should cost against one LFO and
+   a quantiser — **for `14`'s listening round, if Diffuse wins on sound it
+   costs about a fifth of a delay engine to keep, and the other two are free.**
+   **One measured oddity, flagged rather than smoothed:** Crush reads
+   consistently *cheaper* than FX off, reproducing in all six processes with
+   the paired ratio between 0.918 and 0.958 — outside the within-process
+   spread, and unexplained from the code. It changes no verdict, but **it must
+   not be quoted as "Crush is free" until somebody understands why.**
+
+**One optimisation is open and this budget does not assume its outcome.**
+**Clean's 32-tap polyphase Kaiser sinc read is the single largest cost in the
+module and the whole reason Clean is the most expensive character**: bare, at
+48 kHz, Clean is 89.82 ms against Tape's 50.30 and bucket-brigade's 64.79 —
+**1.79× Tape, and identically 1.79× at 192 kHz**, which is the interpolator and
+nothing else (`10` §1 gives Tape and BBD a 4-point Hermite and calls the sinc
+"the only place ~32 MACs is spent"). Frosty has decided to **reduce the tap
+count and weigh the cost in quality**; that is a separate piece of work, **in
+flight and not pre-judged here.** The figures above are the engine as it stands
+at 720b8b7 with the 32-tap read intact. **If the taps come down, re-base this
+whole baseline downward and say so** — do not leave a ceiling in place that the
+module has walked away from.
+
+**What is still not reproducible from the repository alone, and it is the one
+thing left open.** The baseline above was taken with a **single-file harness
+outside the repository**, in a scratchpad, because the bench was commissioned
+to write nothing into the tree. `14` §2 wants measurements to come "from a tool
+in the tree driving the shipping path", and this one does not yet. **No
+measurement tool in this tree has a CPU mode**: `measure_dwell` has `schema`
+and `latency` and nothing else. **The follow-up is to land a `cpu` mode in
+`tools/measure/dwell/main.cpp`** that implements the conditions above — the
+pinning and the spin-up included, or it will measure the laptop instead of the
+module — and to re-take the baseline through it. Until that exists, **the
+figures here are quotable as measurements but the gate cannot be run by anyone
+who only has the repo**, and that, not the numbers, is the last unfinished part
+of this section.
 
 **All four rings** are allocated once in `prepare()` from the fixed maximum —
 two audio rings, one per engine, and **two compander control rings of the same
@@ -441,9 +646,12 @@ no divergence, NaN, denormal slowdown or DC growth, as (d).
 `latencyForParams` is 0 for every candidate. Crush is **exempt from (f)'s
 −60 dBFS floor**; its assertion is that the non-harmonic floor is non-increasing
 from repeat 10 to 32. Toggling either `fx` and sweeping either type on and off
-block boundaries: nothing above −60 dBFS on either edge. `bench` per candidate
-against the FX-off loop: ≤ 1.3× any one, ≤ 1.5× heaviest, **per engine**, and FX
-off within noise of the pre-FX build. No candidate allocates a second buffer --
+block boundaries: nothing above −60 dBFS on either edge. Timed per candidate
+under (k)'s measurement conditions, against the FX-off loop at otherwise
+identical settings **in the same process**: ≤ 1.3× any one, ≤ 1.5× heaviest,
+**per engine**, and FX off within noise of the pre-FX build. **This budget
+holds as measured** (AURORA, 2026-09-22) — worst candidate Diffuse at 1.200×;
+the figures and one flagged oddity are in (k). No candidate allocates a second buffer --
 Reverse was cut on 2026-09-21 -- so the FX stage allocates nothing at all, and
 `process()` must allocate nothing when either `fx` turns on. **There is no
 FREEZE to bypass the stage any more** (10 §11.5): the lane's detent deliberately

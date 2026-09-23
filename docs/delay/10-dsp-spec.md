@@ -728,9 +728,11 @@ in place.
   figure**: that is a code comment and is flagged rather than edited, this being
   a documentation pass.
 - **CPU doubles while HOLD is on and costs a branch while it is off**, so the
-  module at its defaults costs what the single-engine module cost. `11` §4k's
-  heaviest-case budget is marked there as needing re-measurement rather than
-  quietly changed.
+  module at its defaults costs what the single-engine module cost. **Both
+  halves of that are now MEASURED** (AURORA, 2026-09-22): the lane adds
+  **84–102 %** when it runs, and **nothing at all** at the defaults, where HOLD
+  ships off and the second engine genuinely does not run. `11` §4k carries the
+  figures and has been re-cut around them as an absolute ceiling.
 
 ## 11a. In-loop FX
 
@@ -806,9 +808,11 @@ Candidates — list and order free until ship (11 §3):
 > specification is deleted rather than kept as dead text.
 
 **CPU**: target ≤ 1.3× the FX-off loop for any one candidate at 192 kHz, ≤ 1.5×
-heaviest, **per engine** (DECISION; bench per 11 §4k). Only Diffuse should
-measure; two engines both on it is roughly 2.6× a single FX-off loop, which is
-why 11 §4k's heaviest-case budget is marked for re-measurement.
+heaviest, **per engine** (DECISION; timed per 11 §4k's conditions). **MEASURED
+and holding** (AURORA, 2026-09-22): Diffuse **1.200×**, Pan/Tremolo **1.022×**,
+Crush **0.949×** on Clean at defaults. Only Diffuse costs anything material, as
+predicted. Crush reading *cheaper* than FX off is real and reproducible but
+unexplained — 11 §4k flags it, and it must not be quoted as "Crush is free".
 
 ## 12. Fixed values to target
 

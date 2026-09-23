@@ -108,6 +108,7 @@ bmo_add_module(fetcomp
 bmo_add_module(reverb
     DSP_SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/reverb/dsp/DspCore.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/reverb/dsp/ErTable.cpp
     UI_SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/reverb/panel/ReverbPanel.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/reverb/Module.cpp)

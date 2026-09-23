@@ -173,6 +173,9 @@ const char* ruleName (int rule) noexcept
         case ruleGamma:      return "gamma, 7 positions";
         case ruleLateral:    return "lateral fraction";
         case ruleMoorer:     return "Moorer (Room)";
+        case rulePlateOnset: return "plate: onset <= 1 ms";
+        case rulePlateFront: return "plate: peak in 0-5 ms";
+        case rulePlateDispersion: return "plate: bands in order";
         default:             return "?";
     }
 }
@@ -537,6 +540,133 @@ Report auditAtSize (const ErTable& table, const AuditContext& ctx, float sizeMf)
             lower (ruleMoorer, 0.25 - std::abs (core - 19.0) / 19.0);
             lower (ruleMoorer, std::min (fig.firstTapMs - 1.0, 8.0 - fig.firstTapMs) / 7.0);
             lower (ruleMoorer, 0.25 - std::abs (fig.lastTapMs - 79.7) / 79.7);
+        }
+    }
+
+    //== Plate: the room rules lifted, the plate rules in their place ==========
+    //
+    // See ErAudit.h: owner decision, 2026-09-23, and Frosty's plate research.
+    // The room rules above ran for every type; for a plate their margins are
+    // withdrawn here, so there is one code path for the rooms and not two.
+    if (ctx.isPlate)
+    {
+        for (const int r : { ruleSeparation, ruleGaps, ruleFullBand, ruleKuttruff, ruleFlamLate,
+                             ruleFlamOnset, ruleLoc, ruleProximity, ruleCentre, ruleGamma,
+                             ruleLateral, ruleMoorer })
+            rep.margin[r] = kNone;
+
+        // Mono safety is not a room rule: gamma >= 0 at 0-5, all three densities.
+        for (const auto* g : { fig.gamma, fig.gammaCore, fig.gammaFull })
+            for (int v = 0; v < kErCombVariation; ++v)
+                lower (ruleGamma, g[v]);
+
+        double frontHeard = 0.0, allHeard = 0.0;
+
+        for (int v = 0; v < kErVariations; ++v)
+            for (const auto* ch : { &table.variation[v].left, &table.variation[v].right })
+            {
+                const auto taps = heard (table, *ch, sizeM);
+
+                // Instant onset.
+                lower (rulePlateOnset, 1.0 - taps.front().t);
+
+                // Front-loaded: heard energy per 5 ms window, peak in the first.
+                std::vector<double> e;
+
+                for (const auto& t : taps)
+                {
+                    const auto w = weight (t.theta, density) * t.a;
+                    const auto slot = (size_t) (t.t / 5.0);
+
+                    if (e.size() <= slot)
+                        e.resize (slot + 1, 0.0);
+
+                    e[slot] += w * w * kPi * t.fc;
+
+                    if (v == 2 && ch == &table.variation[v].left)
+                    {
+                        allHeard += w * w * kPi * t.fc;
+                        frontHeard += t.t <= 5.0 ? w * w * kPi * t.fc : 0.0;
+                    }
+                }
+
+                double later = 0.0;
+
+                for (size_t w = 1; w < e.size(); ++w)
+                    later = std::max (later, e[w]);
+
+                lower (rulePlateFront, later > 0.0 ? dbPower (e[0] / later) : 0.0);
+
+                // Dispersion order: each present band's first arrival after
+                // the brighter present band's.
+                double first[kErBands];
+
+                for (auto& f : first)
+                    f = kNone;
+
+                for (const auto& t : taps)
+                    first[t.band] = std::min (first[t.band], t.t);
+
+                double previous = -1.0;
+
+                for (int b = 0; b < kErBands; ++b)
+                    if (! std::isinf (first[b]))
+                    {
+                        if (previous >= 0.0)
+                            lower (rulePlateDispersion, first[b] - previous);
+
+                        previous = first[b];
+                    }
+            }
+
+        fig.plateFrontShare = allHeard > 0.0 ? frontHeard / allHeard : 0.0;
+
+        const auto band = [&] (const ErChannel& ch, int b)
+        {
+            std::vector<double> out;
+
+            for (const auto& t : heard (table, ch, sizeM))
+                if (t.band == b)
+                    out.push_back (t.t);
+
+            return out;
+        };
+
+        for (int b = 0; b < kErBands; ++b)
+        {
+            const auto l2 = band (table.variation[2].left, b);
+            double sum = 0.0;
+
+            for (const auto t : l2)
+                sum += t;
+
+            fig.plateBandFirstMs[b] = l2.empty() ? 0.0 : l2.front();
+            fig.plateBandMeanMs[b]  = l2.empty() ? 0.0 : sum / (double) l2.size();
+
+            // VARIATION 5, where nearly every slot is split: each left tap of
+            // the band against the right tap of the same slot -- the one with
+            // the same threshold and bearing, which a split leaves unchanged
+            // on a plate -- over the pairs that were split.
+            const auto l = heard (table, table.variation[5].left, sizeM);
+            const auto r = heard (table, table.variation[5].right, sizeM);
+            double lr = 0.0;
+            int pairs = 0;
+
+            for (const auto& x : l)
+            {
+                if (x.band != b)
+                    continue;
+
+                for (const auto& y : r)
+                    if (y.band == b && y.theta == x.theta && y.pan == x.pan && y.t != x.t)
+                    {
+                        lr += std::abs (x.t - y.t);
+                        ++pairs;
+                        break;
+                    }
+            }
+
+            fig.plateLrMs[b] = pairs > 0 ? lr / pairs : 0.0;
         }
     }
 

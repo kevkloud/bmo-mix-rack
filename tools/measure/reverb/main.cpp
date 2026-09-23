@@ -382,7 +382,7 @@ void printAudit (int t, const ErTable& table, float directGain = 0.0f)
                  (double) ctx.density * 100.0, (double) ctx.erLevelDb);
     std::printf ("  %-28s %12s %-6s %14s\n", "rule (at default SIZE)", "margin", "unit", "at 12 m, info");
 
-    static const char* units[ergen::numRules] { "ms", "frac", "Hz", "dB", "dB", "dB", "dB", "dB", "frac", "pan", "gamma", "LF", "frac" };
+    static const char* units[ergen::numRules] { "ms", "frac", "Hz", "dB", "dB", "dB", "dB", "dB", "frac", "pan", "gamma", "LF", "frac", "ms", "dB", "ms" };
 
     for (int r = 0; r < ergen::numRules; ++r)
     {
@@ -415,6 +415,22 @@ void printAudit (int t, const ErTable& table, float directGain = 0.0f)
                  f.firstTapMs, f.lastTapMs, f.coreFirstMs, f.coreLastMs, f.maxTapDb);
     std::printf ("  closest core gap pair %.2f %% apart; full-set adjacent gap pairs within 2 %%: %d (reported, not a rule)\n",
                  f.worstGapPct, f.fullSetGapCollisions);
+
+    if (ctx.isPlate)
+    {
+        // Against the research; reported, not asserted (see ErAudit.h).
+        std::printf ("  plate: heard energy inside 5 ms %.1f %%; span %.2f - %.2f ms (research ~30)\n",
+                     100.0 * f.plateFrontShare, f.firstTapMs, f.lastTapMs);
+
+        for (int b = 0; b < kErBands; ++b)
+            std::printf ("  plate band %d (%5.1f m/s): first %6.2f ms (x%.2f of band 0; 1/sqrt f gives x%.2f), "
+                         "mean %6.2f ms, VAR 5 mean |L-R| %.2f ms\n", b, ergen::kPlateBandSpeed[b],
+                         f.plateBandFirstMs[b],
+                         f.plateBandFirstMs[0] > 0.0 ? f.plateBandFirstMs[b] / f.plateBandFirstMs[0] : 0.0,
+                         ergen::kPlateBandSpeed[0] / ergen::kPlateBandSpeed[b],
+                         f.plateBandMeanMs[b], f.plateLrMs[b]);
+    }
+
     std::printf ("  => %s\n", rep.allPass ? "ALL PASS" : "FAILS");
 }
 
@@ -539,7 +555,8 @@ int tapsCommand (int argc, char** argv)
 
         if (! ergen::generate (t, seed, table, &d))
         {
-            std::printf ("%s: seed %u could not be placed\n", typeName (t), seed);
+            std::printf ("%s: seed %u could not be placed (stage %d: 0 images, 1 core, 2 infill)\n",
+                         typeName (t), seed, d.failedAt);
             return 1;
         }
 

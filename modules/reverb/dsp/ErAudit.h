@@ -31,7 +31,32 @@ namespace bmo::reverb::ergen
     fader and so is evaluated there. The dichotic bonus is not spent: the
     Kuttruff ceiling is applied to every tap at full diotic strictness, so the
     ~10 dB 10 section 3 allows once a tap is decorrelated is headroom left in
-    hand, not used. */
+    hand, not used.
+
+    **PLATE IS NOT A ROOM, AND THE ROOM RULES DO NOT APPLY TO IT.** Owner
+    decision, 2026-09-23: "plate verbs are a physical metal plate model, not a
+    room model. room rules shouldn't apply." So for Plate the separation and
+    gap rules, the 1-8 ms full-band ban, the Kuttruff ceiling, all four flam
+    rules, the first-tap-near-centre rule, the lateral fraction and the Moorer
+    check are **not evaluated** (their margins print n/a). What still binds
+    Plate is what binds any source: the -15.3 dB single-tap ceiling (a
+    colouration bound), taps inside the window, and gamma >= 0 at VARIATION
+    0-5 (mono safety; the rooms' falling ladder is not asserted of it). In
+    their place, three **plate rules**, the structural ones from Frosty's
+    plate research (2026-09-23), physics or sourced:
+
+      - instant onset: the first tap at or under 1 ms (a real plate has no
+        pre-delay);
+      - front-loaded: the heard energy peaks in the first 5 ms window (the
+        highs are dense by about 5 ms);
+      - dispersion order: each darker band's first arrival comes after the
+        brighter band's (group speed goes as sqrt(f), so highs first).
+
+    Reported and **not** asserted, because the research labels them estimates:
+    the L/R offset per band (about 5-10 ms in the lows, under 1 ms in the
+    highs), the span (about 30 ms), and how close each band's first arrival
+    sits to 1/sqrt(f). Do not "fix" Plate back into a room: a Plate table that
+    fails a room rule is not failing anything. */
 
 enum Rule
 {
@@ -48,6 +73,11 @@ enum Rule
     ruleGamma,            ///< gamma >= 0 at all seven positions, 0-5 falling ~0.95 -> ~0.05
     ruleLateral,          ///< the room's early lateral fraction 0.10-0.25, at VARIATION 2
     ruleMoorer,           ///< Room only: count and span against Moorer's 19 taps, 4.3-79.7 ms
+
+    // Plate's own rules -- n/a for a room. See the comment above Rule.
+    rulePlateOnset,       ///< the first tap at or under 1 ms
+    rulePlateFront,       ///< the heard energy peaks in the first 5 ms window
+    rulePlateDispersion,  ///< each band's first arrival after the brighter band's
     numRules
 };
 
@@ -86,6 +116,12 @@ struct Figures
     double largestRiseDb;               ///< rule (ii) taken literally: the largest 5 ms rise after the peak
     double worstGapPct;                 ///< smallest core gap-to-gap difference, per cent
     int    fullSetGapCollisions;        ///< over all 48 taps, adjacent gaps within 2 % -- reported, not a rule
+
+    // Plate, reported against the research (all VARIATION 2 unless said).
+    double plateFrontShare;             ///< heard energy inside 5 ms, default density
+    double plateBandFirstMs[kErBands];  ///< each band's first arrival, left channel
+    double plateBandMeanMs[kErBands];   ///< each band's mean arrival, left channel
+    double plateLrMs[kErBands];         ///< VARIATION 5: mean L-R offset per band
 };
 
 struct Report

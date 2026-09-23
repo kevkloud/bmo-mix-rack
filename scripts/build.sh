@@ -66,10 +66,15 @@ if [[ ${1:-} == --snapshots ]]; then
     mkdir -p snapshots
 
     # By the name `snapshot` takes, which is the module's id rather than the
-    # product's display name: BMO Defang is `deesser`, BMO Linger is `reverb`.
-    for module in eq sat util opto dim deq vcomp deesser reverb; do
+    # product's display name -- BMO Defang is `deesser`, BMO Linger is `reverb`,
+    # BMO FET is `fetcomp` -- except LTV Comp, which `snapshot` knows only as
+    # `ltvcomp`, never `vcomp`. One loop and one rack render, both covering the
+    # whole registry: the FET change added a second copy of each rather than
+    # extending these, and its rack render overwrote the first with a chain that
+    # was missing BMO Defang.
+    for module in eq sat util opto dim deq ltvcomp deesser fetcomp reverb; do
         "$snapshot" "$module" "snapshots/$module.png"
     done
 
-    "$snapshot" rack snapshots/rack.png chain=util,eq,sat,opto,dim,deq,vcomp,deesser,reverb
+    "$snapshot" rack snapshots/rack.png chain=util,eq,sat,opto,dim,deq,ltvcomp,deesser,fetcomp,reverb
 fi

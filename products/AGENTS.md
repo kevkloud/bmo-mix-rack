@@ -20,6 +20,7 @@ Permanent. Allocate here before the first build of anything new.
 | BMO Mix Rack | -- | `Brck` | `com.lt3audio.bmomixrack` | `.bmorack` |
 | BMO DEQ | `deq` | `Bpar` | `com.lt3audio.bmodeq` | `.bmodeq` |
 | BMO Defang | `deesser` | `Bdes` | `com.lt3audio.bmodefang` | `.bmodeesser` |
+| BMO FET | `fetcomp` | `Bfet` | `com.lt3audio.bmofet` | `.bmofetcomp` |
 | BMO Linger | `reverb` | `Brvb` | `com.lt3audio.bmolinger` | `.bmoreverb` |
 | BMO Tune RT -- **not in the rack** | `tune` | `Btun` | `com.lt3audio.bmotunert` | `.bmotune` |
 | LTV Comp -- **not a BMO product** | `ltvcomp` | `Ltvc` | `com.lt3audio.ltvcomp` | `.ltvcomp` (reads `.bmovcomp`) |
@@ -169,12 +170,29 @@ a parameter. ADAPT, attack, release, mix and a stereo-link switch were all
 considered and left out; each could be appended after `shape`, and none can be
 inserted. See `modules/deesser/AGENTS.md` and `docs/deesser/`.
 
-Reserved for later products (not built, do not reuse): `Bfet` FET comp,
-`Bdyn` dynamics, `Bovr` overdrive,
-`Bcmp` compressor, `Bdly` delay.
+**`Bfet` has been spent**, on BMO FET, and **`Brvb` has been spent**, on BMO
+Linger, both 2026-09-21 -- their rows are in the table above. Each branch struck
+only its own code, so both strikes are recorded here together.
 
-**`Brvb` has been spent**, on BMO Linger, 2026-09-21 -- its row is in the table
-above.
+**BMO FET** is the FET compressor, and its row in the table above is its
+identity. `Bfet` was reserved here as "FET comp" and is spent on it; the bundle
+id and the preset extension follow the existing rows -- bundle from the display
+name, extension from the module id, which is `fetcomp` rather than `fet` so
+that the id says what the module is rather than which transistor is in it.
+
+It has **no threshold knob**, because the hardware family it is modelled on has
+none: INPUT is how hard the programme arrives at the cell and therefore how
+much reduction there is, and OUTPUT is hand-set makeup. The ratio is four
+positions plus **all-buttons**, which is every button pushed in at once and a
+different curve rather than a steeper one. **ATTACK and RELEASE are the knob
+position, 1 to 7 with 7 fastest**, not milliseconds, so a host's automation
+lane runs the same way the knob does -- a deliberate departure from LTV Comp's
+ascending millisecond pair, which models no hardware knob and has no direction
+to honour. Two voicings, **Blue** and **Black** (default Black), shown as the
+border around the VU and nowhere else. MIX ships, its dry path delay-matched to
+the oversampler. Stereo is always linked and there is no sidechain filter, both
+of which could be appended later and neither of which can be inserted. See
+`modules/fetcomp/AGENTS.md` and `docs/fet-comp/`.
 
 **BMO Linger** is the reverb: an 8-line FDN with per-line absorbent filters
 behind an image-source early-reflection generator, and the **second module in
@@ -199,6 +217,15 @@ returned Linger and Foyer clear, Afterglow adjacent and crowded, and Haunt a
 direct clash with a currently-sold hardware reverb pedal. The working title
 "B Verb" was set aside because it echoes a reference product's own name one
 letter apart, which is what the no-third-party-names rule exists to prevent.
+
+Reserved for later products (not built, do not reuse): `Bdyn` dynamics,
+`Bovr` overdrive, `Bcmp` compressor, `Bdly` delay.
+
+**`Bdes` is not on that list and must not go back on it.** The BMO FET change
+re-listed it as reserved "de-esser" while the table two sections up already
+gives it to BMO Defang; the table is right. Three codes have now been spent off
+the reserved list -- `Bdes`, `Bfet`, `Brvb` -- and the four above are what is
+left.
 
 ## BMO EQ and BMO DEQ — settle BMO EQ's name
 
@@ -334,6 +361,54 @@ there are distinguishable ones.
 | BMO Linger | `#e694e0` mauve-orchid | 304.4° | 6.23 | 1.89 |
 | BMO Tune RT (not in the rack) | `#b6e35d` lime | 80.1° | **9.10** | **1.29** |
 | LTV Comp -- **unsigned, and on the LTV ground** | `#a2a8ff` periwinkle | 236.1° | 6.17 | 1.91 |
+| BMO FET -- **an owner-approved exception to both rules below** | `#5489d4` deep blue | 215.2° | **3.80** | **3.09** |
+
+**BMO FET's blue breaks the hue rule and both contrast bands, knowingly.** It
+is 16.4° from the utility azure and 20.9° from the periwinkle, against a table
+whose worst shipped separation is the teal's 26.8° -- itself recorded below as
+a known objection -- and whose best is the lavender's 64.4°. It measures 3.80:1
+on the dark plate against a shipped band of 5.87-7.19, and 3.09:1 on the pale
+one against 1.64-2.00; it is the only accent in the suite that is *too dark* on
+the dark plate and *too heavy* on the pale one.
+
+**No blue could have passed.** The blue band is bracketed by the azure at
+198.8° and the periwinkle at 236.1°, a gap of 37.3°, so the best any blue can
+reach is about 18.6° to each side -- worse than the teal. Reaching further,
+the 236.1°-271.6° gap has a midpoint near 254° that is 17.8° from each side and
+also fails. Six candidates were drawn on both plates in a colour mock on
+AURORA; the one that passed everything, `#e694e0` at 304.4°, was refused for
+not being blue. Frosty took `#5489d4` after reviewing that mock, as an explicit
+exception.
+
+**Two figures in the paragraph above were true when BMO FET was written and are
+not true now**, because BMO Linger landed at 304.4° in the same window. The
+mauve `#e694e0` the FET mock "refused for not being blue" is no longer a colour
+anything could take -- it is BMO Linger's, spent 2026-09-21, and the row is in
+the table. And "the lavender's 64.4°" was the 271.6°-336.0° gap measured with
+nothing in it; Linger sits in that gap now, so the lavender's separation is
+32.8° to Linger and 35.5° to the periwinkle. Neither changes the decision --
+`#5489d4` is an approved exception on hue and on both contrast bands, and no
+blue was ever admissible -- but the two numbers are historical and should not be
+re-measured off this page.
+
+What it costs, so that none of it is rediscovered as new: the knob cap reads
+3.80:1 on the dark plate with its pointer at 3.97:1 on top, both outside the
+stated ranges, so the cap reads as a dark disc rather than as the module's
+colour there; on the pale plate `faceOf` washes it to `#a9c4e9` at 1.55:1, just
+under the 1.64 floor. **Rendered, the dark cap is better than that figure
+suggests** — it reads as a solid mid-blue against `#2e2e32` and is plainly the
+module's colour, not a dark disc; 3.80:1 is low for *text* and is a cap. Accent-coloured *small text* is kept off it -- legends
+and captions take `text1`/`text2` -- because `accentTextOn` has to step E
+further than any shipped accent and the result reads as a different blue from
+the arcs beside it. The active switch needs no special case: `onAccentOf` sees
+E's relative luminance at 0.245, above its 0.18 pivot, and darkens, giving a
+near-black label at 5.91:1 on the fill. **No test fails** -- there is no
+contrast or palette assertion anywhere in `tests/` -- so the exception costs
+nothing in CI and needs no suppression, which also means the render pass is the
+only thing that will catch a problem. The figures were computed by the WCAG
+formula on AURORA and confirmed against real renders with
+`tools/inspect/Inspect.exe ratio`; the candidate table and the reasoning are
+`docs/fet-comp/11-integration-and-test-plan.md` §4c.
 
 **BMO Defang's coral passes both rules, with no exception and no near-miss.**
 Hue 3.8° sits in the red gap, 27.8° from BMO EQ's pink and 28.0° from the

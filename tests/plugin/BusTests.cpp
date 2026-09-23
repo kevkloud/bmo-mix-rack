@@ -338,17 +338,30 @@ const Golden kDefaults[]
       -18.0078987379, 0.237040400505,
       -18.0000001899, 0.237879320979, -17.9999997391, 0.239933893085,
       -18.0078987379, 0.237040400505, -18.0078987379, 0.237040400505 },
+    // BMO FET, captured on AURORA on 2026-09-22 when it merged into this
+    // branch. The one row here that is not near -18: BMO FET's placeholder is
+    // not a wire -- it compresses at its defaults, so it lands about 2.6 dB
+    // down, and it is the only new module so far whose arrival is visible in
+    // its own row.
+    { "fetcomp",
+      -20.6458693267, 0.178372368217,
+      -20.7609701573, 0.175070211291, -20.7124848796, 0.176500663161,
+      -20.6458693267, 0.178372368217, -20.6458693267, 0.178372368217 },
     // BMO Linger. **A wire, and that is the whole of what this row says
     // today**: its DSP is a marked placeholder, so the numbers are the
     // unaltered input and they are LTV Comp's, BMO DEQ's and the wire's alike.
     // They will move when the engine lands, and the row is here so that the
     // commit which moves them has to say so rather than quietly adding one.
-    // The rack rows below are unchanged by *its* arrival, which is the check
-    // that the pass-through really does pass through. They did move when BMO
-    // Defang joined the registry, because the rack walks every registered
-    // module and the chain is a module longer; every other row above is
-    // byte-identical to 8fed835, which is what says the move is the new
-    // module and nothing else.
+    //
+    // **The rack rows below did not move for BMO FET or for BMO Linger, and
+    // the reason is the slot count, not the DSP.** `RackProcessor::kSlots` is
+    // 8 and `makeFullRack` adds the registry in order, so the chain stops at
+    // BMO Defang; the ninth and tenth registered modules never enter it. They
+    // did move when Defang joined, because Defang took the eighth slot. An
+    // earlier version of this note read the unchanged rack rows as proof that
+    // BMO Linger's placeholder passes signal through -- it is not, and no row
+    // in this file tests that. Every row above is byte-identical to 8fed835
+    // except the three captured since, which is what says nothing else moved.
     { "reverb",
       -18.0000001899, 0.237879320979,
       -18.0000001899, 0.237879320979, -17.9999997391, 0.239933893085,
@@ -397,6 +410,10 @@ const Golden kSwept[]
       -18.1231178049, 0.234146103263,
       -18.0548834769, 0.236055493355, -18.0545154892, 0.239385798573,
       -18.1231178049, 0.234146103263, -18.1231178049, 0.234146103263 },
+    { "fetcomp",
+      -14.1968014623, 0.385867774487,
+      -14.3174488279, 0.38244971633, -14.2261054655, 0.383085817099,
+      -14.1968014623, 0.385867774487, -14.1968014623, 0.385867774487 },
     // Identical to its defaults row, and it should be: at 0.63 of normalised
     // every one of BMO Linger's thirty parameters is somewhere else, and a
     // placeholder does not care. This is the row that will move furthest.

@@ -18,14 +18,22 @@ namespace bmo::ui
 class PlainKnob final : public juce::Component
 {
 public:
-    /** Leave `captionColour` alone and the caption is derived from `accent`
-        against the current plate -- `accentTextOn`, so it reads at 4.5:1 and
-        it is the module's own colour.
+    /** Leave `captionColour` alone and the caption is the colour system the
+        knob belongs to, **as it stands and not stepped for contrast** -- the
+        module's accent for a character knob, the shared azure for a utility
+        one.
 
         Until 0.2.2 it defaulted to the shared track azure, which put every
         caption in the suite at 1.95:1 and, worse, put INPUT and DRIVE in blue
         underneath an orange knob. BMO Opto had already worked around both by
-        hardcoding its own hex. Pass a colour here only to override that. */
+        hardcoding its own hex. Pass a colour here only to override that.
+
+        **This said `accentTextOn` and "reads at 4.5:1" until 2026-09-20, and
+        had been wrong since 0.2.3**, when the stepped colour moved to section
+        legends and the raw one stayed here. The cost is in the .cpp beside the
+        code that pays it; it was Frosty's call on a render. The stale promise
+        sent the BMO FET spec pack looking for a fault that was a decision, so
+        it is corrected rather than left as "roughly what happens". */
     PlainKnob (juce::RangedAudioParameter&, const juce::String& caption,
                Knob::Style style = Knob::Style::utility, float faceScale = 0.5f,
                juce::Colour accent = tokens().accent,
@@ -59,6 +67,11 @@ public:
     /** L and R at the ends of the track instead of minus and plus.
         Forwards to Knob::setEndMarks; see it for why. */
     void setEndMarks (Knob::EndMarks);
+
+    /** Discrete position marks instead of the dotted track and its end
+        symbols, with every nth one numbered. Forwards to Knob::setStepMarks;
+        see it for why. */
+    void setStepMarks (int count, int labelEvery = 0);
 
     /** Re-colours the knob and, unless a caption colour was passed in, its
         caption with it. For a module whose colour depends on its own state --
@@ -784,6 +797,50 @@ public:
         constructed: a needle meter needs a dark one whatever the mode. */
     void setColours (juce::Colour accent, juce::Colour hot) noexcept;
 
+    /** How opaque the bezel is drawn, 0..1. **Opt-in, and it defaults to the
+        0.7 this has always drawn at**, so every module that does not call it
+        renders byte for byte as it did.
+
+        BMO FET is why. It shows its voicing as the bezel -- accent blue for
+        Blue, literal black for Black -- and the two states have to be told
+        apart against `meterFace` #464649, which is the same colour in both
+        appearances. Measured off real renders on AURORA, the pair separates by
+        3.88:1 at the stock 0.7 and by 5.91:1 at full alpha
+        (docs/fet-comp/11-integration-and-test-plan.md 4b predicts 3.88 and
+        5.13; the second was the pessimistic one). Which of those ships is a
+        call taken on renders, so both had to be renderable, and the 0.7
+        literal in `paint` could not simply move.
+
+        Clamped rather than asserted: a bezel is decoration, and a caller that
+        hands in 1.4 should get a solid frame, not a failed build. */
+    void setBezelAlpha (float alpha) noexcept;
+
+    /** How thick the bezel is stroked, in pixels. 1.5 is what this class has
+        drawn since it existed, and is the default.
+
+        Opt-in for the same reason as `setBezelAlpha`: on BMO FET the bezel is
+        not decoration but the one place the voicing is shown, and once the
+        meter moved to the head of that panel a 1.5 px frame was too slight to
+        carry it. Every other meter in the suite keeps 1.5 and renders byte for
+        byte as it did.
+
+        Clamped, not asserted -- a bezel is decoration elsewhere, and a caller
+        handing in nonsense should get a frame, not a failed build. */
+    void setBezelThickness (float pixels) noexcept;
+
+    /** Whether the bezel is stroked again on top of the needle.
+
+        The needle is drawn last so that it reads before anything else on the
+        face. On a meter whose frame is thin that is right. On one whose frame
+        carries meaning and is thick, the needle crossing it at full sweep cuts
+        the frame in two, and the frame is what the eye is being asked to read
+        -- so the bezel goes back over it. Hardware does the same thing by
+        putting the needle behind the glass and the bezel in front of it.
+
+        False is what this class has always done, and what every meter but BMO
+        FET's still does. */
+    void setBezelInFront (bool) noexcept;
+
     /** One control point on the printed scale: a value in the mode's own unit
         (dB relative to the VU reference, or dB of gain reduction), where it
         sits across the needle's sweep, 0..1, and whether it is numbered.
@@ -825,6 +882,19 @@ private:
     static constexpr float kVuReference = -18.0f;
     static constexpr float kGrRangeDb   = 24.0f;
     juce::Colour accentColour, hotColour;
+
+    /** The alpha the bezel is stroked at. 0.7 is what this class has drawn at
+        since it existed; see setBezelAlpha for the one module that moves it. */
+    static constexpr float kDefaultBezelAlpha = 0.7f;
+    float bezelAlpha = kDefaultBezelAlpha;
+
+    /** The width the bezel is stroked at, and whether it is stroked a second
+        time over the needle. Both are what this class has always drawn; see
+        setBezelThickness and setBezelInFront for the one module that moves
+        them. */
+    static constexpr float kDefaultBezelThickness = 1.5f;
+    float bezelThickness = kDefaultBezelThickness;
+    bool  bezelInFront   = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DynamicsMeter)
 };

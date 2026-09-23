@@ -5,4 +5,4 @@ bmo_add_plugin(BmoMixRack
     CATEGORIES   "Fx"
     SOURCES      ${CMAKE_CURRENT_SOURCE_DIR}/main.cpp
                  ${CMAKE_CURRENT_SOURCE_DIR}/Registry.cpp
-    LIBRARIES    bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp bmo_deesser bmo_reverb)
+    LIBRARIES    bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp bmo_deesser bmo_fetcomp bmo_reverb)

@@ -216,6 +216,12 @@ void PlainKnob::setEndMarks (Knob::EndMarks m)
     repaint();
 }
 
+void PlainKnob::setStepMarks (int count, int labelEvery)
+{
+    knob.setStepMarks (count, labelEvery);
+    repaint();
+}
+
 //==============================================================================
 Fader::Fader (juce::RangedAudioParameter& param, const juce::String& captionText,
               juce::Colour accent, juce::Colour captionColourIn)
@@ -1117,6 +1123,41 @@ void DynamicsMeter::setColours (juce::Colour accent, juce::Colour hot) noexcept
     repaint();
 }
 
+void DynamicsMeter::setBezelAlpha (float alpha) noexcept
+{
+    const auto clamped = juce::jlimit (0.0f, 1.0f, alpha);
+
+    if (clamped == bezelAlpha)
+        return;
+
+    bezelAlpha = clamped;
+    repaint();
+}
+
+void DynamicsMeter::setBezelThickness (float pixels) noexcept
+{
+    // Upper bound is the face's own corner radius doubled: past that the
+    // stroke closes over the rounded corners and the frame stops being a
+    // frame. Lower bound is a hairline rather than zero -- a caller that wants
+    // no bezel sets the alpha, which is what that control is for.
+    const auto clamped = juce::jlimit (0.5f, 8.0f, pixels);
+
+    if (clamped == bezelThickness)
+        return;
+
+    bezelThickness = clamped;
+    repaint();
+}
+
+void DynamicsMeter::setBezelInFront (bool shouldBeInFront) noexcept
+{
+    if (shouldBeInFront == bezelInFront)
+        return;
+
+    bezelInFront = shouldBeInFront;
+    repaint();
+}
+
 void DynamicsMeter::timerCallback()
 {
     float level = 0.0f;
@@ -1281,6 +1322,11 @@ void DynamicsMeter::paint (juce::Graphics& g)
     // Half the width of the hub the needle turns on.
     constexpr float kHubRadius = 3.5f;
 
+    /** The corner radius the bezel's own path is built on. The face is filled
+        to a radius derived from this and the stroke width, so that the two
+        share one outer silhouette at any bezel weight -- see paint(). */
+    constexpr float kFaceRadius = 4.0f;
+
     // A 124 degree sweep is limited by width, never by height: the arc ends
     // reach sin(62) = 0.88 of the radius sideways but only 0.47 of it
     // downwards. Taking the radius from jmin(width/2, height) therefore sized
@@ -1346,10 +1392,47 @@ void DynamicsMeter::paint (juce::Graphics& g)
     // Face plate: dark, so the light ink on it reads. The bezel stays the
     // module's accent -- semantic colour on the frame, luminance contrast on
     // everything that has to be read.
+    // **The face and the frame have to share one silhouette.**
+    //
+    // The bezel is stroked on a path inset by half its own width, so its outer
+    // edge lands on `bounds` with a corner radius of kFaceRadius + half the
+    // width. The face is filled to `bounds` too -- and a *smaller* corner
+    // radius is a squarer corner, which reaches further into the corner than a
+    // rounder one. Fill at a flat 4 and the face pokes out past the frame at
+    // all four corners.
+    //
+    // At the suite's 1.5 px the overhang is a fifth of a pixel and has never
+    // been seen. At BMO FET's 4 px it is a visible grey speck at each corner,
+    // outside a black frame and against a dark plate, which is what this
+    // corrects.
+    //
+    // **Derived from the change in thickness, not from the thickness.** The
+    // geometrically exact fill radius is kFaceRadius + half the stroke width,
+    // which at the default works out at 4.75 against the 4.0 this has always
+    // filled -- correct, and it moves every shipped meter's corners. Taking
+    // the *difference* from the default instead leaves 1.5 px filling exactly
+    // 4.0 as before, and carries the same fifth-of-a-pixel overhang up to any
+    // weight rather than letting it grow with the frame. BMO Opto's three
+    // hashes hold, which is the constraint this class works under.
+    const auto faceRadius = kFaceRadius + (bezelThickness - kDefaultBezelThickness) * 0.5f;
+
     g.setColour (t.meterFace);
-    g.fillRoundedRectangle (bounds, 4.0f);
-    g.setColour (accentColour.withAlpha (0.7f));
-    g.drawRoundedRectangle (bounds.reduced (0.75f), 4.0f, 1.5f);
+    g.fillRoundedRectangle (bounds, faceRadius);
+
+    // 0.7 and 1.5 px unless a module asked for something else -- see
+    // setBezelAlpha and setBezelThickness. Both literals moved into members
+    // rather than out of this line, and the stroke is inset by half its own
+    // width so that thickening it grows inwards over the face rather than
+    // outwards past the bounds it was given. At 1.5 that inset is the 0.75
+    // this always used, so a meter nobody has spoken to strokes exactly the
+    // frame it always did.
+    const auto strokeBezel = [&]
+    {
+        g.setColour (accentColour.withAlpha (bezelAlpha));
+        g.drawRoundedRectangle (bounds.reduced (bezelThickness * 0.5f), kFaceRadius, bezelThickness);
+    };
+
+    strokeBezel();
 
     // Scale ticks and numbers. Split into two paths so the 0 VU and above
     // zone -- hotColour, a classic VU meter's red printed in the module's
@@ -1398,6 +1481,11 @@ void DynamicsMeter::paint (juce::Graphics& g)
     g.setColour (t.meterInk);
     g.drawLine (juce::Line<float> (pivot, tip), 2.4f);
     g.fillEllipse (juce::Rectangle<float> (kHubRadius * 2.0f, kHubRadius * 2.0f).withCentre (pivot));
+
+    // Last of all, and only where a module asked for it: the frame again, over
+    // the needle that would otherwise cut it. See setBezelInFront.
+    if (bezelInFront)
+        strokeBezel();
 }
 
 } // namespace bmo::ui

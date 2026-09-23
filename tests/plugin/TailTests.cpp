@@ -220,8 +220,8 @@ int main()
         check (ringing == 1,
                "exactly one registered module is exempt from the zero, got "
                    + juce::String (ringing));
-        check (bmo::products::registry().size() == 9,
-               "the registry still holds nine modules, got "
+        check (bmo::products::registry().size() == 10,
+               "the registry still holds ten modules, got "
                    + juce::String ((int) bmo::products::registry().size()));
     }
 

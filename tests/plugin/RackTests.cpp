@@ -69,6 +69,11 @@ namespace
         // modules/deesser/params.h. The order is the table in
         // docs/deesser/11-integration-and-test-plan.md section 3.
         { "deesser", { "freq", "q", "thresh", "range", "shape" } },
+        // BMO FET. ATTACK and RELEASE are knob positions, 1..7 with 7 fastest,
+        // not milliseconds -- see modules/fetcomp/params.h. The order is the
+        // table in docs/fet-comp/11-integration-and-test-plan.md section 2.
+        { "fetcomp", { "input", "output", "attack", "release", "ratio", "mix",
+                       "voicing", "oversampling" } },
         // BMO Linger. **Thirty parameters against a slot's thirty-two lanes**,
         // so the whole schema gets a lane, none of BMO DEQ's SlotOverflow
         // machinery is needed, and two are left over. It was thirty with two
@@ -231,8 +236,8 @@ int main()
         auto rack = createRack();
         const auto& registry = rack->getRegistry();
 
-        check (registry.size() == 9,
-               "the registry holds util, eq, sat, opto, dim, deq, vcomp, deesser and reverb");
+        check (registry.size() == 10,
+               "the registry holds util, eq, sat, opto, dim, deq, vcomp, deesser, fetcomp and reverb");
 
         // A bank is a module's host lanes, so it stops at 32 even if the
         // module does not. Past that, its golden schema test pins the order.
@@ -268,7 +273,7 @@ int main()
     // `ModuleDsp::analyser()` returns null by default and BMO DEQ was its only
     // overrider until BMO Linger's EQ page got a spectrum on 2026-09-21. A
     // virtual with a default is exactly the kind of change that looks free and
-    // is only free if nobody else quietly picks it up, so the six that have no
+    // is only free if nobody else quietly picks it up, so the seven that have no
     // tap are named here rather than assumed.
     //
     // Through the rack, one slot at a time, because that is where a wrong
@@ -281,7 +286,7 @@ int main()
 
         const Tapped kTaps[] {
             { "util", false }, { "eq", false }, { "sat", false }, { "opto", false },
-            { "dim", false }, { "ltvcomp", false },
+            { "dim", false }, { "ltvcomp", false }, { "fetcomp", false },
             // BMO DEQ's is post-EQ; BMO Linger's is at the point the Reverb EQ
             // acts on, and shows the dry input until there is a reverb under
             // it (modules/reverb/dsp/DspCore.h, `eqAnalyser`); BMO Defang's is

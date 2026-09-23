@@ -3,6 +3,7 @@
 #include "modules/deq/Module.h"
 #include "modules/dim/Module.h"
 #include "modules/eq/Module.h"
+#include "modules/fetcomp/Module.h"
 #include "modules/opto/Module.h"
 #include "modules/reverb/Module.h"
 #include "modules/sat/Module.h"
@@ -23,6 +24,7 @@ const std::vector<const ModuleDef*>& registry()
         &deq::module(),
         &vcomp::module(),
         &deesser::module(),
+        &fetcomp::module(),
         &reverb::module(),
     };
 

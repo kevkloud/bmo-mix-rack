@@ -1,7 +1,7 @@
 // Renders a product's editor to a PNG without a display, so a layout change
 // can be reviewed in a pull request rather than described in one.
 //
-//   snapshot <eq|sat|util|opto|dim|deq|ltvcomp|deesser|reverb|rack> out.png [width height] [param=value ...]
+//   snapshot <eq|sat|util|opto|dim|deq|ltvcomp|deesser|fetcomp|reverb|rack> out.png [width height] [param=value ...]
 //
 // For the rack, "chain=util,eq,sat,opto" sets the modules and "N.id=value"
 // sets a parameter of the module in slot N (1-based), e.g. 2.mid_gain=4.
@@ -37,13 +37,15 @@
 // Opto takes "ui.meter=IN|GR|OUT", which is the only way to render its VU in
 // anything but OUT, and BMO Defang takes that plus "ui.listen=on|off", which
 // is the only way to render its momentary listen switch engaged -- it is held
-// by a mouse button and has no parameter behind it, by decision. Offered to
-// every panel; refused by all of them is fatal.
+// by a mouse button and has no parameter behind it, by decision. BMO FET
+// takes "ui.bezel=stock|full" for the border-alpha gate. Offered to every
+// panel; refused by all of them is fatal.
 
 #include "products/deesser/Product.h"
 #include "products/deq/Product.h"
 #include "products/dim/Product.h"
 #include "products/eq/Product.h"
+#include "products/fetcomp/Product.h"
 #include "products/opto/Product.h"
 #include "products/reverb/Product.h"
 #include "products/vcomp/Product.h"
@@ -74,8 +76,10 @@ namespace
         if (product == "deq")  return createDeq();
         if (product == "ltvcomp") return createVcomp();
         // By the module's id rather than its display name, as every row here
-        // is: BMO Defang is `deesser` and BMO Linger is `reverb`.
+        // is: BMO Defang is `deesser`, BMO FET is `fetcomp` and BMO Linger is
+        // `reverb`.
         if (product == "deesser") return createDeesser();
+        if (product == "fetcomp") return createFetcomp();
         if (product == "reverb") return createReverb();
         if (product == "rack") return createRack();
         return nullptr;
@@ -235,7 +239,7 @@ int main (int argc, char** argv)
 
     if (argc < 3)
     {
-        std::cerr << "usage: snapshot <eq|sat|util|opto|dim|deq|ltvcomp|deesser|reverb|rack> out.png [width height] [param=value ...]\n";
+        std::cerr << "usage: snapshot <eq|sat|util|opto|dim|deq|ltvcomp|deesser|fetcomp|reverb|rack> out.png [width height] [param=value ...]\n";
         return 2;
     }
 
@@ -680,6 +684,18 @@ int main (int argc, char** argv)
     // PngOut.h, not an inline createOutputStream: writing over an existing
     // render used to append rather than replace, and tests/tools/SnapshotIoTests
     // now holds that line. See the header for what it cost.
+    //
+    // The same fault was fixed twice, independently -- inline here on `main` for
+    // BMO FET, and behind this seam on BMO Linger's branch. One survives, and it
+    // is the seam, because it is the one a test can call: the inline version was
+    // `deleteFile()` alone, this one keeps the truncate behind it as well, and
+    // `snapshot_io` is the only regression test the bug has.
+    //
+    // Carried over from the inline fix, because it is the part that is easy to
+    // forget: this bit every module, not just BMO FET, and it bit hardest
+    // exactly when someone was iterating -- first render correct, every one
+    // after it stale. **Any recorded hash taken from a re-rendered file before
+    // this landed is suspect.**
     if (! bmo::snapshot::writePng (out, image))
     {
         std::cerr << "could not write " << out.getFullPathName() << '\n';

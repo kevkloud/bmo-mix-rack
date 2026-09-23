@@ -86,9 +86,10 @@ void SingleModuleProcessor::releaseResources()
 
 bool SingleModuleProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
 {
-    // Mono, stereo, or mono in and stereo out. See core/product/BusLayouts.h,
-    // which the rack answers from as well.
-    return buses::isSupported (layouts);
+    // Mono or stereo, and mono in to stereo out only for a module that opts in
+    // (ModuleDef::acceptsMonoInput). See core/product/BusLayouts.h, which the
+    // rack answers from as well.
+    return buses::isSupported (layouts, def.acceptsMonoInput);
 }
 
 void SingleModuleProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)

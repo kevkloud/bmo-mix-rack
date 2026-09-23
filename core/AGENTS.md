@@ -79,6 +79,16 @@ rack/     SlotParameter (one generic host parameter, remapped live),
   stamp the type's block over the levels the session had just restored. The
   field is null for every module but BMO Linger. A second one has
   to argue for itself the way `modules/reverb/AGENTS.md` argues for the first.
+- **Mono in, stereo out is opt-in per module** (`ModuleDef::acceptsMonoInput`,
+  Frosty's decision on 2026-09-23). The bus contract is one function,
+  `product/BusLayouts.h`, which both processors answer from: mono to mono and
+  stereo to stereo for everyone, stereo to mono for no one, and mono to stereo
+  only for a module that sets the flag -- **BMO Linger alone** -- or for the
+  rack when any module it can host does, because a host fixes the layout
+  before there is a chain. Where the layout is in use the input is duplicated
+  into both channels, never cleared. The flag is the last field in
+  `ModuleDef` and false for every other module, which keeps each of them on
+  exactly the layouts it had before; `bus_tests` holds the table per product.
 - `SlotParameter::assign` keeps a pointer into the module's static
   `specs()` vector. Never hand it a temporary.
 - A slot's `SlotOverflow` is an `AudioProcessor` only so that its

@@ -33,6 +33,14 @@
     against case C's constants: duplication means the two must agree, so the
     new path is pinned to a number the old code produced.
 
+    **Since 2026-09-23 the layout is opt-in per module** (Frosty's decision;
+    `ModuleDef::acceptsMonoInput`), and BMO Linger is the only module that
+    opts in. So case D runs for BMO Linger and for the rack, whose registry
+    holds it; for every other module the layout must be refused, which puts
+    each of them back on exactly the layouts it had before the conversion
+    existed. Cases A, B and C are untouched by the opt-in, and so are their
+    constants.
+
     Regenerate the tables with:  bus_tests --print
 */
 
@@ -252,6 +260,36 @@ void applySetting (bmo::ParamSet& params, Setting setting)
         auto& p = params.param (i);
         p.setValueNotifyingHost (setting == Setting::defaults ? p.getDefaultValue() : 0.63f);
     }
+}
+
+//== A wire that opts in ======================================================
+/** Passes its input through untouched and opts in to mono -> stereo, so the
+    widening in SingleModuleProcessor can be checked sample for sample without
+    depending on any shipped module either being a wire or opting in. */
+struct WireDsp final : bmo::ModuleDsp
+{
+    void prepare (double, int, int) override {}
+    void reset() override {}
+    void setParams (const float*, int) override {}
+    void process (float* const*, int, int) override {}
+    int latencyForParams (const float*, int) const override { return 0; }
+};
+
+const bmo::ModuleDef& wireModule()
+{
+    static const bmo::ParamSpecs specs { bmo::ParamSpec::floatParam ("unused", "Unused", 0.0f, 1.0f, 0.0f, 1.0f) };
+    static const std::vector<bmo::FactoryPreset> presets { { "Init", {} } };
+
+    static const bmo::ModuleDef def {
+        "wire", "Wire", 1, 160, juce::Colours::grey, specs, presets,
+        [] { return std::make_unique<WireDsp>(); },
+        {},         // no panel: nothing here opens an editor
+        0,          // one width
+        nullptr,    // BMO line
+        nullptr,    // no ParamLink
+        true };     // acceptsMonoInput
+
+    return def;
 }
 
 std::unique_ptr<bmo::SingleModuleProcessor> makeProduct (const bmo::ModuleDef& def, Setting setting)
@@ -491,15 +529,20 @@ void checkDuplicated (const Render& r, const Golden& g, const juce::String& wher
 }
 
 /** Every layout a product accepts, written out. A product that gains or loses
-    one fails here. */
-void checkAcceptedLayouts (juce::AudioProcessor& proc, const juce::String& name)
+    one fails here.
+
+    Mono -> stereo is **opt-in per module** (`ModuleDef::acceptsMonoInput`,
+    Frosty's decision on 2026-09-23), so it is the one row that differs by
+    product: a module that did not opt in must refuse it, which is the layout
+    set it had before the conversion existed. */
+void checkAcceptedLayouts (juce::AudioProcessor& proc, const juce::String& name, bool monoToStereo)
 {
     check (proc.checkBusesLayoutSupported (layoutOf (kMono, kMono)),
            name + " accepts mono -> mono");
     check (proc.checkBusesLayoutSupported (layoutOf (kStereo, kStereo)),
            name + " accepts stereo -> stereo");
-    check (proc.checkBusesLayoutSupported (layoutOf (kMono, kStereo)),
-           name + " accepts mono -> stereo");
+    check (proc.checkBusesLayoutSupported (layoutOf (kMono, kStereo)) == monoToStereo,
+           name + (monoToStereo ? " accepts mono -> stereo" : " refuses mono -> stereo -- it has not opted in"));
 
     check (! proc.checkBusesLayoutSupported (layoutOf (kStereo, kMono)),
            name + " refuses stereo -> mono");
@@ -524,10 +567,26 @@ int main (int argc, char** argv)
 
     //== The accepted-layout table ============================================
     {
-        for (const auto* def : bmo::products::registry())
-            checkAcceptedLayouts (*makeProduct (*def, Setting::defaults), def->name);
+        bool anyAcceptsMono = false;
 
-        checkAcceptedLayouts (*bmo::products::createRack(), "the rack");
+        for (const auto* def : bmo::products::registry())
+        {
+            // Written out rather than read off the def, which is the thing
+            // under test: BMO Linger opts in and nothing else does.
+            const auto optsIn = juce::String (def->id) == "reverb";
+
+            check (def->acceptsMonoInput == optsIn,
+                   juce::String (def->name) + (optsIn ? " opts in to mono -> stereo"
+                                                      : " does not opt in to mono -> stereo"));
+
+            checkAcceptedLayouts (*makeProduct (*def, Setting::defaults), def->name, optsIn);
+            anyAcceptsMono = anyAcceptsMono || optsIn;
+        }
+
+        // The rack's layout is fixed before it holds a chain, so it offers
+        // what any module it can host could use (RackProcessor.cpp).
+        check (anyAcceptsMono, "at least one registered module opts in, so the rack offers mono -> stereo");
+        checkAcceptedLayouts (*bmo::products::createRack(), "the rack", anyAcceptsMono);
     }
 
     //== Nothing that already worked moved ====================================
@@ -539,7 +598,7 @@ int main (int argc, char** argv)
         const auto  count = setting == Setting::defaults ? std::size (kDefaults) : std::size (kSwept);
         const juce::String tag { setting == Setting::defaults ? " (defaults)" : " (swept)" };
 
-        const auto run = [&] (const char* id, auto&& make)
+        const auto run = [&] (const char* id, bool monoToStereo, auto&& make)
         {
             const auto* g = goldenFor (table, count, id);
 
@@ -556,25 +615,35 @@ int main (int argc, char** argv)
             checkDuplicated  (render (*make(), 2, 2, signalA(), signalA()), *g,
                               where + " stereo-in duplicate");
 
-            // D: the new layout, pinned to C's pre-change numbers.
-            checkDuplicated  (render (*make(), 1, 2, signalA(), signalB()), *g,
-                              where + " mono -> stereo");
+            // D: the new layout, pinned to C's pre-change numbers -- where it
+            // is offered. A module that has not opted in must refuse it, so
+            // the render never runs.
+            if (monoToStereo)
+                checkDuplicated (render (*make(), 1, 2, signalA(), signalB()), *g,
+                                 where + " mono -> stereo");
+            else
+                check (! render (*make(), 1, 2, signalA(), signalB()).ran,
+                       where + ": mono -> stereo is refused, so nothing renders");
         };
 
         for (const auto* def : bmo::products::registry())
-            run (def->id, [&] { return makeProduct (*def, setting); });
+            run (def->id, def->acceptsMonoInput, [&] { return makeProduct (*def, setting); });
 
-        run ("rack", [&] { return makeFullRack (setting); });
+        // The rack offers the layout whatever its chain holds -- its registry
+        // has a module that opts in -- so D runs on it. (The full rack stops
+        // at eight slots, before BMO Linger; the rack's answer does not care.)
+        run ("rack", true, [&] { return makeFullRack (setting); });
     }
 
     //== The new layout, on its own terms =====================================
-    // BMO Util at its defaults is a wire, so a mono -> stereo instance of it
-    // has one correct output and it is written down here rather than measured:
-    // both channels carry the input sample for sample.
+    // A wire that opts in has one correct output on a mono -> stereo layout,
+    // and it is written down here rather than measured: both channels carry
+    // the input sample for sample. This was BMO Util at its defaults until the
+    // layout became opt-in; Util does not opt in, so the wire is a module of
+    // this file's own that does, and the thing under test is still only
+    // SingleModuleProcessor's widening.
     {
-        auto proc = makeProduct (*bmo::products::registry().front(), Setting::defaults);
-        check (juce::String (bmo::products::registry().front()->id) == "util",
-               "the wire test is on BMO Util");
+        auto proc = makeProduct (wireModule(), Setting::defaults);
 
         check (proc->setBusesLayout (layoutOf (kMono, kStereo)),
                "a mono -> stereo layout can be set");

@@ -212,6 +212,13 @@ slot's 32 host lanes with two to spare, so it needs none of BMO DEQ's
 `SlotOverflow` machinery. Two is all there is, though, and
 `modules/reverb/AGENTS.md` is where a thirty-first control has to be argued.
 
+It is also **the one product that offers a host mono in, stereo out**. The
+layout is opt-in per module (`ModuleDef::acceptsMonoInput`, Frosty's decision
+on 2026-09-23): a reverb on a mono source is the case it exists for, and every
+other product keeps the mono-to-mono and stereo-to-stereo pair it shipped with.
+BMO Mix Rack offers it too, because a module it can host does; `core/AGENTS.md`
+has the contract.
+
 Five names were considered. A collision scan -- not a trademark opinion --
 returned Linger and Foyer clear, Afterglow adjacent and crowded, and Haunt a
 direct clash with a currently-sold hardware reverb pedal. The working title

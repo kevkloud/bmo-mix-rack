@@ -475,7 +475,19 @@ bool RackProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
     // widening happens once, at its input, ahead of slot 1: every slot still
     // sees the same channel count as every other, and no module has to know
     // that the instance is fed from a single channel.
-    return buses::isSupported (layouts);
+    //
+    // **Mono in to stereo out is offered if any module the rack can host opts
+    // in** (ModuleDef::acceptsMonoInput), which today means BMO Linger. A host
+    // fixes the layout before there is a chain and does not ask again when the
+    // chain changes, so the answer cannot depend on what is loaded; the rack
+    // offers what its registry could use. A module that did not opt in and is
+    // loaded into such a rack is handed the duplicated pair BusLayouts.h
+    // describes, which is the signal a stereo instance fed the same input on
+    // both sides has always had.
+    const auto anyAcceptsMono = std::any_of (registry.begin(), registry.end(),
+                                             [] (const ModuleDef* d) { return d->acceptsMonoInput; });
+
+    return buses::isSupported (layouts, anyAcceptsMono);
 }
 
 void RackProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)

@@ -11,14 +11,21 @@
 namespace bmo::buses
 {
 
-/** Mono, stereo, and the one conversion between them: mono in, stereo out.
+/** Mono, stereo, and -- only where the caller opts in -- the one conversion
+    between them: mono in, stereo out.
 
-    Stereo in / mono out is *not* accepted. Folding is a mix decision -- which
-    sum, at what gain -- and BMO Util is the module that makes it, on the
-    panel, where a user can see it. A processor doing it silently in
+    **The conversion is opt-in per module** (`ModuleDef::acceptsMonoInput`,
+    Frosty's decision on 2026-09-23). Without it the answer is exactly what
+    both processors gave before the conversion existed: mono to mono or stereo
+    to stereo, nothing else. The standalone product passes its module's flag;
+    the rack passes whether any module it can host has one.
+
+    Stereo in / mono out is *not* accepted by anyone. Folding is a mix decision
+    -- which sum, at what gain -- and BMO Util is the module that makes it, on
+    the panel, where a user can see it. A processor doing it silently in
     `processBlock` would be a mixer nobody asked for.
 */
-inline bool isSupported (const juce::AudioProcessor::BusesLayout& layouts)
+inline bool isSupported (const juce::AudioProcessor::BusesLayout& layouts, bool monoInStereoOut)
 {
     const auto& in  = layouts.getMainInputChannelSet();
     const auto& out = layouts.getMainOutputChannelSet();
@@ -29,7 +36,8 @@ inline bool isSupported (const juce::AudioProcessor::BusesLayout& layouts)
     if (in == out)
         return true;
 
-    return in == juce::AudioChannelSet::mono() && out == juce::AudioChannelSet::stereo();
+    return monoInStereoOut
+        && in == juce::AudioChannelSet::mono() && out == juce::AudioChannelSet::stereo();
 }
 
 /** Makes the block the modules see, when the output bus is wider than the
@@ -50,9 +58,10 @@ inline bool isSupported (const juce::AudioProcessor::BusesLayout& layouts)
     inputs of a stereo instance -- a path that has shipped since 1.0 and that
     every module is already correct for. It is also what a module that
     wants to *generate* stereo needs: the full mono signal is present in both
-    channels, so a reverb is free to decorrelate its tail from it. Nothing has
-    to opt in, and nothing mid-chain in the rack has to change width: the rack
-    widens once, here, before slot 1.
+    channels, so a reverb is free to decorrelate its tail from it. No module's
+    DSP has to change for it -- the opt-in in `isSupported` decides only whether
+    a host is offered the layout -- and nothing mid-chain in the rack has to
+    change width: the rack widens once, here, before slot 1.
 
     Unity, not -3 dB. A mono track panned centre reaches both speakers at full
     level, and that is the level the module must be given; anything else would

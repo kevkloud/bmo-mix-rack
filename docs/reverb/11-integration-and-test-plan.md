@@ -123,6 +123,15 @@ the deferral below. The analysis that follows is kept because it is where the
 requirement came from, but three of its conclusions turned out to be wrong and
 the implementation in `core/product/BusLayouts.h` does not follow them:
 
+**And one of the three was right after all: 2026-09-23, the layout is opt-in.**
+Frosty decided that only a module that declares it offers a host mono in,
+stereo out -- `ModuleDef::acceptsMonoInput`, set by BMO Linger alone -- so every
+other product keeps exactly the layouts it had on `main` before this branch.
+The flag is on `ModuleDef` rather than `ModuleDsp`, because it decides what a
+host is offered and not what the DSP is handed, which is the duplicated pair
+either way. The rack offers the layout when any module it can host opts in,
+since a host fixes the layout before there is a chain.
+
 - *"The rack is the blocker… if ever done, standalone only."* It is not. The rack
   widens **once, at its own input, ahead of slot 1**, so no slot ever sees an
   asymmetric layout and no module widens the one after it. The rack ships this.

@@ -76,6 +76,26 @@ struct ModuleDef
         See `core/state/ParamLink.h` for why an engine and not a panel. */
     ParamLinkFactory createParamLink = nullptr;
 
+    /** Whether this module's standalone plugin offers a host the mono-in,
+        stereo-out layout -- true for BMO Linger alone.
+
+        **Opt-in, by Frosty's decision on 2026-09-23.** A module that makes
+        stereo out of one input -- a reverb decorrelating its tail -- is what
+        the layout exists for; every other module was built and heard as mono
+        to mono or stereo to stereo, and keeps exactly those. The input is
+        duplicated into both channels when the layout is in use
+        (`core/product/BusLayouts.h`), so nothing a module does changes; what
+        the flag decides is only whether a host is offered the choice.
+
+        The rack offers it if any module it can host sets this, since a
+        layout is fixed before a chain exists; `RackProcessor` says so.
+
+        **Last, after `createParamLink`, for the reason every field since
+        `line` is last**: positional aggregate initialisation re-binds another
+        module's members if a field goes anywhere else. A module that sets it
+        spells out the two before it. */
+    bool acceptsMonoInput = false;
+
     /** The line this module is drawn as -- BMO if it names none. */
     const ui::Line& lineOf() const noexcept
     {

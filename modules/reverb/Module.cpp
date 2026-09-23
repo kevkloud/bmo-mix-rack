@@ -85,6 +85,14 @@ const ModuleDef& module()
         // `modules/reverb/TypeVoicing.h` for the whole argument, including the
         // automation conflict it knowingly creates.
         &createParamLink,
+
+        // **The one module that offers a host mono in, stereo out**
+        // (`ModuleDef::acceptsMonoInput`, opt-in by Frosty's decision on
+        // 2026-09-23). A reverb on a mono source is the case the layout exists
+        // for: the engine is handed the input in both channels and
+        // decorrelates its own tail from it, so a mono vocal comes back with a
+        // stereo room around it.
+        true,
     };
 
     return def;

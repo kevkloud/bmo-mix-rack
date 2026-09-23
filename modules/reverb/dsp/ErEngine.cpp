@@ -205,8 +205,8 @@ void ErEngine::prepare (double newSampleRate, float newRampWidth, float crossfad
     smoothCoeff = (float) (1.0 - std::exp (-1.0 / (tau * sampleRate)));
 
     // The delay line covers the longest reach of any table at its largest
-    // clamped size, the comb pair's extra delay on top, and Energy mode's
-    // window. Sized from the tables themselves, so a regenerated table that
+    // clamped size, and Energy mode's window. Variation 6 reaches no further:
+    // it is the mono set put on the side, not a delayed copy of it. Sized from the tables themselves, so a regenerated table that
     // reaches further is covered without anyone editing this.
     float maxMs = 0.0f;
 
@@ -223,7 +223,7 @@ void ErEngine::prepare (double newSampleRate, float newRampWidth, float crossfad
                 for (int i = 0; i < std::clamp (c->numTaps, 0, kErMaxTaps); ++i)
                     reach = std::max (reach, c->taps[i].timeMs);
 
-        maxMs = std::max (maxMs, (reach + std::max (0.0f, t.combDelayMs)) * kHi);
+        maxMs = std::max (maxMs, reach * kHi);
     }
 
     // A bogus table must not become a gigabyte; two seconds is ten times any
@@ -331,11 +331,11 @@ void ErEngine::build (TapSet& set, const Settings& s) noexcept
     const auto v = std::clamp (s.variation, 0, kErVariations - 1);
     const auto& vs = t.variation[v];
 
-    set.comb = v == kErCombVariation;
-    set.combDelay = set.comb ? std::clamp (roundToSamples (t.combDelayMs * k, sampleRate), 0, mask / 2) : 0;
-    set.combGain  = set.comb ? t.combGain : 0.0f;
+    // Variation 6 reads the table's variation-6 set as the one mono set E;
+    // `combDelayMs` and `combGain` are not read at all (see runSet).
+    set.side = v == kErCombVariation;
 
-    const auto maxDelay = std::max (0, mask - 1 - set.combDelay);
+    const auto maxDelay = std::max (0, mask - 1);
 
     for (int ch = 0; ch < 2; ++ch)
     {
@@ -504,7 +504,7 @@ void ErEngine::applyDensity (TapSet& set, float d) noexcept
     // 10 section 3's bridge: a_k * w_k(D), renormalised so the ER energy is
     // the same at every density -- the energy out of the band filters, which
     // is what `weightedEnergy` measures.
-    for (int ch = 0; ch < (set.comb ? 1 : 2); ++ch)
+    for (int ch = 0; ch < (set.side ? 1 : 2); ++ch)
     {
         const auto sum = weightedEnergy (set, ch, d);
         const auto scale = sum > 0.0f ? std::sqrt (set.energy[ch] / sum) : 0.0f;
@@ -542,28 +542,30 @@ void ErEngine::prime() noexcept
 //==============================================================================
 void ErEngine::runSet (const TapSet& set, int readBase, float* accL, float* accR) const noexcept
 {
-    if (set.comb)
+    if (set.side)
     {
-        // Variation 6, Schroeder's complementary pair on the mono set:
-        // L = E + g E(t - delta), R = E - g E(t - delta). Both halves come
-        // off the same reads, so it costs what one channel pair costs, and
-        // since every later stage is linear and identical in both channels
-        // the two transfer functions still sum to 2E.
-        float p[kErBands] {}, q[kErBands] {};
+        // **Variation 6, "mono null": the ER go into the side and nowhere
+        // else.** With E the mono set, L = +E and R = -E -- BMO Dimension's
+        // mid/side convention, L = M + S and R = M - S, and its principle:
+        // "anything done to S alone is invisible in the mono sum"
+        // (modules/dim/dsp/DspCore.h, the DspCore class comment). After the
+        // mix the module puts out dry + E and dry - E, whose sum is exactly
+        // twice the dry.
+        //
+        // **Exactly, not nearly.** Everything after this point -- the band
+        // one-poles, the diffuser, the hi-cut, the dip -- is the same
+        // arithmetic in both channels on states that started equal and
+        // opposite, and IEEE negation commutes with every one of those
+        // multiplies and adds, so R stays the bit-exact negative of L.
+        // `tests/dsp/ReverbDspTests.cpp` asserts L + R == 0.0f.
+        for (int b = 0; b < kErBands; ++b)
+            accL[b] = 0.0f;
 
         for (int i = 0; i < set.num[0]; ++i)
-        {
-            const auto idx = readBase - set.delay[0][i];
-            const auto g = set.gain[0][i];
-            p[set.band[0][i]] += g * line[(size_t) (idx & mask)];
-            q[set.band[0][i]] += g * line[(size_t) ((idx - set.combDelay) & mask)];
-        }
+            accL[set.band[0][i]] += set.gain[0][i] * line[(size_t) ((readBase - set.delay[0][i]) & mask)];
 
         for (int b = 0; b < kErBands; ++b)
-        {
-            accL[b] = p[b] + set.combGain * q[b];
-            accR[b] = p[b] - set.combGain * q[b];
-        }
+            accR[b] = -accL[b];
 
         return;
     }
@@ -814,7 +816,7 @@ void ErEngine::process (const float* in, float* outL, float* outR, int numSample
 float ErEngine::currentTapGain (int channel, int tap) const noexcept
 {
     const auto& set = fading ? sets[1 - active] : sets[active];
-    const auto ch = set.comb ? 0 : std::clamp (channel, 0, 1);
+    const auto ch = set.side ? 0 : std::clamp (channel, 0, 1);
 
     return tap >= 0 && tap < set.num[ch] ? set.gain[ch][tap] : 0.0f;
 }
@@ -822,7 +824,7 @@ float ErEngine::currentTapGain (int channel, int tap) const noexcept
 int ErEngine::currentTapCount (int channel) const noexcept
 {
     const auto& set = fading ? sets[1 - active] : sets[active];
-    return set.num[set.comb ? 0 : std::clamp (channel, 0, 1)];
+    return set.num[set.side ? 0 : std::clamp (channel, 0, 1)];
 }
 
 size_t ErEngine::memoryBytes() const noexcept

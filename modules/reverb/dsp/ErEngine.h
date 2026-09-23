@@ -38,8 +38,8 @@ namespace bmo::reverb
     five low-passes per channel, which cannot ring.
 
     **The input is the mono sum.** One source in one room: the table's
-    per-channel sets are what the two ears hear of it, and Variation 6's
-    complementary pair is defined on one signal. It is also what makes one
+    per-channel sets are what the two ears hear of it, and Variation 6 puts
+    one mono set on the side, +E left and -E right. It is also what makes one
     delay line enough -- a stereo source's image is the dry path's to carry,
     and the dry path is never delayed.
 
@@ -89,7 +89,7 @@ public:
         float shape      = 1.0f;              ///< the rise exponent p, per type
         float spreadMs   = 80.0f;             ///< sigma, the Energy envelope's length
         float hiCutHz    = 7000.0f;
-        int   variation  = 2;                 ///< 0..6; 6 is the complementary comb pair
+        int   variation  = 2;                 ///< 0..6; 6 is "mono null": E on the side only
     };
 
     //== The laws, public so the tests and the measurement tool can name them ==
@@ -218,9 +218,7 @@ private:
         int  numPairs[2] {};
         float bandA [kErBands] {};        ///< each band filter's target coefficient
 
-        bool  comb = false;               ///< Variation 6: channel 0 is E, played as E +- g E(t - delta)
-        int   combDelay = 0;
-        float combGain = 0.0f;
+        bool  side = false;               ///< Variation 6: channel 0 is E, played as L = +E, R = -E
 
         Settings built;                   ///< what it was built from
     };

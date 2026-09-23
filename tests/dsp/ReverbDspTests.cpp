@@ -416,15 +416,117 @@ namespace
                       << " skipped, worst " << score.worstDb << " dB, " << score.worstSamples << " samples\n";
         }
 
-        //== Variation 6 is the complementary pair the contract describes =====
+        //== Variation 6 is "mono null": the ER on the side and nowhere else ==
         //
-        // Not the comb *rule* -- whether the pair sums flat in mono is the
-        // table half's audit -- but whether the engine plays what the contract
-        // says: L = E + g E(t - delta) and R = E - g E(t - delta), with E the
-        // mono set. So (L + R) / 2 must be E's taps and (L - R) / 2 must be
-        // the same taps delta later at g times the gain.
+        // The owner's reading (2026-09-23), and the value string's: with E the
+        // table's variation-6 set, the ER bus is L = +E and R = -E, BMO
+        // Dimension's side convention, so the mono sum of the module is
+        // exactly twice the dry. `combDelayMs` and `combGain` are not used.
         {
-            TapScore sum, diff;
+            // An impulse and then noise; fully wet, the output is the ER bus.
+            const auto signal = [&]
+            {
+                std::vector<float> x ((size_t) (0.3 * rate), 0.0f);
+                x[0] = 1.0f;
+                unsigned int seed = 5150u;
+
+                for (size_t i = x.size() / 2; i < x.size(); ++i)
+                {
+                    seed = seed * 1664525u + 1013904223u;
+                    x[i] = (float) (seed >> 8) * (1.0f / 8388608.0f) - 1.0f;
+                }
+
+                return x;
+            };
+
+            const auto drive = [&] (const DspCore::Params& p, int channels)
+            {
+                DspCore core;
+                core.prepare (rate, 256, channels);
+                core.setParams (p);
+
+                Stereo io { signal(), signal() };
+
+                if (channels == 2)
+                {
+                    run (core, io, 256);
+                }
+                else
+                {
+                    for (size_t i = 0; i < io.l.size(); i += 256)
+                    {
+                        float* ch[] { io.l.data() + i };
+                        core.process (ch, 1, (int) std::min ((size_t) 256, io.l.size() - i));
+                    }
+                }
+
+                return io;
+            };
+
+            // **L + R is exactly zero**: bit-exact, every sample, every type,
+            // four densities (the bridge and every diffuser stage), all three
+            // modes. And L is not silent, or this proves nothing.
+            bool nulls = true, sounds = true;
+            bool levelsMatch = true;
+            double worstLevelDb = 0.0;
+
+            for (int type = 0; type < numTypes; ++type)
+                for (const auto mode : { ErMode::taps, ErMode::energy, ErMode::blend })
+                    for (const auto density : { 0.0f, 0.3f, 0.7f, 1.0f })
+                    {
+                        auto p = erOnly (type);
+                        p.erMode = mode;
+                        p.erDensity = density;
+                        p.erVariation = kErCombVariation;
+
+                        const auto out = drive (p, 2);
+
+                        for (size_t i = 0; i < out.l.size(); ++i)
+                            nulls = nulls && out.l[i] + out.r[i] == 0.0f;
+
+                        const auto energy = energyOf (out.l);
+                        sounds = sounds && energy > 0.0;
+
+                        // **Each side carries the ER at the level the other
+                        // positions do**: against Variation 5 at the same
+                        // settings, 0.2 dB, on the impulse response -- the
+                        // noise half of the drive is a random quantity
+                        // through two different velvet sequences. Both sets
+                        // are renormalised to their own core energy, so this
+                        // holds while the two carry the same energy, which the
+                        // table half's sets are built to; the tap check below
+                        // is the absolute.
+                        //
+                        // **Up to DENSITY 0.6 only.** Above it the diffuser
+                        // is in, and what it does to a level depends on how a
+                        // set's own pattern meets its 64 paths -- in Energy
+                        // mode Var 5 and Var 6 are different velvet sequences
+                        // and differ by a quarter of a decibel there. That is
+                        // the same for every position, and the density sweep
+                        // is where it is held.
+                        if (density > ErEngine::kDiffuserStartDensity)
+                            continue;
+
+                        auto five = p;
+                        five.erVariation = 5;
+                        const auto six  = impulse (p, rate, 0.2);
+                        const auto ref5 = impulse (five, rate, 0.2);
+                        const auto levelDb = db (energyOf (six.l) / energyOf (ref5.l));
+
+                        worstLevelDb = std::max (worstLevelDb, std::abs (levelDb));
+                        levelsMatch = levelsMatch && std::abs (levelDb) <= 0.2;
+                    }
+
+            check (nulls, "Variation 6: L + R is exactly 0.0 at every sample, type, density and mode");
+            check (sounds, "Variation 6: the side is not silent, so the null is not vacuous");
+            check (levelsMatch, "Variation 6: each side carries the ER within 0.2 dB of Variation 5 at the same settings, DENSITY 0-60 %");
+            std::cout << "  var 6: worst level against Var 5 " << worstLevelDb << " dB\n";
+
+            // **And L is E itself**, tap for tap: the absolute behind the
+            // level check. At DENSITY 0 with the hi-cut open, L's taps are the
+            // variation-6 set's core taps under the Size law, and R = -L by
+            // the null above.
+            TapScore side;
 
             for (int type = 0; type < numTypes; ++type)
             {
@@ -432,30 +534,49 @@ namespace
                 auto p = erOnly (type);
                 p.erDensity = 0.0f;
                 p.erVariation = kErCombVariation;
-                p.sizeM = kReferenceSizeM;
 
                 const auto ir = impulse (p, rate, (double) (table.windowClampMs + 20.0f) * 0.001);
-
-                std::vector<float> half ((size_t) ir.l.size()), side ((size_t) ir.l.size());
-
-                for (size_t i = 0; i < ir.l.size(); ++i)
-                {
-                    half[i] = 0.5f * (ir.l[i] + ir.r[i]);
-                    side[i] = 0.5f * (ir.l[i] - ir.r[i]);
-                }
-
-                const auto k = scaleFor (table, kReferenceSizeM);
-                const auto delta = (int) std::lround ((double) (table.combDelayMs * k) * rate * 0.001);
-                const auto& e = table.variation[kErCombVariation].left;
-
-                scoreTaps (half, coreTaps (e, table, kReferenceSizeM, rate), sum);
-                scoreTaps (side, coreTaps (e, table, kReferenceSizeM, rate, delta, table.combGain), diff);
+                scoreTaps (ir.l, coreTaps (table.variation[kErCombVariation].left, table, p.sizeM, rate), side);
             }
 
-            check (sum.checked > 0 && sum.timeMisses == 0 && sum.gainMisses == 0,
-                   "Variation 6: (L + R) / 2 is the mono set E, tap for tap");
-            check (diff.checked > 0 && diff.timeMisses == 0 && diff.gainMisses == 0,
-                   "Variation 6: (L - R) / 2 is g E(t - delta), tap for tap");
+            check (side.checked > 0 && side.timeMisses == 0 && side.gainMisses == 0,
+                   "Variation 6: L is the mono set E, tap for tap, times to a sample and gains to 0.2 dB");
+
+            // **A mono instance puts out no ER at all at Variation 6**, and
+            // what it does put out is finite: at MIX 100 % exactly silence,
+            // at MIX 50 % exactly half the dry, sample for sample.
+            bool monoSilent = true, monoDry = true, monoFinite = true;
+
+            for (int type = 0; type < numTypes; ++type)
+                for (const auto mode : { ErMode::taps, ErMode::energy, ErMode::blend })
+                {
+                    auto p = erOnly (type);
+                    p.erMode = mode;
+                    p.erDensity = 0.8f;
+                    p.erVariation = kErCombVariation;
+
+                    const auto wet = drive (p, 1);
+
+                    for (const auto x : wet.l)
+                    {
+                        monoFinite = monoFinite && std::isfinite (x);
+                        monoSilent = monoSilent && x == 0.0f;
+                    }
+
+                    p.mix = 0.5f;
+                    const auto half = drive (p, 1);
+                    const auto input = signal();
+
+                    for (size_t i = 0; i < half.l.size(); ++i)
+                    {
+                        monoFinite = monoFinite && std::isfinite (half.l[i]);
+                        monoDry = monoDry && half.l[i] == input[i] * 0.5f;
+                    }
+                }
+
+            check (monoFinite, "Variation 6, mono instance: every sample is finite");
+            check (monoSilent, "Variation 6, mono instance: at MIX 100 % the output is exactly silence -- no ER at all");
+            check (monoDry, "Variation 6, mono instance: at MIX 50 % the output is exactly half the dry");
         }
 
         //== Density sweep: constant energy, no tap appearing, no click =======

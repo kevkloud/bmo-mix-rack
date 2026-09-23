@@ -157,7 +157,7 @@ public:
         float erShape       = roomDefaults::kErShape;             ///< per type, the rise exponent p
         float erSpreadMs    = roomDefaults::kErSpreadMs;          ///< 5..200, the envelope sigma
         float erHiCutHz     = 7000.0f;                            ///< 1000..20000, one post-ER shelf
-        int   erVariation   = 2;                                  ///< 0..6; 6 is the comb pair
+        int   erVariation   = 2;                                  ///< 0..6; 6 is "mono null", the ER on the side only
 
         float modDepthMs    = roomDefaults::kModDepthMs;     ///< 0.1..0.8
         float modRateHz     = roomDefaults::kModRateHz;      ///< 0.1..1.2

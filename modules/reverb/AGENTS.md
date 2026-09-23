@@ -462,10 +462,14 @@ way to insert it later, **not because it is settled**. The listening pass
 (`11` section 6) is where it becomes real or becomes a synonym for one of its
 neighbours.
 
-Variation 6 is the other position that is not what it looks like: it is
-Schroeder's complementary-comb pair, the widest setting *and* the only provably
-uncoloured-in-mono one — and the ER vanish entirely in a mono sum there. Its
-value string says so, because an automation lane has nowhere else to.
+Variation 6 is the other position that is not what it looks like: it is **mono
+null** (owner, 2026-09-23). The ER go into the side and nowhere else — with E
+the mono set, L = +E and R = −E, BMO Dimension's mid/side convention — so the
+module puts out dry + E and dry − E and its mono sum is exactly twice the dry.
+The widest setting, and the ER vanish entirely in a mono sum there. Its value
+string says so, because an automation lane has nowhere else to. The table's
+`combDelayMs` and `combGain` are not read; they leave `ErTable.h` at
+integration.
 
 ## The panel
 
@@ -1062,11 +1066,14 @@ land, the tests follow them.
   to zero at its end, so the cluster ends on a ramp at every size.
 - **ER HI-CUT is a one-pole solved to be exactly −3 dB at its setting**, and
   at the top of its range, 20 kHz, it is exactly a wire.
-- **Variation 6 is `L = E + g E(t − δ)`, `R = E − g E(t − δ)` as `ErTable.h`
-  writes it**, so the mono sum is `2E`: the *comb* vanishes in mono, not the
-  ER. The "ER vanish in mono entirely" wording elsewhere in this file and in
-  `10` section 3 describes Schroeder's original pair (M = dry), not the
-  contract; one of the two needs correcting, and it is not this pass's call.
+- **Variation 6 is mono null** (owner-confirmed 2026-09-23, the spec's reading):
+  L = +E, R = −E on the ER bus, so the ER sum to exactly 0.0 — bit-exact, and
+  asserted so — and a mono instance puts out no ER at all. It follows BMO
+  Dimension (`modules/dim/dsp/DspCore.h`, "anything done to S alone is
+  invisible in the mono sum"). Until 2026-09-23 it was built as
+  `ErTable.h`'s comment wrote it, E ± g E(t − δ), whose mono sum is 2E; that
+  reading was the contract's and is gone, and positions 0–5 are bit-identical
+  across the change (`measure_reverb hash`).
 - **Energy and Blend are deterministic and unheard.** Energy is 48 velvet
   pulses per channel, one per equal cell of the window, seeded from the
   table's seed, the type, the variation and the channel; every pulse is on at

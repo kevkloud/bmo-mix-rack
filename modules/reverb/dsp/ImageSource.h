@@ -50,10 +50,10 @@ struct Recipe
     /** The highest image order: 3, as 10 section 3 has it, for every type but
         two -- and **both exceptions depart from the spec**:
 
-        - Plate, to 5, and from 0: the direct wave is its first tap. A plane
-          lattice holds 4n images of order n where a room holds 4n^2 + 2, and
-          a plate's arrivals crowd, so they fuse over a wider span; orders up
-          to 5 are what leaves 21 distinct.
+        - Plate, to 5, and from 0: the direct wave is its first tap. A plate
+          is not a room and the spec's orders were written for rooms (owner,
+          2026-09-23); a plane lattice holds 4n images of order n, and orders
+          up to 5 are what fill its window at the highs' speed.
         - Cavern. At its 55 m default SIZE only 26 images of orders 1-3
           arrive inside the 200 ms window and 18 survive fusing: a room that
           large has fewer than 21 distinct reflections in 200 ms. Order 4
@@ -165,6 +165,14 @@ inline constexpr int    kInfillTaps = kErMaxTaps - kErCoreTaps;
     band's speed, which is the feed-forward form of dispersion: highs first,
     lows later, with no allpass anywhere. */
 inline constexpr double kPlateBandSpeed[kErBands] { 438.1, 195.9, 98.0, 69.3 };
+
+/** A plate's taps are a dense dispersive cloud, not discrete reflections, so
+    the rooms' spacing rules do not bind them (owner, 2026-09-23). They are
+    kept this far apart only so no two coincide, the infill starts this soon,
+    and a split tap's two arrivals differ by at least this much. CALIBRATE. */
+inline constexpr double kPlateMinSeparationMs = 0.25;
+inline constexpr double kPlateInfillStartMs   = 0.5;
+inline constexpr double kPlateSplitMinMs      = 0.05;
 
 /** gamma at VARIATION 0..5: from about 0.95 to about 0.05 (10 section 3).
     Position 0 aims at the first; each later one at an equal share of what is

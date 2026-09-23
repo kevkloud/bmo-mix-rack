@@ -110,4 +110,12 @@ const ErTable& erTableFor (int typeIndex) noexcept;
     tables, because kappa is a table-generation constant. */
 float erBandCutoffHzAt (const ErTable& table, int band, float sizeM) noexcept;
 
+/** When a table's last reflection arrives at room size `sizeM`, in
+    milliseconds: its latest tap in any channel at any VARIATION, by the Size
+    law, held to `windowClampMs`. The per-type form of `erSpanMsAt (float)` in
+    TapTables.h, which reads the placeholder and which the tail formula still
+    calls; this is added beside it rather than changing it, and moving the
+    tail formula over is integration's. Added by the generator half. */
+float erSpanMsAt (const ErTable& table, float sizeM) noexcept;
+
 } // namespace bmo::reverb

@@ -1,9 +1,9 @@
 # Repo conventions for a REVERB module — the delta only
 
 General layout/registration/params/build-test harness: **PR #19 /
-`docs/1176-comp/00-repo-conventions.md`** (via `git show
-frosty-fetcomp-groundwork:...`) — not repeated. Render/visual tooling:
-**`docs/1176-comp/11-integration-and-test-plan.md` §4** — reference only.
+`docs/fet-comp/00-repo-conventions.md`** (in the tree since BMO FET merged)
+— not repeated. Render/visual tooling:
+**`docs/fet-comp/11-integration-and-test-plan.md` §4** — reference only.
 
 ## 1. Reusable DSP
 

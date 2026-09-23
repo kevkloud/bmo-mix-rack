@@ -4,7 +4,7 @@ Groundwork; no code. **DSP behaviour is `10-dsp-spec.md`'s** — architecture,
 types, constants, tail formula, CPU. This pack owns repo conventions,
 registration, schema layout, accent and how the suites are built. Published
 thresholds cite `05-er-psychoacoustics-citations.md`. Layout/registration/harness:
-`docs/1176-comp/00-repo-conventions.md`; render tooling: that pack's
+`docs/fet-comp/00-repo-conventions.md`; render tooling: that pack's
 `11-integration-and-test-plan.md` §4. Reverb deltas: `docs/reverb/00-repo-conventions.md`.
 
 **Thesis (10 §0):** Reference B's tail character, Reference A's control structure

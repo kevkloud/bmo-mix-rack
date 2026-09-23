@@ -187,6 +187,82 @@ void BmoLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int widt
         const auto given = knob != nullptr ? knob->getTrackRadius() : 0.0f;
         const auto track = given > 0.0f ? given : radius + Tokens::trackGap;
 
+        // A knob whose parameter is a *position* draws its positions and
+        // nothing else: no dotted arc, no rest dot, no minus and plus. See
+        // Knob::setStepMarks. Everything below this block is the continuum
+        // treatment and is skipped wholesale rather than partly suppressed,
+        // because a step-marked face that still carried a plus would be
+        // promising both things at once.
+        if (const auto steps = knob != nullptr ? knob->getStepMarks() : 0; steps > 1)
+        {
+            // Radially, like the meter's own scale, and struck from the track
+            // inwards so the marks sit in the same ring the dots would have.
+            // The pointer reaches kPointerReach of the face, so these stop
+            // clear of it and read as a scale around the knob rather than as
+            // teeth on it.
+            const auto labelEvery = knob->getStepLabelEvery();
+
+            // **Step marks ride closer to the face than the dotted track.**
+            //
+            // Tokens::trackGap is the room a *ring of dots* wants, and a ring
+            // reads as its own object at that distance. A scale does not: it
+            // belongs to the knob it numbers, and at the dotted radius around
+            // a small face it floats away from it. Pulling it in also buys the
+            // numbers their room -- the component has to hold face, marks and
+            // numerals, and every pixel the ring gives up is one the numbers
+            // can have.
+            const auto stepTrack = radius + 6.0f;
+
+            // A numbered mark is struck inwards only, so the number can sit
+            // just outside the ring without the tick reaching up into it. An
+            // unnumbered one is centred on the ring and stays short -- the two
+            // lengths are what let a reader count from 1 to 3 without a number
+            // on 2.
+            juce::Path marks;
+
+            for (int i = 0; i < steps; ++i)
+            {
+                const auto fraction = (float) i / (float) (steps - 1);
+                const auto angle    = startAngle + fraction * (endAngle - startAngle);
+                const auto numbered = labelEvery > 0 && i % labelEvery == 0;
+
+                marks.startNewSubPath (at (angle, stepTrack - (numbered ? 4.5f : 3.0f)));
+                marks.lineTo          (at (angle, stepTrack + (numbered ? 1.5f : 3.0f)));
+            }
+
+            g.setColour (dim (accent.withAlpha (enabled ? 0.55f : 0.2f)));
+            g.strokePath (marks, juce::PathStrokeType (1.8f));
+
+            if (labelEvery > 0)
+            {
+                // The numbers are the module's own colour at full strength
+                // rather than the marks' 0.55, because they are read and the
+                // marks are only counted. Same argument the meter's scale
+                // makes: colour marks the system, contrast does the reading.
+                const auto font = labelFont (9.0f);
+                g.setColour (dim (accent));
+                g.setFont (font);
+
+                for (int i = 0; i < steps; i += labelEvery)
+                {
+                    const auto fraction = (float) i / (float) (steps - 1);
+                    const auto angle    = startAngle + fraction * (endAngle - startAngle);
+
+                    // Centred on a box out beyond the ring. 11 px of reach is
+                    // the mark's own 1.5 of overshoot, a clear gap, and half a
+                    // digit -- so a numeral sits off the tick rather than on
+                    // its end.
+                    const auto where = at (angle, stepTrack + 8.0f);
+
+                    g.drawText (juce::String (i + 1),
+                                juce::Rectangle<float> (13.0f, 9.0f).withCentre (where),
+                                juce::Justification::centred, false);
+                }
+            }
+        }
+        else
+        {
+
         // Signed with the sweep. The inset pulls the symbols in from the ends;
         // on a sweep that runs backwards, adding it to the start and taking it
         // off the end pushes them out past the ends instead.
@@ -333,6 +409,7 @@ void BmoLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int widt
                 g.fillRect (juce::Rectangle<float> (arm * 2.0f, weight).withCentre (plusAt));
                 g.fillRect (juce::Rectangle<float> (weight, arm * 2.0f).withCentre (plusAt));
             }
+        }
         }
     }
 

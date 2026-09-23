@@ -2,7 +2,7 @@
 
 Groundwork; no code. Topology, modes, latency and constants: **per
 `10-dsp-spec.md`**. Tools, fonts and visual-pass step order:
-`docs/1176-comp/11-integration-and-test-plan.md` §4d — follow it, not repeated.
+`docs/fet-comp/11-integration-and-test-plan.md` §4d — follow it, not repeated.
 Figures computed on **AURORA**.
 
 ## 1. Drop-in

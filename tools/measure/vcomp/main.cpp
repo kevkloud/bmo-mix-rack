@@ -50,6 +50,7 @@
 #include "tools/measure/Wav.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -717,6 +718,85 @@ std::string flagString (int argc, char** argv, const char* flag, const std::stri
     return flagValue (argc, argv, flag, s) ? s : fallback;
 }
 
+//==============================================================================
+/** ns/sample, as the baseline BMO FET's CPU budget is stated against.
+
+    `docs/fet-comp/11-integration-and-test-plan.md` section 3 sets BMO FET at
+    "<= 2.0x LTV Comp per sample at defaults, <= 3.0x at the heaviest setting"
+    and says to run this tool in the same session on the same box, because a
+    ns/sample figure on its own says nothing -- it is a number about the
+    machine as much as about the code.
+
+    **The loop below is `measure_fetcomp`'s bench, line for line**: the same
+    220 Hz tone, the same 10 seconds of it, the same 512-sample blocks, the
+    same two channels, the same eight passes, and the same
+    elapsed / (passes * samples). It has to be, or the ratio is measuring the
+    difference between two harnesses. If one of them changes, change both.
+
+    Both figures are per sample *per channel pair*, not per channel. */
+int bench()
+{
+    std::printf ("ns/sample, Release build, 48 kHz, 512-sample blocks, stereo.\n"
+                 "The baseline for BMO FET's CPU budget (11 section 3): FET is\n"
+                 "allowed 2.0x the defaults figure and 3.0x the heaviest. Same\n"
+                 "harness as measure_fetcomp bench -- run both in one session.\n\n");
+
+    std::printf ("%-28s %-12s\n", "setting", "ns/sample");
+
+    struct Case { const char* name; DspCore::Params p; };
+
+    DspCore::Params defaults;
+
+    DspCore::Params working;
+    working.amountPercent = 50.0f;
+
+    DspCore::Params complex;
+    complex.amountPercent = 50.0f;
+    complex.complex = true;
+
+    DspCore::Params heaviest;
+    heaviest.amountPercent = 100.0f;
+    heaviest.complex = true;
+    heaviest.gateDb = -40.0f;
+
+    const Case cases[]
+    {
+        { "defaults",                defaults },
+        { "amount 50",               working  },
+        { "amount 50, complex",      complex  },
+        { "amount 100, complex, gate", heaviest },
+    };
+
+    for (const auto& c : cases)
+    {
+        DspCore core;
+        core.setParams (c.p);
+        core.prepare (kSampleRate, 512, 2);
+
+        auto signal = sine (220.0, 10.0, 0.4);
+        auto left = signal, right = signal;
+
+        const auto started = std::chrono::steady_clock::now();
+        constexpr int kPasses = 8;
+
+        for (int pass = 0; pass < kPasses; ++pass)
+            for (size_t n = 0; n < left.size(); n += 512)
+            {
+                const auto count = (int) std::min ((size_t) 512, left.size() - n);
+                float* channels[2] { left.data() + n, right.data() + n };
+                core.process (channels, 2, count);
+            }
+
+        const auto elapsed = std::chrono::duration<double, std::nano> (
+                                 std::chrono::steady_clock::now() - started).count();
+
+        std::printf ("%-28s %-12.1f\n", c.name,
+                     elapsed / (double) (kPasses * (int) left.size()));
+    }
+
+    return 0;
+}
+
 } // namespace
 
 //==============================================================================
@@ -724,6 +804,8 @@ int main (int argc, char** argv)
 {
     const std::string command = argc > 1 ? argv[1] : "";
     const auto outdir = flagString (argc, argv, "--outdir");
+
+    if (command == "bench")   { return bench(); }
 
     if (command == "curve")
     {

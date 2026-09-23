@@ -90,6 +90,12 @@ bmo_add_module(deesser
         ${CMAKE_CURRENT_SOURCE_DIR}/deesser/panel/DeesserPanel.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/deesser/panel/Ribbon.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/deesser/Module.cpp)
+bmo_add_module(fetcomp
+    DSP_SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/fetcomp/dsp/DspCore.cpp
+    UI_SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/fetcomp/panel/FetcompPanel.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/fetcomp/Module.cpp)
 
 endif()
 

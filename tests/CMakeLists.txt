@@ -33,6 +33,9 @@ add_test(NAME vcomp_dsp COMMAND vcomp_dsp_tests)
 bmo_add_dsp_tool(deesser_dsp_tests dsp/DeesserDspTests.cpp)
 target_link_libraries(deesser_dsp_tests PRIVATE bmo_deesser_dsp)
 add_test(NAME deesser_dsp COMMAND deesser_dsp_tests)
+bmo_add_dsp_tool(fetcomp_dsp_tests dsp/FetcompDspTests.cpp)
+target_link_libraries(fetcomp_dsp_tests PRIVATE bmo_fetcomp_dsp)
+add_test(NAME fetcomp_dsp COMMAND fetcomp_dsp_tests)
 
 endif()
 
@@ -106,15 +109,19 @@ bmo_add_tool(deesser_tests plugin/DeesserTests.cpp)
 target_link_libraries(deesser_tests PRIVATE bmo_deesser)
 add_test(NAME deesser COMMAND deesser_tests)
 
+bmo_add_tool(fetcomp_tests plugin/FetcompTests.cpp)
+target_link_libraries(fetcomp_tests PRIVATE bmo_fetcomp)
+add_test(NAME fetcomp COMMAND fetcomp_tests)
+
 bmo_add_tool(rack_tests plugin/RackTests.cpp ${BMO_ROOT}/products/rack/Registry.cpp)
-target_link_libraries(rack_tests PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp bmo_deesser)
+target_link_libraries(rack_tests PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp bmo_deesser bmo_fetcomp)
 add_test(NAME rack COMMAND rack_tests)
 
 # Layout assertions on the real panels. JUCE, not bmo_add_dsp_tool: no
 # rendering happens, but Tokens.h includes juce_gui_basics, so a UI assertion
 # cannot run in the DSP-only job whatever docs/ui-workflow-brief.md §4 says.
 bmo_add_tool(ui_layout_tests ui/LayoutTests.cpp ${BMO_ROOT}/products/rack/Registry.cpp)
-target_link_libraries(ui_layout_tests PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp bmo_deesser)
+target_link_libraries(ui_layout_tests PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp bmo_deesser bmo_fetcomp)
 add_test(NAME ui_layout COMMAND ui_layout_tests)
 
 endif()

@@ -11,6 +11,7 @@ if(BMO_BUILD_RACK)
     add_subdirectory(deq)
     add_subdirectory(vcomp)
     add_subdirectory(deesser)
+    add_subdirectory(fetcomp)
     add_subdirectory(rack)
 endif()
 

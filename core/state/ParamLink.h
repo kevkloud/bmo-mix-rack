@@ -25,10 +25,11 @@ class ParamSet;
     own and one per occupied rack slot -- so owning the link there covers both
     from a single line.
 
-    The interface is empty on purpose. A link is a **lifetime**, not a service:
-    it subscribes in its constructor, unsubscribes in its destructor, and is
-    never called by the engine that holds it. Anything a link wants to expose
-    for a test it exposes on its own type, which the test already knows.
+    The interface is nearly empty on purpose. A link is a **lifetime**, not a
+    service: it subscribes in its constructor, unsubscribes in its destructor,
+    and the engine that holds it calls it at one moment only -- after a state
+    restore, `stateRestored` below. Anything a link wants to expose for a test
+    it exposes on its own type, which the test already knows.
 
     **Message thread.** Created and destroyed with the engine, which is a
     message-thread operation in both products (`RackProcessor::rebuild` says so
@@ -39,6 +40,23 @@ class ParamSet;
 struct ParamLink
 {
     virtual ~ParamLink() = default;
+
+    /** Called by the engine after a saved state has been applied, on whichever
+        thread applied it.
+
+        **The one call a link gets, and why it needs it.** A restore writes the
+        linked parameter and the parameters it writes, in file order. A link
+        that reacts through a `juce::ParameterAttachment` reacts at once on the
+        message thread but only *queues* the reaction anywhere else -- and a host
+        may restore from any thread; the rack's MessageManagerLock is a mutex,
+        not a change of thread. The queued reaction then lands after the file's
+        own values and overwrites them. This is where a link records that what
+        the parameters hold now is a restored whole, so that the queued reaction
+        finds nothing left to do.
+
+        It must not write a parameter: the file's values are final. The default
+        does nothing, which is right for any link that is not a voicing. */
+    virtual void stateRestored() {}
 };
 
 /** What a `ModuleDef` supplies when its module has one. Null for every module

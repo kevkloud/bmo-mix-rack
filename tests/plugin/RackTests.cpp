@@ -22,9 +22,13 @@
 #include "products/sat/Product.h"
 #include "modules/eq/params.h"
 #include "modules/opto/params.h"
+#include "modules/reverb/params.h"
 #include "modules/sat/params.h"
 #include "modules/util/Module.h"
 #include "modules/util/params.h"
+
+#include <atomic>
+#include <thread>
 
 using namespace test;
 using bmo::RackProcessor;
@@ -466,6 +470,72 @@ int main()
             auto r = createRack();
             r->setStateInformation (block.getData(), (int) block.getSize());
             check (chainIds (*r) == std::vector<juce::String> { "util" }, "an unknown module is dropped");
+        }
+    }
+
+    //== A BMO Linger slot restored off the message thread keeps its levels ====
+    //
+    // `setStateInformation` takes a MessageManagerLock when a host calls it
+    // from another thread. That is a mutex, not a change of thread: the TYPE
+    // write in the restore still arrives off the message thread, so the slot's
+    // `TypeVoicing` only queues it, and the queued callback -- delivered once
+    // the lock is gone -- used to stamp the stored type's block over the nine
+    // levels the session had just put back. ReverbTests holds the same case
+    // for the standalone product; this is the rack's path, through `rebuild`.
+    //
+    // The lock needs a running message loop to be granted, so the main thread
+    // pumps until the host thread is done, and once more afterwards to deliver
+    // whatever the restore queued.
+    {
+        namespace R = bmo::reverb;
+
+        const std::pair<int, float> kStored[] {
+            { R::Index::size, 33.3f }, { R::Index::erdensity, 17.0f }, { R::Index::erspread, 123.0f },
+            { R::Index::moddepth, 0.63f }, { R::Index::modrate, 0.93f }, { R::Index::inhicut, 11111.0f },
+            { R::Index::feed, 41.0f }, { R::Index::erlevel, -17.0f }, { R::Index::verblevel, -29.0f },
+        };
+
+        juce::MemoryBlock state;
+
+        {
+            auto rack = createRack();
+            rack->addModule (*rack->findModule ("reverb"));
+            auto& p = rack->getEngineAt (0)->params();
+
+            p.setReal (R::Index::type, (float) R::cavern);
+
+            for (const auto& [index, value] : kStored)
+                p.setReal (index, value);
+
+            rack->getStateInformation (state);
+        }
+
+        auto rack = createRack();
+        std::atomic<bool> done { false };
+
+        std::thread host ([&]
+        {
+            rack->setStateInformation (state.getData(), (int) state.getSize());
+            done = true;
+        });
+
+        while (! done)
+            juce::MessageManager::getInstance()->runDispatchLoopUntil (5);
+
+        host.join();
+        juce::MessageManager::getInstance()->runDispatchLoopUntil (50);
+
+        check (chainIds (*rack) == std::vector<juce::String> { "reverb" }, "the reverb slot restores");
+
+        if (auto* engine = rack->getEngineAt (0))
+        {
+            checkClose (engine->params().getReal (R::Index::type), (double) R::cavern, 1.0e-6,
+                        "the restored slot is on Cavern");
+
+            for (const auto& [index, value] : kStored)
+                checkClose (engine->params().getReal (index), (double) value, 0.05,
+                            juce::String ("an off-thread rack restore keeps the file's '")
+                                + engine->params().spec (index).id + "'");
         }
     }
 

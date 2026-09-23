@@ -15,6 +15,8 @@
 #include "modules/reverb/presets/FactoryPresets.h"
 #include "products/reverb/Product.h"
 
+#include <thread>
+
 using namespace test;
 namespace P = bmo::reverb;
 
@@ -586,6 +588,68 @@ int main()
                     "the file's SIZE survives the type's, because type is written first");
         checkClose (getValue (*restored, P::kVerbLevel), -22.0, 0.05,
                     "the file's REVERB survives the type's");
+    }
+
+    //== And the same restore from a thread that is not the message thread ====
+    //
+    // The block above restores on the message thread, where the link applies
+    // the stored type synchronously and the file's own values land on top.
+    // **A host may restore from any thread**, and there the link's
+    // `juce::ParameterAttachment` only queues the TYPE change: the nine levels
+    // land first, and the queued callback, delivered afterwards, used to see a
+    // type it had not applied yet and stamp that type's block over every one
+    // of them. So a session saved on Cavern with its own sizes and levels came
+    // back as a stock Cavern.
+    //
+    // All nine are set away from Cavern's row, so a stamp of any one of them
+    // is caught. The dispatch loop is run afterwards to deliver whatever the
+    // restore queued -- which is what a host's message loop does anyway, a
+    // moment later -- and the assertions are made only after it.
+    {
+        const bmo::Setting kStored[] {
+            { P::kSize, 33.3f }, { P::kErDensity, 17.0f }, { P::kErSpread, 123.0f },
+            { P::kModDepth, 0.63f }, { P::kModRate, 0.93f }, { P::kInHiCut, 11111.0f },
+            { P::kFeed, 41.0f }, { P::kErLevel, -17.0f }, { P::kVerbLevel, -29.0f },
+        };
+
+        for (const auto& s : P::typeSettings (P::cavern))
+            for (const auto& k : kStored)
+                if (juce::String (s.id) == k.id)
+                    check (std::abs (s.value - k.value) > 0.1f,
+                           juce::String ("the stored '") + k.id + "' is not Cavern's own, so a stamp would show");
+
+        auto proc = createReverb();
+        juce::MemoryBlock state;
+
+        setValue (*proc, P::kType, (float) P::cavern);
+
+        for (const auto& s : kStored)
+            setValue (*proc, s.id, s.value);
+
+        proc->getStateInformation (state);
+
+        auto restored = createReverb();
+
+        std::thread host ([&] { restored->setStateInformation (state.getData(), (int) state.getSize()); });
+        host.join();
+
+        juce::MessageManager::getInstance()->runDispatchLoopUntil (50);
+
+        checkClose (getValue (*restored, P::kType), (double) P::cavern, 1.0e-6,
+                    "a restore off the message thread lands on Cavern");
+
+        for (const auto& s : kStored)
+            checkClose (getValue (*restored, s.id), (double) s.value, 0.05,
+                        juce::String ("a restore off the message thread keeps the file's '") + s.id
+                            + "' after the queued type change is delivered");
+
+        // **And a real type change afterwards still applies its block**: the
+        // restore settled the link, it did not switch it off.
+        setValue (*restored, P::kType, (float) P::hall);
+
+        for (const auto& s : P::typeSettings (P::hall))
+            checkClose (getValue (*restored, s.id), (double) s.value, 0.05,
+                        juce::String ("after an off-thread restore, selecting Hall still stamps '") + s.id + "'");
     }
 
     //== Displayed values, at both ends of every knob =========================

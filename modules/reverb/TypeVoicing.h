@@ -4,6 +4,7 @@
 #include "core/state/ParamSet.h"
 #include "modules/reverb/params.h"
 
+#include <atomic>
 #include <cmath>
 
 namespace bmo::reverb
@@ -66,7 +67,7 @@ namespace bmo::reverb
 
     ## Why it cannot recurse, re-enter, or run on the audio thread
 
-    Three things, and the first of them is the structural one:
+    Four things, and the first of them is the structural one:
 
     - **`type` is not in what a type writes.** `typeSettings` returns nine
       settings and `kType` is not among them, so applying a type can never
@@ -82,6 +83,16 @@ namespace bmo::reverb
       restore and `resetToDefaults` all write `type` at least once with nothing
       new in it. Without this, every one of those would stamp a block for no
       reason.
+    - **A state restore settles `applied` to the type it restored**
+      (`stateRestored`, called by the engine once the last value has landed).
+      On the message thread that changes nothing: the TYPE write applied its
+      block at once and the file's own values landed on top. Off it -- a host
+      may restore from any thread, and the rack's MessageManagerLock is a
+      mutex, not a change of thread -- the TYPE write is only queued, and the
+      queued call used to arrive after the file's nine values, see a type it
+      had not applied, and stamp that type's block over all of them. Settling
+      turns that late call into a real move of nothing. A user or automation
+      change after the restore still differs from `applied` and still stamps.
 
     And the writes reach the parameters **on the message thread**, because
     `juce::ParameterAttachment` marshals a change that arrives on any other one
@@ -117,7 +128,15 @@ public:
         current parameter, and the two differ only inside an apply. For a test,
         which is the only caller: there is nothing a panel or an engine needs
         from it. */
-    int appliedType() const noexcept { return applied; }
+    int appliedType() const noexcept { return applied.load(); }
+
+    /** The restored TYPE is the voicing now, whatever the restore's own writes
+        queued along the way. No parameter is written: a restored session's
+        levels are the user's, and stamping them is the bug this exists for. */
+    void stateRestored() override
+    {
+        applied.store (detentOf (params.getReal (Index::type)));
+    }
 
 private:
     static int detentOf (float value) noexcept
@@ -140,7 +159,11 @@ private:
     }
 
     const ParamSet& params;
-    int applied;
+
+    // Atomic because `stateRestored` runs on whichever thread restored, and
+    // the standalone product takes no lock around a restore, while
+    // `typeChanged` reads it on the message thread.
+    std::atomic<int> applied;
     bool applying = false;
     juce::ParameterAttachment attachment;
 

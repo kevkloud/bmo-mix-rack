@@ -119,10 +119,19 @@ add_test(NAME fetcomp COMMAND fetcomp_tests)
 
 bmo_add_tool(reverb_tests plugin/ReverbTests.cpp)
 target_link_libraries(reverb_tests PRIVATE bmo_reverb)
+# The one plugin test that restores from a thread other than the message
+# thread, and it has to deliver what that restore queued before it can assert
+# anything -- which is MessageManager::runDispatchLoopUntil, and JUCE only
+# compiles that in with modal loops permitted. Every JUCE source is compiled
+# into the executable itself, so the define is consistent across it.
+target_compile_definitions(reverb_tests PRIVATE JUCE_MODAL_LOOPS_PERMITTED=1)
 add_test(NAME reverb COMMAND reverb_tests)
 
 bmo_add_tool(rack_tests plugin/RackTests.cpp ${BMO_ROOT}/products/rack/Registry.cpp)
 target_link_libraries(rack_tests PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp bmo_deesser bmo_fetcomp bmo_reverb)
+# As reverb_tests: the off-thread restore needs a message loop to grant its
+# MessageManagerLock and to deliver what it queued.
+target_compile_definitions(rack_tests PRIVATE JUCE_MODAL_LOOPS_PERMITTED=1)
 add_test(NAME rack COMMAND rack_tests)
 
 # Bus layouts, across every product at once: the accepted-layout table, and the

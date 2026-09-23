@@ -182,7 +182,7 @@ void RackProcessor::rebuild (std::vector<std::pair<const ModuleDef*, std::unique
             slot.engine = std::make_unique<ModuleEngine> (*slot.def, ParamSet (slot.def->specs, assigned));
 
             if (auto* state = chain[(size_t) s].second.get())
-                slot.engine->params().applyXml (*state);
+                slot.engine->restoreState (*state);
 
             if (prepared)
                 slot.engine->prepare (currentRate, currentBlock, currentChannels);

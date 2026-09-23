@@ -139,7 +139,7 @@ bool SingleModuleProcessor::restoreState (const juce::XmlElement& xml)
         return false;
 
     // Future versions migrate here, keyed off the stored stateVersion.
-    engine.params().applyXml (xml);
+    engine.restoreState (xml);
     return true;
 }
 

@@ -112,6 +112,22 @@ public:
         return dsp->tailSecondsForParams (now.data(), (int) now.size());
     }
 
+    /** Applies a saved state -- a session, a rack slot's carried state, a
+        preset file -- and then tells the module's link that it happened.
+
+        **Every state restore goes through here rather than straight to
+        `params().applyXml`**, in both products, because the order matters: the
+        link has to hear about the restore after the last value has landed, and
+        only the engine holds both. `ParamLink::stateRestored` says what went
+        wrong without it. */
+    void restoreState (const juce::XmlElement& xml)
+    {
+        paramSet.applyXml (xml);
+
+        if (paramLink != nullptr)
+            paramLink->stateRestored();
+    }
+
     /** Momentary, from the panel; -1 clears it. Not a parameter, so it is not
         in paramSet, not in a preset and not in a saved session. */
     void setSolo (int index) noexcept { dsp->setSolo (index); }

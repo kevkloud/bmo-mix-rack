@@ -315,6 +315,14 @@ would say so.
   `setValueNotifyingHost` notifies whether or not the value changed, so a preset
   recall, a state restore and `resetToDefaults` each write `type` at least once
   with nothing new in it.
+- **A state restore settles that detent to the type it restored.** Off the
+  message thread -- any host thread, or the rack's MessageManagerLock, which
+  is a mutex and not a change of thread -- the TYPE write is only queued, and
+  the queued call used to land after the file's nine values and stamp the
+  type's block over them. `ModuleEngine::restoreState` calls
+  `TypeVoicing::stateRestored` once the last value has landed, so that call
+  finds nothing to do; `ReverbTests` and `RackTests` restore off the message
+  thread and assert all nine survive.
 - **The writes land on the message thread**, because `juce::ParameterAttachment`
   marshals a change arriving on any other one through an AsyncUpdater.
   Automation moves TYPE from the audio thread, where `setValueNotifyingHost` has

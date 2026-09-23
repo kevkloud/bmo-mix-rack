@@ -72,8 +72,12 @@ rack/     SlotParameter (one generic host parameter, remapped live),
   voicing rather than a table lookup. The writes go through `ParamSet::apply`,
   the path a preset recall already uses, and reach the parameters on the
   message thread through a `juce::ParameterAttachment` — never from the audio
-  thread, which is where automation delivers the change that triggers them. The
-  field is last in `ModuleDef` and null for every other module. A second one has
+  thread, which is where automation delivers the change that triggers them. A
+  state restore goes through `ModuleEngine::restoreState`, which tells the link
+  once the last value has landed (`ParamLink::stateRestored`): off the message
+  thread the attachment only queues the TYPE write, and the late call used to
+  stamp the type's block over the levels the session had just restored. The
+  field is null for every module but BMO Linger. A second one has
   to argue for itself the way `modules/reverb/AGENTS.md` argues for the first.
 - `SlotParameter::assign` keeps a pointer into the module's static
   `specs()` vector. Never hand it a temporary.

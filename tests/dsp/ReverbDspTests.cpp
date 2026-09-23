@@ -1012,9 +1012,15 @@ int main()
         bool clamped = true;
 
         for (int t = 0; t < numTypes; ++t)
-            clamped = clamped && erSpanMsAt (erTableFor (t), 80.0f) == erTableFor (t).windowClampMs;
+            if (t != plate)
+                clamped = clamped && erSpanMsAt (erTableFor (t), 80.0f) == erTableFor (t).windowClampMs;
 
-        check (clamped, "at 80 m every table's span is its clamp");
+        check (clamped, "at 80 m every room table's span is its clamp");
+
+        // Plate spans 45 ms at its 22 m default, so even at 80 m it stays
+        // inside its 200 ms clamp: about 164 ms, the Size law and no more.
+        const auto plateSpan = erSpanMsAt (erTableFor (plate), 80.0f);
+        check (plateSpan > 150.0f && plateSpan < 180.0f, "at 80 m Plate's span is its last tap, 150-180 ms, inside its clamp");
     }
 
     //== The audits of 10 section 3 and 11 section 6, on every shipped table ==
@@ -1023,11 +1029,16 @@ int main()
     // the jitter; `measure_reverb taps --audit` prints every margin. Every
     // rule passes at every type **but one**, and it is named here rather than
     // hidden: Cavern fails flam rule (i) by 1.50 dB at its 55 m default SIZE,
-    // with no seed of 3000 and no geometry tried doing better, because a room
-    // that large puts its first-order walls 40 ms and more behind the floor
-    // bounce (see the testing note). The exemption is held to an absolute
-    // floor, so it cannot quietly get worse, and it is the thing to remove
-    // when Cavern's SIZE or recipe is revisited.
+    // because a room that large puts its first-order walls 40 ms and more
+    // behind the floor bounce (see the testing note). **This is a known
+    // failure on purpose, not a desk bug: the owner will decide it by ear at
+    // the listening checkpoint -- Cavern at 55 m against a smaller SIZE --
+    // 2026-09-23. Do not search seeds for it.** It is held to an absolute
+    // floor so it cannot quietly get worse.
+    //
+    // Plate's room rules print n/a and pass by construction: the owner ruled
+    // on 2026-09-23 that a plate is not a room (ErAudit.h). Its own three
+    // plate rules are asserted here like any other rule.
     {
         for (int t = 0; t < numTypes; ++t)
         {
@@ -1195,6 +1206,100 @@ int main()
 
             check (fails (b, ergen::ruleMoorer), "48 core taps fail the Moorer sanity check");
         }
+    }
+
+    //== Plate is held to plate rules, and only to them ========================
+    //
+    // Owner decision, 2026-09-23: a plate is a physical metal plate model, not
+    // a room, and the room rules do not apply (ErAudit.h). Three things here:
+    // the room rules are withdrawn for Plate and for no room; the plate rules
+    // are withdrawn for every room; and each plate rule reddens on a Plate
+    // table broken by hand for it.
+    {
+        const auto plateCtx = ergen::contextFor (plate);
+        const auto plateRep = ergen::audit (erTableFor (plate), plateCtx);
+        const auto roomRep  = ergen::audit (erTableFor (room), ergen::contextFor (room));
+
+        bool withdrawn = true, stillRoom = true;
+
+        for (const int r : { ergen::ruleSeparation, ergen::ruleGaps, ergen::ruleFullBand, ergen::ruleKuttruff,
+                             ergen::ruleFlamLate, ergen::ruleFlamOnset, ergen::ruleLoc, ergen::ruleProximity,
+                             ergen::ruleCentre, ergen::ruleLateral, ergen::ruleMoorer })
+        {
+            withdrawn = withdrawn && std::isinf (plateRep.margin[r]);
+            stillRoom = stillRoom && ! std::isinf (roomRep.margin[r]);
+        }
+
+        check (withdrawn, "Plate is not held to any room rule");
+        check (stillRoom, "Room is still held to every room rule");
+        check (! std::isinf (plateRep.margin[ergen::ruleTapCeiling]) && ! std::isinf (plateRep.margin[ergen::ruleGamma]),
+               "Plate is still held to the -15.3 dB ceiling and to gamma >= 0");
+        check (std::isinf (roomRep.margin[ergen::rulePlateOnset]) && std::isinf (roomRep.margin[ergen::rulePlateFront])
+                   && std::isinf (roomRep.margin[ergen::rulePlateDispersion]),
+               "Room is not held to the plate rules");
+
+        const auto fails = [&plateCtx] (const ErTable& broken, int rule)
+        {
+            return ! ergen::audit (broken, plateCtx).pass[rule];
+        };
+
+        {
+            // The onset moved to 2 ms in one channel.
+            auto b = erTableFor (plate);
+            auto& ch = b.variation[1].right;
+            const auto shift = 2.0f - ch.taps[0].timeMs;
+
+            for (int i = 0; i < ch.numTaps; ++i)
+                ch.taps[i].timeMs += shift;
+
+            check (fails (b, ergen::rulePlateOnset), "a plate whose first tap is at 2 ms fails the onset rule");
+        }
+
+        {
+            // A loud bright tap at 20 ms moves the peak out of the first 5 ms.
+            auto b = erTableFor (plate);
+            auto& ch = b.variation[4].left;
+            int i = 0;
+
+            while (i < ch.numTaps - 1 && ch.taps[i].timeMs * constantsFor (plate).sizeM / kReferenceSizeM < 20.0f)
+                ++i;
+
+            ch.taps[i].gain = 0.3f;
+            ch.taps[i].band = 0;
+            ch.taps[i].theta = 0.0f;
+            check (fails (b, ergen::rulePlateFront), "a plate peaking at 20 ms fails the front-loaded rule");
+        }
+
+        {
+            // The first tap relabelled into the dark band: lows before highs.
+            auto b = erTableFor (plate);
+            b.variation[0].left.taps[0].band = kErBands - 1;
+            check (fails (b, ergen::rulePlateDispersion), "a plate whose lows arrive first fails the dispersion rule");
+        }
+    }
+
+    //== Every number in every table is finite =================================
+    {
+        bool finite = true;
+
+        for (int t = 0; t < numTypes; ++t)
+        {
+            const auto& table = erTableFor (t);
+
+            for (const auto& v : table.variation)
+                for (const auto* ch : { &v.left, &v.right })
+                    for (int i = 0; i < ch->numTaps; ++i)
+                        finite = finite && std::isfinite (ch->taps[i].timeMs) && std::isfinite (ch->taps[i].gain)
+                                        && std::isfinite (ch->taps[i].theta) && std::isfinite (ch->taps[i].pan);
+
+            for (const auto c : table.bandCutoffHz)
+                finite = finite && std::isfinite (c) && c > 0.0f;
+
+            finite = finite && std::isfinite (table.windowMs) && std::isfinite (table.beta)
+                            && std::isfinite (table.combDelayMs) && std::isfinite (table.combGain);
+        }
+
+        check (finite, "every number in every ER table is finite");
     }
 
     //== prepare() and reset() are reachable and do not throw ================

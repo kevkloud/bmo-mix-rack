@@ -11,6 +11,26 @@
 #include <cstdint>
 #include <vector>
 
+/** EXPERIMENT, AURORA 2026-09-23 -- clean's sinc tap count, made nameable.
+
+    `10` §1 asks for a "32-tap polyphase Kaiser sinc, reusing
+    `modules/tune/dsp/SincTable.h`", and 32 is the width Tune measured for
+    *its* job: reading at a rate other than 1, where the kernel is also the
+    anti-aliasing filter (`modules/tune/AGENTS.md`: 16 taps reach -24 dB at
+    0.4 fs, 32 reach -78). Dwell's clean read is at rate 1, so the number came
+    in with the header rather than being derived for this engine -- and the CPU
+    bench of 2026-09-22 found that read to be the single largest cost in the
+    module, which is why clean is the *most* expensive character.
+
+    Defining `BMO_DWELL_SINC_TAPS` to 8 or 16 builds a narrower kernel, so the
+    cost of the width can be measured against what it buys. **The default is 32
+    and the shipping behaviour is unchanged**; deleting this block and writing
+    `<32>` back into `Sinc` below reverts the experiment whole. Frosty decides
+    by ear. */
+#ifndef BMO_DWELL_SINC_TAPS
+ #define BMO_DWELL_SINC_TAPS 32
+#endif
+
 namespace bmo::dwell
 {
 
@@ -664,7 +684,8 @@ private:
 class DelayEngine
 {
 public:
-    using Sinc = bmo::tune::SincTable<32>;
+    /** 32 unless the experiment at the head of this file overrides it. */
+    using Sinc = bmo::tune::SincTable<BMO_DWELL_SINC_TAPS>;
 
     static constexpr int kMaxChannels = 2;
 
@@ -1366,7 +1387,8 @@ private:
     {
         const auto pos = (double) writeIdx - delay;
 
-        // 10 §1: 32-tap polyphase Kaiser sinc on clean -- unity gain at every
+        // 10 §1: a polyphase Kaiser sinc on clean, 32 taps by default (see
+        // BMO_DWELL_SINC_TAPS at the head of this file) -- unity gain at every
         // phase and an exact delay at whole samples, so the repeat chain
         // accumulates no phase-dependent HF loss. Tape and bucket-brigade take
         // 4-point 3rd-order Hermite instead, where the per-repeat HF loss is
@@ -1826,8 +1848,10 @@ private:
     static constexpr int kRingGuard = Sinc::kTaps + 4;
 
     /** The scratch ring the kernel is probed out of. 128 holds all 32 taps
-        around the centre without wrapping. */
+        around the centre without wrapping, and so holds any narrower kernel
+        BMO_DWELL_SINC_TAPS can ask for. */
     static constexpr int kProbeSize = 128;
+    static_assert (Sinc::kTaps <= 64, "the probe ring has to hold the kernel around kProbeCentre");
     static constexpr int kProbeCentre = 32;
 
     /** 20 ms, 10 §12's clean crossfade. */

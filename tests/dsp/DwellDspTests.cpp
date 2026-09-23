@@ -3244,6 +3244,463 @@ void testTheStereoModes()
     }
 }
 
+//==============================================================================
+// Stage 2e: the in-loop FX stage. docs/delay/11 §4 l and e7, 10 §11a.
+//==============================================================================
+
+const char* fxTypeName (int t)
+{
+    return t == 0 ? "diffuse" : (t == 1 ? "pan/trem" : "crush");
+}
+
+/** One render with both engines alive, capturing **both** wet taps and both FX
+    stages' state signatures.
+
+    Both taps at once is what makes "per path" assertable in one pass: the same
+    render answers "did the lane's FX reach the main?" and "did the main's reach
+    the lane?", and a test that rendered twice could not tell a leak from a
+    difference between the two renders. */
+struct FxRender
+{
+    std::vector<float> mainTap, laneTap;
+    double mainSignature = 0.0, laneSignature = 0.0;
+};
+
+FxRender renderBothTaps (int character, const std::vector<float>& v, int n, int chunk, double rate)
+{
+    P::DwellDsp dsp;
+    dsp.prepare (rate, 512, 2);
+
+    auto p = v;
+    p[P::Index::character] = (float) character;
+    dsp.setParams (p.data(), (int) p.size());
+
+    Block block { n };
+    Noise noise;
+
+    for (int i = 0; i < n; ++i)
+    {
+        block.left[(size_t) i]  = 0.3f * noise.next();
+        block.right[(size_t) i] = 0.3f * noise.next();
+    }
+
+    FxRender out;
+    out.mainTap.assign ((size_t) n, 0.0f);
+    out.laneTap.assign ((size_t) n, 0.0f);
+
+    for (int offset = 0; offset < n; )
+    {
+        const auto count = std::min (chunk, n - offset);
+
+        float* channels[] { block.left.data() + offset, block.right.data() + offset };
+        dsp.process (channels, 2, count);
+
+        const auto& core = dsp.getCore();
+        const auto* m = core.mainWetTap (0);
+        const auto* l = core.laneWetTap (0);
+
+        std::copy (m, m + count, out.mainTap.begin() + offset);
+        std::copy (l, l + count, out.laneTap.begin() + offset);
+
+        offset += count;
+    }
+
+    out.mainSignature = dsp.getCore().getMainEngine().fxStateSignature();
+    out.laneSignature = dsp.getCore().getLaneEngine().fxStateSignature();
+
+    return out;
+}
+
+/** The lane alive and fed, and both FX trios set. */
+std::vector<float> fxSettings (bool mainFx, int mainType, float mainAmount,
+                               bool laneFx, int laneType, float laneAmount,
+                               bool link)
+{
+    auto v = laneSettings (0, 250.0f, -20.0f, 0.0f);
+    v[P::Index::feedback]     = 50.0f;
+    v[P::Index::time]         = 375.0f;
+    v[P::Index::send]         = 1.0f;
+    v[P::Index::fx]           = mainFx ? 1.0f : 0.0f;
+    v[P::Index::fxType]       = (float) mainType;
+    v[P::Index::fxAmount]     = mainAmount;
+    v[P::Index::laneFx]       = laneFx ? 1.0f : 0.0f;
+    v[P::Index::laneFxType]   = (float) laneType;
+    v[P::Index::laneFxAmount] = laneAmount;
+    v[P::Index::fxLink]       = link ? 1.0f : 0.0f;
+    return v;
+}
+
+/** **FX off is bit-identical to the loop without the stage, and it holds PER
+    PATH** (`11` §4l, 10 §11a).
+
+    "Without the stage" cannot be rendered by a binary that has one, so the
+    claim is asserted in the two halves that together mean it, and the second
+    is the one that would catch a real fault:
+
+    1. **With `fx` off the render is bit-identical across every type and every
+       amount.** Nothing the stage's parameters say reaches the audio, so no
+       code downstream of the branch ran.
+    2. **The stage's own state signature is exactly its reset value afterwards**
+       -- every allpass line still zero, the LFO still unturned, the hold
+       counter still at nothing, after two seconds of a loop at FEEDBACK 50.
+       This is what separates *skipped* from *run at a zero coefficient*: a
+       zero coefficient passes (1) while filling its buffers, and then jumps the
+       first time FX is switched on. §11a asks for the skip by name.
+
+    And **per path**: the main's stage and the lane's are different objects
+    because there are two engines, so the same render also asserts that turning
+    one on leaves the other's tap identical to the bit. That is the property
+    `fx_link` is allowed to tie values across without ever tying state. */
+void testFxOffIsBitIdenticalOnBothPaths()
+{
+    constexpr auto rate = 48000.0;
+    constexpr int chunk = 384;
+    const auto n = (int) (rate * 2.0);
+
+    // A freshly prepared engine has never run the stage, so its signature is
+    // the value every FX-off render below must still be at.
+    double restingSignature = 0.0;
+    {
+        P::DwellDsp dsp;
+        dsp.prepare (rate, 512, 2);
+        restingSignature = dsp.getCore().getMainEngine().fxStateSignature();
+    }
+
+    for (int c = 0; c < 3; ++c)
+    {
+        const auto base = renderBothTaps (c, fxSettings (false, 0, 35.0f, false, 0, 35.0f, false),
+                                          n, chunk, rate);
+
+        check (base.mainSignature == restingSignature && base.laneSignature == restingSignature,
+               std::string ("with FX off neither stage has any state at all on ")
+                   + characterName (c));
+
+        for (int t = 0; t < 3; ++t)
+        {
+            for (const auto amount : { 0.0f, 100.0f })
+            {
+                // Both trios moved to the same extreme, with FX off on both
+                // paths: not one sample may differ, on either tap.
+                const auto off = renderBothTaps (c, fxSettings (false, t, amount, false, t, amount, false),
+                                                 n, chunk, rate);
+
+                check (worstDifference (base.mainTap, off.mainTap) == 0.0f,
+                       std::string ("FX off on the main path is bit-identical at ")
+                           + fxTypeName (t) + " " + std::to_string ((int) amount) + " % on "
+                           + characterName (c));
+
+                check (worstDifference (base.laneTap, off.laneTap) == 0.0f,
+                       std::string ("FX off on the lane path is bit-identical at ")
+                           + fxTypeName (t) + " " + std::to_string ((int) amount) + " % on "
+                           + characterName (c));
+
+                check (off.mainSignature == restingSignature
+                           && off.laneSignature == restingSignature,
+                       std::string ("FX off skips the stage rather than running it at zero, at ")
+                           + fxTypeName (t) + " " + std::to_string ((int) amount) + " % on "
+                           + characterName (c));
+            }
+        }
+
+        // The other half, and the one that makes the above non-vacuous: each
+        // stage on its own reaches its own path and **only** its own path.
+        for (int t = 0; t < 3; ++t)
+        {
+            const auto mainOnly = renderBothTaps (c, fxSettings (true, t, 100.0f, false, t, 100.0f, false),
+                                                  n, chunk, rate);
+            const auto laneOnly = renderBothTaps (c, fxSettings (false, t, 100.0f, true, t, 100.0f, false),
+                                                  n, chunk, rate);
+
+            check (worstDifference (base.mainTap, mainOnly.mainTap) > 1.0e-4f,
+                   std::string ("the main's own FX stage reaches the main loop at ")
+                       + fxTypeName (t) + " on " + characterName (c));
+
+            check (worstDifference (base.laneTap, laneOnly.laneTap) > 1.0e-4f,
+                   std::string ("the lane's own FX stage reaches the lane at ")
+                       + fxTypeName (t) + " on " + characterName (c));
+
+            check (worstDifference (base.laneTap, mainOnly.laneTap) == 0.0f,
+                   std::string ("the main's FX stage cannot reach the lane at ")
+                       + fxTypeName (t) + " on " + characterName (c));
+
+            check (worstDifference (base.mainTap, laneOnly.mainTap) == 0.0f,
+                   std::string ("the lane's FX stage cannot reach the main loop at ")
+                       + fxTypeName (t) + " on " + characterName (c));
+        }
+    }
+}
+
+/** **The 2c headline again, now with the lane crushed** (`11` §4e1 and §4l).
+
+    2c proved the main loop's tap is bit-identical between a render where SEND
+    is held throughout and one where it is never touched. The FX stage is the
+    first thing added since that could plausibly break it: it is *in the loop*,
+    it holds buffers, and if the two engines shared one the lane's crush would
+    be writing into the main delay's memory. So the same assertion is re-run
+    with the lane's stage live at the most destructive setting the module has,
+    against a main delay running none. */
+void testTheMainLoopIsUndisturbedByASendWithFxLive()
+{
+    constexpr auto rate = 48000.0;
+    constexpr int chunk = 384;
+    const auto n = (int) (rate * 3.0);
+
+    for (int c = 0; c < 3; ++c)
+    {
+        const auto sendAt = [chunk] (int offset) { return ((offset / chunk) % 9) < 6; };
+
+        const auto render = [&] (bool toggleSend, std::vector<float>& tap)
+        {
+            P::DwellDsp dsp;
+            dsp.prepare (rate, 512, 2);
+
+            // The lane on Crush at full, the main delay with no FX at all --
+            // and `fx_link` off, which is the only way to ask for that.
+            auto v = fxSettings (false, 0, 35.0f, true, 2, 100.0f, false);
+            v[P::Index::character] = (float) c;
+            v[P::Index::laneLevel] = 24.0f;
+            v[P::Index::send]      = 0.0f;
+            dsp.setParams (v.data(), (int) v.size());
+
+            Block block { n };
+            Noise noise;
+
+            for (int i = 0; i < n; ++i)
+            {
+                block.left[(size_t) i]  = 0.3f * noise.next();
+                block.right[(size_t) i] = 0.3f * noise.next();
+            }
+
+            std::vector<float> right;
+
+            renderWithTap (dsp, block, n, chunk, false, tap, right,
+                           [&] (int offset, int)
+                           {
+                               v[P::Index::send] = (toggleSend && sendAt (offset)) ? 1.0f : 0.0f;
+                               dsp.setParams (v.data(), (int) v.size());
+                           });
+
+            return block.left;
+        };
+
+        std::vector<float> tapA, tapB;
+        const auto quiet   = render (false, tapA);
+        const auto toggled = render (true,  tapB);
+
+        check (worstDifference (tapA, tapB) == 0.0f,
+               std::string ("the main loop's tap is still bit-identical across a send with the "
+                            "lane's FX stage live, on ") + characterName (c));
+
+        check (worstDifference (quiet, toggled) > 0.01f,
+               std::string ("the crushed lane was fed and audible on ") + characterName (c));
+    }
+}
+
+/** **Crush's acceptance: the non-harmonic floor stops growing by repeat 10**
+    (10 §11a, `11` §4l).
+
+    Crush is **exempt from §4's -60 dBFS alias floor**, and that exemption is
+    the design rather than a concession: the sample-and-hold's images are made
+    *inside* the loop and meet §4's 18 kHz cap on the *next* lap, so the cap
+    tames them one repeat late instead of preventing them. Deliberate aliasing
+    with a level is not a fault; deliberate aliasing that compounds without
+    bound is. So what is asserted is that it **converges**.
+
+    The measurement is relative, and it has to be: at FEEDBACK 97 the loop is at
+    unity FX-off, but the hold is a low-pass with teeth, so the loop runs a
+    little under unity with it in and an absolute floor would fall with the
+    whole signal and pass for the wrong reason. What is tracked is the worst
+    non-harmonic probe **against the fundamental in the same window**.
+
+    A 1 kHz tone is used so the harmonic grid is coarse and easy to sit off: the
+    five probes are 350 Hz from the nearest harmonic, which at this window is
+    seventeen bins of Hann sidelobe away -- far enough that what they read is
+    the crush and not the tone. */
+void testCrushFloorStopsGrowing()
+{
+    constexpr auto rate = 48000.0;
+    constexpr auto toneHz = 1000.0;
+    const auto lap = (int) (rate * 0.1);
+    const auto burst = lap / 2;
+    // AMOUNT 37 % puts the hold divisor on 13 -- `ceil(1 + 0.37 . 31)` -- so
+    // the sample-and-hold runs at 48000/13 = 3692.31 Hz, which is **not** a
+    // multiple of the tone. That is the reason for the odd figure: at AMOUNT
+    // 50 the divisor is 16 and the hold rate is exactly 3 kHz, so every image
+    // lands on a harmonic of the 1 kHz tone and there is no non-harmonic
+    // content left to measure. The probes are the first four images,
+    // `|k . f_hold +- f_tone|`, each at least 300 Hz -- fifteen bins of this
+    // window -- from the nearest harmonic.
+    constexpr auto holdHz = 48000.0 / 13.0;
+    const double probes[] { holdHz - toneHz, holdHz + toneHz,
+                            2.0 * holdHz - toneHz, 2.0 * holdHz + toneHz };
+
+    for (int c = 0; c < 3; ++c)
+    {
+        P::DwellDsp dsp;
+        dsp.prepare (rate, 512, 2);
+
+        auto v = settings (c, (float) ((double) lap * 1000.0 / rate), 97.0f, 100.0f);
+        v[P::Index::fx]       = 1.0f;
+        v[P::Index::fxType]   = 2.0f;   // Crush
+        v[P::Index::fxAmount] = 37.0f;
+        dsp.setParams (v.data(), (int) v.size());
+
+        const auto n = lap * 18;
+        Block block { n };
+
+        for (int i = 0; i < burst; ++i)
+        {
+            const auto w = 0.5 - 0.5 * std::cos (2.0 * P::kPiD * (double) i / (double) burst);
+            const auto s = (float) (0.5 * w * std::sin (2.0 * P::kPiD * toneHz * (double) i / rate));
+            block.left[(size_t) i]  = s;
+            block.right[(size_t) i] = s;
+        }
+
+        renderInChunks (dsp, block, n, 512);
+
+        const auto relativeFloorAt = [&] (int repeat)
+        {
+            auto worst = 0.0;
+
+            for (const auto hz : probes)
+                worst = std::max (worst, magnitudeAt (block.left, repeat * lap, burst, hz, rate));
+
+            const auto tone = magnitudeAt (block.left, repeat * lap, burst, toneHz, rate);
+
+            return 20.0 * std::log10 (std::max (worst, 1.0e-30) / std::max (tone, 1.0e-30));
+        };
+
+        // Repeat 1 is the input arriving late and **has never been crushed** --
+        // the stage is in `C(y)`, the feedback chain, so the first lap through
+        // it lands on repeat 2. That is where the measurement starts.
+        const auto atTwo = relativeFloorAt (2);
+        const auto atTen = relativeFloorAt (10);
+
+        auto after = atTen;
+
+        for (int r = 11; r <= 17; ++r)
+            after = std::max (after, relativeFloorAt (r));
+
+        std::printf ("      crush floor %-15s repeat 2: %7.2f dB, repeat 10: %7.2f dB, "
+                     "worst 11-17: %7.2f dB\n",
+                     characterName (c), atTwo, atTen, after);
+
+        // 0.5 dB of slack, the figure `11` §4e4 already uses for the lane's own
+        // convergence, because this is the same kind of claim: not that the
+        // number is small -- §11a exempts Crush from the -60 dBFS floor
+        // precisely because it will not be -- but that it has stopped moving.
+        check (after <= atTen + 0.5,
+               std::string ("crush's non-harmonic floor stops growing by repeat 10 on ")
+                   + characterName (c) + " (repeat 10 " + std::to_string (atTen)
+                   + " dB, worst after " + std::to_string (after) + " dB)");
+
+        // What the measurement actually found, and it is stronger than §11a
+        // asks for: the floor is **level from the first crushed repeat**, not
+        // merely level by the tenth. The hold's images are a fixed ratio of
+        // whatever is circulating, so they ride the tail down rather than
+        // building on it -- which is the thing "every candidate compounds per
+        // repeat" was the risk of.
+        check (std::abs (atTen - atTwo) <= 0.5,
+               std::string ("crush's floor is level from the first crushed repeat on ")
+                   + characterName (c) + " (repeat 2 " + std::to_string (atTwo)
+                   + " dB, repeat 10 " + std::to_string (atTen) + " dB)");
+
+        // Non-vacuous: there has to be real non-harmonic content for the
+        // convergence to be about. Anything near the -60 dBFS an FX-off render
+        // reads would mean the probes had missed the images and this test was
+        // measuring the quantiser's dither instead.
+        check (atTen > -40.0,
+               std::string ("crush really is making non-harmonic content to converge, on ")
+                   + characterName (c) + " (" + std::to_string (atTen) + " dB)");
+    }
+}
+
+/** **`fx_link` ties the lane's trio to the main's, and ties nothing else**
+    (`11` §4e7, 10 §11.3).
+
+    Three claims, and the third is the one that is easy to get wrong:
+
+    1. **On, the lane's own three rows cannot reach the audio.** Two renders
+       with `lane_fx`, `lane_fx_type` and `lane_fx_amount` at opposite extremes
+       must null bit-exactly -- the lane's stage reads the main's three, so its
+       own values are ignored rather than overwritten.
+    2. **Off, they reach it** -- which is the case the parameter exists for: a
+       thrown word crushed against a clean main delay.
+    3. **Nothing is seeded either way.** The lane's three values are still
+       exactly what the host set after a pass with the tie on, so there is no
+       automation pass that rewrites parameters and `11` §4e7's "automating
+       `fx_link` writes no parameters at all" is simply true of this module. */
+void testFxLinkTiesTheLanesTrio()
+{
+    constexpr auto rate = 48000.0;
+    constexpr int chunk = 384;
+    const auto n = (int) (rate * 2.0);
+
+    for (int c = 0; c < 3; ++c)
+    {
+        // Linked, with the main delay running Diffuse: the lane must follow it
+        // whatever its own rows say.
+        const auto linkedA = renderBothTaps (c, fxSettings (true, 0, 35.0f, false, 0, 0.0f, true),
+                                             n, chunk, rate);
+        const auto linkedB = renderBothTaps (c, fxSettings (true, 0, 35.0f, true, 2, 100.0f, true),
+                                             n, chunk, rate);
+
+        check (worstDifference (linkedA.laneTap, linkedB.laneTap) == 0.0f,
+               std::string ("with FX LINK on the lane's own trio cannot leak, on ")
+                   + characterName (c));
+
+        check (worstDifference (linkedA.mainTap, linkedB.mainTap) == 0.0f,
+               std::string ("with FX LINK on the lane's own trio cannot reach the main either, on ")
+                   + characterName (c));
+
+        // And the tie is real rather than both stages simply being off: with
+        // the main's stage running, the lane's tap must differ from a render
+        // where the main's stage is off too.
+        const auto unlit = renderBothTaps (c, fxSettings (false, 0, 35.0f, false, 0, 0.0f, true),
+                                           n, chunk, rate);
+
+        check (worstDifference (unlit.laneTap, linkedA.laneTap) > 1.0e-4f,
+               std::string ("FX LINK on makes the lane follow the main's stage, on ")
+                   + characterName (c));
+
+        // Released: now the lane's own three are what it runs, and the main is
+        // untouched by them -- **a thrown word crushed against a clean main
+        // delay**, which is the case the parameter exists for.
+        const auto freeA = renderBothTaps (c, fxSettings (false, 0, 35.0f, false, 0, 0.0f, false),
+                                           n, chunk, rate);
+        const auto freeB = renderBothTaps (c, fxSettings (false, 0, 35.0f, true, 2, 100.0f, false),
+                                           n, chunk, rate);
+
+        check (worstDifference (freeA.laneTap, freeB.laneTap) > 1.0e-4f,
+               std::string ("with FX LINK off the lane's own trio reaches the audio, on ")
+                   + characterName (c));
+
+        check (worstDifference (freeA.mainTap, freeB.mainTap) == 0.0f,
+               std::string ("with FX LINK off the lane's crush still leaves the main clean, on ")
+                   + characterName (c));
+
+        // Nothing was seeded while the tie was on: the lane's three rows come
+        // back out of the core exactly as the host set them.
+        {
+            P::DwellDsp dsp;
+            dsp.prepare (rate, 512, 2);
+
+            auto linked = fxSettings (true, 0, 35.0f, true, 2, 100.0f, true);
+            linked[P::Index::character] = (float) c;
+            dsp.setParams (linked.data(), (int) linked.size());
+
+            Block warm { 4096 };
+            renderInChunks (dsp, warm, 4096, 512);
+
+            const auto& p = dsp.getCore().getParams();
+
+            check (p.laneFx && p.laneFxTypeChoice == 2 && p.laneFxAmountPct == 100.0f,
+                   std::string ("FX LINK leaves the lane's own three rows exactly as they were, on ")
+                       + characterName (c));
+        }
+    }
+}
+
 } // namespace
 
 //==============================================================================
@@ -3291,6 +3748,12 @@ int main()
     // Stage 2d: ducking and the stereo modes.
     testDuckIsAfterTheLoopTapAndNeverTouchesTheLane();
     testTheStereoModes();
+
+    // Stage 2e: the in-loop FX stage.
+    testFxOffIsBitIdenticalOnBothPaths();
+    testTheMainLoopIsUndisturbedByASendWithFxLive();
+    testCrushFloorStopsGrowing();
+    testFxLinkTiesTheLanesTrio();
 
     std::printf ("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

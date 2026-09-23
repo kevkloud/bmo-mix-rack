@@ -207,7 +207,10 @@ inline constexpr double kDuckWidthDb = 20.0;
     left the ring, the fractional read, §3's feedback law with its computed
     `P_c`, §9's MIX law and both engines; 2b added the characters. 2c adds
     SEND, HOLD and CHOP, §11.2's bipolar tail and the lane's LEVEL; 2d adds
-    §6's ducker and §8's three stereo modes. The FX stage is a later stage.
+    §6's ducker and §8's three stereo modes. **2e adds §11a's in-loop FX
+    stage**, which lands almost entirely in `DelayEngine` -- the stage is
+    in-loop, so it is the engine's -- and leaves out here only `fx_link`, which
+    chooses which trio the lane engine is handed.
 
     **Where each of those went is the design, not an implementation detail.**
     The stereo mode is one shared control governing both engines, so it is a
@@ -494,7 +497,7 @@ private:
         // of an engine that cannot ask which one it is. What differs between
         // the two calls is TIME, and in 2c the lane's own FX trio. Nothing
         // else, and nothing about the sound.
-        const auto voiceOf = [this] (float engineTimeMs)
+        const auto voiceOf = [this] (float engineTimeMs, bool fxOn, int fxType, float fxAmountPct)
         {
             DelayEngine::Params p;
             p.timeMs      = engineTimeMs;
@@ -505,18 +508,47 @@ private:
             p.modRateHz   = params.modRateHz;
             p.modDepthPct = params.modDepthPct;
             p.drivePct    = params.drivePct;
+            p.fx          = fxOn;
+            p.fxType      = fxType;
+            p.fxAmountPct = fxAmountPct;
             return p;
         };
 
-        mainEngine.setParams (voiceOf (params.timeMs), snapNow);
+        mainEngine.setParams (voiceOf (params.timeMs, params.fx, params.fxTypeChoice,
+                                       params.fxAmountPct),
+                              snapNow);
         mainEngine.setFeedbackGain (feedbackGainFor (params.feedbackPct,
                                                      mainEngine.referenceLoopPeak()),
                                     snapNow);
 
+        // **`fx_link` lives here and cannot live in the engine** (10 §11.3,
+        // §11a). It is a decision about *which three numbers the lane engine
+        // is handed*, which is a statement about the two instances -- so it
+        // belongs where the difference between them already lives, beside the
+        // two gain laws. An engine that took the flag would be an engine that
+        // knew it was the lane, which is exactly the seam 10 §11.1 forbids.
+        //
+        // **While it is on, the lane's three rows are ignored, not
+        // overwritten** (§11.3): nothing is written back to them, they keep
+        // whatever they held, and they come back untouched when the tie
+        // releases. That is why there is no seeding here and why `11` §4e7 can
+        // assert that automating `fx_link` writes no parameters at all -- there
+        // is nothing in this module that writes one.
+        //
+        // **The tie is of values and never of state.** Even with both trios
+        // identical the two stages run from separate buffers, because each
+        // engine holds its own; that is what keeps "FX off is bit-identical to
+        // the loop without the stage" true per path at every setting of this
+        // flag (§11a).
+        const auto laneFxOn     = params.fxLink ? params.fx : params.laneFx;
+        const auto laneFxType   = params.fxLink ? params.fxTypeChoice : params.laneFxTypeChoice;
+        const auto laneFxAmount = params.fxLink ? params.fxAmountPct : params.laneFxAmountPct;
+
         // **`lane_note` is ignored here exactly as `note` is** (10 §11.7):
         // both ship disabled on the one `kSyncIsEnabled` switch until `12`'s
         // tempo plumbing lands, so the lane engine runs from `lane_time`.
-        laneEngine.setParams (voiceOf (params.laneTimeMs), snapNow);
+        laneEngine.setParams (voiceOf (params.laneTimeMs, laneFxOn, laneFxType, laneFxAmount),
+                              snapNow);
 
         // 10 §11.2's bipolar tail. **The detent snaps rather than smooths**:
         // `lane_gain` at exactly 0 is a promise that the loop peak is 1.000,

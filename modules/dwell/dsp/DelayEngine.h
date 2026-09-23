@@ -276,6 +276,342 @@ inline double companderGainFor (double levelDb) noexcept
 }
 
 //==============================================================================
+/** The three in-loop FX types, by the index the schema's FX TYPE choice
+    carries (10 §11a). Like a character, a type is **a parameter**: naming them
+    here is not the engine knowing which instance it is.
+
+    **Three, and only three.** Octave up, Octave down and Reverse were cut on
+    2026-09-21 and Sweep on 2026-09-22 -- Sweep *because* VOICE was, since it
+    was specified as VOICE's resonant centre being moved per repeat and there
+    is no resonant filter left for it to move. Re-adding a sweep means
+    re-opening the VOICE decision first; it does not mean giving this stage a
+    band-pass of its own. */
+enum FxType
+{
+    kDiffuse = 0,      ///< 6-stage allpass chain, delays 7-37 ms scaled by AMOUNT
+    kPanTremolo = 1,   ///< one LFO stepped at the delay period; chops on the mono bus
+    kCrush = 2         ///< quantise to 16-3 bits and sample-and-hold at f_s / 1-32
+};
+
+//==============================================================================
+/** **10 §11a's in-loop FX stage: one per engine, no shared state.**
+
+    It lives inside `DelayEngine` because it is *in-loop* -- it sits in the
+    character chain between the mode filters and the shaper, so it recirculates
+    and compounds per repeat, which is the point of it and the risk in it.
+    Putting it here is what gives each engine its own stage and its own buffers
+    **for free**: the main delay's allpass memory, LFO phase, hold counter and
+    quantiser are simply different objects from the lane's, so §11a's "the two
+    stages share no state" is a consequence of where the class is declared
+    rather than a rule anyone has to keep. `fx_link` ties the two stages'
+    parameter *values* and lives out in `DspCore`, because choosing which three
+    numbers to hand the lane engine is a decision about the two instances --
+    and an engine that took an "am I the lane?" flag would be the wrong seam.
+
+    **Every candidate is non-expanding, `|F| <= 1` at every setting** (§11a), so
+    §3's `|g| < 1` bound is untouched and `P_c` does not have to be re-swept
+    when FX moves. Diffuse is an allpass, so it is exactly unity at every omega;
+    Pan/Tremolo is peak-normalised in closed form (see `panGain`); Crush's
+    quantiser is clamped to the same +-1 the safety clip uses and a
+    zero-order hold can never exceed its own input.
+
+    **AMOUNT zero is a wire on Diffuse and Pan/Tremolo** -- the allpass lengths
+    round to nothing and every stage is skipped, and the pan normalisation
+    collapses to a gain of exactly 1.0. **On Crush it is not**: at AMOUNT 0 the
+    spec's law gives 16 bits and a hold divisor of 1, which is a quantiser at
+    about -96 dBFS rather than a bypass. That is inaudible but it is not
+    bit-exact, and it is recorded here rather than rounded away, because §11a
+    says "zero always inaudible" and means the sound rather than the bits.
+
+    **Nothing here reads ahead**, so reported latency stays 0 (§0). */
+class FxStage
+{
+public:
+    static constexpr int kMaxChannels = 2;
+
+    /** §11a: "6-stage allpass, delays 7-37 ms" -- the shape of
+        `modules/dim`'s `AllPassChain` (00 §1) with real delay lines in place
+        of its unit-sample stages, which is what a *smear* needs and a
+        phase-scrambler does not.
+
+        The six are mutually near-prime in milliseconds so that their echoes do
+        not line up into a pitched comb over the six passes, let alone over the
+        `k` laps the loop then puts them through. The range's ends are 10 §11a's
+        own; the four between them are CALIBRATE, being a spacing rather than a
+        measurement. */
+    static constexpr int kStages = 6;
+    static constexpr double kStageDelaysMs[kStages] { 7.0, 11.0, 17.0, 23.0, 31.0, 37.0 };
+
+    /** The allpass coefficient at AMOUNT 100 (CALIBRATE). §11a fixes the
+        delays and leaves the diffusion depth open; 0.7 is the usual Schroeder
+        value and is well inside the `|a| < 1` the structure needs to stay
+        bounded. AMOUNT scales it linearly, so zero is a wire in the
+        coefficient as well as in the lengths. */
+    static constexpr double kDiffuseCoefficient = 0.7;
+
+    /** §11a's crush law, verbatim: `b = 16 - AMOUNT . 13` bits, sample-and-hold
+        at `f_s / ceil(1 + AMOUNT . 31)`. */
+    static constexpr double kCrushBitsAtZero = 16.0;
+    static constexpr double kCrushBitsSpan = 13.0;
+    static constexpr double kCrushHoldSpan = 31.0;
+
+    /** How far the stepped LFO turns per repeat (CALIBRATE).
+
+        §11a asks for "one LFO stepped at the delay period, so each repeat gets
+        its own position or level rather than a wobble inside one" and does not
+        say how fast it turns. A quarter turn on a cosine gives the four-repeat
+        cycle hard-one-side, centre, hard-the-other, centre -- every repeat a
+        different place, both extremes reached, and no repeat landing on the
+        same position as the one before it. A half turn would alternate sides
+        and never pass through centre; an irrational fraction would never
+        repeat, which is harder to perform against. */
+    static constexpr double kPanTurnsPerRepeat = 0.25;
+
+    void prepare (double newSampleRate, int numChannels)
+    {
+        sampleRate = newSampleRate > 0.0 ? newSampleRate : 48000.0;
+
+        // Sized for **every** channel the engine can run rather than for the
+        // count handed over, so that nothing here is ever the first thing to
+        // ask for memory later on.
+        (void) numChannels;
+
+        for (int s = 0; s < kStages; ++s)
+        {
+            const auto longest = (int) std::ceil (kStageDelaysMs[s] * 0.001 * sampleRate) + 2;
+
+            int size = 1;
+            while (size < longest)
+                size <<= 1;
+
+            stageMask[(size_t) s] = size - 1;
+
+            for (auto& ch : lines)
+                ch[(size_t) s].assign ((size_t) size, 0.0f);
+        }
+
+        setAmount (amountAtBlock);
+        reset();
+    }
+
+    /** 10 §11.4 lists "the FX stage's buffers" among what a HOLD-off clear
+        zeroes, and `DelayEngine::reset()` is that list -- which is why this is
+        called from there rather than copied into `DspCore`. */
+    void reset() noexcept
+    {
+        for (auto& ch : lines)
+            for (auto& line : ch)
+                std::fill (line.begin(), line.end(), 0.0f);
+
+        writeIdx.fill (0);
+        held.fill (0.0);
+        holdCounter.fill (0);
+
+        lfoPhase = 0.0;
+        lfoValue = 1.0;
+        stepCounter = 0;
+    }
+
+    /** The allpass lengths, taken from AMOUNT **once per block**.
+
+        A Schroeder allpass whose line length moves per sample is a line being
+        re-tapped per sample, and at 192 kHz a 20 ms smoother would walk it two
+        samples per sample: a sweep of AMOUNT would tear rather than glide. So
+        the lengths step at the block boundary -- where the host moves the
+        control anyway -- and the *coefficient* is what is smoothed per sample,
+        which is the part that carries the audible change in diffusion. A fast
+        AMOUNT automation on Diffuse therefore steps its delays at block rate;
+        recorded rather than hidden, and neither 10 §11a nor `11` §4 asks for
+        more. */
+    void setAmount (double amount) noexcept
+    {
+        amountAtBlock = std::clamp (amount, 0.0, 1.0);
+
+        for (int s = 0; s < kStages; ++s)
+        {
+            const auto samples = kStageDelaysMs[s] * 0.001 * sampleRate * amountAtBlock;
+            stageLength[(size_t) s] = (int) std::lround (samples);
+        }
+    }
+
+    /** One sample's worth of the shared state: the stepped LFO.
+
+        It is stepped **at the delay period**, so the position changes once a
+        repeat rather than wobbling inside one, and it is advanced once per
+        sample for the whole engine rather than once per channel -- a pan needs
+        one position that the two channels read opposite ends of. That is per
+        *engine* shared state, not per module: the lane has its own. */
+    void advance (double delaySamples) noexcept
+    {
+        const auto period = std::max (1, (int) std::lround (delaySamples));
+
+        if (++stepCounter >= period)
+        {
+            stepCounter = 0;
+            lfoPhase += 2.0 * kPiD * kPanTurnsPerRepeat;
+
+            if (lfoPhase >= 2.0 * kPiD)
+                lfoPhase -= 2.0 * kPiD;
+
+            lfoValue = std::cos (lfoPhase);
+        }
+    }
+
+    double process (int ch, int type, double x, double amount, int numChannels) noexcept
+    {
+        const auto c = (size_t) std::clamp (ch, 0, kMaxChannels - 1);
+        const auto a = std::clamp (amount, 0.0, 1.0);
+
+        if (type == kPanTremolo)
+            return panGain (ch, a, numChannels) * x;
+
+        if (type == kCrush)
+            return crush (c, x, a);
+
+        return diffuse (c, x, a);
+    }
+
+    /** Everything the stage holds, as one number, so that `11` §4l's "the
+        stage is skipped, not run at a zero coefficient" can be asserted
+        rather than reviewed: with FX off this must stay exactly at its reset
+        value however hard the loop is driven. A coefficient of zero would
+        still fill the allpass lines and still turn the LFO, and this is what
+        tells the two apart. */
+    double stateSignature() const noexcept
+    {
+        auto sum = lfoPhase + lfoValue + (double) stepCounter;
+
+        for (int ch = 0; ch < kMaxChannels; ++ch)
+        {
+            sum += held[(size_t) ch] + (double) holdCounter[(size_t) ch]
+                 + (double) writeIdx[(size_t) ch];
+
+            for (const auto& line : lines[(size_t) ch])
+                for (const auto v : line)
+                    sum += std::abs ((double) v);
+        }
+
+        return sum;
+    }
+
+private:
+    /** 10 §11a's Diffuse. Six allpasses in series: unit magnitude at every
+        omega, so `|F| = 1` exactly and the smear accumulates over `k` passes
+        into a pseudo-reverb without ever adding energy.
+
+        A stage whose length rounds to nothing is **skipped**, which is what
+        makes AMOUNT 0 a wire rather than a six-sample delay. */
+    double diffuse (size_t ch, double x, double amount) noexcept
+    {
+        const auto a = kDiffuseCoefficient * amount;
+        const auto w = writeIdx[ch];
+
+        for (int s = 0; s < kStages; ++s)
+        {
+            const auto length = stageLength[(size_t) s];
+
+            if (length < 1)
+                continue;
+
+            auto& line = lines[ch][(size_t) s];
+            const auto mask = stageMask[(size_t) s];
+
+            const auto d = (double) line[(size_t) ((w - length) & mask)];
+            const auto y = -a * x + d;
+
+            line[(size_t) (w & mask)] = (float) (x + a * y);
+            x = y;
+        }
+
+        writeIdx[ch] = w + 1;
+
+        return x;
+    }
+
+    /** 10 §11a's Pan / Tremolo, and the one candidate whose bound had to be
+        argued rather than inherited.
+
+        An equal-power pan cannot be both unity at centre and `<= 1` at the
+        extremes: normalised to unity at centre it reaches `sqrt(2)` at the
+        sides, and normalised to unity at the sides it sits at -3 dB in the
+        middle -- so a depth of zero would not be inaudible, which §11a
+        requires of every AMOUNT. The way out is §11a's own instruction to
+        **peak-normalise in closed form**: blend from unity to the equal-power
+        pair by AMOUNT and divide by that blend's own maximum,
+
+            g = ((1 - depth) + depth . p) / ((1 - depth) + depth . p_max)
+
+        which is exactly 1.0 at depth 0, is `p / p_max <= 1` at depth 1, and is
+        monotone between. What it costs is that a deep setting attenuates the
+        loop slightly on average -- the same direction every user stage in §4
+        moves, so the tail can only shorten and §3's reference still bounds it.
+
+        **On the mono bus it chops rather than pans** (§8): with one line there
+        is no second output to move into, so the same construction runs on a
+        level `1 + u` instead of on a pair, and at full depth it is a tremolo
+        gated once per repeat. */
+    double panGain (int ch, double depth, int numChannels) const noexcept
+    {
+        if (numChannels >= 2)
+        {
+            const auto theta = 0.25 * kPiD * (1.0 + lfoValue);
+            const auto pan = kRootTwo * (ch == 0 ? std::cos (theta) : std::sin (theta));
+
+            return ((1.0 - depth) + depth * pan) / ((1.0 - depth) + depth * kRootTwo);
+        }
+
+        return ((1.0 - depth) + depth * (1.0 + lfoValue)) / ((1.0 - depth) + depth * 2.0);
+    }
+
+    /** 10 §11a's Crush, and **deliberate aliasing**.
+
+        The hold's images are made *inside* the loop and meet §4's 18 kHz cap on
+        the *next* lap, so the cap tames them one repeat late rather than
+        preventing them -- musical and bounded, and always ahead of the shaper.
+        That is why Crush is **exempt from §4's -60 dBFS alias floor**, which is
+        measured FX-off, and why its own acceptance is only that the
+        non-harmonic floor **stops growing by repeat 10** (`11` §4l).
+
+        The quantiser is clamped to +-1: rounding can carry a sample half a step
+        past its input, and `|F| <= 1` is a bound this stage is asked to keep
+        rather than to leave to the clip two stages later. */
+    double crush (size_t ch, double x, double amount) noexcept
+    {
+        const auto divisor = (int) std::ceil (1.0 + amount * kCrushHoldSpan);
+
+        if (holdCounter[ch] <= 0)
+        {
+            held[ch] = x;
+            holdCounter[ch] = std::max (1, divisor);
+        }
+
+        --holdCounter[ch];
+
+        const auto bits = kCrushBitsAtZero - amount * kCrushBitsSpan;
+        const auto step = std::exp2 (1.0 - bits);
+        const auto q = std::round (held[ch] / step) * step;
+
+        return std::clamp (q, -1.0, 1.0);
+    }
+
+    static constexpr double kRootTwo = 1.41421356237309505;
+
+    double sampleRate = 48000.0;
+
+    std::array<std::array<std::vector<float>, kStages>, kMaxChannels> lines;
+    std::array<int, kStages> stageMask {};
+    std::array<int, kStages> stageLength {};
+    std::array<int, kMaxChannels> writeIdx {};
+
+    std::array<double, kMaxChannels> held {};
+    std::array<int, kMaxChannels> holdCounter {};
+
+    double amountAtBlock = 0.0;
+    double lfoPhase = 0.0, lfoValue = 1.0;
+    int stepCounter = 0;
+};
+
+//==============================================================================
 /** **BMO Dwell's delay engine: one type, instantiated twice.**
 
     docs/delay/10 §11.1 makes this a structural requirement rather than a
@@ -310,7 +646,15 @@ inline double companderGainFor (double levelDb) noexcept
     it is a parameter like the character and reaches the engine the same way.
     The ducker and the lane's three gates are **not** here and must not be --
     they are the caller's, because they are what tells the two instances
-    apart. The FX stage is a later stage.
+    apart.
+
+    **Stage 2e adds 10 §11a's in-loop FX stage, and it belongs in here for the
+    same reason the character does and the gates do not: it is *in the loop*.**
+    Each engine therefore gets its own stage and its own buffers for free, so
+    neither can disturb the other's without anything being written to make that
+    true. Which three values the stage runs on is the caller's business --
+    `fx_link` is a decision about the two instances and lives in `DspCore` --
+    and an engine handed them still cannot ask which one it is.
 
     Latency is 0 and stays 0: no oversampling, no lookahead, and the wet delay
     time is not latency (10 §0, `00` §4).
@@ -471,6 +815,14 @@ public:
         float modRateHz   = 0.6f;       ///< wow, 0.1 - 8 Hz
         float modDepthPct = 0.0f;       ///< 0 - 100 %
         float drivePct    = 0.0f;       ///< into the ADAA residual shaper
+
+        /** 10 §11a's in-loop FX stage, **one per engine**. Which three values
+            arrive here is the caller's decision -- `fx_link` hands the lane
+            engine the main's trio or its own (10 §11.3) -- and the engine
+            cannot tell which it was given, which is the whole seam. */
+        bool  fx          = false;      ///< off **skips** the stage, at no cost
+        int   fxType      = kDiffuse;   ///< Diffuse, Pan/Tremolo or Crush
+        float fxAmountPct = 35.0f;      ///< 0 - 100 %, its meaning per type
     };
 
     //==========================================================================
@@ -530,6 +882,12 @@ public:
         driveBlend.prepare (sampleRate, 30.0);
         driveCurve.prepare (sampleRate, 30.0);
 
+        // 20 ms on FX AMOUNT, 10 §11's schema. The allpass *lengths* are not
+        // smoothed -- see `FxStage::setAmount` for why they cannot be.
+        fxAmount.prepare (sampleRate, 20.0);
+
+        fx.prepare (sampleRate, FxStage::kMaxChannels);
+
         for (auto& f : filters)
             f.compressor.prepare (sampleRate, kCompanderAttackMs, kCompanderReleaseMs);
 
@@ -538,10 +896,12 @@ public:
         primed = false;
         gainPrimed = false;
         drivePrimed = false;
+        fxPrimed = false;
 
         buildUserFilters();
         buildModeFilters();
         applyDrive (true);
+        applyFx (true);
         applyTime (params.timeMs, true);
         reset();
     }
@@ -570,6 +930,12 @@ public:
             f.compressor.reset();
             f.shaper.reset();
         }
+
+        // 10 §11.4 lists the FX stage's buffers among what a HOLD-off clear
+        // zeroes, and a clear is `reset()` -- so they are cleared here and
+        // nowhere else, which is why `DspCore::clearLane` needs no second copy
+        // of this list.
+        fx.reset();
 
         writeIdx = 0;
         fadeCounter = -1;
@@ -619,6 +985,7 @@ public:
             handOverTimeLaw();
 
         applyDrive (snapNow);
+        applyFx (snapNow);
         applyTime (p.timeMs, modeMoved);
     }
 
@@ -664,6 +1031,15 @@ public:
         track the clock rather than sit at a constant. */
     double modeCutoffHz() const noexcept { return bbdCutoffHz; }
 
+    /** The FX stage's whole state as one number, for `11` §4l.
+
+        With FX off this must sit at its reset value however hard the loop is
+        driven -- which is the difference between a stage that is **skipped**
+        and one that is run at a zero coefficient (10 §11a). The latter would
+        pass a bit-identity test on the audio while still filling its allpass
+        lines and turning its LFO, and would then jump when FX came on. */
+    double fxStateSignature() const noexcept { return fx.stateSignature(); }
+
     //==========================================================================
     /** One block. Allocates nothing: every buffer and every grid came from
         `prepare`.
@@ -707,8 +1083,18 @@ public:
             const auto gain = (double) feedback.tick();
             const auto blend = (double) driveBlend.tick();
             const auto curve = (double) driveCurve.tick();
+            const auto fxDepth = (double) fxAmount.tick();
 
             advanceTime (glide);
+
+            // The FX stage's one piece of per-engine shared state: a pan wants
+            // **one** position that the two channels read opposite ends of, so
+            // the LFO turns once a sample for the engine rather than once a
+            // sample per channel. It is stepped at the delay period, so each
+            // repeat gets its own place (10 §11a). Turned only when FX is on,
+            // which is what `11` §4l's state signature measures.
+            if (params.fx)
+                fx.advance (delayCurrent);
 
             // §5's modulation follows §2's law and is never limited by it, so
             // it is taken here once a sample and applied to **both** taps of a
@@ -765,7 +1151,8 @@ public:
 
                 output[ch][n] = (float) y;
 
-                chain[(size_t) ch] = character (filters[(size_t) ch], y, blend, curve);
+                chain[(size_t) ch] = character (filters[(size_t) ch], ch, y, blend, curve,
+                                                fxDepth, nch);
             }
 
             // Pass two: 10 §8's matrix, then the write. **There is still no
@@ -896,7 +1283,8 @@ private:
         The safety clip is not optional: it is what makes the top of FEEDBACK's
         travel a limit cycle instead of a divergence (§3, §11.6), and it is on
         regardless of DRIVE. */
-    double character (ChannelFilters& f, double y, double blend, double curve) noexcept
+    double character (ChannelFilters& f, int ch, double y, double blend, double curve,
+                      double fxDepth, int nch) noexcept
     {
         auto c = f.lowCut.highPass (y);
         c = f.highCut.lowPass (c);
@@ -911,6 +1299,20 @@ private:
             c = f.bbdAntiAlias.process (c);
             c = f.bbdReconstruct.process (c);
         }
+
+        // **10 §11a's FX stage: after the mode filters, before the shaper, and
+        // skipped outright when off.** The position is the whole of what makes
+        // it an FX *in the loop* -- it is ahead of the blocker, so an offset a
+        // candidate introduces is removed rather than compounded, and ahead of
+        // the clip, so §3's bound still ends where it did.
+        //
+        // **This branch is the acceptance, not an optimisation.** §11a says off
+        // means the stage is skipped rather than run at a zero coefficient, so
+        // that FX off is bit-identical to the loop without it -- and because
+        // each engine holds its own `FxStage`, that identity holds **per path**
+        // without anything here knowing which path it is on.
+        if (params.fx)
+            c = fx.process (ch, params.fxType, c, fxDepth, nch);
 
         if (blend > 0.0)
         {
@@ -1096,6 +1498,31 @@ private:
 
         driveBlend.setTarget ((float) t);
         driveCurve.setTarget ((float) curve);
+    }
+
+    /** FX AMOUNT, as a smoothed 0-1 and as the block-rate figure the allpass
+        lengths are cut from.
+
+        **`setAmount` is called whether or not FX is on**, and that costs
+        nothing: it writes six integers and touches no audio. What must not
+        happen while FX is off is the stage *running*, and that is a branch in
+        `character()` rather than a coefficient of zero -- §11a is explicit that
+        off means skipped, and `11` §4l asserts it against the stage's own
+        state signature rather than against a timing. */
+    void applyFx (bool snapNow) noexcept
+    {
+        const auto t = std::clamp ((double) params.fxAmountPct * 0.01, 0.0, 1.0);
+
+        fx.setAmount (t);
+
+        if (! fxPrimed || snapNow)
+        {
+            fxAmount.snap ((float) t);
+            fxPrimed = true;
+            return;
+        }
+
+        fxAmount.setTarget ((float) t);
     }
 
     /** A character change swaps §2's law under a delay that may be mid-move.
@@ -1423,8 +1850,15 @@ private:
     Sinc sinc;
     std::vector<float> probe;
 
-    Smoother feedback, driveBlend, driveCurve;
-    bool primed = false, gainPrimed = false, drivePrimed = false;
+    Smoother feedback, driveBlend, driveCurve, fxAmount;
+    bool primed = false, gainPrimed = false, drivePrimed = false, fxPrimed = false;
+
+    /** **10 §11a's stage, held by value, one per engine.** That it is a member
+        here rather than a thing `DspCore` owns is the answer to "which
+        instance am I?": the main delay's buffers and the lane's are different
+        objects because there are two engines, so no flag has to be passed in
+        and none can be. */
+    FxStage fx;
 
     double delayCurrent = 0.0, delayNext = 0.0, delayTarget = 0.0;
     int fadeCounter = -1, fadeLength = 1;

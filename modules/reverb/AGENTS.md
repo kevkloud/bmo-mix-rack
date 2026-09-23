@@ -1056,12 +1056,26 @@ land, the tests follow them.
   by a quarter. With both, the bridge holds to about 1e-6 dB.
 - **The diffuser holds the level only on average.** Up to DENSITY 0.6 the
   bridge is exact; above it the three stages fade in and the level moves by up
-  to **0.24 dB** on the stand-in table. That is a property of taking one
-  output per channel from a feed-forward network — only an allpass preserves
-  every input's energy — and not of the delays. **11 section 6 asks for
-  0.2 dB over the whole sweep; this range does not meet it**, and the test
-  holds it to 0.3 dB and says so. The owner decides. Its fourth line enters
-  inverted, which is what keeps its DC gain at 1 (see the code).
+  to **0.24 dB** at 48 kHz on the stand-in table (0.29 at 96, 0.22 at 192).
+  That is a property of taking one output per channel from a feed-forward
+  network — only an allpass preserves every input's energy — and not of the
+  delays. **11 section 6 asks for 0.2 dB over the whole sweep; this range
+  does not meet it**, and the test holds it to 0.3 dB and says so. The owner
+  asked on 2026-09-23 for a feed-forward gain computed in `prepare()` from
+  the diffuser's own per-output gain; it was built — the diffuser's energy
+  for a one-pole-smeared pulse, tabulated over every crossfade position —
+  and moved no type by more than 0.01 dB, because the drift is the table's
+  tap pattern meeting the diffuser's paths and no diffuser-only figure can
+  see that. It is not committed; the patch and the figures are in the
+  testing note. Its fourth line enters inverted, which is what keeps its DC
+  gain at 1 (see the code).
+- **DENSITY runs on a 32-sample control grid.** The tap weights and the
+  renormalisation are recomputed every `kControlInterval` samples, counted
+  from `reset()` and never from a block's start, and each sounding set ramps
+  linearly to them in between — so a sweep lands on the same samples at every
+  block size. A weight that switched instead of ramping would now arrive as a
+  0.67 ms fade rather than a step; the per-tap check in `reverb_dsp` is what
+  catches that, not the waveform detector.
 - **The end-of-cluster ramp** fades taps across the last 5 ms of the window
   to zero at its end, so the cluster ends on a ramp at every size.
 - **ER HI-CUT is a one-pole solved to be exactly −3 dB at its setting**, and
@@ -1087,12 +1101,11 @@ land, the tests follow them.
 **The CPU budget was measured before anything was tuned**, as `10` section 8
 asks: the worst case (48 taps a channel, three diffuser stages) is about 0.6 %
 of a core at 48 kHz and 2.4 % at 192 kHz on AURORA, Release — the ER alone, so
-the late network has what is left of 1.5 % and 5 %. **One transient is already
-over**: with DENSITY moving on every block the weights are recomputed every
-sample, and that costs 5.3 % at 192 kHz. A session passes through it rather
-than sitting in it, but with the tail added it is the first place to spend
-effort (a control-rate recompute aligned to the sample clock would keep block
-invariance). `measure_reverb bench`.
+the late network has what is left of 1.5 % and 5 %. The costliest transient,
+DENSITY moving on every block, was 5.3 % at 192 kHz while the weights were
+recomputed every sample; on the control grid it is 0.92 % at 48 kHz and
+3.7 % at 192 kHz. A crossfade running on every block is 1.0 % and 4.2 %.
+`measure_reverb bench`.
 
 ## What is not here yet, and where it goes
 

@@ -291,7 +291,7 @@ void printBench()
 
     const Row rows[] {
         { "worst case: 48 taps, 3 stages",  2, (int) ErMode::taps,   false, false },
-        { "  the same, Variation 6 (comb)", 6, (int) ErMode::taps,   false, false },
+        { "  the same, Variation 6 (mono null)", 6, (int) ErMode::taps,   false, false },
         { "  the same, Energy mode",        2, (int) ErMode::energy, false, false },
         { "  crossfading on every block",   2, (int) ErMode::taps,   true,  false },
         { "  DENSITY moving every block",   2, (int) ErMode::taps,   false, true  },

@@ -134,3 +134,106 @@ was never fuzzed. All three fixed in 3f06a3c and re-proved.
 - `tests/plugin/ReverbTests.cpp`'s header and its "no preset level check"
   comment still say the DSP is a pass-through. Left alone: that file holds
   the goldens this pass may not touch.
+
+## Owner decisions, second pass (same day, on AURORA)
+
+### 1. Variation 6 is mono null (c24707f)
+
+L = +E, R = -E on the ER bus, E the table's variation-6 set; BMO Dimension's
+mid/side convention. `combDelayMs` and `combGain` are no longer read anywhere,
+buffer sizing included. `ErTable.h` untouched.
+
+`measure_reverb hash` (3c4bb39), Release, 48 kHz, every type x 3 modes x
+DENSITY 0/30/70/100 x SIZE 6/12/30 m, FNV-1a 64 over the output:
+
+| position | before | after |
+|---|---|---|
+| Var 0 | 7a6c5c9cf91f143c | 7a6c5c9cf91f143c |
+| Var 1 | aeeba9d578569697 | aeeba9d578569697 |
+| Var 2 | eb2524248bb0a1d4 | eb2524248bb0a1d4 |
+| Var 3 | 8cde6a8fff426b31 | 8cde6a8fff426b31 |
+| Var 4 | a10551355686c303 | a10551355686c303 |
+| Var 5 | 554970b6ae22dc82 | 554970b6ae22dc82 |
+| **Var 0-5 combined** | **9d2b36f5e9af1e98** | **9d2b36f5e9af1e98** |
+| Var 6 | 889a9d8f5231633c | 6bf1a65e0372ac03 |
+
+Tests: L + R == 0.0f at every sample (6 types x 3 modes x DENSITY
+0/0.3/0.7/1, impulse then noise); L not silent; L is E tap for tap (times to
+a sample, gains to 0.2 dB); each side within 0.2 dB of Var 5 on the impulse
+response up to DENSITY 60 % (worst 1.0e-6 dB); a mono instance is exactly
+silent at MIX 100 %, exactly half the dry at 50 %, and finite.
+
+The Var 5 comparison stops at 60 % on purpose: above it, in Energy mode, Var 5
+and Var 6 are different velvet sequences and the diffuser treats them
+differently by up to 0.26 dB -- the density sweep's subject, not Var 6's.
+A first version measured the level over the noise half of the drive too, and
+failed by 0.31 dB in Energy mode at DENSITY 0: that is noise through two
+different pulse sequences, a random quantity, not a level.
+
+Breaks (each reverted): R = -0.999 L (3 red: the null, both mono checks); the
+side silent (3 red); the side 10 % loud (2 red: E tap for tap, level against
+Var 5); mono taking L only (2 red); mono NaN (3 red, including finite). Two
+earlier breaks, on lines shared with Var 0-5's tap loop, reddened Var 0-5's
+checks as well and were redone on the side block alone.
+
+### 2. The density level above 60 % -- not met
+
+Built as asked: a gain computed in `prepare()` (once per rate, shared) from
+the diffuser's own per-output gain -- G(D, a), the energy of one output for
+a pulse smeared by a one-pole of pole a, over 49 crossfade positions and 25
+poles -- dividing each set's renormalisation, table lookup on the audio
+thread, no recursion. G is 1.000 at the stand-in's bright poles and swings
+0.80-1.10 at a = 0.9. Worst over DENSITY 60-100 %, reverb_dsp, Debug:
+
+| type | 48 kHz without / with | 96 kHz | 192 kHz |
+|---|---|---|---|
+| Room | 0.0887 / 0.0887 dB | 0.0692 / 0.0687 | 0.0923 / 0.0926 |
+| Chamber, Hall, Cavern, Plate | 0.2381 / 0.2384 | 0.2857 / 0.2860 | 0.2200 / 0.2123 |
+| Ambience | 0.1538 / 0.1540 | 0.1385 / 0.1387 | 0.1190 / 0.1149 |
+
+(Chamber, Hall, Cavern and Plate are the same stand-in table at the same
+clamped size, so they agree to the digit.) It moves nothing by more than
+0.01 dB: the drift is the table's own taps interfering with the diffuser's
+paths, which no quantity of the diffuser alone can see. **So the engine
+change is not committed** and the test stays at 0.3 dB; 68a084e extends the
+sweep to 96 and 192 kHz and prints each type. The patch is kept outside the
+repository (the session scratchpad, `change2-diffuser-gain-table.patch`).
+
+What would meet it: the exact correction, E_out = sum over tap pairs of
+x_i x_j sum_k r_D(k) C_ij(k + n_i - n_j), is a function of the set (sizes are
+continuous), so it cannot be tabulated in `prepare()`. Computed at each set
+build and at each control point it is about 20 k multiply-adds at 48 kHz and
+75 k at 192 kHz -- on the audio thread, which this pass was told not to do.
+Or accept about 0.3 dB, or change what the diffuser is. An owner decision.
+
+### 3. DENSITY on a 32-sample control grid (546bb41)
+
+Bench, Release, block 128, 60 s, median of five, % of one core, 48 / 192 kHz:
+
+| row | before (68a084e) | after, run 1 | after, run 2 |
+|---|---|---|---|
+| worst case: 48 taps, 3 stages | 0.570 / 2.426 | 0.585 / 2.291 | 0.579 / 2.330 |
+| Variation 6 (mono null) | 0.382 / 1.536 | 0.383 / 1.535 | 0.387 / 1.553 |
+| Energy mode | 0.576 / 2.346 | 0.575 / 2.301 | 0.570 / 2.289 |
+| crossfading on every block | 1.024 / 4.230 | 1.029 / 4.164 | 1.018 / 4.144 |
+| **DENSITY moving every block** | **1.301 / 5.325** | **0.916 / 3.688** | **0.920 / 3.646** |
+
+Every row is now inside 1.5 % / 5 %. A new check runs DENSITY from 0 to 100 %
+starting on sample 0 and asserts bit-identical output at block sizes
+1/16/32/64/127/512/2048; the fixed-parameter one stays green.
+
+Breaks: the grid counted from each block's start (1 red: the moving block-size
+check); ramps that never advance (1 red); the spec's raw renormalisation and
+the DC-gain-2 diffuser re-run against the three-rate sweep (2 and 1 red).
+**The switched-weight break (06) no longer reddens the waveform click
+detector**: on the grid a switched weight arrives as a 32-sample linear fade,
+under the detector's 1 %; the per-tap "no tap appears" check still catches it.
+With the switch *and* no ramp the detector reads 16.9 % of peak and goes red.
+
+### Builds and tests after the second pass
+
+On AURORA: `build-dsp` Debug build of `reverb_dsp_tests measure_reverb` exit 0,
+ctest 18/18 passed (`tune_hardtune_target` disabled by design). `build` Debug,
+targeted build of `reverb_dsp_tests reverb_tests tail_tests ui_layout_tests
+rack_tests` exit 0, no plugin product built; `reverb_dsp`, `reverb`, `tail`,
+`ui_layout`, `rack` 5/5 passed.

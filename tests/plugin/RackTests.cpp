@@ -69,6 +69,11 @@ namespace
         // modules/deesser/params.h. The order is the table in
         // docs/deesser/11-integration-and-test-plan.md section 3.
         { "deesser", { "freq", "q", "thresh", "range", "shape" } },
+        // BMO FET. ATTACK and RELEASE are knob positions, 1..7 with 7 fastest,
+        // not milliseconds -- see modules/fetcomp/params.h. The order is the
+        // table in docs/fet-comp/11-integration-and-test-plan.md section 2.
+        { "fetcomp", { "input", "output", "attack", "release", "ratio", "mix",
+                       "voicing", "oversampling" } },
         // **Twenty-seven, five under a slot's lanes**: every one of BMO Dwell's
         // parameters gets one, with room to append. The order is permanent.
         // It was thirty-three, one row over the ceiling, until the lane was
@@ -219,8 +224,7 @@ int main()
         auto rack = createRack();
         const auto& registry = rack->getRegistry();
 
-        
-        check (registry.size() == 9, "the registry holds util, eq, sat, opto, dim, deq, vcomp, deesser and dwell");
+        check (registry.size() == 10, "the registry holds util, eq, sat, opto, dim, deq, vcomp, deesser, fetcomp and dwell");
 
         // A bank is a module's host lanes, so it stops at 32 even if the
         // module does not. Past that, its golden schema test pins the order.

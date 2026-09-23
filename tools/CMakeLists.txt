@@ -21,6 +21,8 @@ target_link_libraries(measure_vcomp PRIVATE bmo_vcomp_dsp)
 
 bmo_add_dsp_tool(measure_deesser ${CMAKE_CURRENT_SOURCE_DIR}/measure/deesser/main.cpp)
 target_link_libraries(measure_deesser PRIVATE bmo_deesser_dsp)
+bmo_add_dsp_tool(measure_fetcomp ${CMAKE_CURRENT_SOURCE_DIR}/measure/fetcomp/main.cpp)
+target_link_libraries(measure_fetcomp PRIVATE bmo_fetcomp_dsp)
 bmo_add_dsp_tool(measure_dwell ${CMAKE_CURRENT_SOURCE_DIR}/measure/dwell/main.cpp)
 target_link_libraries(measure_dwell PRIVATE bmo_dwell_dsp)
 
@@ -28,6 +30,7 @@ if(NOT BMO_DSP_ONLY)
     bmo_add_tool(snapshot
         ${CMAKE_CURRENT_SOURCE_DIR}/snapshot/main.cpp
         ${BMO_ROOT}/products/rack/Registry.cpp)
+    target_link_libraries(snapshot PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp bmo_deesser bmo_fetcomp)
     target_link_libraries(snapshot PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp bmo_deesser)
     target_link_libraries(snapshot PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp bmo_dwell)
 endif()

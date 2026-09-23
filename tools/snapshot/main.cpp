@@ -1,6 +1,7 @@
 // Renders a product's editor to a PNG without a display, so a layout change
 // can be reviewed in a pull request rather than described in one.
 //
+//   snapshot <eq|sat|util|opto|dim|deq|ltvcomp|deesser|fetcomp|rack> out.png [width height] [param=value ...]
 //   snapshot <eq|sat|util|opto|dim|deq|ltvcomp|deesser|rack> out.png [width height] [param=value ...]
 //   snapshot <eq|sat|util|opto|dim|deq|ltvcomp|dwell|rack> out.png [width height] [param=value ...]
 //
@@ -38,14 +39,16 @@
 // Opto takes "ui.meter=IN|GR|OUT", which is the only way to render its VU in
 // anything but OUT, and BMO Defang takes that plus "ui.listen=on|off", which
 // is the only way to render its momentary listen switch engaged -- it is held
-// by a mouse button and has no parameter behind it, by decision. Offered to
-// every panel; refused by all of them is fatal.
+// by a mouse button and has no parameter behind it, by decision. BMO FET
+// takes "ui.bezel=stock|full" for the border-alpha gate. Offered to every
+// panel; refused by all of them is fatal.
 
 #include "products/deesser/Product.h"
 #include "products/deq/Product.h"
 #include "products/dim/Product.h"
 #include "products/dwell/Product.h"
 #include "products/eq/Product.h"
+#include "products/fetcomp/Product.h"
 #include "products/opto/Product.h"
 #include "products/vcomp/Product.h"
 #include "products/sat/Product.h"
@@ -74,6 +77,7 @@ namespace
         if (product == "deq")  return createDeq();
         if (product == "ltvcomp") return createVcomp();
         if (product == "deesser") return createDeesser();
+        if (product == "fetcomp") return createFetcomp();
         if (product == "dwell") return createDwell();
         if (product == "rack") return createRack();
         return nullptr;
@@ -233,6 +237,7 @@ int main (int argc, char** argv)
 
     if (argc < 3)
     {
+        std::cerr << "usage: snapshot <eq|sat|util|opto|dim|deq|ltvcomp|deesser|fetcomp|rack> out.png [width height] [param=value ...]\n";
         std::cerr << "usage: snapshot <eq|sat|util|opto|dim|deq|ltvcomp|deesser|rack> out.png [width height] [param=value ...]\n";
         std::cerr << "usage: snapshot <eq|sat|util|opto|dim|deq|ltvcomp|dwell|rack> out.png [width height] [param=value ...]\n";
         return 2;
@@ -677,6 +682,19 @@ int main (int argc, char** argv)
     const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), false, 2.0f);
 
     juce::PNGImageFormat png;
+
+    // Truncate first. `createOutputStream` opens an existing file **at the
+    // end**, so re-rendering over a snapshot appended a second PNG instead of
+    // replacing the first -- and every viewer reads the leading image and
+    // ignores the trailing bytes, so the tool reported "wrote" and the file
+    // still showed the previous render. A panel change then looked like it had
+    // done nothing. Found on AURORA, 2026-09-21, when three renders of the
+    // same path came to exactly the sum of their three sizes.
+    //
+    // This bit every module, not just BMO FET, and it bit hardest exactly when
+    // someone was iterating: first render correct, every one after it stale.
+    // Any recorded hash taken from a re-rendered file is suspect.
+    out.deleteFile();
 
     // **Truncate first.** `File::createOutputStream` hands back a stream
     // positioned at the *end* of an existing file, so rendering twice to one

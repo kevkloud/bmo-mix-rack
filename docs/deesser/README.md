@@ -6,7 +6,7 @@ AURORA, 2026-09-20; nothing is built, measured or heard.
 
 ## Index
 
-- [00-repo-conventions.md](00-repo-conventions.md) — the delta on `docs/1176-comp/00-repo-conventions.md`: what BMO DEQ supplies, what the repo lacks.
+- [00-repo-conventions.md](00-repo-conventions.md) — the delta on `docs/fet-comp/00-repo-conventions.md`: what BMO DEQ supplies, what the repo lacks.
 - [01-reference-behavior.md](01-reference-behavior.md) — sibilance acoustics, classic behaviour, artefacts, settings, targets; claims tagged for confidence.
 - [02-design-approaches.md](02-design-approaches.md) — six approaches with artefacts, CPU, latency, aliasing.
 - [10-dsp-spec.md](10-dsp-spec.md) — the topology (a dynamic-EQ cut on a level-independent prominence detector), detection math, gain computer, timings; §11 ADAPT.

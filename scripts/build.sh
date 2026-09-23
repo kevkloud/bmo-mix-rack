@@ -72,4 +72,11 @@ if [[ ${1:-} == --snapshots ]]; then
     done
 
     "$snapshot" rack snapshots/rack.png chain=util,eq,sat,opto,dim,deq,vcomp,deesser
+    # By the name `snapshot` takes, which is the product's id: LTV Comp is
+    # `ltvcomp` and BMO FET is `fetcomp`.
+    for module in eq sat util opto dim deq ltvcomp fetcomp; do
+        "$snapshot" "$module" "snapshots/$module.png"
+    done
+
+    "$snapshot" rack snapshots/rack.png chain=util,eq,sat,opto,dim,deq,ltvcomp,fetcomp
 fi

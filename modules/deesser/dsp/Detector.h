@@ -39,7 +39,7 @@ inline double levelDb (double linear) noexcept
     Adapted from `modules/deq/dsp/Dynamics.h` rather than shared with it. The
     repo's rule is that each dynamics module owns its own envelope and release
     stages -- there is no shared compressor-detector library
-    (docs/1176-comp/00-repo-conventions.md 2) -- and the two have already
+    (docs/fet-comp/00-repo-conventions.md 2) -- and the two have already
     diverged here: this one is fed a power-summed level from two channels
     rather than one channel's rectified sample, because the image must not
     wander (10 section 3).

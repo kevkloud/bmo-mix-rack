@@ -67,7 +67,7 @@ inline dsp::Biquad cutDesign (Shape shape, double hz, double q, double depthDb,
     about than one built from a cookbook that has both.
 
     Per the repo's rule, a module's detector is its own
-    (docs/1176-comp/00-repo-conventions.md 2). This is the detector. */
+    (docs/fet-comp/00-repo-conventions.md 2). This is the detector. */
 inline dsp::Biquad detectorDesign (Shape shape, double hz, double q, double sampleRate) noexcept
 {
     const auto w = 2.0 * dsp::kPi * hz / sampleRate;

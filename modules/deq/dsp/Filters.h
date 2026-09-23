@@ -15,7 +15,7 @@ namespace bmo::deq
     -- a de-esser is a narrowband dynamic-EQ cut, so it wants exactly this
     bell, this shelf and this glideable SVF. The repo's rule bars a shared
     *compressor-detector* library ("each dynamics module owns its own
-    ReleaseStage/Smoother", docs/1176-comp/00-repo-conventions.md 2), and a
+    ReleaseStage/Smoother", docs/fet-comp/00-repo-conventions.md 2), and a
     detector is what Defang copies rather than shares. Filter design is not a
     detector: it is arithmetic with one right answer, the same category as the
     `GainComputer` and `Oversampler` already sitting in `core/dsp/`, and two

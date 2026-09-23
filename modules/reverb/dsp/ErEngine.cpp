@@ -11,19 +11,38 @@ namespace
 {
     constexpr double kPi = 3.14159265358979323846;
 
-    /** The diffuser's delays, in milliseconds. Short, as 10 section 1 asks,
-        rising from stage to stage so each stage spreads what the last one
-        made rather than re-spreading the same span, and chosen so that the 64
-        path sums a pulse can take through three stages land on 64 different
-        samples at every rate from 44.1 to 192 kHz -- which is what makes each
-        stage exactly energy-preserving on a pulse rather than only on
-        average. `tests/dsp/ReverbDspTests.cpp` asserts that at every rate.
+    /** The diffuser's delays, in milliseconds: 20.3 ms of spread at most.
+
+        Chosen by search, against two conditions that are the table's business
+        not at all. **Only one stage is ever partly in** -- stage s fades while
+        every earlier one is fully in and every later one fully out -- so the
+        paths a pulse can take that coexist are the earlier stages' sums with
+        and without stage s's four delays: 5, then 20, then 80 of them. First,
+        those land on different samples at every rate from 44.1 to 192 kHz,
+        which `tests/dsp/ReverbDspTests.cpp` asserts; two paths on one sample
+        add or cancel instead of sitting side by side. Second, of the sets
+        that pass, the one whose neighbouring paths sit furthest apart, scored
+        as the summed squared overlap of the darkest band's one-pole (a 0.1 ms
+        time constant) -- two paths a sample apart are one pulse to a 3 kHz
+        filter.
+
+        **The diffuser holds the ER level only on average, and that is a
+        property of the construction, not of these numbers.** The butterfly
+        preserves the energy of all four lines together; a channel's output
+        is one line, and a one-in, one-out filter that preserves the energy of
+        every input is an allpass -- which a feed-forward network cannot be
+        and 10 section 1 forbids the recursive kind. So as DENSITY opens the
+        diffuser, the level moves by however the table's own tap pattern
+        happens to interfere with these 64 paths: a few tenths of a decibel
+        on the stand-in table, see the testing note. A longer spread lowers it
+        slowly; 25.7 ms was measured and did not settle it either.
+
         CALIBRATE: nothing here has been heard. */
     constexpr float kDiffuserMs[ErEngine::kDiffuserStages][ErEngine::kDiffuserWidth]
     {
-        { 0.43f, 0.97f, 1.39f, 1.87f },
-        { 2.23f, 2.81f, 3.37f, 4.13f },
-        { 4.79f, 5.53f, 6.29f, 7.19f },
+        { 0.33f, 1.02f, 1.69f, 2.31f },
+        { 3.84f, 5.58f, 6.03f, 6.46f },
+        { 6.26f, 6.59f, 11.39f, 11.50f },
     };
 
     int nextPowerOfTwo (int n) noexcept
@@ -323,26 +342,31 @@ void ErEngine::build (TapSet& set, const Settings& s) noexcept
         const auto& c = ch == 0 ? vs.left : vs.right;
         const auto n = std::clamp (c.numTaps, 0, kErMaxTaps);
 
-        // Taps mode's gains come first whatever the mode, because their core
+        // Taps mode's set is built first whatever the mode, because its core
         // energy is the level every mode is renormalised to: switching mode
-        // is not also a level change (AGENTS.md, Blend).
+        // is not also a level change (AGENTS.md, Blend). Energy and Blend
+        // then overwrite it with their own.
         float tapMs[kErMaxTaps] {};
         float tapGain[kErMaxTaps] {};
-        float energy = 0.0f;
 
         for (int i = 0; i < n; ++i)
         {
-            const auto& tap = c.taps[i];
-            const auto band = std::clamp (tap.band, 0, kErBands - 1);
+            tapMs[i]   = c.taps[i].timeMs * k;
+            tapGain[i] = c.taps[i].gain / k * endTaper (tapMs[i], W);
 
-            tapMs[i]   = tap.timeMs * k;
-            tapGain[i] = tap.gain / k * endTaper (tapMs[i], W);
-
-            if (tap.theta <= 0.0f)
-                energy += tapGain[i] * tapGain[i] * set.eta[band];
+            set.delay[ch][i] = std::clamp (roundToSamples (tapMs[i], sampleRate), 0, maxDelay);
+            set.theta[ch][i] = c.taps[i].theta;
+            set.band[ch][i]  = std::clamp (c.taps[i].band, 0, kErBands - 1);
+            set.base[ch][i]  = tapGain[i];
         }
 
-        set.energy[ch] = energy;
+        set.num[ch] = n;
+        buildPairs (set, ch);
+
+        // At D = 0 only the core taps sound, so this *is* the core energy --
+        // computed by the same function that renormalises, which is what
+        // makes the renormalisation exactly unity there.
+        set.energy[ch] = weightedEnergy (set, ch, 0.0f);
 
         const auto onset = n > 0 ? tapMs[0] : 0.0f;
 
@@ -391,52 +415,98 @@ void ErEngine::build (TapSet& set, const Settings& s) noexcept
             }
 
             set.num[ch] = n > 0 ? kErMaxTaps : 0;
+            buildPairs (set, ch);
         }
-        else
+        else if (s.mode == kModeBlend)
         {
+            // Blend: Taps' times, bands and thresholds, the Energy envelope's
+            // gains in place of the physical law. The renormalisation in
+            // applyDensity brings it to Taps' level. Same times, so the same
+            // pairs.
             for (int i = 0; i < n; ++i)
-            {
-                set.delay[ch][i] = std::clamp (roundToSamples (tapMs[i], sampleRate), 0, maxDelay);
-                set.theta[ch][i] = c.taps[i].theta;
-                set.band[ch][i]  = std::clamp (c.taps[i].band, 0, kErBands - 1);
-
-                // Blend: Taps' times and thresholds, the Energy envelope's
-                // gains in place of the physical law. The renormalisation in
-                // applyDensity brings it to Taps' level.
-                set.base[ch][i] = s.mode == kModeBlend
-                                    ? envelope (tapMs[i] - onset, s.spreadMs, s.shape) * endTaper (tapMs[i], W)
-                                    : tapGain[i];
-            }
-
-            set.num[ch] = n;
+                set.base[ch][i] = envelope (tapMs[i] - onset, s.spreadMs, s.shape) * endTaper (tapMs[i], W);
         }
     }
 
     set.built = s;
 }
 
+void ErEngine::buildPairs (TapSet& set, int ch) noexcept
+{
+    // The inner product of two one-pole pulses, the earlier through a band
+    // with pole a and the later, Delta samples on, through one with pole b,
+    // is (1 - a)(1 - b) a^Delta / (1 - a b): closed form, because both are
+    // geometric. Only pairs whose overlap is worth a millionth of a pulse's
+    // own energy are kept, which for a table that honours the 0.9 ms
+    // separation rule is usually none -- this is what keeps a table that does
+    // not, or a size small enough to squeeze two taps onto adjacent samples,
+    // from moving the level as DENSITY brings the second one in.
+    auto& count = set.numPairs[ch];
+    count = 0;
+
+    float maxA = 0.0f;
+    for (const auto a : set.bandA)
+        maxA = std::max (maxA, a);
+
+    const auto reach = maxA > 0.0f ? (int) std::ceil (std::log (1.0e-6) / std::log ((double) maxA)) : 0;
+
+    for (int i = 0; i < set.num[ch]; ++i)
+        for (int j = i + 1; j < set.num[ch]; ++j)
+        {
+            const auto delta = set.delay[ch][j] - set.delay[ch][i];
+
+            if (std::abs (delta) > reach || count >= TapSet::kMaxPairs)
+                continue;
+
+            const auto early = delta >= 0 ? i : j;
+            const auto late  = delta >= 0 ? j : i;
+            const auto a = (double) set.bandA[set.band[ch][early]];
+            const auto b = (double) set.bandA[set.band[ch][late]];
+
+            const auto overlap = (1.0 - a) * (1.0 - b) * std::pow (a, std::abs (delta)) / (1.0 - a * b);
+
+            if (overlap > 1.0e-6 * (1.0 - a) / (1.0 + a))
+                set.pairs[ch][count++] = { (std::uint8_t) i, (std::uint8_t) j, (float) overlap };
+        }
+}
+
+float ErEngine::weightedEnergy (TapSet& set, int ch, float d) noexcept
+{
+    // The energy the band filters actually put out for the gains a_k w_k(D),
+    // written into `gain` on the way: the sum of each tap's squared gain
+    // times its band's pulse energy, plus twice each overlapping pair's
+    // product times its overlap. **The per-band weighting is not in 10
+    // section 3's formula** and has to be: the four bands pass different
+    // fractions of a pulse's energy (a 3 kHz one-pole keeps about a fifth of
+    // it at 48 kHz, a 12 kHz one about two thirds), and the infill is spread
+    // across bands differently from the core, so renormalising the raw gains
+    // lets the level drift with density by most of a decibel.
+    float sum = 0.0f;
+
+    for (int i = 0; i < set.num[ch]; ++i)
+    {
+        const auto g = set.base[ch][i] * densityWeight (set.theta[ch][i], d, rampWidth);
+        set.gain[ch][i] = g;
+        sum += g * g * set.eta[set.band[ch][i]];
+    }
+
+    for (int p = 0; p < set.numPairs[ch]; ++p)
+    {
+        const auto& pair = set.pairs[ch][p];
+        sum += 2.0f * set.gain[ch][pair.i] * set.gain[ch][pair.j] * pair.overlap;
+    }
+
+    return std::max (sum, 0.0f);
+}
+
 void ErEngine::applyDensity (TapSet& set, float d) noexcept
 {
     // 10 section 3's bridge: a_k * w_k(D), renormalised so the ER energy is
-    // the same at every density. **The sum is weighted by each tap's band
-    // filter's impulse energy**, which the spec's formula leaves out: the four
-    // bands pass different fractions of a pulse's energy (a 3 kHz one-pole
-    // keeps about a fifth of it at 48 kHz, a 12 kHz one about two thirds),
-    // and infill taps are spread across bands differently from the core, so
-    // renormalising the raw gains alone lets the level drift with density by
-    // a good part of a decibel. With the weights, what is held constant is the
-    // energy that actually comes out of the filters.
+    // the same at every density -- the energy out of the band filters, which
+    // is what `weightedEnergy` measures.
     for (int ch = 0; ch < (set.comb ? 1 : 2); ++ch)
     {
-        float sum = 0.0f;
-
-        for (int i = 0; i < set.num[ch]; ++i)
-        {
-            const auto g = set.base[ch][i] * densityWeight (set.theta[ch][i], d, rampWidth);
-            set.gain[ch][i] = g;
-            sum += g * g * set.eta[set.band[ch][i]];
-        }
-
+        const auto sum = weightedEnergy (set, ch, d);
         const auto scale = sum > 0.0f ? std::sqrt (set.energy[ch] / sum) : 0.0f;
 
         for (int i = 0; i < set.num[ch]; ++i)
@@ -679,7 +749,17 @@ void ErEngine::process (const float* in, float* outL, float* outR, int numSample
             // orthonormal butterfly, and twice line 0 comes out -- so with
             // every stage out this is exactly a wire, and with a stage in it
             // turns one pulse into four of a quarter the energy each.
-            float v[kDiffuserWidth] { 0.5f * e, 0.5f * e, 0.5f * e, 0.5f * e };
+            //
+            // **The fourth line enters inverted, and that is load-bearing.**
+            // The butterfly is an involution (H H = I), so at DC three stages
+            // act as one and line 0 reads the sum of the four inputs: fed
+            // [1, 1, 1, 1] / 2 that is a gain of 2, +6 dB at DC with every
+            // stage in, and an ER of positive taps keeps a few per cent of its
+            // energy near DC -- enough to lift the level by a quarter of a
+            // decibel as DENSITY opens the diffuser. [1, 1, 1, -1] / 2 has the
+            // same energy and a DC gain of exactly 1 with none, one, two or
+            // three stages in.
+            float v[kDiffuserWidth] { 0.5f * e, 0.5f * e, 0.5f * e, -0.5f * e };
 
             for (int s = 0; s < kDiffuserStages; ++s)
             {

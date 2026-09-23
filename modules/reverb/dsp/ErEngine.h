@@ -3,6 +3,7 @@
 #include "modules/reverb/dsp/ErTable.h"
 #include "modules/reverb/dsp/TapTables.h"
 
+#include <cstdint>
 #include <vector>
 
 namespace bmo::reverb
@@ -202,6 +203,19 @@ private:
         int   num   [2] {};
         float energy[2] {};               ///< the renormalisation target, per channel
         float eta   [kErBands] {};        ///< each band filter's impulse energy
+
+        /** Pairs of taps close enough that their filtered pulses overlap,
+            with the overlap -- the inner product of the two filtered pulses.
+            Built once per set; see `applyDensity`. */
+        struct Pair
+        {
+            std::uint8_t i, j;
+            float overlap;
+        };
+
+        static constexpr int kMaxPairs = kErMaxTaps * (kErMaxTaps - 1) / 2;
+        Pair pairs[2][kMaxPairs] {};
+        int  numPairs[2] {};
         float bandA [kErBands] {};        ///< each band filter's target coefficient
 
         bool  comb = false;               ///< Variation 6: channel 0 is E, played as E +- g E(t - delta)
@@ -213,6 +227,8 @@ private:
 
     void build (TapSet& set, const Settings& s) noexcept;
     void applyDensity (TapSet& set, float d) noexcept;
+    float weightedEnergy (TapSet& set, int ch, float d) noexcept;
+    void buildPairs (TapSet& set, int ch) noexcept;
     void prime() noexcept;
     void updateTargets() noexcept;
     bool definesDifferentSet (const Settings& a, const Settings& b) const noexcept;

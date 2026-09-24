@@ -78,7 +78,7 @@ enum Rule
     ruleLoc,              ///< (iii) ER energy in 100 ms >= 3 dB below direct at the default fader
     ruleProximity,        ///< (iv) a deliberate small allocation inside 5 ms
     ruleCentre,           ///< the first reflection stays near centre
-    ruleGamma,            ///< gamma >= 0 at all seven positions, 0-5 falling ~0.95 -> ~0.05
+    ruleGamma,            ///< gamma >= 0 at VARIATION 0-5, falling ~0.95 -> ~0.05; Var 6 mono null, its mono sum exactly zero
     ruleLateral,          ///< the room's early lateral fraction 0.10-0.25, at VARIATION 2
     ruleMoorer,           ///< Room only: count and span against Moorer's 19 taps, 4.3-79.7 ms
 
@@ -115,9 +115,10 @@ AuditContext candidateContext (const char* name);
 
 struct Figures
 {
-    double gamma[kErVariations];        ///< at the default density
-    double gammaCore[kErVariations];    ///< core taps only (DENSITY 0)
-    double gammaFull[kErVariations];    ///< every tap (DENSITY 100 %)
+    double gamma[kErCombVariation];     ///< VARIATION 0-5 at the default density; Var 6 has no gamma
+    double gammaCore[kErCombVariation]; ///< core taps only (DENSITY 0)
+    double gammaFull[kErCombVariation]; ///< every tap (DENSITY 100 %)
+    int    monoNullMismatches;          ///< Var 6: taps where left and right differ; 0 is an exact mono null
     double lateralFraction;             ///< the room's LF: VARIATION 2, core taps, lateral cosine squared -- the rule
     double lateralFractionStereo;       ///< what the output carries: side over mid, 125-1000 Hz, default density
     double lateralFractionStereoFull;   ///< the same at DENSITY 100 %

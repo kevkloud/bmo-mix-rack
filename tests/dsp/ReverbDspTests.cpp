@@ -2642,6 +2642,22 @@ int main()
             check (fails (b, ergen::ruleGamma), "two VARIATION positions alike fail the gamma rule");
         }
 
+        // VARIATION 6 is mono null, and its check is not a gamma: the engine
+        // plays L = +E and R = -E, so the ER mono sum is exactly zero only if
+        // the table carries the same set in both channels. One tap apart is a
+        // failure; and every shipped table passes.
+        {
+            auto b = base;
+            b.variation[kErCombVariation].right.taps[3].gain *= 1.001f;
+            check (fails (b, ergen::ruleGamma), "a Var 6 whose channels differ by one tap fails: its mono sum is not zero");
+            check (ergen::audit (b, ctx).figures.monoNullMismatches == 1,
+                   "... and the audit counts exactly that one tap");
+        }
+
+        for (int type = 0; type < numTypes; ++type)
+            check (ergen::audit (erTableFor (type), ergen::contextFor (type)).figures.monoNullMismatches == 0,
+                   "every shipped table's Var 6 is an exact mono null: both channels carry the same set");
+
         {
             auto b = base;
 

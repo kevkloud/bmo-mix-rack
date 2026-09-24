@@ -101,38 +101,43 @@ namespace
         return w;
     }
 
-    /** gamma of one position at one density. VARIATION 6 is played as
-        Schroeder's pair from the mono set the table carries, so its channels
-        are built here the way the engine will build them. */
+    /** gamma of one of VARIATION 0-5 at one density. VARIATION 6 has no gamma
+        to audit: it is mono null (owner, 2026-09-23), L = +E and R = -E, so
+        its correlation is -1 by construction, and what is checked of it is
+        `monoNullMismatches` below. */
     double gammaAt (const ErTable& table, int v, double sizeM, double density)
     {
-        if (v != kErCombVariation)
+        const auto l = heard (table, table.variation[v].left, sizeM);
+        const auto r = heard (table, table.variation[v].right, sizeM);
+        return correlation (l, weights (l, density), r, weights (r, density));
+    }
+
+    /** VARIATION 6's check: the ER mono sum is exactly zero. The engine plays
+        the set as L = +E and R = -E, and the table carries that one set in
+        both channels (ErTable.h), so the mono sum +E_left - E_right is exactly
+        zero when -- and only when -- the two channels are the same taps to
+        the bit: same times, gains, thresholds and bands. Returns how many
+        taps differ. */
+    int monoNullMismatches (const ErTable& table)
+    {
+        const auto& l = table.variation[kErCombVariation].left;
+        const auto& r = table.variation[kErCombVariation].right;
+
+        if (l.numTaps != r.numTaps)
+            return kErMaxTaps;
+
+        int differ = 0;
+
+        for (int i = 0; i < l.numTaps; ++i)
         {
-            const auto l = heard (table, table.variation[v].left, sizeM);
-            const auto r = heard (table, table.variation[v].right, sizeM);
-            return correlation (l, weights (l, density), r, weights (r, density));
+            const auto& a = l.taps[i];
+            const auto& b = r.taps[i];
+
+            if (a.timeMs != b.timeMs || a.gain != b.gain || a.theta != b.theta || a.band != b.band)
+                ++differ;
         }
 
-        const auto e = heard (table, table.variation[v].left, sizeM);
-        const auto we = weights (e, density);
-        const double delay = table.combDelayMs * sizeM / (double) kReferenceSizeM;
-        const double g = table.combGain;
-
-        std::vector<Heard> l, r;
-        std::vector<double> al, ar;
-
-        for (size_t i = 0; i < e.size(); ++i)
-        {
-            auto late = e[i];
-            late.t += delay;
-
-            l.push_back (e[i]); al.push_back (we[i]);
-            l.push_back (late); al.push_back (g * we[i]);
-            r.push_back (e[i]); ar.push_back (we[i]);
-            r.push_back (late); ar.push_back (-g * we[i]);
-        }
-
-        return correlation (l, al, r, ar);
+        return differ;
     }
 
     std::vector<double> windowsOf (const std::vector<Heard>& taps, double density, int& count)
@@ -170,7 +175,7 @@ const char* ruleName (int rule) noexcept
         case ruleLoc:        return "flam (iii) LOC, 3 dB";
         case ruleProximity:  return "flam (iv) inside 5 ms";
         case ruleCentre:     return "first tap near centre";
-        case ruleGamma:      return "gamma, 7 positions";
+        case ruleGamma:      return "gamma 0-5, Var 6 mono null";
         case ruleLateral:    return "lateral fraction";
         case ruleMoorer:     return "Moorer (Room)";
         case rulePlateOnset:     return "plate: onset <= 2 ms";
@@ -391,14 +396,14 @@ Report auditAtSize (const ErTable& table, const AuditContext& ctx, float sizeMf)
     lower (ruleProximity, proximityMin > 0.0 ? 0.25 - proximityMax : -1.0);
 
     //== gamma ==================================================================
-    for (int v = 0; v < kErVariations; ++v)
+    for (int v = 0; v < kErCombVariation; ++v)
     {
         fig.gamma[v]     = gammaAt (table, v, sizeM, density);
         fig.gammaCore[v] = gammaAt (table, v, sizeM, 0.0);
         fig.gammaFull[v] = gammaAt (table, v, sizeM, 1.0);
     }
 
-    // At the default density and at 100 %: >= 0 at all seven, about 0.95 at
+    // At the default density and at 100 %: >= 0 at 0-5, about 0.95 at
     // 0, about 0.05 at 5, and falling by at least 0.05 a step -- a step you
     // could not hear would not be a position. At DENSITY 0 the same, except
     // the end: there the core alone carries the ER, the first reflection is
@@ -407,7 +412,7 @@ Report auditAtSize (const ErTable& table, const AuditContext& ctx, float sizeMf)
     // to 0.30 instead of 0.15.
     for (const auto* g : { fig.gamma, fig.gammaCore, fig.gammaFull })
     {
-        for (int v = 0; v < kErVariations; ++v)
+        for (int v = 0; v < kErCombVariation; ++v)
             lower (ruleGamma, g[v]);
 
         lower (ruleGamma, g[0] - 0.85);
@@ -416,6 +421,12 @@ Report auditAtSize (const ErTable& table, const AuditContext& ctx, float sizeMf)
         for (int v = 1; v < kErCombVariation; ++v)
             lower (ruleGamma, (g[v - 1] - g[v]) - 0.05);
     }
+
+    // VARIATION 6 is mono null: its check is that the mono sum is exactly
+    // zero, not a gamma. 11 section 6.
+    fig.monoNullMismatches = monoNullMismatches (table);
+    if (fig.monoNullMismatches != 0)
+        lower (ruleGamma, -(double) fig.monoNullMismatches);
 
     //== Lateral fraction at VARIATION 2 =========================================
     //
@@ -573,6 +584,9 @@ Report auditAtSize (const ErTable& table, const AuditContext& ctx, float sizeMf)
         for (const auto* g : { fig.gamma, fig.gammaCore, fig.gammaFull })
             for (int v = 0; v < kErCombVariation; ++v)
                 lower (ruleGamma, g[v]);
+
+        if (fig.monoNullMismatches != 0)
+            lower (ruleGamma, -(double) fig.monoNullMismatches);
 
         // The plate rules. Source: measured, 16 EMT 140 IRs, research doc
         // section 8, 2026-09-23 -- see ErAudit.h. Every channel of VARIATION

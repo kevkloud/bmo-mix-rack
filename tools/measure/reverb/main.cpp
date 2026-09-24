@@ -701,12 +701,13 @@ void printAudit (int t, const ErTable& table, float directGain = 0.0f)
     }
 
     const auto& f = rep.figures;
-    std::printf ("  gamma 0-6, default density:");
+    std::printf ("  gamma 0-5, default density:");
     for (double g : f.gamma) std::printf (" %.3f", g);
-    std::printf ("\n  gamma 0-6, core only:      ");
+    std::printf ("\n  gamma 0-5, core only:      ");
     for (double g : f.gammaCore) std::printf (" %.3f", g);
-    std::printf ("\n  gamma 0-6, every tap:      ");
+    std::printf ("\n  gamma 0-5, every tap:      ");
     for (double g : f.gammaFull) std::printf (" %.3f", g);
+    std::printf ("\n  Var 6 mono null: %s (%d taps differ between its channels)", f.monoNullMismatches == 0 ? "exact" : "BROKEN", f.monoNullMismatches);
     std::printf ("\n  lateral fraction (VARIATION 2): room %.3f; stereo S/M 125-1000 Hz %.3f at default density, %.3f at 100 %%\n",
                  f.lateralFraction, f.lateralFractionStereo, f.lateralFractionStereoFull);
     std::printf ("  ER energy before 30 ms: %.1f %% (the dropped >= 50 %% rule of 11 section 6, measured)\n",

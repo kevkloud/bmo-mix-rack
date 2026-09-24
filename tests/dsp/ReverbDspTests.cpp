@@ -23,6 +23,9 @@
     pre-delay and the tail's own phasing null.
 */
 
+#include "modules/reverb/dsp/ErAudit.h"
+#include "modules/reverb/dsp/ErTable.h"
+#include "modules/reverb/dsp/ImageSource.h"
 #include "modules/reverb/dsp/ReverbDsp.h"
 #include "modules/reverb/dsp/TapTables.h"
 
@@ -33,6 +36,7 @@
 #include <complex>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <new>
 #include <string>
@@ -2263,6 +2267,535 @@ int main()
             check (unstable == 0,
                    "every corner of the EQ's own ranges designs a stable, finite filter");
         }
+    }
+
+    //== The early-reflection tables are the generator's, bit for bit =========
+    //
+    // 11 section 6's Golden STATE row asks for the *derived* tables to be
+    // pinned, because "a failing table is re-seeded, not patched" (10 section
+    // 8) only means something if the table is what the seed makes. So every
+    // type is regenerated here from its recipe and pinned seed and compared
+    // with the committed ErTableData.inc field by field, with ==. The
+    // generator rounds onto a coarse grid before it returns, which is what
+    // lets this be equality rather than a tolerance on every platform.
+    //
+    // A red here means the generator, a recipe or a type's default SIZE moved
+    // and the data did not: run `measure_reverb taps --emit`, then `--audit`,
+    // and commit both halves together. It never means "edit the .inc".
+    {
+        int mismatches = 0, unbuilt = 0;
+
+        for (int t = 0; t < numTypes; ++t)
+        {
+            ErTable fresh;
+
+            if (! ergen::generate (t, ergen::recipeFor (t).seed, fresh))
+            {
+                ++unbuilt;
+                continue;
+            }
+
+            const auto& shipped = erTableFor (t);
+
+            for (int v = 0; v < kErVariations; ++v)
+                for (int ch = 0; ch < 2; ++ch)
+                {
+                    const auto& a = ch == 0 ? fresh.variation[v].left : fresh.variation[v].right;
+                    const auto& b = ch == 0 ? shipped.variation[v].left : shipped.variation[v].right;
+
+                    mismatches += a.numTaps != b.numTaps ? 1 : 0;
+
+                    for (int i = 0; i < kErMaxTaps; ++i)
+                    {
+                        const auto& x = a.taps[i];
+                        const auto& y = b.taps[i];
+                        mismatches += (x.timeMs != y.timeMs || x.gain != y.gain || x.theta != y.theta
+                                       || x.pan != y.pan || x.band != y.band) ? 1 : 0;
+                    }
+                }
+
+            mismatches += fresh.combDelayMs != shipped.combDelayMs ? 1 : 0;
+            mismatches += fresh.combGain != shipped.combGain ? 1 : 0;
+            mismatches += fresh.windowMs != shipped.windowMs ? 1 : 0;
+            mismatches += fresh.windowClampMs != shipped.windowClampMs ? 1 : 0;
+            mismatches += fresh.beta != shipped.beta ? 1 : 0;
+            mismatches += fresh.seed != shipped.seed ? 1 : 0;
+
+            for (int b = 0; b < kErBands; ++b)
+                mismatches += fresh.bandCutoffHz[b] != shipped.bandCutoffHz[b] ? 1 : 0;
+        }
+
+        check (unbuilt == 0, "every type's pinned seed generates a table");
+        check (mismatches == 0, "the shipped ER tables are the generator's at the pinned seeds, bit for bit");
+    }
+
+    //== What the engine may rely on of every table ============================
+    {
+        bool shaped = true, ascending = true, cored = true, thresholds = true, banded = true,
+             bearings = true, inside = true, positive = true, combMono = true;
+
+        for (int t = 0; t < numTypes; ++t)
+        {
+            const auto& table = erTableFor (t);
+
+            for (int v = 0; v < kErVariations; ++v)
+                for (const auto* ch : { &table.variation[v].left, &table.variation[v].right })
+                {
+                    shaped = shaped && ch->numTaps == kErMaxTaps;
+                    int core = 0;
+
+                    for (int i = 0; i < ch->numTaps; ++i)
+                    {
+                        const auto& tap = ch->taps[i];
+                        core += tap.theta == 0.0f ? 1 : 0;
+                        thresholds = thresholds && tap.theta >= 0.0f && tap.theta < 1.0f - DspCore::kRampWidth;
+                        banded     = banded && tap.band >= 0 && tap.band < kErBands;
+                        bearings   = bearings && tap.pan >= -1.0f && tap.pan <= 1.0f;
+                        inside     = inside && tap.timeMs > 0.0f && tap.timeMs <= table.windowMs;
+                        positive   = positive && tap.gain > 0.0f;
+
+                        if (i > 0)
+                            ascending = ascending && tap.timeMs > ch->taps[i - 1].timeMs;
+                    }
+
+                    cored = cored && core == kErCoreTaps;
+                }
+
+            // VARIATION 6 carries the mono set in both channels; the engine
+            // builds Schroeder's pair from it.
+            const auto& six = table.variation[kErCombVariation];
+
+            for (int i = 0; i < kErMaxTaps; ++i)
+                combMono = combMono && six.left.taps[i].timeMs == six.right.taps[i].timeMs
+                                    && six.left.taps[i].gain == six.right.taps[i].gain;
+        }
+
+        check (shaped, "every channel of every table holds 48 taps");
+        check (ascending, "every channel's taps ascend in time");
+        check (cored, "every channel carries exactly the 21 core taps at theta 0");
+        // The engine ramps literally, w = clamp ((D - theta) / 0.08, 0, 1), so a
+        // threshold above 1 - 0.08 would never reach full weight at DENSITY
+        // 100 %, and one at 1 would never sound at all.
+        check (thresholds, "every density threshold is under 0.92, so every infill pulse is fully on at 100 %");
+        check (banded, "every tap names one of the four bands");
+        check (bearings, "every bearing is within -1..+1");
+        check (inside, "every tap is after the direct sound and inside its table's window");
+        check (positive, "every gain is positive, so no tap pair can be anti-correlated");
+        check (combMono, "VARIATION 6 carries one set in both channels");
+
+        // The window clamps are 10 section 3's, and beta runs 0.70 Room to
+        // 0.88 Cavern in type order.
+        check (erTableFor (room).windowClampMs == 100.0f && erTableFor (chamber).windowClampMs == 100.0f
+                   && erTableFor (ambience).windowClampMs == 100.0f,
+               "Room, Chamber and Ambience clamp their window at 100 ms");
+        check (erTableFor (hall).windowClampMs == 200.0f && erTableFor (cavern).windowClampMs == 200.0f
+                   && erTableFor (plate).windowClampMs == 200.0f,
+               "Hall, Cavern and Plate clamp their window at 200 ms");
+        check (erTableFor (room).beta == 0.70f && erTableFor (cavern).beta == 0.88f
+                   && erTableFor (chamber).beta > 0.70f && erTableFor (hall).beta > erTableFor (chamber).beta
+                   && erTableFor (hall).beta < 0.88f,
+               "beta runs 0.70 Room to 0.88 Cavern in type order");
+    }
+
+    //== The cutoff law and the span, read through the contract's functions ===
+    {
+        // erBandCutoffHzAt writes kappa again rather than including the
+        // generator's; the tables' cutoffs are quoted with the generator's, so
+        // the two must agree or the engine's bands drift off the audit's.
+        bool agree = true;
+
+        for (int t = 0; t < numTypes; ++t)
+            for (int b = 0; b < kErBands; ++b)
+            {
+                const auto& table = erTableFor (t);
+                const auto s = constantsFor (t).sizeM;
+                const auto expected = (double) table.bandCutoffHz[b]
+                                    * std::pow ((double) kReferenceSizeM / s, ergen::kKappa);
+                agree = agree && std::abs (erBandCutoffHzAt (table, b, s) - expected) <= 1.0e-4 * expected;
+            }
+
+        check (agree, "erBandCutoffHzAt uses the generator's kappa");
+
+        // The span is the last tap by the Size law, held to the clamp: Room's
+        // is under its clamp at 12 m, and every table is at its clamp by 80 m.
+        const auto& roomTable = erTableFor (room);
+        check (erSpanMsAt (roomTable, kReferenceSizeM) > 90.0f && erSpanMsAt (roomTable, kReferenceSizeM) < 100.0f,
+               "Room's ER span at 12 m is its last tap, inside 90-100 ms");
+
+        bool clamped = true;
+
+        for (int t = 0; t < numTypes; ++t)
+            if (t != plate)
+                clamped = clamped && erSpanMsAt (erTableFor (t), 80.0f) == erTableFor (t).windowClampMs;
+
+        check (clamped, "at 80 m every room table's span is its clamp");
+
+        // Plate spans about 39 ms at its 22 m default, so even at 80 m it stays
+        // inside its 200 ms clamp: about 140 ms, the Size law and no more.
+        const auto plateSpan = erSpanMsAt (erTableFor (plate), 80.0f);
+        check (plateSpan > 120.0f && plateSpan < 160.0f, "at 80 m Plate's span is its last tap, 120-160 ms, inside its clamp");
+    }
+
+    //== The audits of 10 section 3 and 11 section 6, on every shipped table ==
+    //
+    // Each rule is in ErAudit.cpp, evaluated at the type's default SIZE, after
+    // the jitter; `measure_reverb taps --audit` prints every margin. Every
+    // rule passes at every type **but one**, and it is named here rather than
+    // hidden: Cavern fails flam rule (i) by 1.50 dB at its 55 m default SIZE,
+    // because a room that large puts its first-order walls 40 ms and more
+    // behind the floor bounce (see the testing note). **This is a known
+    // failure on purpose, not a desk bug: the owner will decide it by ear at
+    // the listening checkpoint -- Cavern at 55 m against a smaller SIZE --
+    // 2026-09-23. Do not search seeds for it.** It is held to an absolute
+    // floor so it cannot quietly get worse.
+    //
+    // Plate's room rules print n/a and pass by construction: the owner ruled
+    // on 2026-09-23 that a plate is not a room (ErAudit.h). Its own three
+    // plate rules are asserted here like any other rule.
+    {
+        for (int t = 0; t < numTypes; ++t)
+        {
+            const auto rep = ergen::audit (erTableFor (t), ergen::contextFor (t));
+
+            for (int r = 0; r < ergen::numRules; ++r)
+            {
+                const std::string what = std::string (kTypeNames[t]) + ": " + ergen::ruleName (r);
+
+                if (t == cavern && r == ergen::ruleFlamLate)
+                {
+                    check (rep.margin[r] >= -1.6, (what + " -- the known failure, no worse than -1.6 dB").c_str());
+                    continue;
+                }
+
+                check (rep.pass[r], what.c_str());
+            }
+        }
+    }
+
+    //== The audits are not vacuous: each one reddens on a table broken for it =
+    //
+    // Room's shipped table, copied and broken by hand in exactly one way per
+    // rule -- a tap moved, a band changed, a gain raised -- never re-seeded.
+    // Each break must fail the rule it was made for. This is the permanent
+    // form of breaking a table to watch a test go red.
+    {
+        const auto ctx = ergen::contextFor (room);
+        const auto& base = erTableFor (room);
+
+        const auto fails = [&ctx] (const ErTable& broken, int rule)
+        {
+            return ! ergen::audit (broken, ctx).pass[rule];
+        };
+
+        const auto sortAll = [] (ErTable& table)
+        {
+            for (auto& v : table.variation)
+                for (auto* ch : { &v.left, &v.right })
+                    std::sort (ch->taps, ch->taps + ch->numTaps,
+                               [] (const ErTap& a, const ErTap& b) { return a.timeMs < b.timeMs; });
+        };
+
+        // The index of the first tap at or after `ms`, in one channel.
+        const auto at = [] (const ErChannel& ch, float ms)
+        {
+            int i = 0;
+
+            while (i < ch.numTaps - 1 && ch.taps[i].timeMs < ms)
+                ++i;
+
+            return i;
+        };
+
+        {
+            auto b = base;
+            auto& ch = b.variation[2].left;
+            const int i = at (ch, 40.0f);
+            ch.taps[i].timeMs = ch.taps[i - 1].timeMs + 0.3f;
+            check (fails (b, ergen::ruleSeparation), "a tap 0.3 ms from its neighbour fails the separation audit");
+        }
+
+        {
+            // Three consecutive core taps given two equal gaps.
+            auto b = base;
+            auto& ch = b.variation[0].left;
+            int core[3] { -1, -1, -1 }, n = 0;
+
+            for (int i = at (ch, 30.0f); i < ch.numTaps && n < 3; ++i)
+                if (ch.taps[i].theta == 0.0f)
+                    core[n++] = i;
+
+            ch.taps[core[2]].timeMs = ch.taps[core[1]].timeMs + (ch.taps[core[1]].timeMs - ch.taps[core[0]].timeMs);
+            sortAll (b);
+            check (n == 3 && fails (b, ergen::ruleGaps), "two equal core gaps fail the gap audit");
+        }
+
+        {
+            auto b = base;
+            b.variation[3].right.taps[0].band = 0;   // the floor bounce, inside 8 ms, made full-band
+            check (fails (b, ergen::ruleFullBand), "a full-band tap between 1 and 8 ms fails its audit");
+        }
+
+        {
+            auto b = base;
+            auto& ch = b.variation[1].left;
+            ch.taps[at (ch, 10.0f)].gain = 0.3f;     // -10.5 dB at about 10 ms, over -14
+            check (fails (b, ergen::ruleKuttruff), "a -10.5 dB tap near 10 ms fails the Kuttruff ceiling");
+        }
+
+        {
+            auto b = base;
+            auto& ch = b.variation[4].right;
+            ch.taps[at (ch, 60.0f)].gain = 0.2f;     // -14 dB, past the Kuttruff window
+            check (fails (b, ergen::ruleTapCeiling), "a -14 dB tap fails the -15.3 dB ceiling");
+        }
+
+        {
+            auto b = base;
+            auto& ch = b.variation[2].right;
+            auto& tap = ch.taps[at (ch, 60.0f)];
+            tap.gain = 0.12f;                        // -18.4 dB: under the ceiling, over (i)
+            tap.theta = 0.0f;
+            check (fails (b, ergen::ruleFlamLate), "a -18 dB tap at 60 ms fails flam rule (i)");
+            check (! fails (b, ergen::ruleTapCeiling), "... and is still under the tap ceiling");
+        }
+
+        {
+            auto b = base;
+            auto& ch = b.variation[5].left;
+            auto& tap = ch.taps[at (ch, 72.0f)];
+            tap.gain = 0.05f;                        // -26 dB where the envelope is near -38
+            tap.theta = 0.0f;
+            check (fails (b, ergen::ruleFlamOnset), "a -26 dB tap at 72 ms fails flam rule (ii)");
+        }
+
+        {
+            auto b = base;
+
+            for (auto& v : b.variation)
+                for (auto* ch : { &v.left, &v.right })
+                    for (int i = 0; i < ch->numTaps; ++i)
+                        ch->taps[i].gain *= 6.0f;
+
+            check (fails (b, ergen::ruleLoc), "every tap 15.6 dB louder fails flam rule (iii)");
+        }
+
+        {
+            auto b = base;
+
+            for (auto& v : b.variation)
+                for (auto* ch : { &v.left, &v.right })
+                    ch->taps[0].timeMs = 6.0f;       // the floor bounce, moved out of the first 5 ms
+
+            check (fails (b, ergen::ruleProximity), "no tap inside 5 ms fails flam rule (iv)");
+        }
+
+        {
+            auto b = base;
+            b.variation[0].left.taps[0].pan = 0.8f;
+            check (fails (b, ergen::ruleCentre), "a first reflection at pan 0.8 fails the centre rule");
+        }
+
+        {
+            auto b = base;
+            b.variation[3] = b.variation[2];          // two positions with one gamma
+            check (fails (b, ergen::ruleGamma), "two VARIATION positions alike fail the gamma rule");
+        }
+
+        {
+            auto b = base;
+
+            for (auto* ch : { &b.variation[2].left, &b.variation[2].right })
+                for (int i = 0; i < ch->numTaps; ++i)
+                    ch->taps[i].pan = 0.0f;
+
+            check (fails (b, ergen::ruleLateral), "every image on the median plane fails the lateral fraction");
+        }
+
+        {
+            auto b = base;
+
+            for (int i = 0; i < b.variation[2].left.numTaps; ++i)
+                b.variation[2].left.taps[i].theta = 0.0f;   // 48 "core" taps against Moorer's 19
+
+            check (fails (b, ergen::ruleMoorer), "48 core taps fail the Moorer sanity check");
+        }
+    }
+
+    //== Plate is held to plate rules, and only to them ========================
+    //
+    // Owner decision, 2026-09-23: a plate is a physical metal plate model, not
+    // a room, and the room rules do not apply (ErAudit.h). Three things here:
+    // the room rules are withdrawn for Plate and for no room; the plate rules
+    // are withdrawn for every room; and each plate rule reddens on a Plate
+    // table broken by hand for it.
+    {
+        const auto plateCtx = ergen::contextFor (plate);
+        const auto plateRep = ergen::audit (erTableFor (plate), plateCtx);
+        const auto roomRep  = ergen::audit (erTableFor (room), ergen::contextFor (room));
+
+        bool withdrawn = true, stillRoom = true;
+
+        for (const int r : { ergen::ruleSeparation, ergen::ruleGaps, ergen::ruleFullBand, ergen::ruleKuttruff,
+                             ergen::ruleFlamLate, ergen::ruleFlamOnset, ergen::ruleLoc, ergen::ruleProximity,
+                             ergen::ruleCentre, ergen::ruleLateral, ergen::ruleMoorer })
+        {
+            withdrawn = withdrawn && std::isinf (plateRep.margin[r]);
+            stillRoom = stillRoom && ! std::isinf (roomRep.margin[r]);
+        }
+
+        check (withdrawn, "Plate is not held to any room rule");
+        check (stillRoom, "Room is still held to every room rule");
+        check (! std::isinf (plateRep.margin[ergen::ruleTapCeiling]) && ! std::isinf (plateRep.margin[ergen::ruleGamma]),
+               "Plate is still held to the -15.3 dB ceiling and to gamma >= 0");
+        bool noPlateRules = true;
+
+        for (const int r : { ergen::rulePlateOnset, ergen::rulePlateFront, ergen::rulePlateSwellTime,
+                             ergen::rulePlateSwellRise, ergen::rulePlateBands, ergen::rulePlateLr500 })
+            noPlateRules = noPlateRules && std::isinf (roomRep.margin[r]);
+
+        check (noPlateRules, "Room is not held to the plate rules");
+
+        // Each measured plate rule (ErAudit.h: measured, 16 EMT 140 IRs,
+        // research doc section 8, 2026-09-23) reddens on a Plate table broken
+        // by hand for it. Times in the table are at 12 m; Plate plays at 22 m.
+        const auto fails = [&plateCtx] (const ErTable& broken, int rule)
+        {
+            return ! ergen::audit (broken, plateCtx).pass[rule];
+        };
+
+        const float toDefault = constantsFor (plate).sizeM / kReferenceSizeM;
+
+        const auto tapAt = [toDefault] (const ErChannel& ch, float ms)
+        {
+            int i = 0;
+
+            while (i < ch.numTaps - 1 && ch.taps[i].timeMs * toDefault < ms)
+                ++i;
+
+            return i;
+        };
+
+        {
+            // The whole left channel of VARIATION 1 starting at 3 ms.
+            auto b = erTableFor (plate);
+            auto& ch = b.variation[1].left;
+            const auto shift = 3.0f / toDefault - ch.taps[0].timeMs;
+
+            for (int i = 0; i < ch.numTaps; ++i)
+                ch.taps[i].timeMs += shift;
+
+            check (fails (b, ergen::rulePlateOnset), "a plate that starts at 3 ms fails the onset rule");
+        }
+
+        {
+            // A loud bright tap at about 3 ms: the front is no longer weak,
+            // and the swell no longer rises 8 dB over it.
+            auto b = erTableFor (plate);
+            auto& ch = b.variation[2].right;
+            auto& tap = ch.taps[tapAt (ch, 3.0f)];
+            tap.gain = 0.12f;
+            tap.theta = 0.0f;
+            check (fails (b, ergen::rulePlateFront), "a strong tap inside 5 ms fails the front rule");
+            check (fails (b, ergen::rulePlateSwellRise), "... and the swell-rise rule");
+        }
+
+        {
+            // A loud tap at 35 ms moves the envelope's peak past 25 ms.
+            auto b = erTableFor (plate);
+            auto& ch = b.variation[3].left;
+            auto& tap = ch.taps[tapAt (ch, 35.0f)];
+            tap.gain = 0.12f;
+            tap.theta = 0.0f;
+            tap.band = 0;
+            check (fails (b, ergen::rulePlateSwellTime), "a plate peaking at 35 ms fails the swell-time rule");
+        }
+
+        {
+            // The 8 kHz band's taps relabelled into the 125 Hz band: lows first.
+            auto b = erTableFor (plate);
+            auto& ch = b.variation[0].left;
+
+            for (int i = 0; i < ch.numTaps; ++i)
+                if (ch.taps[i].band == 0)
+                    ch.taps[i].band = kErBands - 1;
+
+            check (fails (b, ergen::rulePlateBands), "a plate whose lows arrive first fails the band-onset rule");
+        }
+
+        {
+            // The right channel of VARIATION 4 made the left: no 500 Hz lag.
+            auto b = erTableFor (plate);
+            b.variation[4].right = b.variation[4].left;
+            check (fails (b, ergen::rulePlateLr500), "a plate with no right-later 500 Hz lag fails the L/R rule");
+        }
+    }
+
+    //== Cavern B: a candidate for the owner's ear, pinned, never shipped ======
+    //
+    // Tool-only (ImageSource.h): it lives in bmo_reverb_ergen, which no plugin
+    // links, and erTableFor (cavern) is still the shipping Cavern -- which the
+    // pin above holds bit for bit. Cavern B is held to every rule the
+    // shipping tables are, and to flam (i) at least 4 dB clear, which is the
+    // point of it (2026-09-24).
+    {
+        const auto* b = ergen::erCandidateTable ("cavern-b");
+        check (b != nullptr, "the cavern-b candidate is reachable from the tools");
+        check (ergen::erCandidateTable ("cavern") == nullptr && ergen::erCandidateTable (nullptr) == nullptr,
+               "only named candidates exist");
+
+        if (b != nullptr)
+        {
+            ErTable fresh;
+            const bool built = ergen::generateCandidate ("cavern-b", ergen::candidateRecipe ("cavern-b")->seed, fresh);
+            check (built, "cavern-b's pinned seed generates a table");
+            check (built && std::memcmp (&fresh, b, sizeof (ErTable)) == 0,
+                   "cavern-b is the generator's at its pinned seed, bit for bit");
+            check (b != &erTableFor (cavern), "the shipping Cavern is not the candidate");
+
+            const auto ctx = ergen::candidateContext ("cavern-b");
+            const auto rep = ergen::audit (*b, ctx);
+
+            for (int r = 0; r < ergen::numRules; ++r)
+                check (rep.pass[r], (std::string ("Cavern B: ") + ergen::ruleName (r)).c_str());
+
+            check (rep.margin[ergen::ruleFlamLate] >= 4.0, "Cavern B passes flam (i) at least 4 dB clear");
+
+            // A hand break: one late tap raised to the shipping Cavern's level.
+            auto broken = *b;
+            auto& ch = broken.variation[2].left;
+            int i = 0;
+
+            while (i < ch.numTaps - 1 && ch.taps[i].timeMs * ctx.sizeM / kReferenceSizeM < 100.0f)
+                ++i;
+
+            ch.taps[i].gain *= 4.0f;
+            ch.taps[i].theta = 0.0f;
+            check (! ergen::audit (broken, ctx).pass[ergen::ruleFlamLate], "a Cavern B cluster tap 12 dB up fails flam (i)");
+        }
+    }
+
+    //== Every number in every table is finite =================================
+    {
+        bool finite = true;
+
+        for (int t = 0; t < numTypes; ++t)
+        {
+            const auto& table = erTableFor (t);
+
+            for (const auto& v : table.variation)
+                for (const auto* ch : { &v.left, &v.right })
+                    for (int i = 0; i < ch->numTaps; ++i)
+                        finite = finite && std::isfinite (ch->taps[i].timeMs) && std::isfinite (ch->taps[i].gain)
+                                        && std::isfinite (ch->taps[i].theta) && std::isfinite (ch->taps[i].pan);
+
+            for (const auto c : table.bandCutoffHz)
+                finite = finite && std::isfinite (c) && c > 0.0f;
+
+            finite = finite && std::isfinite (table.windowMs) && std::isfinite (table.beta)
+                            && std::isfinite (table.combDelayMs) && std::isfinite (table.combGain);
+        }
+
+        check (finite, "every number in every ER table is finite");
     }
 
     //== prepare() and reset() are reachable and do not throw ================

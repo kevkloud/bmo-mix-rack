@@ -1107,6 +1107,36 @@ recomputed every sample; on the control grid it is 0.92 % at 48 kHz and
 3.7 % at 192 kHz. A crossfade running on every block is 1.0 % and 4.2 %.
 `measure_reverb bench`.
 
+## The early-reflection tables are real, and pinned
+
+`dsp/ErTable.h` is the contract between the tables and the ER engine;
+`ErTable.cpp` serves six tables from **`dsp/ErTableData.inc`, which is
+generated -- never edit it**. `dsp/ImageSource.cpp` is the generator and
+`dsp/ErAudit.cpp` the rules of `10` section 3 and `11` section 6 as code. Both
+are offline: `modules/CMakeLists.txt` builds them into `bmo_reverb_ergen`,
+which only `reverb_dsp_tests` and `measure_reverb` link, so the plugin ships
+the numbers and not the machinery. The panel still draws `TapTables.h`'s
+placeholder; moving it onto these tables is integration's.
+
+- **To change a table:** edit its recipe in `ImageSource.cpp` (geometry, beta,
+  seed), then `measure_reverb taps --emit`, rebuild, `taps --audit`. The pin
+  test in `reverb_dsp_tests` regenerates every table and compares it with the
+  .inc bit for bit, so a generator change without a re-emit goes red.
+- **A failing table is re-seeded:** `taps --reseed <type>` finds the first
+  passing seed; `--try` tries a geometry across seeds before a row is edited.
+- **Tables are voiced at each type's default SIZE** (read from
+  `constantsFor`) and quoted at `kReferenceSizeM`, and the audits run at the
+  default SIZE. Changing a default SIZE in `params.h` changes that type's
+  table: re-emit and re-audit.
+- **Known and named, not hidden:** Cavern fails flam rule (i) by 1.5 dB at
+  55 m -- a known failure the owner will decide by ear (2026-09-23), not a
+  seed to search for. **Plate is not a room** (owner, 2026-09-23): no room
+  rule applies to it; it has six plate rules of its own, from 16 measured
+  EMT 140 IRs (`ErAudit.h`), and
+  it is a dispersive plate lattice, not a shoebox -- do not fix it back into a
+  room. Cavern and Plate go past image order 3.
+  `testing-notes/linger-m2-tables-2026-09-23.md` has every figure.
+
 ## What is not here yet, and where it goes
 
 - **Tail reporting is done** (`11` section 2a, milestone M5).

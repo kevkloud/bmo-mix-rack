@@ -17,10 +17,14 @@
                                     report once ModuleDsp has the accessor,
                                     across the schema's corners and against
                                     the 30 s ceiling
-        measure_reverb taps         the ER tap table at a given SIZE, which is
-                                    the one piece of the ER generator that
-                                    exists -- and the numbers the panel's
-                                    display is drawn from
+        measure_reverb taps         the panel's placeholder tap table at a given
+                                    SIZE (TapTables.h), which the display is
+                                    still drawn from
+        measure_reverb taps --audit every ER audit's margin for every shipped
+                                    table (ErTable.cpp); --emit writes those
+                                    tables from the generator, --reseed,
+                                    --best and --try search seeds and
+                                    geometry, --dump shows one type
         measure_reverb constants    the internal constants v1 ships, so the
                                     value being argued about is the value in
                                     the build
@@ -48,6 +52,9 @@
     testing-notes/.**
 */
 
+#include "modules/reverb/dsp/ErAudit.h"
+#include "modules/reverb/dsp/ErTable.h"
+#include "modules/reverb/dsp/ImageSource.h"
 #include "modules/reverb/dsp/ReverbDsp.h"
 #include "modules/reverb/dsp/TapTables.h"
 
@@ -207,11 +214,11 @@ void printTaps (float sizeM)
     }
 
     std::printf ("\n  span %.2f ms\n", (double) erSpanMsAt (sizeM));
-    std::printf ("\n  **PLACEHOLDER GEOMETRY.** These are not the shipped tables:\n"
-                 "  the real ones come offline from the image-source method and\n"
-                 "  none of 11 section 6's comb, spacing or flamming rules is\n"
-                 "  claimed of these. What is real is the Size law and the fact\n"
-                 "  that the panel's display reads this same table.\n");
+    std::printf ("\n  **PLACEHOLDER GEOMETRY.** This is TapTables.h, which the panel's\n"
+                 "  display still reads; none of 11 section 6's rules is claimed of it.\n"
+                 "  The shipped early-reflection tables are ErTable.cpp's, from the\n"
+                 "  image-source generator: `taps --audit` prints them against every\n"
+                 "  rule. Moving the panel onto them is integration's.\n");
 }
 
 void printConstants()
@@ -467,9 +474,605 @@ void printHash()
     std::printf ("  Var 0-5 combined  %016llx\n", (unsigned long long) all);
 }
 
+//==============================================================================
+// The early-reflection tables: `taps --audit`, `--emit`, `--reseed`, `--dump`.
+
+const char* typeName (int t) { return ergen::recipeFor (t).name; }
+
+/** The shortest decimal that reads back as exactly `v`, as a float literal.
+    Every number the generator produces sits on a coarse grid, so this is
+    usually the grid's own digits -- readable, and exact. */
+std::string literal (float v)
+{
+    char buf[48];
+
+    for (int p = 6; p <= 9; ++p)
+    {
+        std::snprintf (buf, sizeof (buf), "%.*g", p, (double) v);
+
+        if (std::strtof (buf, nullptr) == v)
+            break;
+    }
+
+    std::string s { buf };
+
+    if (s.find_first_of (".en") == std::string::npos)
+        s += ".0";
+
+    return s + "f";
+}
+
+/** One table as a C++ initialiser, indented for an array element. */
+void writeTable (std::FILE* f, const char* label, const ErTable& table)
+{
+    std::fprintf (f, "    // %s -- seed %u, beta %s\n    {\n        {\n",
+                  label, table.seed, literal (table.beta).c_str());
+
+    for (int v = 0; v < kErVariations; ++v)
+    {
+        std::fprintf (f, "            // VARIATION %d\n            {\n", v);
+
+        for (const auto* ch : { &table.variation[v].left, &table.variation[v].right })
+        {
+            std::fprintf (f, "                { { // %s\n", ch == &table.variation[v].left ? "left" : "right");
+
+            for (int i = 0; i < ch->numTaps; ++i)
+            {
+                const auto& tap = ch->taps[i];
+                std::fprintf (f, "                    { %s, %s, %s, %s, %d },\n",
+                              literal (tap.timeMs).c_str(), literal (tap.gain).c_str(),
+                              literal (tap.theta).c_str(), literal (tap.pan).c_str(), tap.band);
+            }
+
+            std::fprintf (f, "                  }, %d },\n", ch->numTaps);
+        }
+
+        std::fprintf (f, "            },\n");
+    }
+
+    std::fprintf (f, "        },\n");
+    std::fprintf (f, "        %s, %s,   // combDelayMs, combGain\n",
+                  literal (table.combDelayMs).c_str(), literal (table.combGain).c_str());
+    std::fprintf (f, "        %s, %s,   // windowMs, windowClampMs\n",
+                  literal (table.windowMs).c_str(), literal (table.windowClampMs).c_str());
+    std::fprintf (f, "        { %s, %s, %s, %s },   // bandCutoffHz\n",
+                  literal (table.bandCutoffHz[0]).c_str(), literal (table.bandCutoffHz[1]).c_str(),
+                  literal (table.bandCutoffHz[2]).c_str(), literal (table.bandCutoffHz[3]).c_str());
+    std::fprintf (f, "        %s,   // beta\n        %uu   // seed\n    }",
+                  literal (table.beta).c_str(), table.seed);
+}
+
+int emitTables (const char* path)
+{
+    std::FILE* f = std::fopen (path, "wb");
+
+    if (f == nullptr)
+    {
+        std::printf ("cannot write %s\n", path);
+        return 1;
+    }
+
+    std::fprintf (f,
+        "// GENERATED by `measure_reverb taps --emit`. Do not edit by hand.\n"
+        "//\n"
+        "// BMO Linger's early-reflection tables: the image-source generator in\n"
+        "// ImageSource.cpp, run once per type at its pinned seed and audited by\n"
+        "// ErAudit.cpp. `reverb_dsp_tests` regenerates every table and asserts it\n"
+        "// equals this file exactly, so a change to the generator, a recipe or a\n"
+        "// type's default SIZE turns it red until this is re-emitted and the audits\n"
+        "// re-run. **A table that fails an audit is re-seeded, not patched**\n"
+        "// (docs/reverb/10-dsp-spec.md section 8): change the recipe's seed, never a\n"
+        "// number here.\n"
+        "//\n"
+        "// Quoted at kReferenceSizeM. Each tap: { timeMs, gain, theta, pan, band }.\n"
+        "// Inside ErTable.cpp's namespace; included once, from there.\n\n"
+        "static const ErTable kErTables[%d]\n{\n", (int) numTypes);
+
+    for (int t = 0; t < numTypes; ++t)
+    {
+        ErTable table;
+
+        if (! ergen::generate (t, ergen::recipeFor (t).seed, table))
+        {
+            std::fclose (f);
+            std::printf ("%s: its pinned seed %u cannot be placed; nothing emitted that can be trusted\n",
+                         typeName (t), ergen::recipeFor (t).seed);
+            return 1;
+        }
+
+        writeTable (f, typeName (t), table);
+        std::fprintf (f, ",\n");
+    }
+
+    std::fprintf (f, "};\n");
+    std::fclose (f);
+    std::printf ("wrote %s\n", path);
+    return 0;
+}
+
+/** The candidates' file: tables for the owner's ear, never for the plugin. */
+int emitCandidates (const char* path)
+{
+    ErTable table;
+    const auto seed = ergen::candidateRecipe ("cavern-b")->seed;
+
+    if (! ergen::generateCandidate ("cavern-b", seed, table))
+    {
+        std::printf ("cavern-b: its pinned seed %u cannot be placed; nothing emitted\n", seed);
+        return 1;
+    }
+
+    std::FILE* f = std::fopen (path, "wb");
+
+    if (f == nullptr)
+    {
+        std::printf ("cannot write %s\n", path);
+        return 1;
+    }
+
+    std::fprintf (f,
+        "// GENERATED by `measure_reverb taps --emit`. Do not edit by hand.\n"
+        "//\n"
+        "// Candidate tables for the owner's ear -- never selectable by the plugin.\n"
+        "// Included by ErCandidates.cpp, in bmo_reverb_ergen, which no plugin links.\n"
+        "// Pinned by reverb_dsp_tests like the shipping tables; re-seeded, never\n"
+        "// patched.\n\n"
+        "static const ErTable kCavernBTable =\n");
+    writeTable (f, "Cavern B (candidate, stands in for Cavern)", table);
+    std::fprintf (f, ";\n");
+    std::fclose (f);
+    std::printf ("wrote %s\n", path);
+    return 0;
+}
+
+/** A cavern's shape: first arrival, the dip, the late cluster, flam (i).
+    Levels of windows are 5 ms energy sums at the default density; the
+    cluster is the loudest window after 40 ms, and "re E25" is against the
+    energy before 25 ms, the reference flam rule (i) uses. */
+void printShape (const char* label, const ErTable& table, const ergen::AuditContext& ctx)
+{
+    const auto rep = ergen::audit (table, ctx);
+    const auto scale = ctx.sizeM / kReferenceSizeM;
+    const auto& first = table.variation[2].left.taps[0];
+    const auto firstDb = 20.0 * std::log10 (first.gain / scale);
+
+    double w[64];
+    const int n = ergen::windowEnergies (table, ctx, 2, false, w, 64);
+    double e25 = 0.0, peak = 0.0, dip = 0.0, gap = 0.0, cluster = 0.0;
+    int clusterAt = 0;
+
+    for (int i = 0; i < n; ++i)
+    {
+        if (i * 5 + 5 <= 25) e25 += w[i];
+        peak = std::max (peak, w[i]);
+
+        if (i * 5 >= 10 && i * 5 + 5 <= 40)
+            dip += w[i] / 6.0;   // the mean 5 ms window over 10-40 ms
+
+        if (i * 5 >= 25 && i * 5 + 5 <= 60)
+            gap += w[i] / 7.0;   // and over 25-60 ms
+
+        if (i * 5 >= 40 && w[i] > cluster)
+        {
+            cluster = w[i];
+            clusterAt = i;
+        }
+    }
+
+    const auto db = [] (double e) { return e > 0.0 ? 10.0 * std::log10 (e) : -99.0; };
+
+    std::printf ("%s: first arrival %.2f ms at %.1f dB (%.1f dB re the direct at 1/d); dip %.1f dB re the "
+                 "peak window (mean of 10-40 ms), %.1f dB (25-60 ms); cluster %d-%d ms at %.1f dB re E25; flam (i) margin %.2f dB "
+                 "(loudest tap after 25 ms at %.1f dB re E25)\n",
+                 label, first.timeMs * scale, firstDb, firstDb - 20.0 * std::log10 ((double) ctx.directGain),
+                 db (dip) - db (peak), db (gap) - db (peak), clusterAt * 5, clusterAt * 5 + 5, db (cluster) - db (e25),
+                 rep.margin[ergen::ruleFlamLate], -12.0 - rep.margin[ergen::ruleFlamLate]);
+}
+
+void printAudit (int t, const ErTable& table, float directGain = 0.0f)
+{
+    auto ctx = ergen::contextFor (t);
+
+    if (directGain > 0.0f)
+        ctx.directGain = directGain;   // a --try geometry, not the shipped one
+
+    const auto rep = ergen::audit (table, ctx);
+    const auto ref = ergen::auditAtSize (table, ctx, kReferenceSizeM);
+
+    std::printf ("\n%s -- seed %u, beta %.2f, default SIZE %.1f m, DENSITY %.0f %%, ER %.1f dB\n",
+                 typeName (t), table.seed, (double) table.beta, (double) ctx.sizeM,
+                 (double) ctx.density * 100.0, (double) ctx.erLevelDb);
+    std::printf ("  %-28s %12s %-6s %14s\n", "rule (at default SIZE)", "margin", "unit", "at 12 m, info");
+
+    static const char* units[ergen::numRules] { "ms", "frac", "Hz", "dB", "dB", "dB", "dB", "dB", "frac", "pan", "gamma", "LF", "frac", "ms", "frac", "ms", "dB", "ms", "ms" };
+
+    for (int r = 0; r < ergen::numRules; ++r)
+    {
+        const auto m = rep.margin[r];
+        const auto mr = ref.margin[r];
+
+        if (std::isinf (m)) std::printf ("  %-28s %12s %-6s", ergen::ruleName (r), "n/a", "");
+        else                std::printf ("  %-28s %12.4f %-6s", ergen::ruleName (r), m, units[r]);
+
+        if (std::isinf (mr)) std::printf (" %14s", "n/a");
+        else                 std::printf (" %14.4f", mr);
+
+        std::printf ("  %s\n", rep.pass[r] ? "pass" : "FAIL");
+    }
+
+    const auto& f = rep.figures;
+    std::printf ("  gamma 0-6, default density:");
+    for (double g : f.gamma) std::printf (" %.3f", g);
+    std::printf ("\n  gamma 0-6, core only:      ");
+    for (double g : f.gammaCore) std::printf (" %.3f", g);
+    std::printf ("\n  gamma 0-6, every tap:      ");
+    for (double g : f.gammaFull) std::printf (" %.3f", g);
+    std::printf ("\n  lateral fraction (VARIATION 2): room %.3f; stereo S/M 125-1000 Hz %.3f at default density, %.3f at 100 %%\n",
+                 f.lateralFraction, f.lateralFractionStereo, f.lateralFractionStereoFull);
+    std::printf ("  ER energy before 30 ms: %.1f %% (the dropped >= 50 %% rule of 11 section 6, measured)\n",
+                 100.0 * f.energyBefore30);
+    std::printf ("  LOC: ER in 100 ms is %.1f dB below direct at the default fader\n", f.locMarginDb);
+    std::printf ("  inside 5 ms: up to %.1f %% of the ER energy\n", 100.0 * f.proximityShare);
+    std::printf ("  span (VARIATION 2, left): %.2f - %.2f ms; core %.2f - %.2f ms; loudest tap %.2f dB\n",
+                 f.firstTapMs, f.lastTapMs, f.coreFirstMs, f.coreLastMs, f.maxTapDb);
+    std::printf ("  closest core gap pair %.2f %% apart; full-set adjacent gap pairs within 2 %%: %d (reported, not a rule)\n",
+                 f.worstGapPct, f.fullSetGapCollisions);
+
+    if (ctx.isPlate)
+    {
+        // Against the measured EMT 140s (research doc section 8).
+        std::printf ("  plate: inside 5 ms %.2f %% of the first 100 ms (measured 0.1-4); swell peak at %.0f ms "
+                     "(10-25), %.1f dB over 0-5 ms (10-13); span %.2f - %.2f ms\n",
+                     100.0 * f.plateFrontShare, f.platePeakMs, f.plateRiseDb, f.firstTapMs, f.lastTapMs);
+
+        static const char* bandHz[kErBands] { "8 kHz", "2 kHz", "500 Hz", "125 Hz" };
+        static const char* measured[kErBands] { "~2.5", "~10", "~13", "~18" };
+
+        for (int b = 0; b < kErBands; ++b)
+            std::printf ("  plate band %d (%s): onset L %6.2f ms, R %6.2f ms, R - L %+.2f ms (measured onset %s ms)\n",
+                         b, bandHz[b], f.plateOnsetMs[0][b], f.plateOnsetMs[1][b],
+                         f.plateOnsetMs[1][b] - f.plateOnsetMs[0][b], measured[b]);
+    }
+
+    std::printf ("  => %s\n", rep.allPass ? "ALL PASS" : "FAILS");
+}
+
+int tapsCommand (int argc, char** argv)
+{
+    const std::string flag { argv[0] };
+
+    if (flag == "--audit")
+    {
+        bool all = true;
+
+        for (int t = 0; t < numTypes; ++t)
+        {
+            printAudit (t, erTableFor (t));
+            all = all && ergen::audit (erTableFor (t), ergen::contextFor (t)).allPass;
+        }
+
+        std::printf ("\nshipped tables: %s\n", all ? "every rule passes at every type"
+                                                   : "AT LEAST ONE RULE FAILS");
+        return all ? 0 : 1;
+    }
+
+    if (flag == "--reseed")
+    {
+        // The first seed from `start` whose table generates and passes every
+        // audit. Prints it and changes nothing on disk: the seed is pinned by
+        // editing the recipe, and --emit then writes the table.
+        const int t = argc > 1 ? std::atoi (argv[1]) : 0;
+        const auto start = argc > 2 ? (std::uint32_t) std::strtoul (argv[2], nullptr, 10) : 1u;
+        const auto count = argc > 3 ? (std::uint32_t) std::strtoul (argv[3], nullptr, 10) : 20000u;
+        int failures[ergen::numRules] {};
+        int unplaced = 0;
+
+        for (std::uint32_t s = start; s < start + count; ++s)
+        {
+            ErTable table;
+
+            if (! ergen::generate (t, s, table))
+            {
+                ++unplaced;
+                continue;
+            }
+
+            const auto rep = ergen::audit (table, ergen::contextFor (t));
+
+            if (rep.allPass)
+            {
+                std::printf ("%s: seed %u passes (%u tried, %d could not be placed)\n",
+                             typeName (t), s, s - start + 1, unplaced);
+                printAudit (t, table);
+                return 0;
+            }
+
+            for (int r = 0; r < ergen::numRules; ++r)
+                failures[r] += rep.pass[r] ? 0 : 1;
+        }
+
+        std::printf ("%s: no seed in %u..%u passes; %d could not be placed\n",
+                     typeName (t), start, start + count - 1, unplaced);
+
+        for (int r = 0; r < ergen::numRules; ++r)
+            std::printf ("  %-28s failed %d\n", ergen::ruleName (r), failures[r]);
+
+        return 1;
+    }
+
+    if (flag == "--best")
+    {
+        // For a type no seed passes: the seed whose worst failing margin is
+        // least bad, among those that pass every other rule. Prints it and
+        // changes nothing on disk.
+        const int t = argc > 1 ? std::atoi (argv[1]) : 0;
+        const auto count = argc > 2 ? (std::uint32_t) std::strtoul (argv[2], nullptr, 10) : 2000u;
+        std::uint32_t best = 0;
+        double bestScore = -1.0e9;
+        int bestFails = 99;
+
+        for (std::uint32_t s = 1; s <= count; ++s)
+        {
+            ErTable table;
+
+            if (! ergen::generate (t, s, table))
+                continue;
+
+            const auto rep = ergen::audit (table, ergen::contextFor (t));
+            int fails = 0;
+            double worst = 1.0e9;
+
+            for (int r = 0; r < ergen::numRules; ++r)
+                if (! rep.pass[r])
+                {
+                    ++fails;
+                    worst = std::min (worst, rep.margin[r]);
+                }
+
+            if (fails < bestFails || (fails == bestFails && worst > bestScore))
+            {
+                best = s;
+                bestFails = fails;
+                bestScore = worst;
+            }
+        }
+
+        std::printf ("%s: best seed %u of %u fails %d rule(s), worst margin %.4f\n",
+                     typeName (t), best, count, bestFails, bestScore);
+
+        ErTable table;
+
+        if (best > 0 && ergen::generate (t, best, table))
+            printAudit (t, table);
+
+        return 0;
+    }
+
+    if (flag == "--dump")
+    {
+        const int t = argc > 1 ? std::atoi (argv[1]) : 0;
+        const int v = argc > 2 ? std::atoi (argv[2]) : 2;
+        const auto seed = argc > 3 ? (std::uint32_t) std::strtoul (argv[3], nullptr, 10) : ergen::recipeFor (t).seed;
+        ErTable table;
+        ergen::Diagnostics d {};
+
+        if (! ergen::generate (t, seed, table, &d))
+        {
+            std::printf ("%s: seed %u could not be placed (stage %d: 0 images, 1 core, 2 infill, 3 no free time, 4 slot count)\n",
+                         typeName (t), seed, d.failedAt);
+            return 1;
+        }
+
+        const auto scale = d.sizeM / kReferenceSizeM;
+        std::printf ("%s at %.1f m: direct %.2f m, mean free path %.2f m, %d images inside the window, "
+                     "%d draws redrawn\n", typeName (t), d.sizeM, d.directDistM, d.meanFreePathM,
+                     d.imagesConsidered, d.attemptsRejected);
+        std::printf ("  shared slots per position:");
+        for (int n : d.sharedSlots) std::printf (" %d", n);
+        std::printf ("\n  VARIATION %d at %.1f m\n", v, d.sizeM);
+        std::printf ("  %3s  %9s %8s %6s %6s %2s   %9s %8s %6s %6s %2s\n",
+                     "k", "L ms", "dB", "theta", "pan", "b", "R ms", "dB", "theta", "pan", "b");
+
+        const auto& set = table.variation[v];
+
+        for (int i = 0; i < kErMaxTaps; ++i)
+        {
+            const auto& l = set.left.taps[i];
+            const auto& r = set.right.taps[i];
+            std::printf ("  %3d  %9.3f %8.2f %6.3f %6.2f %2d   %9.3f %8.2f %6.3f %6.2f %2d\n", i,
+                         l.timeMs * scale, 20.0 * std::log10 (l.gain / scale), (double) l.theta, (double) l.pan, l.band,
+                         r.timeMs * scale, 20.0 * std::log10 (r.gain / scale), (double) r.theta, (double) r.pan, r.band);
+        }
+
+        std::printf ("  band cutoffs at %.1f m:", d.sizeM);
+        for (int b = 0; b < kErBands; ++b)
+            std::printf (" %.0f", (double) erBandCutoffHzAt (table, b, (float) d.sizeM));
+
+        double w[64];
+        const auto n = ergen::windowEnergies (table, ergen::contextFor (t), v, false, w, 64);
+        std::printf ("\n  5 ms window energies, dB, left, default density:");
+        for (int i = 0; i < n; ++i) std::printf (" %.1f", w[i] > 0.0 ? 10.0 * std::log10 (w[i]) : -99.0);
+        std::printf ("\n");
+        printAudit (t, table);
+        return 0;
+    }
+
+    if (flag == "--try")
+    {
+        // A re-voiced geometry, tried across seeds before its row is edited:
+        // --try <type> <listenerFx> <listenerFy> <sourceDistM> <azimuthDeg> [seeds] [maxOrder]
+        if (argc < 6)
+        {
+            std::printf ("--try <type> <listenerFx> <listenerFy> <sourceDistM> <azimuthDeg> [seeds]\n");
+            return 2;
+        }
+
+        const int t = std::atoi (argv[1]);
+        auto recipe = ergen::recipeFor (t);
+        recipe.listenerFx       = std::atof (argv[2]);
+        recipe.listenerFy       = std::atof (argv[3]);
+        recipe.sourceDistM      = std::atof (argv[4]);
+        recipe.sourceAzimuthDeg = std::atof (argv[5]);
+        const auto count = argc > 6 ? (std::uint32_t) std::strtoul (argv[6], nullptr, 10) : 500u;
+        recipe.maxOrder  = argc > 7 ? std::atoi (argv[7]) : recipe.maxOrder;
+        recipe.beta      = argc > 9 ? std::atof (argv[9]) : recipe.beta;
+
+        int failures[ergen::numRules] {};
+        int unplaced = 0, passed = 0, why[3] {};
+        std::uint32_t first = 0;
+
+        for (std::uint32_t s = 1; s <= count; ++s)
+        {
+            ErTable table;
+            ergen::Diagnostics d {};
+
+            if (! ergen::generateFrom (recipe, t, s, table, &d))
+            {
+                ++unplaced;
+                ++why[std::clamp (d.failedAt, 0, 2)];
+                if (d.failedAt == 0 && why[0] == 1)
+                    std::printf ("  (first shortfall: %d images inside the window, %d kept)\n",
+                                 d.imagesConsidered, d.attemptsRejected);
+                continue;
+            }
+
+            auto ctx = ergen::contextFor (t);
+            ctx.directGain = (float) d.directGain;
+            const auto rep = ergen::audit (table, ctx);
+
+            if (rep.allPass && passed++ == 0)
+                first = s;
+
+            for (int r = 0; r < ergen::numRules; ++r)
+                failures[r] += rep.pass[r] ? 0 : 1;
+        }
+
+        std::printf ("%s tried at fx %.3f fy %.3f d %.2f az %.1f: %d of %u pass (first seed %u), %d unplaced (images %d, core %d, infill %d)\n",
+                     typeName (t), recipe.listenerFx, recipe.listenerFy, recipe.sourceDistM,
+                     recipe.sourceAzimuthDeg, passed, count, first, unplaced, why[0], why[1], why[2]);
+
+        for (int r = 0; r < ergen::numRules; ++r)
+            if (failures[r] > 0)
+                std::printf ("  %-28s failed %d\n", ergen::ruleName (r), failures[r]);
+
+        if (argc > 8)
+        {
+            ErTable table;
+            ergen::Diagnostics d {};
+            const auto s = (std::uint32_t) std::strtoul (argv[8], nullptr, 10);
+
+            if (ergen::generateFrom (recipe, t, s, table, &d))
+                printAudit (t, table, (float) d.directGain);
+        }
+
+        return passed > 0 ? 0 : 1;
+    }
+
+    if (flag == "--emit")
+    {
+        // The shipping tables, then the candidates beside them.
+        const auto shipped = emitTables (argc > 1 ? argv[1] : "modules/reverb/dsp/ErTableData.inc");
+
+        if (shipped != 0)
+            return shipped;
+
+        return emitCandidates (argc > 2 ? argv[2] : "modules/reverb/dsp/ErCandidateData.inc");
+    }
+
+    if (flag == "--candidate")
+    {
+        // A candidate's audit and its shape against the shipping table's:
+        // --candidate <name> [seed]; without a seed, the pinned one.
+        const char* name = argc > 1 ? argv[1] : "cavern-b";
+        const auto* recipe = ergen::candidateRecipe (name);
+
+        if (recipe == nullptr)
+        {
+            std::printf ("unknown candidate: %s\n", name);
+            return 2;
+        }
+
+        const auto seed = argc > 2 ? (std::uint32_t) std::strtoul (argv[2], nullptr, 10) : recipe->seed;
+        ErTable table;
+        ergen::Diagnostics d {};
+
+        if (! ergen::generateCandidate (name, seed, table, &d))
+        {
+            std::printf ("%s: seed %u could not be placed (stage %d)\n", name, seed, d.failedAt);
+            return 1;
+        }
+
+        const auto type = ergen::candidateType (name);
+        const auto ctx = ergen::candidateContext (name);
+        std::printf ("candidate %s (stands in for %s), seed %u\n", name, typeName (type), seed);
+        printAudit (type, table, ctx.directGain);
+        std::printf ("\n  shape, at the default SIZE and density, VARIATION 2 left:\n");
+        printShape ("  shipping", erTableFor (type), ergen::contextFor (type));
+        printShape ("  candidate", table, ctx);
+        return ergen::audit (table, ctx).allPass ? 0 : 1;
+    }
+
+    if (flag == "--reseed-candidate")
+    {
+        // The first seed whose candidate passes every audit with flam (i) at
+        // least `min` dB clear: --reseed-candidate <name> [start] [n] [min].
+        const char* name = argc > 1 ? argv[1] : "cavern-b";
+        const auto start = argc > 2 ? (std::uint32_t) std::strtoul (argv[2], nullptr, 10) : 1u;
+        const auto count = argc > 3 ? (std::uint32_t) std::strtoul (argv[3], nullptr, 10) : 2000u;
+        const auto minMargin = argc > 4 ? std::atof (argv[4]) : 4.0;
+        const auto ctx = ergen::candidateContext (name);
+        int unplaced = 0, failures[ergen::numRules] {};
+        double bestFlam = -1.0e9;
+
+        for (std::uint32_t s = start; s < start + count; ++s)
+        {
+            ErTable table;
+
+            if (! ergen::generateCandidate (name, s, table))
+            {
+                ++unplaced;
+                continue;
+            }
+
+            const auto rep = ergen::audit (table, ctx);
+            bestFlam = std::max (bestFlam, rep.margin[ergen::ruleFlamLate]);
+
+            if (rep.allPass && rep.margin[ergen::ruleFlamLate] >= minMargin)
+            {
+                std::printf ("%s: seed %u passes with flam (i) %.2f dB clear (%u tried, %d unplaced)\n",
+                             name, s, rep.margin[ergen::ruleFlamLate], s - start + 1, unplaced);
+                return 0;
+            }
+
+            for (int r = 0; r < ergen::numRules; ++r)
+                failures[r] += rep.pass[r] ? 0 : 1;
+        }
+
+        std::printf ("%s: no seed passes with flam (i) %.1f dB clear; best flam (i) margin %.2f dB; %d unplaced\n",
+                     name, minMargin, bestFlam, unplaced);
+
+        for (int r = 0; r < ergen::numRules; ++r)
+            if (failures[r] > 0)
+                std::printf ("  %-28s failed %d\n", ergen::ruleName (r), failures[r]);
+
+        return 1;
+    }
+
+
+    std::printf ("unknown taps flag: %s\n", flag.c_str());
+    return 2;
+}
+
 void usage()
 {
-    std::printf ("usage: measure_reverb <latency|tail|taps [size]|constants|schema|bench|hash>\n");
+    std::printf ("usage: measure_reverb <latency|tail|taps [size]|constants|schema|bench|hash>\n"
+                 "       measure_reverb taps --audit                     every rule's margin, per type\n"
+                 "       measure_reverb taps --emit [path]               write ErTableData.inc\n"
+                 "       measure_reverb taps --reseed <type> [start] [n] find the first passing seed\n"
+                 "       measure_reverb taps --dump <type> [var] [seed]  one type's taps and audit\n"
+                 "       measure_reverb taps --best <type> [n]           least-bad seed when none passes\n"
+                 "       measure_reverb taps --try <type> <fx> <fy> <d> <az> [n] [order] [seed] [beta]\n"
+                 "                                                       a re-voiced geometry across seeds\n");
 }
 
 } // namespace
@@ -490,6 +1093,9 @@ int main (int argc, char** argv)
     if (mode == "schema")    { printSchema();    return 0; }
     if (mode == "bench")     { printBench();     return 0; }
     if (mode == "hash")      { printHash();      return 0; }
+
+    if (mode == "taps" && argc > 2 && std::string (argv[2]).rfind ("--", 0) == 0)
+        return tapsCommand (argc - 2, argv + 2);
 
     if (mode == "taps")
     {

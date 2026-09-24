@@ -38,7 +38,7 @@ target_link_libraries(fetcomp_dsp_tests PRIVATE bmo_fetcomp_dsp)
 add_test(NAME fetcomp_dsp COMMAND fetcomp_dsp_tests)
 
 bmo_add_dsp_tool(reverb_dsp_tests dsp/ReverbDspTests.cpp)
-target_link_libraries(reverb_dsp_tests PRIVATE bmo_reverb_dsp)
+target_link_libraries(reverb_dsp_tests PRIVATE bmo_reverb_dsp bmo_reverb_ergen)
 add_test(NAME reverb_dsp COMMAND reverb_dsp_tests)
 
 endif()

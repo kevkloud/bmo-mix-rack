@@ -884,4 +884,9 @@ became faders.
 **Owner confirm, still open:** whether `inhicut` ships as a parameter or becomes
 a constant (§4d); whether ER SPREAD greys out in Taps mode or sits inert — *ER
 SHAPE is no longer part of that question, having lost its knob in the trim*
-(§4a); the MIX law and its default.
+(§4a); the MIX law and its default; and **what happens past the 30 s tail
+ceiling** — `decay` 20 s × `damphi` or `damplo` 2.0 rings for 40 s, so §6's tail
+report cannot be both ≥ measured and ≤30 s at that corner, and §6's own
+stability test sits on it. Clamp the effective T60 in the engine, restrict
+"≥ measured" to settings under the ceiling, or accept and record the
+under-report; `HANDOFF-linger-dsp.md` holds M3 until this is chosen.

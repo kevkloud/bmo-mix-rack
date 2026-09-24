@@ -329,3 +329,62 @@ copied VARIATION 4's left channel into its right. Run: **every one of the six
 plate rules went red**, plus the pin, "every channel's taps ascend" and
 "exactly 21 core taps". Restored; green. The test file's Plate hand-breaks
 now target the six measured rules, one table broken per rule or pair.
+
+## Cavern B -- a second candidate for the owner's ear (2026-09-24, on AURORA)
+
+The shipping Cavern is unchanged. `erTableFor (cavern)` is still seed 1444,
+and the pin holds all six shipping tables bit for bit: re-emitting after
+this work left `ErTableData.inc` byte-identical. Cavern B is **tool-only**.
+`ergen::erCandidateTable ("cavern-b")` lives in `ErCandidates.cpp` +
+`ErCandidateData.inc`, which are compiled into `bmo_reverb_ergen` only, and no
+plugin links that library. `measure_reverb taps --candidate cavern-b` prints
+its audit and the shape below; `--reseed-candidate` searches seeds. It is
+pinned (regenerated and compared bit for bit) and held to every rule the
+shipping tables are.
+
+**What it is.** The shipping Cavern's room, placement and beta (0.88), with
+one change: an early scattered field. 13 of the 27 velvet pulses are laid
+over the free time from 1.5 to 22 ms (inside 8 ms they go to the dark band,
+as every tap there does). The remaining 14 begin no earlier than 60 ms, which
+leaves 25-60 ms clear. Seed 11 is the first from 1 with every rule passing and
+flam (i) at least 4 dB clear.
+
+| at 55 m, default density, VARIATION 2 left | Cavern A (shipping, 1444) | Cavern B (candidate, 11) | measured stone spaces |
+|---|---|---|---|
+| flam (i): loudest tap after 25 ms re E25 | -10.5 dB (fails by 1.50) | **-17.0 dB (passes by 4.96)** | -14.2 / -15.2 / -17.7 (York, St Andrew's, Hamilton) |
+| dip: mean 5 ms window re the peak window, 10-40 ms | -4.8 dB | -5.8 dB | Hamilton -24 to -27 (10-40 ms) |
+| dip: the same, 25-60 ms | -10.3 dB | -76.2 dB (as good as empty) | -- |
+| late cluster: loudest 5 ms window after 40 ms | 40-45 ms, -11.1 dB re E25 | 120-125 ms, -14.9 dB re E25 | Hamilton 65-80 ms |
+| first arrival | 0.74 ms, -27.2 dB (-1.2 re the direct at 1/d) | 0.73 ms, the same floor bounce | 1.9-3.5 ms, -8 to -18 dB re direct |
+
+**How it compares with the measured spaces.** Cavern B's flam (i) figure
+sits where the measured stone spaces do.
+
+Its dip falls at 25-60 ms, later than Hamilton's 10-40 ms, because its
+early scatter fills 1.5-22 ms. Its cluster lands at 120-125 ms, not 65-80.
+Its first arrival is the same 0.74 ms floor bounce as Cavern A, much earlier
+and louder, relative to the direct, than the measured 1.9-3.5 ms at -8 to
+-18 dB.
+
+I did not tune any of those three; flam (i) was the brief.
+
+**Why it takes early scatter and not a new geometry.** Moving the listener,
+the source or beta could not get a 55 m shoebox past about -12 dB re E25. The
+room has about 26-32 distinct reflections in its 200 ms window, so there is
+no early energy to spend, and a corner placement fuses its images below the
+21 core taps. With early scatter at 0.88 beta, the flam (i) margin rose with
+the gap left before the late infill:
+
+- about 3.6 dB, with the late infill starting straight after the early scatter;
+- 3.9 dB, starting at 40 ms;
+- 4.96 dB, starting at 60 ms.
+
+At 0.9 ms spacing the early field holds about 13 pulses; 20 or more could not
+be placed. Cavern B's other margins: separation 0.005 ms (thin), flam (ii)
+0.42 dB (thin), gamma 0.018, lateral fraction 0.122 (margin 0.022).
+
+**Non-vacuity.** In the suite, Cavern B's copy with one cluster tap raised
+12 dB fails flam (i). By hand, I raised one VARIATION 2 left tap at 22.6 ms
+(at 12 m) to 0.25 in `ErCandidateData.inc` and rebuilt (exit 0). 4 checks
+went red: the candidate pin, "Cavern B: flam (i)", "Cavern B: flam (ii)"
+and "at least 4 dB clear". Restored; green.

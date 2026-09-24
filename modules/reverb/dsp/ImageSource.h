@@ -114,6 +114,17 @@ struct Recipe
     /** The window a plate fills at its default SIZE, inside its 200 ms clamp:
         a plate's arrivals are over in tens of milliseconds. CALIBRATE. */
     double plateWindowMs;
+
+    //== Early scatter -- zero in every shipping row ===========================
+
+    /** The first `earlyInfillCells` of the 27 velvet pulses are laid over the
+        free time before `earlyInfillEndMs` rather than over the whole window:
+        a scattered early field, the irregular stone of a real cavern, ahead
+        of the dip and the late cluster. Used by the Cavern B candidate only.
+        CALIBRATE. */
+    double earlyInfillEndMs;
+    int    earlyInfillCells;
+    double lateInfillStartMs;   ///< and the rest begin no earlier than this: the dip, kept clear
 };
 
 /** The six recipes, in `type` order. */
@@ -174,6 +185,9 @@ inline constexpr double kPlateMinSeparationMs = 0.25;
 inline constexpr double kPlateInfillStartMs   = 0.5;
 inline constexpr double kPlateSplitMinMs      = 0.05;
 
+/** Where an early-scatter recipe's infill begins (Recipe::earlyInfillCells). */
+inline constexpr double kEarlyScatterStartMs  = 1.5;
+
 /** **Plate's envelope, fitted to measurement.** Source: measured, 16 EMT 140
     IRs, research doc section 8, 2026-09-23. A real plate's energy *rises*
     10-13 dB to a peak at 10-25 ms and then decays; only 0.1-4 % of the
@@ -231,6 +245,29 @@ bool generate (int typeIndex, std::uint32_t seed, ErTable& out, Diagnostics* dia
     re-voiced geometry in `measure_reverb taps --try` before editing the row.
     `typeIndex` still supplies the default SIZE the room is built at. */
 bool generateFrom (const Recipe& recipe, int typeIndex, std::uint32_t seed, ErTable& out, Diagnostics* diag = nullptr);
+
+//==============================================================================
+/** **Candidates: tables for the owner's ear, never selectable by the plugin.**
+    A candidate is a recipe standing in for a shipping type -- "cavern-b" for
+    Cavern -- generated, pinned and audited exactly like a shipping table,
+    but reachable only here, from `measure_reverb` and the tests: it lives in
+    bmo_reverb_ergen, which no plugin links, and erTableFor never returns it.
+
+    Cavern B (2026-09-24): Cavern's character -- early arrivals, a dip, a
+    late focused cluster -- with its cluster brought down to about -17 dB
+    re the energy before 25 ms, so flam rule (i) passes. Measured stone
+    spaces sit at -14 to -18 dB there (York Minster, St Andrew's, Hamilton
+    Mausoleum; research doc, 2026-09-23); the shipping Cavern sits at -10.5.
+    For the owner's listening checkpoint, against the shipping Cavern. */
+const Recipe* candidateRecipe (const char* name) noexcept;
+int candidateType (const char* name) noexcept;   ///< the type it stands in for, or -1
+bool generateCandidate (const char* name, std::uint32_t seed, ErTable& out, Diagnostics* diag = nullptr);
+
+/** The emitted, pinned candidate (ErCandidateData.inc), or nullptr. */
+const ErTable* erCandidateTable (const char* name) noexcept;
+
+/** The direct path of any recipe at its type's default SIZE. */
+double directDistanceM (const Recipe& recipe, int typeIndex) noexcept;
 
 /** The emitted precision. The generator rounds every number it produces onto
     these grids before it returns, so the table it builds and the one parsed

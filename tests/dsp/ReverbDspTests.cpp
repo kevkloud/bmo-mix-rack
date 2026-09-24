@@ -31,6 +31,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstring>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -1314,6 +1315,50 @@ int main()
             auto b = erTableFor (plate);
             b.variation[4].right = b.variation[4].left;
             check (fails (b, ergen::rulePlateLr500), "a plate with no right-later 500 Hz lag fails the L/R rule");
+        }
+    }
+
+    //== Cavern B: a candidate for the owner's ear, pinned, never shipped ======
+    //
+    // Tool-only (ImageSource.h): it lives in bmo_reverb_ergen, which no plugin
+    // links, and erTableFor (cavern) is still the shipping Cavern -- which the
+    // pin above holds bit for bit. Cavern B is held to every rule the
+    // shipping tables are, and to flam (i) at least 4 dB clear, which is the
+    // point of it (2026-09-24).
+    {
+        const auto* b = ergen::erCandidateTable ("cavern-b");
+        check (b != nullptr, "the cavern-b candidate is reachable from the tools");
+        check (ergen::erCandidateTable ("cavern") == nullptr && ergen::erCandidateTable (nullptr) == nullptr,
+               "only named candidates exist");
+
+        if (b != nullptr)
+        {
+            ErTable fresh;
+            const bool built = ergen::generateCandidate ("cavern-b", ergen::candidateRecipe ("cavern-b")->seed, fresh);
+            check (built, "cavern-b's pinned seed generates a table");
+            check (built && std::memcmp (&fresh, b, sizeof (ErTable)) == 0,
+                   "cavern-b is the generator's at its pinned seed, bit for bit");
+            check (b != &erTableFor (cavern), "the shipping Cavern is not the candidate");
+
+            const auto ctx = ergen::candidateContext ("cavern-b");
+            const auto rep = ergen::audit (*b, ctx);
+
+            for (int r = 0; r < ergen::numRules; ++r)
+                check (rep.pass[r], (std::string ("Cavern B: ") + ergen::ruleName (r)).c_str());
+
+            check (rep.margin[ergen::ruleFlamLate] >= 4.0, "Cavern B passes flam (i) at least 4 dB clear");
+
+            // A hand break: one late tap raised to the shipping Cavern's level.
+            auto broken = *b;
+            auto& ch = broken.variation[2].left;
+            int i = 0;
+
+            while (i < ch.numTaps - 1 && ch.taps[i].timeMs * ctx.sizeM / kReferenceSizeM < 100.0f)
+                ++i;
+
+            ch.taps[i].gain *= 4.0f;
+            ch.taps[i].theta = 0.0f;
+            check (! ergen::audit (broken, ctx).pass[ergen::ruleFlamLate], "a Cavern B cluster tap 12 dB up fails flam (i)");
         }
     }
 

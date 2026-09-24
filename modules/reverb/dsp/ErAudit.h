@@ -110,6 +110,9 @@ struct AuditContext
 
 AuditContext contextFor (int typeIndex);
 
+/** A candidate's context: its stand-in type's defaults and its own direct path. */
+AuditContext candidateContext (const char* name);
+
 struct Figures
 {
     double gamma[kErVariations];        ///< at the default density

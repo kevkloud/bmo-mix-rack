@@ -190,6 +190,17 @@ AuditContext contextFor (int typeIndex)
              (float) (1.0 / directDistanceM (typeIndex)), typeIndex == room, recipeFor (typeIndex).planar };
 }
 
+AuditContext candidateContext (const char* name)
+{
+    const auto type = candidateType (name);
+    auto ctx = contextFor (type < 0 ? 0 : type);
+
+    if (const auto* recipe = candidateRecipe (name))
+        ctx.directGain = (float) (1.0 / directDistanceM (*recipe, type));
+
+    return ctx;
+}
+
 int windowEnergies (const ErTable& table, const AuditContext& ctx, int variation, bool right,
                     double* out, int maxWindows)
 {

@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <string_view>
 #include <vector>
 
 namespace bmo::reverb::ergen
@@ -224,6 +225,41 @@ static const Recipe kRecipes[numTypes]
 const Recipe& recipeFor (int typeIndex) noexcept
 {
     return kRecipes[std::clamp (typeIndex, 0, (int) numTypes - 1)];
+}
+
+//==============================================================================
+// Candidates -- for the owner's ear, never for the plugin (ImageSource.h).
+//
+// Cavern B is the shipping Cavern's room, placement and beta, with one
+// change: 14 of its 27 velvet pulses are laid over the first 30 ms, a
+// scattered early field ahead of the dip, so that the late focused cluster
+// sits at about -17 dB against the energy before 25 ms instead of -10.5.
+// Every other number is the shipping row's. The seed is the first from 1
+// whose table passes every audit with flam (i) at least 4 dB clear.
+static const Recipe kCavernB
+    //  name        planar order beta  clamp   lstFx  lstFy  lstZ  srcD  srcAz srcZ  spacing  proxHz  combMs combG  seed   plate (unused)   early scatter
+    { "Cavern B",   false, 4,    0.88, 200.0,  0.15,  0.65,  1.5, 20.0,  5.0,  1.7,  0.20,   1200.0, 20.0,  0.90,  11u,   0.0, 0.0, 0.0,   22.0, 13, 60.0 };
+
+const Recipe* candidateRecipe (const char* name) noexcept
+{
+    return (name != nullptr && std::string_view (name) == "cavern-b") ? &kCavernB : nullptr;
+}
+
+int candidateType (const char* name) noexcept
+{
+    return candidateRecipe (name) != nullptr ? (int) cavern : -1;
+}
+
+bool generateCandidate (const char* name, std::uint32_t seed, ErTable& out, Diagnostics* diag)
+{
+    const auto* recipe = candidateRecipe (name);
+    return recipe != nullptr && generateFrom (*recipe, candidateType (name), seed, out, diag);
+}
+
+double directDistanceM (const Recipe& recipe, int typeIndex) noexcept
+{
+    return recipe.planar ? recipe.plateEquivalentDistM
+                         : sceneFor (recipe, (double) constantsFor (typeIndex).sizeM).direct[C];
 }
 
 double directDistanceM (int typeIndex) noexcept
@@ -449,7 +485,10 @@ bool generateFrom (const Recipe& recipe, int typeIndex, std::uint32_t seed, ErTa
     // On a plate the infill starts at once -- a plate has no proximity zone
     // to keep clear -- and its bands darken with time, the bloom; a pulse's
     // split is the pickups' difference at its band's speed, drawn.
-    const double infillStartMs = plate ? kPlateInfillStartMs : kProximityHiMs;
+    // An early-scatter recipe starts its infill inside the proximity zone;
+    // anything there lands in the dark band, as every tap inside 8 ms does.
+    const double infillStartMs = plate ? kPlateInfillStartMs
+                               : recipe.earlyInfillCells > 0 ? kEarlyScatterStartMs : kProximityHiMs;
     const double cellMs = (windowMs - infillStartMs) / kInfillTaps;
     const auto plateInfillBand = [&] (double timeMs)
     {
@@ -860,11 +899,51 @@ bool generateFrom (const Recipe& recipe, int typeIndex, std::uint32_t seed, ErTa
         return free.back().second;
     };
 
+    // An early-scatter recipe lays its first earlyInfillCells pulses over the
+    // free time before earlyInfillEndMs and the rest over what follows; every
+    // other recipe lays all 27 evenly over the whole of it.
+    const int earlyCells = std::clamp (recipe.earlyInfillCells, 0, kInfillTaps - 1);
+    double earlyFreeMs = 0.0;
+
+    for (const auto& f : free)
+        earlyFreeMs += std::max (0.0, std::min (f.second, recipe.earlyInfillEndMs) - f.first);
+
+    // The rest start no earlier than lateInfillStartMs, so the dip between
+    // the early scatter and the late cluster stays clear.
+    double lateFreeStart = earlyFreeMs;
+
+    if (earlyCells > 0)
+    {
+        lateFreeStart = 0.0;
+
+        for (const auto& f : free)
+            lateFreeStart += std::max (0.0, std::min (f.second, std::max (recipe.earlyInfillEndMs, recipe.lateInfillStartMs)) - f.first);
+    }
+
+    if (earlyCells > 0 && earlyFreeMs <= 0.0)
+    {
+        if (diag != nullptr)
+            diag->failedAt = 3;
+
+        return false;
+    }
+
+    const auto infillPosition = [&] (int cell, double u)
+    {
+        if (earlyCells == 0)
+            return freeMs * (cell + u) / kInfillTaps;
+
+        if (cell < earlyCells)
+            return earlyFreeMs * (cell + u) / earlyCells;
+
+        return lateFreeStart + (freeMs - lateFreeStart) * (cell - earlyCells + u) / (kInfillTaps - earlyCells);
+    };
+
     for (int i = coreCount; i < slotCount; ++i)
     {
         const int cell = i - coreCount;
 
-        if (! draw (i, [&] { return freeToTime (freeMs * (cell + rng.unit()) / kInfillTaps); }))
+        if (! draw (i, [&] { return freeToTime (infillPosition (cell, rng.unit())); }))
             { if (diag != nullptr) diag->failedAt = 2; return false; }
     }
 

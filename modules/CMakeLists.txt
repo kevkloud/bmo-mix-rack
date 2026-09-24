@@ -121,7 +121,8 @@ bmo_add_module(reverb
 # it equal to the committed data; measure_reverb links it to emit and audit.
 add_library(bmo_reverb_ergen STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/reverb/dsp/ImageSource.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/reverb/dsp/ErAudit.cpp)
+    ${CMAKE_CURRENT_SOURCE_DIR}/reverb/dsp/ErAudit.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/reverb/dsp/ErCandidates.cpp)
 target_link_libraries(bmo_reverb_ergen PUBLIC bmo_reverb_dsp)
 
 endif()

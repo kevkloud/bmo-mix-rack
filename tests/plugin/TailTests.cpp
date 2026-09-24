@@ -59,40 +59,53 @@ constexpr auto kRingingModule = "reverb";
 //== BMO Linger's stated figures ==============================================
 //
 // T_tail = preDelay + T_mid * max(1, r_lo, r_hi) + t_ER,max + 0.05 s, clamped
-// to 30 s (docs/reverb/10-dsp-spec.md 5). t_ER,max is the last reference tap,
-// 79.1 ms quoted at the 12 m reference size and scaling with SIZE, so
-// t_ER,max(S) = 79.1 * S / 12 ms.
+// to 30 s (docs/reverb/10-dsp-spec.md 5). t_ER,max is **the selected type's
+// own ER span** since 2026-09-24: its latest tap, by the Size law and held to
+// the type's window clamp -- `erSpanMsAt (table, size)`, which is the law the
+// ER engine plays by. Every setting below is TYPE Room, whose table's latest
+// tap is 98.078 ms at the 12 m reference, and whose window reaches its 100 ms
+// clamp at 12 m, so **Room's span is 98.078 ms at every SIZE from 12 m up**.
+// (`measure_reverb tail` prints the span per type and size.)
+//
+// Until 2026-09-24 t_ER,max was the placeholder table's last tap, 79.1 ms at
+// 12 m scaling with SIZE and never clamped; the old figures are in the
+// comments beside the new ones.
 //
 // Each row is the arithmetic written out, then the answer. They are settings
 // and seconds, not expressions evaluated by the same code under test.
 
 /** The schema defaults: Room, 12 m, no pre-delay, 1.8 s decay, damping 1.20
     low and 0.40 high.
-    0 + 1.8 * 1.20 + 79.1 * 12 / 12 ms + 0.05 = 2.16 + 0.0791 + 0.05 */
-constexpr double kDefaultTail = 2.2891;
+    0 + 1.8 * 1.20 + 98.078 ms + 0.05 = 2.16 + 0.098078 + 0.05
+    (was 2.2891, with the placeholder's 79.1 ms) */
+constexpr double kDefaultTail = 2.308078;
 
 /** A deliberately unround setting, so the test cannot pass on a coincidence:
-    125 ms pre-delay, 4 s decay, damping 1.50 low and 0.50 high, 24 m.
-    0.125 + 4.0 * 1.50 + 79.1 * 24 / 12 ms + 0.05 = 0.125 + 6.0 + 0.1582 + 0.05 */
-constexpr double kLongTail = 6.3332;
+    125 ms pre-delay, 4 s decay, damping 1.50 low and 0.50 high, 24 m. At 24 m
+    Room's ER is held at its clamp, so its span is still 98.078 ms:
+    0.125 + 4.0 * 1.50 + 98.078 ms + 0.05 = 0.125 + 6.0 + 0.098078 + 0.05
+    (was 6.3332, with the placeholder's 158.2 ms at 24 m) */
+constexpr double kLongTail = 6.273078;
 
 /** Both damping multipliers under unity. The formula floors the multiplier at
     1, so a dark room is not reported SHORTER than its own mid-band decay:
-    0 + 3.0 * 1.00 + 79.1 * 12 / 12 ms + 0.05 */
-constexpr double kDarkTail = 3.1291;
+    0 + 3.0 * 1.00 + 98.078 ms + 0.05
+    (was 3.1291) */
+constexpr double kDarkTail = 3.148078;
 
 /** The ceiling, and **it is now the rack's as well as the module's**. 250 ms +
-    20 s decay at a 2.0 multiplier + 80 m of early reflections is 40.827 s of
-    honest arithmetic, and the host is told 30 -- and a rack of eight of those
+    20 s decay at a 2.0 multiplier + Room's 98.078 ms of early reflections
+    (held to its clamp at 80 m) + 0.05 is 40.398 s of honest arithmetic (it
+    was 40.827 with the placeholder's unclamped 527 ms), and the host is told 30 -- and a rack of eight of those
     is told 30 too, rather than four minutes. Written out here as the seconds
     it is, and checked against `bmo::kMaxTailSeconds` at the foot of the rack
     section so this suite cannot quietly disagree with the code. */
 constexpr double kClampedTail = 30.0;
 
 /** Two occupied slots, in series: the rack adds them.
-    A MAXIMUM would report 6.3332 here, so the two answers cannot be confused,
+    A MAXIMUM would report 6.273078 here, so the two answers cannot be confused,
     and it is **under the rack's ceiling**, so the clamp must leave it alone. */
-constexpr double kSummedTail = kDefaultTail + kLongTail;    // 8.6223
+constexpr double kSummedTail = kDefaultTail + kLongTail;    // 8.581156 (was 8.6223)
 
 //== Building things ==========================================================
 std::unique_ptr<bmo::SingleModuleProcessor> makeProduct (const bmo::ModuleDef& def)
@@ -254,8 +267,8 @@ int main()
 
         // The clamp is a ceiling and not a fixed answer: a setting just under
         // it has to still be reported as itself.
-        //   0 + 20.0 * 1.00 + 79.1 * 12 / 12 ms + 0.05 = 20.1291
-        checkClose (tailAt ({ 0.0f, 20.0f, 1.00f, 1.00f, 12.0f }), 20.1291, 1.0e-4,
+        //   0 + 20.0 * 1.00 + 98.078 ms + 0.05 = 20.148078 (was 20.1291)
+        checkClose (tailAt ({ 0.0f, 20.0f, 1.00f, 1.00f, 12.0f }), 20.148078, 1.0e-4,
                     "20.1 s is under the ceiling and is reported in full");
 
         // Nothing outside the formula moves it. MIX at zero is a bypassed

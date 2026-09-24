@@ -4,6 +4,7 @@
 #include "modules/reverb/dsp/TapTables.h"
 
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 namespace bmo::reverb
@@ -113,7 +114,7 @@ public:
     /** 10 section 3's window clamp has a floor as well as a ceiling: the span
         never shrinks below 5 ms, whatever SIZE says. The ceiling is the
         table's own `windowClampMs`. */
-    static constexpr float kWindowFloorMs = 5.0f;
+    static constexpr float kWindowFloorMs = kErWindowFloorMs;
 
     /** ER HI-CUT's top. **At the top of its range the filter is a wire**: the
         one-pole's pole is walked to zero over the last few per cent of the
@@ -194,6 +195,12 @@ public:
     float currentTapGain (int channel, int tap) const noexcept;
     int   currentTapCount (int channel) const noexcept;
 
+    /** When the latest tap the set in charge is playing at a non-zero gain
+        arrives, in milliseconds, over both channels: the span the engine
+        actually plays, for the test that holds it inside `windowClampMs` at
+        every SIZE. The diffuser's spread comes on top, above DENSITY 0.6. */
+    float currentSpanMs() const noexcept;
+
     /** Whether a set crossfade or a TYPE dip is running. */
     bool isCrossfading() const noexcept { return fading; }
     bool isDipping() const noexcept { return dipping; }
@@ -252,7 +259,10 @@ private:
     int mask = 0;
     int writePos = 0;
 
-    TapSet sets[2];
+    // The two tap sets, on the heap: about 20 kB each with their pair and ramp
+    // tables, which is too much to sit inside an object a host or a test may
+    // put on the stack. Allocated once, at construction, never in process().
+    std::unique_ptr<TapSet[]> sets { new TapSet[2] {} };
     int  active = 0;
 
     // The crossfade between sets.

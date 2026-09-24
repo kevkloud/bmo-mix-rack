@@ -119,11 +119,9 @@ namespace
 //==============================================================================
 float ErEngine::sizeScale (const ErTable& table, float sizeM) noexcept
 {
-    const auto window = std::max (table.windowMs, 1.0e-3f);
-    const auto lo = kWindowFloorMs / window;
-    const auto hi = std::max (lo, table.windowClampMs / window);
-
-    return std::clamp (sizeM / kReferenceSizeM, lo, hi);
+    // The law lives beside the tables (ErTable.h), so that the span the tail
+    // formula reads and the span the engine plays are one computation.
+    return erSizeScale (table, sizeM);
 }
 
 float ErEngine::endTaper (float tMs, float windowEndMs) noexcept
@@ -880,6 +878,19 @@ int ErEngine::currentTapCount (int channel) const noexcept
 {
     const auto& set = fading ? sets[1 - active] : sets[active];
     return set.num[set.side ? 0 : std::clamp (channel, 0, 1)];
+}
+
+float ErEngine::currentSpanMs() const noexcept
+{
+    const auto& set = fading ? sets[1 - active] : sets[active];
+    int last = 0;
+
+    for (int ch = 0; ch < (set.side ? 1 : 2); ++ch)
+        for (int i = 0; i < set.num[ch]; ++i)
+            if (set.gain[ch][i] != 0.0f)
+                last = std::max (last, set.delay[ch][i]);
+
+    return (float) ((double) last * 1000.0 / sampleRate);
 }
 
 size_t ErEngine::memoryBytes() const noexcept

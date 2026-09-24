@@ -195,6 +195,25 @@ void printTail()
                  "  clamped to %.0f s. The rack SUMS this over occupied slots\n"
                  "  rather than taking the maximum: slots are in series.\n",
                  (double) DspCore::kMaxTailSeconds);
+
+    // t_ER,max per type: the span the tail formula reads, erSpanMsAt (table,
+    // size), at the schema's minimum SIZE, the type's default and the
+    // maximum, beside the type's windowClampMs and, in brackets, the
+    // placeholder figure the formula read before 2026-09-24.
+    const auto& sizeSpec = specs()[(size_t) Index::size];
+    std::printf ("\n  t_ER,max per type, ms (the placeholder's figure before 2026-09-24 in brackets)\n");
+    std::printf ("  %-10s %8s %18s %18s %18s\n", "type", "clamp", "min SIZE", "default", "max SIZE");
+
+    for (int t = 0; t < numTypes; ++t)
+    {
+        const auto& table = erTableFor (t);
+        std::printf ("  %-10s %8.1f", kTypeNames[t], (double) table.windowClampMs);
+
+        for (const auto s : { sizeSpec.min, constantsFor (t).sizeM, sizeSpec.max })
+            std::printf ("   %7.3f (%7.3f)", (double) erSpanMsAt (table, s), (double) erSpanMsAt (s));
+
+        std::printf ("\n");
+    }
 }
 
 void printTaps (float sizeM)

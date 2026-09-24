@@ -1475,11 +1475,59 @@ namespace
             check (observed == 0, "process() and setParams() allocate nothing while every parameter moves");
         }
 
+        //== The span the engine plays is inside the clamp, at every SIZE ======
+        //
+        // Every type, at the schema's minimum SIZE, the type's default and the
+        // maximum; every VARIATION; DENSITY 100 %, so every infill tap is in.
+        // The latest tap the engine is playing at a non-zero gain must be the
+        // span the tail formula reads (erSpanMsAt, to a sample) and inside the
+        // type's windowClampMs. Ambience is the case that needed it: its table
+        // spans 150 ms at 12 m against a 100 ms clamp.
+        {
+            bool inside = true, agrees = true;
+            double worstOverMs = -1.0e30;
+            const auto& sizeSpec = specs()[(size_t) Index::size];
+
+            for (int type = 0; type < numTypes; ++type)
+                for (const auto size : { sizeSpec.min, constantsFor (type).sizeM, sizeSpec.max })
+                {
+                    float played = 0.0f;
+
+                    for (int v = 0; v < kErVariations; ++v)
+                    {
+                        auto p = erOnly (type);
+                        p.erDensity = 1.0f;
+                        p.erVariation = v;
+                        p.sizeM = size;
+
+                        DspCore core;
+                        core.prepare (rate, 256, 2);
+                        core.setParams (p);
+                        core.erEngine().process (nullptr, nullptr, nullptr, 0);
+
+                        played = std::max (played, core.erEngine().currentSpanMs());
+                    }
+
+                    const auto& table = erTableFor (type);
+                    const auto reported = erSpanMsAt (table, size);
+                    const auto sampleMs = (float) (1000.0 / rate);
+
+                    inside = inside && played <= table.windowClampMs;
+                    agrees = agrees && std::abs (played - reported) <= sampleMs;
+                    worstOverMs = std::max (worstOverMs, (double) (played - table.windowClampMs));
+                }
+
+            check (inside, "the engine plays no tap past its type's windowClampMs, at SIZE min, default and max");
+            check (agrees, "the span the engine plays is the span the tail formula reads, to a sample");
+            std::cout << "  span: the latest played tap is at worst " << -worstOverMs << " ms inside its clamp\n";
+        }
+
         //== The reported tail covers the ER ====================================
         //
-        // `DspCore::tailSecondsFor` is not changed here and neither is
-        // TailTests; what is asserted is that the figure it already reports is
-        // at least the ER-only -60 dB time the engine now actually produces,
+        // `DspCore::tailSecondsFor` reads the selected type's own span since
+        // 2026-09-24 (TailTests carries the hand-written seconds); what is
+        // asserted here is that the figure it reports is at least the ER-only
+        // -60 dB time the engine actually produces,
         // at the shortest DECAY, every type, mode, size and the density ends.
         {
             bool covered = true;
@@ -1955,7 +2003,7 @@ int main()
         DspCore::Params p;
 
         // preDelay + T_mid * max(1, r_lo, r_hi) + t_ER,max + 0.05
-        const auto expected = 0.0f + 1.8f * 1.20f + erSpanMsAt (p.sizeM) * 0.001f + 0.05f;
+        const auto expected = 0.0f + 1.8f * 1.20f + erSpanMsAt (erTableFor ((int) p.type), p.sizeM) * 0.001f + 0.05f;
         check (near (DspCore::tailSecondsFor (p), expected, 1.0e-3f),
                "the tail formula at the defaults");
 
@@ -2455,19 +2503,24 @@ int main()
 
         check (agree, "erBandCutoffHzAt uses the generator's kappa");
 
-        // The span is the last tap by the Size law, held to the clamp: Room's
-        // is under its clamp at 12 m, and every table is at its clamp by 80 m.
+        // The span is the last tap by the Size law and its window clamp:
+        // Room's is its last tap at 12 m, and **no type's span leaves its
+        // windowClampMs at any SIZE the engine can reach** -- the schema's
+        // minimum, the type's default and the maximum. Above its clamp a
+        // type's ER stops growing: Ambience's table is 150 ms at 12 m and its
+        // clamp is 100, which it reaches at its own 8 m default.
         const auto& roomTable = erTableFor (room);
         check (erSpanMsAt (roomTable, kReferenceSizeM) > 90.0f && erSpanMsAt (roomTable, kReferenceSizeM) < 100.0f,
                "Room's ER span at 12 m is its last tap, inside 90-100 ms");
 
-        bool clamped = true;
+        bool inside = true;
+        const auto& sizeSpec = specs()[(size_t) Index::size];
 
         for (int t = 0; t < numTypes; ++t)
-            if (t != plate)
-                clamped = clamped && erSpanMsAt (erTableFor (t), 80.0f) == erTableFor (t).windowClampMs;
+            for (const auto s : { sizeSpec.min, constantsFor (t).sizeM, sizeSpec.max })
+                inside = inside && erSpanMsAt (erTableFor (t), s) <= erTableFor (t).windowClampMs;
 
-        check (clamped, "at 80 m every room table's span is its clamp");
+        check (inside, "every type's ER span is inside its windowClampMs at SIZE min, default and max");
 
         // Plate spans about 39 ms at its 22 m default, so even at 80 m it stays
         // inside its 200 ms clamp: about 140 ms, the Size law and no more.

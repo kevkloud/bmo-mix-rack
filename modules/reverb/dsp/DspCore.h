@@ -450,7 +450,11 @@ public:
 
             preDelay + T_mid * max(1, r_lo, r_hi) + t_ER,max + 0.05 s
 
-        clamped to `kMaxTailSeconds` (10 section 5). From parameter values
+        clamped to `kMaxTailSeconds` (10 section 5). t_ER,max is the selected
+        type's own span at this SIZE, `erSpanMsAt (table, size)` -- the same
+        Size law and window clamp the ER engine plays by -- since 2026-09-24;
+        it was the placeholder table's last tap scaled without a clamp, which
+        was one number for every type. From parameter values
         rather than from DSP state, which is what lets it be answered before
         the audio thread has picked a change up -- the same reason
         `latencyForParams` takes values rather than reading state.
@@ -473,7 +477,7 @@ public:
         const auto longest = std::max (1.0f, std::max (p.dampLo, p.dampHi));
         const auto seconds = p.preDelayMs * 0.001f
                            + p.decaySeconds * longest
-                           + erSpanMsAt (p.sizeM) * 0.001f
+                           + erSpanMsAt (erTableFor ((int) p.type), p.sizeM) * 0.001f
                            + 0.05f;
 
         return std::min (seconds, kMaxTailSeconds);

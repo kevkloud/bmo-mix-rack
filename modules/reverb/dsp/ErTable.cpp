@@ -41,6 +41,15 @@ float erBandCutoffHzAt (const ErTable& table, int band, float sizeM) noexcept
     return table.bandCutoffHz[b] * std::pow (kReferenceSizeM / s, kKappa);
 }
 
+float erSizeScale (const ErTable& table, float sizeM) noexcept
+{
+    const auto window = std::max (table.windowMs, 1.0e-3f);
+    const auto lo = kErWindowFloorMs / window;
+    const auto hi = std::max (lo, table.windowClampMs / window);
+
+    return std::clamp (sizeM / kReferenceSizeM, lo, hi);
+}
+
 float erSpanMsAt (const ErTable& table, float sizeM) noexcept
 {
     float last = 0.0f;
@@ -50,7 +59,7 @@ float erSpanMsAt (const ErTable& table, float sizeM) noexcept
             if (ch->numTaps > 0)
                 last = std::max (last, ch->taps[ch->numTaps - 1].timeMs);
 
-    return std::min (last * sizeM / kReferenceSizeM, table.windowClampMs);
+    return std::min (last, table.windowMs) * erSizeScale (table, sizeM);
 }
 
 } // namespace bmo::reverb

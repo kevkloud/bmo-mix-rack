@@ -106,12 +106,29 @@ const ErTable& erTableFor (int typeIndex) noexcept;
     tables, because kappa is a table-generation constant. */
 float erBandCutoffHzAt (const ErTable& table, int band, float sizeM) noexcept;
 
-/** When a table's last reflection arrives at room size `sizeM`, in
-    milliseconds: its latest tap in any channel at any VARIATION, by the Size
-    law, held to `windowClampMs`. The per-type form of `erSpanMsAt (float)` in
-    TapTables.h, which reads the placeholder and which the tail formula still
-    calls; this is added beside it rather than changing it, and moving the
-    tail formula over is integration's. Added by the generator half. */
+/** The Size law, with 10 section 3's window clamp: the factor every one of a
+    table's times is multiplied by, and every gain divided by, at room size
+    `sizeM`. `S / S_ref`, held so that the table's window, `windowMs` times
+    the factor, stays inside [kErWindowFloorMs, windowClampMs]. The pattern is
+    kept whole -- no tap is dropped at the clamp -- because scaling the
+    pattern is what keeps a room's identity; above the clamp SIZE stops
+    growing the ER. **The one copy of the law**: the engine plays by it
+    (`ErEngine::sizeScale` forwards here) and the span below is measured by
+    it, so the tail a host is told and the ER it hears cannot disagree. */
+float erSizeScale (const ErTable& table, float sizeM) noexcept;
+
+/** The window's floor: however small the room, the ER span is not squeezed
+    under this. 10 section 3's "window clamped to 5-100 ms" -- the 5. */
+inline constexpr float kErWindowFloorMs = 5.0f;
+
+/** When a table's last reflection can sound at room size `sizeM`, in
+    milliseconds: its latest tap in any channel at any VARIATION, no later
+    than its window, times `erSizeScale`. Always inside `windowClampMs`. This
+    is t_ER,max in the tail formula (10 section 5, `DspCore::tailSecondsFor`).
+    It was added by the generator half as the raw Size law clamped at the
+    top; integration (2026-09-24) made it the engine's own law, floor and
+    ceiling both, and taps past the window -- which the engine fades to
+    nothing -- are not counted. */
 float erSpanMsAt (const ErTable& table, float sizeM) noexcept;
 
 } // namespace bmo::reverb

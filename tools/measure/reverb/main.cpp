@@ -34,6 +34,9 @@
         measure_reverb hash         FNV-1a of the ER output per VARIATION,
                                     so a change can prove which positions
                                     it left bit-identical
+        measure_reverb density-level the ER's level over DENSITY 65-100 % against
+                                    DENSITY 0, every type, rate, mode and
+                                    VARIATION -- the figure reverb_dsp bounds
 
     docs/reverb/11-integration-and-test-plan.md section 6 lists the modes this
     grows when the engine lands -- `ir t60 er density mono sweep bench` -- with
@@ -414,6 +417,109 @@ void printBench()
     std::printf ("\n  Memory is the ER engine's at 192 kHz: the delay line and the\n"
                  "  diffuser's lines. Record every figure in testing-notes/ naming\n"
                  "  the machine.\n");
+}
+
+/** The ER's level across the diffuser's range: for every type, rate, ER mode
+    and VARIATION, the IR energy per channel at DENSITY 65-100 % in 5 % steps
+    against the same setting at DENSITY 0, and the worst of those in dB. The
+    tail at -40, fully wet, hi-cut open -- the conditions of reverb_dsp's
+    density sweep, which holds the same figure to 0.3 dB. */
+void printDensityLevel()
+{
+    std::printf ("ER energy error over DENSITY 65-100 %% against DENSITY 0, worst over both\n"
+                 "channels and VARIATION 0-6, dB (the Variation it happens at in brackets)\n\n");
+
+    const char* modeNames[] { "Taps", "Energy", "Blend" };
+    const double rates[] { 48000.0, 96000.0, 192000.0 };
+    double overall = 0.0;
+
+    for (int mode = 0; mode < numErModes; ++mode)
+    {
+        std::printf ("  %s\n  %-10s %14s %14s %14s\n", modeNames[mode], "type", "48 kHz", "96 kHz", "192 kHz");
+
+        for (int type = 0; type < numTypes; ++type)
+        {
+            std::printf ("  %-10s", kTypeNames[type]);
+
+            for (const auto rate : rates)
+            {
+                double worst = 0.0;
+                int worstVar = 0;
+
+                for (int v = 0; v < kErVariations; ++v)
+                {
+                    const auto& c = constantsFor (type);
+
+                    DspCore::Params p;
+                    p.type        = (Type) type;
+                    p.sizeM       = c.sizeM;
+                    p.erShape     = c.erShape;
+                    p.erSpreadMs  = c.erSpreadMs;
+                    p.erHiCutHz   = 20000.0f;
+                    p.erMode      = (ErMode) mode;
+                    p.erVariation = v;
+                    p.erLevelDb   = 0.0f;
+                    p.verbLevelDb = -40.0f;
+                    p.mix         = 1.0f;
+                    p.outputDb    = 0.0f;
+
+                    const auto length = (size_t) ((erTableFor (type).windowClampMs + 60.0f) * 0.001 * rate);
+
+                    const auto energies = [&] (float density)
+                    {
+                        auto q = p;
+                        q.erDensity = density;
+
+                        DspCore core;
+                        core.prepare (rate, 512, 2);
+                        core.setParams (q);
+
+                        std::vector<float> l (length, 0.0f), r (length, 0.0f);
+                        l[0] = r[0] = 1.0f;
+
+                        for (size_t i = 0; i < length; i += 512)
+                        {
+                            float* ch[] { l.data() + i, r.data() + i };
+                            core.process (ch, 2, (int) std::min ((size_t) 512, length - i));
+                        }
+
+                        double el = 0.0, er = 0.0;
+                        for (size_t i = 0; i < length; ++i)
+                        {
+                            el += (double) l[i] * l[i];
+                            er += (double) r[i] * r[i];
+                        }
+
+                        return std::pair<double, double> { el, er };
+                    };
+
+                    const auto ref = energies (0.0f);
+
+                    for (int step = 13; step <= 20; ++step)
+                    {
+                        const auto e = energies ((float) step / 20.0f);
+                        const auto error = std::max (std::abs (10.0 * std::log10 (e.first / ref.first)),
+                                                     std::abs (10.0 * std::log10 (e.second / ref.second)));
+
+                        if (error > worst)
+                        {
+                            worst = error;
+                            worstVar = v;
+                        }
+                    }
+                }
+
+                overall = std::max (overall, worst);
+                std::printf ("   %7.3f (V%d)", worst, worstVar);
+            }
+
+            std::printf ("\n");
+        }
+
+        std::printf ("\n");
+    }
+
+    std::printf ("  worst anywhere: %.3f dB; reverb_dsp holds it to 0.3 dB\n", overall);
 }
 
 /** A fingerprint of the ER, never the audio itself: FNV-1a over the bytes of
@@ -1083,7 +1189,7 @@ int tapsCommand (int argc, char** argv)
 
 void usage()
 {
-    std::printf ("usage: measure_reverb <latency|tail|taps [size]|constants|schema|bench|hash>\n"
+    std::printf ("usage: measure_reverb <latency|tail|taps [size]|constants|schema|bench|hash|density-level>\n"
                  "       measure_reverb taps --audit                     every rule's margin, per type\n"
                  "       measure_reverb taps --emit [path]               write ErTableData.inc\n"
                  "       measure_reverb taps --reseed <type> [start] [n] find the first passing seed\n"
@@ -1111,6 +1217,7 @@ int main (int argc, char** argv)
     if (mode == "schema")    { printSchema();    return 0; }
     if (mode == "bench")     { printBench();     return 0; }
     if (mode == "hash")      { printHash();      return 0; }
+    if (mode == "density-level") { printDensityLevel(); return 0; }
 
     if (mode == "taps" && argc > 2 && std::string (argv[2]).rfind ("--", 0) == 0)
         return tapsCommand (argc - 2, argv + 2);

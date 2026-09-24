@@ -466,7 +466,7 @@ namespace
         // The owner's reading (2026-09-23), and the value string's: with E the
         // table's variation-6 set, the ER bus is L = +E and R = -E, BMO
         // Dimension's side convention, so the mono sum of the module is
-        // exactly twice the dry. `combDelayMs` and `combGain` are not used.
+        // exactly twice the dry.
         {
             // An impulse and then noise; fully wet, the output is the ER bus.
             const auto signal = [&]
@@ -2355,8 +2355,6 @@ int main()
                     }
                 }
 
-            mismatches += fresh.combDelayMs != shipped.combDelayMs ? 1 : 0;
-            mismatches += fresh.combGain != shipped.combGain ? 1 : 0;
             mismatches += fresh.windowMs != shipped.windowMs ? 1 : 0;
             mismatches += fresh.windowClampMs != shipped.windowClampMs ? 1 : 0;
             mismatches += fresh.beta != shipped.beta ? 1 : 0;
@@ -2848,8 +2846,7 @@ int main()
             for (const auto c : table.bandCutoffHz)
                 finite = finite && std::isfinite (c) && c > 0.0f;
 
-            finite = finite && std::isfinite (table.windowMs) && std::isfinite (table.beta)
-                            && std::isfinite (table.combDelayMs) && std::isfinite (table.combGain);
+            finite = finite && std::isfinite (table.windowMs) && std::isfinite (table.beta);
         }
 
         check (finite, "every number in every ER table is finite");

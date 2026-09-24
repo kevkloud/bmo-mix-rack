@@ -187,11 +187,11 @@ namespace
 // derivation: see the comment on its row.
 static const Recipe kRecipes[numTypes]
 {
-    //  name        planar order beta  clamp   lstFx  lstFy  lstZ  srcD  srcAz srcZ  spacing  proxHz  combMs combG  seed
-    { "Room",       false, 3,    0.70, 100.0,  0.30,  0.40,  1.5,  3.4,  6.0,  1.7,  0.20,   1200.0, 10.0,  0.90,  1u },
-    { "Chamber",    false, 3,    0.76, 100.0,  0.25,  0.35,  1.5,  4.5,  8.0,  1.7,  0.20,   1200.0, 10.0,  0.90,  1u },
-    { "Hall",       false, 3,    0.82, 200.0,  0.24,  0.68,  1.5, 10.0,  5.0,  1.7,  0.20,   1200.0, 20.0,  0.90,  2u },
-    { "Cavern",     false, 4,    0.88, 200.0,  0.15,  0.65,  1.5, 20.0,  5.0,  1.7,  0.20,   1200.0, 20.0,  0.90,  1444u },
+    //  name        planar order beta  clamp   lstFx  lstFy  lstZ  srcD  srcAz srcZ  spacing  proxHz  seed
+    { "Room",       false, 3,    0.70, 100.0,  0.30,  0.40,  1.5,  3.4,  6.0,  1.7,  0.20,   1200.0,  1u },
+    { "Chamber",    false, 3,    0.76, 100.0,  0.25,  0.35,  1.5,  4.5,  8.0,  1.7,  0.20,   1200.0,  1u },
+    { "Hall",       false, 3,    0.82, 200.0,  0.24,  0.68,  1.5, 10.0,  5.0,  1.7,  0.20,   1200.0,  2u },
+    { "Cavern",     false, 4,    0.88, 200.0,  0.15,  0.65,  1.5, 20.0,  5.0,  1.7,  0.20,   1200.0,  1444u },
 
     // PLATE -- CALIBRATE THROUGHOUT, AND NOT A ROOM.
     //
@@ -217,9 +217,9 @@ static const Recipe kRecipes[numTypes]
     // reliable there. Taps sit 0.25 ms apart, not 0.9 (a room rule; with
     // 0.9, no seed of 1000 can place 48 taps in the window, see the note).
     // Window 45 ms at the default SIZE -- the table at 22 m *is* the EMT.
-    { "Plate",      true,  5,    0.90, 200.0,  0.40,  0.25,   0.0,  0.3, 10.0,  0.0,  0.60,   1200.0, 20.0,  0.90,  184u,  2.0, 16.0, 45.0 },
+    { "Plate",      true,  5,    0.90, 200.0,  0.40,  0.25,   0.0,  0.3, 10.0,  0.0,  0.60,   1200.0,  184u,  2.0, 16.0, 45.0 },
 
-    { "Ambience",   false, 3,    0.72, 100.0,  0.40,  0.38,  1.5,  3.0,  8.0,  1.7,  0.20,   1200.0, 10.0,  0.90,  31u },
+    { "Ambience",   false, 3,    0.72, 100.0,  0.40,  0.38,  1.5,  3.0,  8.0,  1.7,  0.20,   1200.0,  31u },
 };
 
 const Recipe& recipeFor (int typeIndex) noexcept
@@ -237,8 +237,8 @@ const Recipe& recipeFor (int typeIndex) noexcept
 // Every other number is the shipping row's. The seed is the first from 1
 // whose table passes every audit with flam (i) at least 4 dB clear.
 static const Recipe kCavernB
-    //  name        planar order beta  clamp   lstFx  lstFy  lstZ  srcD  srcAz srcZ  spacing  proxHz  combMs combG  seed   plate (unused)   early scatter
-    { "Cavern B",   false, 4,    0.88, 200.0,  0.15,  0.65,  1.5, 20.0,  5.0,  1.7,  0.20,   1200.0, 20.0,  0.90,  11u,   0.0, 0.0, 0.0,   22.0, 13, 60.0 };
+    //  name        planar order beta  clamp   lstFx  lstFy  lstZ  srcD  srcAz srcZ  spacing  proxHz  seed   plate (unused)   early scatter
+    { "Cavern B",   false, 4,    0.88, 200.0,  0.15,  0.65,  1.5, 20.0,  5.0,  1.7,  0.20,   1200.0,  11u,   0.0, 0.0, 0.0,   22.0, 13, 60.0 };
 
 const Recipe* candidateRecipe (const char* name) noexcept
 {
@@ -1019,8 +1019,6 @@ bool generateFrom (const Recipe& recipe, int typeIndex, std::uint32_t seed, ErTa
                        [] (const ErTap& a, const ErTap& b) { return a.timeMs < b.timeMs; });
     }
 
-    table.combDelayMs   = (float) quantise (recipe.combDelayMs * toRef, kTimeGridMs);
-    table.combGain      = (float) quantise (recipe.combGain, kUnitGrid);
     table.windowMs      = (float) quantise (windowMs * toRef, kTimeGridMs);
     table.windowClampMs = (float) quantise (recipe.windowClampMs, kTimeGridMs);
 

@@ -531,8 +531,6 @@ void writeTable (std::FILE* f, const char* label, const ErTable& table)
     }
 
     std::fprintf (f, "        },\n");
-    std::fprintf (f, "        %s, %s,   // combDelayMs, combGain\n",
-                  literal (table.combDelayMs).c_str(), literal (table.combGain).c_str());
     std::fprintf (f, "        %s, %s,   // windowMs, windowClampMs\n",
                   literal (table.windowMs).c_str(), literal (table.windowClampMs).c_str());
     std::fprintf (f, "        { %s, %s, %s, %s },   // bandCutoffHz\n",

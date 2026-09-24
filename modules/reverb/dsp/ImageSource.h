@@ -91,10 +91,6 @@ struct Recipe
         1 and 8 ms is allowed there at all (11 section 6). CALIBRATE. */
     double proximityCutoffHz;
 
-    /** VARIATION 6's Schroeder pair: the delay at the type's default size,
-        and the gain. CALIBRATE. */
-    double combDelayMs, combGain;
-
     /** The pinned seed. **The only field an audit failure may change.** */
     std::uint32_t seed;
 

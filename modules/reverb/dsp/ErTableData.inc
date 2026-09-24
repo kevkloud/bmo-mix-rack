@@ -739,7 +739,6 @@ static const ErTable kErTables[6]
                   }, 48 },
             },
         },
-        10.0f, 0.9f,   // combDelayMs, combGain
         100.0f, 100.0f,   // windowMs, windowClampMs
         { 8073.5f, 6064.71f, 4240.51f, 1200.0f },   // bandCutoffHz
         0.7f,   // beta
@@ -1470,7 +1469,6 @@ static const ErTable kErTables[6]
                   }, 48 },
             },
         },
-        6.6667f, 0.9f,   // combDelayMs, combGain
         66.6667f, 100.0f,   // windowMs, windowClampMs
         { 8428.69f, 6170.32f, 4477.26f, 1301.37f },   // bandCutoffHz
         0.76f,   // beta
@@ -2201,7 +2199,6 @@ static const ErTable kErTables[6]
                   }, 48 },
             },
         },
-        7.0588f, 0.9f,   // combDelayMs, combGain
         70.5882f, 200.0f,   // windowMs, windowClampMs
         { 8342.25f, 6176.07f, 4471.9f, 1477.89f },   // bandCutoffHz
         0.82f,   // beta
@@ -2932,7 +2929,6 @@ static const ErTable kErTables[6]
                   }, 48 },
             },
         },
-        4.3636f, 0.9f,   // combDelayMs, combGain
         43.6364f, 200.0f,   // windowMs, windowClampMs
         { 8542.78f, 6289.79f, 4743.43f, 1627.11f },   // bandCutoffHz
         0.88f,   // beta
@@ -3663,7 +3659,6 @@ static const ErTable kErTables[6]
                   }, 48 },
             },
         },
-        10.9091f, 0.9f,   // combDelayMs, combGain
         24.5455f, 200.0f,   // windowMs, windowClampMs
         { 13546.58f, 4515.53f, 1693.32f, 677.33f },   // bandCutoffHz
         0.9f,   // beta
@@ -4394,7 +4389,6 @@ static const ErTable kErTables[6]
                   }, 48 },
             },
         },
-        15.0f, 0.9f,   // combDelayMs, combGain
         150.0f, 100.0f,   // windowMs, windowClampMs
         { 7939.06f, 5813.27f, 4041.38f, 1106.53f },   // bandCutoffHz
         0.72f,   // beta

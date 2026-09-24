@@ -332,8 +332,7 @@ void ErEngine::build (TapSet& set, const Settings& s) noexcept
     const auto v = std::clamp (s.variation, 0, kErVariations - 1);
     const auto& vs = t.variation[v];
 
-    // Variation 6 reads the table's variation-6 set as the one mono set E;
-    // `combDelayMs` and `combGain` are not read at all (see runSet).
+    // Variation 6 reads the table's variation-6 set as the one mono set E.
     set.side = v == kErCombVariation;
 
     const auto maxDelay = std::max (0, mask - 1);

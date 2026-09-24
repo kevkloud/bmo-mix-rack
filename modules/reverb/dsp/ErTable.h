@@ -39,8 +39,11 @@ inline constexpr int kErBands = 4;
 
 /** VARIATION 0..6. Positions 0-5 are per-channel tap sets with gamma falling
     from about 0.95 to about 0.05 and never below zero. Position 6 is built
-    differently: Schroeder's complementary-comb pair, applied by the engine to
-    the mono set this table carries in both channels (see `combDelayMs`). */
+    differently: **mono null** (owner, 2026-09-23). The engine plays the one
+    set this table carries in both of its channels as L = +E, R = -E, so the ER
+    are all side and their mono sum is exactly zero; the audit checks that the
+    two channels are the same set to the bit. `kErCombVariation` keeps its old
+    name because the index is what matters. */
 inline constexpr int kErVariations     = 7;
 inline constexpr int kErCombVariation  = 6;
 
@@ -73,13 +76,6 @@ struct ErVariationSet
 struct ErTable
 {
     ErVariationSet variation[kErVariations];
-
-    /** VARIATION 6's comb delay: L = E + g * E(t - delay), R = E - g * E(t - delay),
-        whose transfer functions sum to unity so the mono sum is exactly flat
-        (10 section 3). Milliseconds at kReferenceSizeM, scaled by Size like
-        every other time. */
-    float combDelayMs;
-    float combGain;
 
     /** The window the taps must stay inside at kReferenceSizeM, and the clamp
         10 section 3 puts on it at any size: 100 ms for Room, Chamber and

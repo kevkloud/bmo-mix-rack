@@ -731,7 +731,6 @@ static const ErTable kCavernBTable =
                   }, 48 },
             },
         },
-        4.3636f, 0.9f,   // combDelayMs, combGain
         43.6364f, 200.0f,   // windowMs, windowClampMs
         { 8779.9f, 6232.21f, 4744.42f, 1627.11f },   // bandCutoffHz
         0.88f,   // beta

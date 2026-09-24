@@ -196,8 +196,10 @@ clamped size, so they agree to the digit.) It moves nothing by more than
 0.01 dB: the drift is the table's own taps interfering with the diffuser's
 paths, which no quantity of the diffuser alone can see. **So the engine
 change is not committed** and the test stays at 0.3 dB; 68a084e extends the
-sweep to 96 and 192 kHz and prints each type. The patch is kept outside the
-repository (the session scratchpad, `change2-diffuser-gain-table.patch`).
+sweep to 96 and 192 kHz and prints each type. The patch was kept in the
+session scratchpad, which was cleared between 2026-09-23 and 2026-09-24: **it
+is gone**, and rebuilding it means rewriting it (the design is described above
+and in modules/reverb/AGENTS.md).
 
 What would meet it: the exact correction, E_out = sum over tap pairs of
 x_i x_j sum_k r_D(k) C_ij(k + n_i - n_j), is a function of the set (sizes are
@@ -237,3 +239,182 @@ ctest 18/18 passed (`tune_hardtune_target` disabled by design). `build` Debug,
 targeted build of `reverb_dsp_tests reverb_tests tail_tests ui_layout_tests
 rack_tests` exit 0, no plugin product built; `reverb_dsp`, `reverb`, `tail`,
 `ui_layout`, `rack` 5/5 passed.
+
+## M2 integration: the engine meets the tables (2026-09-24, on AURORA)
+
+`origin/frosty-linger-er-tables` at 527bc1b merged into `frosty-linger-er`
+(merge 334a0ef). Every build and figure below on AURORA.
+
+### Hashes (`measure_reverb hash`, Release, 48 kHz)
+
+Baseline right after the merge, on the real tables, and **identical at every
+later step** (after removing the comb fields, after the span clamp, and at the
+end):
+
+| position | hash |
+|---|---|
+| Var 0 | 24b48c88a7d5db4e |
+| Var 1 | c16665b21c68a23a |
+| Var 2 | 75f6f28b62f44fcc |
+| Var 3 | f1fee44df219f052 |
+| Var 4 | a9a79078c4155b0e |
+| Var 5 | b9440ba4fec79aa5 |
+| Var 6 | 7181049501fd144b |
+| Var 0-5 combined | 0a49c9a63ce51240 |
+
+### What each step did
+
+1. **Merge** (334a0ef): additive conflicts in reverb_dsp's includes,
+   measure_reverb and AGENTS.md; both halves kept. On the real tables two
+   engine checks went red at once. The tap-gain check read a tap over the
+   window between its neighbours, which Plate's dark bands (a tail still half
+   a pulse 25 samples on) and taps 13 samples apart at half size defeat: worst
+   11.2 dB. **Fixed in the test** (149299a): the gain is now the IR summed
+   from the tap to the end less every other tap's closed-form tail -- 4536
+   gains read, worst 7.5e-5 dB. The other is the density bound (below).
+2. **Comb fields removed** (5670b83): `combDelayMs`, `combGain` gone from
+   ErTable.h, the recipes, the emitter and the tests. The re-emitted `.inc`
+   files differ from the merged ones by exactly the seven removed lines; hash
+   identical.
+3. **Var 6 in the audit** (2c59772): gamma over Var 0-5 only; Var 6 checked as
+   an exact mono null (its two channels the same set, to the bit). Every
+   type's gamma margin unchanged (Room 0.0339, Chamber 0.0431, Hall 0.0162,
+   Cavern 0.0155, Plate 0.1159, Ambience 0.0521); every Var 6 exact.
+4. **Span clamp** (09de56f): the engine already held every span inside its
+   clamp; `erSizeScale` is now the one law (engine, span, tail), and
+   `tailSecondsFor` reads the per-type span. Hash identical. The latest tap
+   the engine plays is at worst 1.06 ms inside its clamp, and equal to
+   `erSpanMsAt` to a sample, every type at SIZE 0.5 m, default and 80 m.
+5. **Density level** (ac62100, measurement only): below.
+6. **Panel** (7f065ba): the EARLY scatter draws `erTableFor (type)`; the
+   placeholder table is retired. core/ui untouched.
+7. **Docs** (e97f42d, 424b664).
+
+### t_ER,max, old -> new, ms
+
+Old is the placeholder's 79.1 * S / 12 for every type, unclamped.
+
+| type | clamp | 0.5 m | default | 80 m |
+|---|---|---|---|---|
+| Room | 100 | 3.296 -> 4.904 | 79.100 -> 98.078 (12 m) | 527.333 -> 98.078 |
+| Chamber | 100 | 3.296 -> 4.942 | 118.650 -> 98.845 (18 m) | 527.333 -> 98.845 |
+| Hall | 200 | 3.296 -> 4.851 | 224.117 -> 194.057 (34 m) | 527.333 -> 194.057 |
+| Cavern | 200 | 3.296 -> 4.953 | 362.542 -> 198.119 (55 m) | 527.333 -> 198.119 |
+| Plate | 200 | 3.296 -> 4.285 | 145.017 -> 38.568 (22 m) | 527.333 -> 140.247 |
+| Ambience | 100 | 3.296 -> 6.183 | 52.733 -> 98.931 (8 m) | 527.333 -> 98.931 |
+
+### Reported tail, old -> new, s
+
+TailTests' hand-written seconds (every row TYPE Room):
+
+| setting | old | new |
+|---|---|---|
+| defaults (12 m, 1.8 s, 1.20 / 0.40) | 2.2891 | 2.308078 |
+| 125 ms / 4 s / 1.50x / 24 m | 6.3332 | 6.273078 |
+| 3 s, damping 0.20 / 0.20, 12 m | 3.1291 | 3.148078 |
+| 20 s, 1.00 / 1.00, 12 m | 20.1291 | 20.148078 |
+| two slots in series (sum) | 8.6223 | 8.581156 |
+| 250 ms / 20 s / 2.0x / 80 m | 40.827, reported 30 | 40.398, reported 30 |
+
+`measure_reverb tail`: defaults 2.289 -> 2.308; shortest decay, smallest room
+0.173 -> 0.175; 6 s at 0.10 6.129 -> 6.148; everything at maximum 30 -> 30.
+Reported tail over the measured ER-only -60 dB time: smallest margin 110.7 ms
+after the merge, 128.3 ms after the span change.
+
+### Density level on the real tables (`measure_reverb density-level`)
+
+Worst ER energy error over DENSITY 65-100 % against DENSITY 0, both channels,
+VARIATION 0-6 (the Variation in brackets), dB. **The 0.3 dB check in
+reverb_dsp is red on these tables and is left red**, threshold unchanged,
+pending the owner.
+
+Taps
+
+| type | 48 kHz | 96 kHz | 192 kHz |
+|---|---|---|---|
+| Room | 0.278 (V5) | 0.318 (V5) | 0.280 (V5) |
+| Chamber | 0.361 (V2) | 0.375 (V5) | 0.335 (V4) |
+| Hall | 0.236 (V1) | 0.234 (V1) | 0.258 (V1) |
+| Cavern | 0.272 (V0) | 0.220 (V0) | 0.219 (V0) |
+| Plate | 0.725 (V4) | 0.720 (V4) | 0.738 (V4) |
+| Ambience | 0.312 (V4) | 0.326 (V4) | 0.275 (V4) |
+
+Energy
+
+| type | 48 kHz | 96 kHz | 192 kHz |
+|---|---|---|---|
+| Room | 0.510 (V4) | 0.369 (V4) | 0.390 (V4) |
+| Chamber | 0.409 (V4) | 0.463 (V4) | 0.468 (V4) |
+| Hall | 0.366 (V3) | 0.242 (V3) | 0.264 (V4) |
+| Cavern | 0.231 (V4) | 0.206 (V4) | 0.184 (V3) |
+| Plate | 0.507 (V6) | 0.518 (V4) | 0.481 (V4) |
+| Ambience | 0.714 (V1) | 0.775 (V1) | 0.583 (V1) |
+
+Blend
+
+| type | 48 kHz | 96 kHz | 192 kHz |
+|---|---|---|---|
+| Room | 0.375 (V1) | 0.394 (V1) | 0.369 (V1) |
+| Chamber | 0.443 (V2) | 0.340 (V2) | 0.325 (V2) |
+| Hall | 0.169 (V4) | 0.219 (V4) | 0.181 (V1) |
+| Cavern | 0.152 (V0) | 0.161 (V0) | 0.151 (V0) |
+| Plate | 0.391 (V5) | 0.361 (V5) | 0.257 (V4) |
+| Ambience | 0.408 (V5) | 0.388 (V4) | 0.272 (V4) |
+
+Worst anywhere 0.775 dB (Ambience, Energy, Var 1, 96 kHz). The bridge
+(DENSITY 0-60 %) stays exact on the real tables: 1.8e-6 dB.
+
+### Renders (scratchpad, not the tree)
+
+In `C:\Users\thesp\AppData\Local\Temp\claude\C--Users-thesp-OneDrive-Documents-REPO-bmo-mix-rack-333\66bf0708-6bd0-40aa-9504-7585913edb62\scratchpad\linger-renders\`:
+`linger-early-Room.png`, `linger-early-Hall.png`, `linger-early-Plate.png`
+(EARLY page, defaults, TYPE set) and `linger-eq-signal-18.png` (EQ page,
+signal=-18), rendered with `build\tools\Debug\snapshot.exe`. Room's EARLY
+readout: 35 taps, 3.7-98.1 ms; Plate's: 45 taps, 0.7-38.6 ms.
+
+### Bench after integration (Release, block 128, 60 s, median of five)
+
+| row, 48 / 192 kHz | pre-merge (546bb41) | after, run 1 | after, run 2 |
+|---|---|---|---|
+| worst case | 0.585 / 2.291 | 0.676 / 2.748 | 0.663 / 2.662 |
+| Var 6 (mono null) | 0.383 / 1.535 | 0.476 / 1.885 | 0.461 / 1.876 |
+| Energy mode | 0.575 / 2.301 | 0.680 / 2.758 | 0.673 / 2.718 |
+| crossfading every block | 1.029 / 4.164 | 1.174 / 4.745 | 1.174 / 4.758 |
+| DENSITY moving every block | 0.916 / 3.688 | 1.004 / 4.059 | 1.006 / 4.054 |
+
+All inside 1.5 % / 5 %, but about 15 % up on the stand-in, and the crossfade
+row at 192 kHz has about 0.25 % of headroom. Memory 418.5 kB at 192 kHz (was
+290.5): the real tables reach 200 ms windows. The likely cost is the real
+tables' pair lists (overlap terms) and the longer delay line; not profiled.
+
+### Non-vacuity (each break one edit, rebuilt with exit 0, reverted)
+
+reverb_dsp (counts include the standing density failure):
+
+| break | red |
+|---|---|
+| engine gains lose the 1/d law | tap gains, Var 6 L = E (3) |
+| engine times 1 % late | tap times, times at every rate, Var 6, gains, engine span = erSpanMsAt (6) |
+| Var 6 mismatches never counted | the one-tap Var 6 break fails, and is counted (3) |
+| Size law unclamped | span inside clamp (both), engine span = erSpanMsAt, termination, fuzz, taps (8) |
+| erSpanMsAt 5 % long | Room's span, span inside clamp, engine span = erSpanMsAt (4) |
+| TapTables.h time law off | both Size-law frame checks (3) |
+| one threshold 1.68 in the data | shape [0, 1], the tables' own threshold check, the pin (4) |
+
+Full tree:
+
+| break | red |
+|---|---|
+| panel first tap by the raw law | ui_layout: twice the size held at the clamp (both panel hosts) |
+| panel last tap 20 % long | ui_layout: last tap is the table's span (both) |
+| tail formula back on the placeholder span | tail: 10 figures |
+
+### Final verification
+
+- `build-dsp` Debug, `--clean-first`, every test target and measure_reverb
+  named: exit 0. ctest **17/18**, `tune_hardtune_target` disabled by design;
+  **reverb_dsp red on exactly one check, the density bound**.
+- `build` Debug, `reverb_dsp_tests reverb_tests tail_tests ui_layout_tests
+  rack_tests snapshot` named: exit 0, no plugin product. ctest: reverb, tail,
+  ui_layout and rack pass; reverb_dsp red on the same one check.
+- `build-dsp-rel` Release measure_reverb: exit 0; hashes and bench above.

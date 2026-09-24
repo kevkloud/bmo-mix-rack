@@ -186,6 +186,7 @@ namespace
     {
         int   sample;
         float gain;
+        float pole;    ///< the one-pole coefficient of the tap's band at this size and rate
     };
 
     /** The core taps of one channel of the table in play, where they should
@@ -194,7 +195,10 @@ namespace
         renormalises to is the set that is playing. The gain is the table's,
         divided by the Size factor, and faded by the end-of-cluster ramp,
         which is the engine's own law (`ErEngine::endTaper`) and the one piece
-        of this that is not in the table. */
+        of this that is not in the table. The pole is the tap's band filter,
+        from the table's own cutoff law (`erBandCutoffHzAt`) through the
+        engine's public one-pole design -- needed only to take a neighbour's
+        tail out of a tap's reading. */
     std::vector<Expected> coreTaps (const ErChannel& c, const ErTable& t, float sizeM,
                                     double rate, int shift = 0, float gainScale = 1.0f)
     {
@@ -205,8 +209,10 @@ namespace
             if (c.taps[i].theta <= 0.0f)
             {
                 const auto ms = c.taps[i].timeMs * k;
+                const auto band = std::clamp (c.taps[i].band, 0, kErBands - 1);
                 out.push_back ({ (int) std::lround ((double) ms * rate * 0.001) + shift,
-                                 gainScale * c.taps[i].gain / k * ErEngine::endTaper (ms, t.windowMs * k) });
+                                 gainScale * c.taps[i].gain / k * ErEngine::endTaper (ms, t.windowMs * k),
+                                 ErEngine::onePoleCoefficient (erBandCutoffHzAt (t, band, kReferenceSizeM * k), rate) });
             }
 
         return out;
@@ -214,68 +220,103 @@ namespace
 
     struct TapScore
     {
-        int checked = 0, timeMisses = 0, gainMisses = 0, skipped = 0;
+        int checked = 0, timeMisses = 0, gainMisses = 0, skipped = 0, gains = 0;
         double worstDb = 0.0;
         int worstSamples = 0;
     };
 
-    /** Peak-pick each expected tap in `ir` and read its gain.
+    /** Peak-pick each expected tap in `ir` for its time, and read its gain.
 
-        **How a tap's gain is isolated from its band filter:** every filter
-        between a tap and the output is a one-pole low-pass with unity gain at
-        DC, whose impulse response is positive, peaks on its first sample and
-        decays monotonically. So a filtered pulse's *area* -- the sum of the
-        IR over the samples it owns -- is the tap's gain exactly, whatever the
-        band's cutoff, and its *peak* is on the tap's own sample. A sample
-        belongs to the nearest expected tap; what leaks across a boundary
-        half a tap spacing away is the filter's tail at a^(gap/2), which for
-        the darkest band at the closest spacing the table allows (0.9 ms) is
-        under 1e-3 of the area. Peak-picking the raw IR instead would read
-        the gain of the *filter*, which is (1 - a), not of the tap. */
+        **How a tap's gain is isolated from its band filter and its
+        neighbours.** Every filter between a tap and the output is a one-pole
+        low-pass `y = (1 - a) x + a y`, unity at DC, so a tap of gain g at
+        sample n puts g (1 - a) a^(m - n) into sample m >= n, and the sum of
+        that from n to the end of the IR is g (1 - a^(N - n)). So the sum of
+        the IR from a tap's own sample to the end, less what every *other*
+        core tap still has to put out from there, is that tap's gain -- exact
+        at any spacing and through any band, however dark. Plate's bands are
+        dark enough that a tail still carries half a pulse 25 samples on,
+        which is why a window between neighbours is not enough here. The
+        other taps' gains in that subtraction are the table's, so an engine
+        playing any tap wrong shows up in that tap and in its neighbours;
+        nothing is fitted.
+
+        Times are per tap, peak-picked between the midpoints to the
+        neighbours, since a peak does not leak. */
     void scoreTaps (const std::vector<float>& ir, std::vector<Expected> taps, TapScore& score)
     {
         std::sort (taps.begin(), taps.end(), [] (auto& a, auto& b) { return a.sample < b.sample; });
 
+        const auto end = (int) ir.size();
+
+        // Suffix sums of the IR, in double.
+        std::vector<double> after ((size_t) end + 1, 0.0);
+        for (int j = end - 1; j >= 0; --j)
+            after[(size_t) j] = after[(size_t) j + 1] + (double) ir[(size_t) j];
+
+        // What tap j puts into samples [from, end).
+        const auto remaining = [end] (const Expected& t, int from)
+        {
+            const auto start = std::max (from, t.sample);
+            return (double) t.gain * (std::pow ((double) t.pole, (double) (start - t.sample))
+                                    - std::pow ((double) t.pole, (double) (end - t.sample)));
+        };
+
         for (size_t i = 0; i < taps.size(); ++i)
         {
             const auto n = taps[i].sample;
-            const auto prev = i > 0 ? taps[i - 1].sample : n - 64;
-            const auto next = i + 1 < taps.size() ? taps[i + 1].sample : n + 256;
 
-            // Two taps within a few samples of each other cannot be told apart
-            // by either measure; they are counted and skipped, not guessed at.
-            if (n - prev < 4 || next - n < 4 || std::abs (taps[i].gain) < 1.0e-4f)
+            if (n < 0 || n >= end)
             {
                 ++score.skipped;
                 continue;
             }
 
-            const auto lo = std::max (0, (prev + n) / 2 + 1);
-            const auto hi = std::min ((int) ir.size(), (next + n) / 2 + 1);
+            // The time.
+            const auto prev = i > 0 ? taps[i - 1].sample : n - 64;
+            const auto next = i + 1 < taps.size() ? taps[i + 1].sample : n + 256;
 
-            int peak = lo;
-            double area = 0.0;
-
-            for (int j = lo; j < hi; ++j)
+            if (n - prev >= 4 && next - n >= 4)
             {
-                area += ir[(size_t) j];
+                const auto lo = std::max (0, (prev + n) / 2 + 1);
+                const auto hi = std::min (end, (next + n) / 2 + 1);
+                int peak = lo;
 
-                if (std::abs (ir[(size_t) j]) > std::abs (ir[(size_t) peak]))
-                    peak = j;
+                for (int j = lo; j < hi; ++j)
+                    if (std::abs (ir[(size_t) j]) > std::abs (ir[(size_t) peak]))
+                        peak = j;
+
+                ++score.checked;
+
+                if (std::abs (peak - n) > 1)
+                    ++score.timeMisses;
+
+                score.worstSamples = std::max (score.worstSamples, std::abs (peak - n));
+            }
+            else
+            {
+                ++score.skipped;   // two peaks a few samples apart cannot be told apart
             }
 
-            ++score.checked;
+            // The gain.
+            if (std::abs (taps[i].gain) < 1.0e-4f)
+                continue;
 
-            if (std::abs (peak - n) > 1)
-                ++score.timeMisses;
+            double others = 0.0;
+            for (size_t j = 0; j < taps.size(); ++j)
+                if (j != i)
+                    others += remaining (taps[j], n);
 
-            const auto errDb = 20.0 * std::log10 (std::max (std::abs (area), 1.0e-30) / std::abs ((double) taps[i].gain));
+            const auto own = after[(size_t) n] - others;
+            const auto expected = remaining (taps[i], n);
+            const auto errDb = 20.0 * std::log10 (std::max (std::abs (own), 1.0e-30) / std::abs (expected));
+
+            ++score.gains;
 
             if (std::abs (errDb) > 0.2)
                 ++score.gainMisses;
 
             score.worstDb = std::max (score.worstDb, std::abs (errDb));
-            score.worstSamples = std::max (score.worstSamples, std::abs (peak - n));
         }
     }
 
@@ -417,7 +458,7 @@ namespace
             check (score.gainMisses == 0, "every core tap's gain is the table's under the Size law, within 0.2 dB");
 
             std::cout << "  er taps: " << score.checked << " checked, " << score.skipped
-                      << " skipped, worst " << score.worstDb << " dB, " << score.worstSamples << " samples\n";
+                      << " skipped, " << score.gains << " gains read, worst " << score.worstDb << " dB, " << score.worstSamples << " samples\n";
         }
 
         //== Variation 6 is "mono null": the ER on the side and nowhere else ==

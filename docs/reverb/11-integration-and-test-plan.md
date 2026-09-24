@@ -762,11 +762,16 @@ at −40.
   gaps within 2%**; jitter ±3%, deterministic per type. **No single tap above
   −15.3 dB** (from `20log₁₀((1+a)/(1−a)) ≤ 3 dB`). Against dry, mono-summed ER
   power **ΣP ≤ −15.8 dB** for ≤1 dB RMS ripple — a bound that is a *function of
-  the wet/dry setting*, so sweep MIX and have the panel say so.
+  the wet/dry setting*, so sweep MIX and have the panel say so. **Plate is a
+  physical plate, not a room** (owner, 2026-09-23): the room rules in this block
+  do not apply to it, and it is held instead to rules measured from EMT 140
+  plates (`ErAudit.h` and the reverb research doc, section 8).
 - **Mono compatibility.** Loss `10log₁₀((1+γ)/2)` dB, γ the ER bus L/R
-  correlation: **γ ≥ 0 at all seven VARIATION positions** (anti-correlated tap
-  pairs forbidden outright), falling ≈0.95 → ≈0.05 monotonically, loss ≤3 dB
-  throughout (05 §9.3).
+  correlation: **γ ≥ 0 at VARIATION 0–5** (anti-correlated tap pairs forbidden
+  outright), falling ≈0.95 → ≈0.05 monotonically, loss ≤3 dB throughout
+  (05 §9.3). **VARIATION 6 is mono null** (owner, 2026-09-23): the ER are side
+  only, L = +E and R = −E, so it has no γ to audit; its check is that the ER
+  mono sum is exactly zero.
 - **Flamming, three rules** (10 §3), on a dry snare: (i) **no tap after 25 ms
   above −12 dB relative to cumulative ER energy at 25 ms**; (ii) cumulative energy
   in successive 5 ms windows non-increasing after the peak, so there is no second

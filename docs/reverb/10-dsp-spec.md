@@ -172,7 +172,10 @@ closed-form tap-gain law is published; **1/t spreading × exponential absorption
 is the physically correct model, and it is both, not either** (`05` §10.3).
 β = 0.70 Room … 0.88 Cavern (CALIBRATE). Base count **21**; Moorer's 19-tap
 table, span 4.3–79.7 ms, is the sanity reference, and its implied direct distance
-of ~3.4 m checks the *d*ref choice (`05` §10.2).
+of ~3.4 m checks the *d*ref choice (`05` §10.2). **Plate is a physical
+plate, not a room** (owner, 2026-09-23): it is exempt from the room rules of
+this section and held instead to rules measured from EMT 140 plates (`ErAudit.h`
+and the reverb research doc, section 8).
 
 **Window.** "Small room 5–30 ms, hall 20–100 ms" is manual folklore with no
 source (`05` §10.1, §11), so `03`'s 5–100 ms is *consistent with* the anchors,
@@ -212,7 +215,11 @@ has no published resolution. **Variation 6 is built differently**: Schroeder's
 1958 complementary-comb pair (L = M + delayed, R = M − delayed) is the one
 construction whose transfer functions sum to unity, so the mono sum is exactly
 flat (`05` §9.3). It is the widest *and* the only provably uncoloured-in-mono
-setting — but the ER vanish in mono entirely, which the panel must label.
+setting — but the ER vanish in mono entirely, which the panel must label. *As
+built (owner, 2026-09-23): Variation 6 is **mono null** — the ER go into the
+side only, L = +E and R = −E with E the mono set, so the mono sum is exactly the
+dry; the γ rule covers Variations 0–5 and Variation 6's check is that the ER
+mono sum is exactly zero.*
 
 **Combing.** *Against dry:* below 100 % wet the ER sum against dry; with
 mono-summed ER power *P* relative to dry the RMS ripple ≈ 8.686·√(*P*/2) dB, so

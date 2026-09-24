@@ -22,8 +22,9 @@ edited `docs/`, so read this file for what the schema is.
 latency is zero — the *shipped* figure. There is **no late network** (M3), so
 REVERB, DECAY, damping, SOURCE, WIDTH, PRE-DELAY, the modulation pair, IN
 HI-CUT and the Reverb EQ reach `DspCore::Params` and go no further. The ER
-tables themselves are a **stand-in** (`dsp/ErTable.cpp`) until the table
-generator replaces it. See "The early reflections (M2)" below. The DSP pass
+tables are the real, generated image-source tables since the M2 integration
+(2026-09-24), and the EARLY page draws them. See "The early reflections (M2)"
+and "The early-reflection tables are real, and pinned" below. The DSP pass
 owns `dsp/` and nothing outside it, with one exception named below.
 
 ## What this reverb is
@@ -468,8 +469,9 @@ the mono set, L = +E and R = −E, BMO Dimension's mid/side convention — so th
 module puts out dry + E and dry − E and its mono sum is exactly twice the dry.
 The widest setting, and the ER vanish entirely in a mono sum there. Its value
 string says so, because an automation lane has nowhere else to. The table's
-`combDelayMs` and `combGain` are not read; they leave `ErTable.h` at
-integration.
+`combDelayMs` and `combGain` left `ErTable.h`, the generator and the data at
+integration (2026-09-24), with the engine's hash unchanged; the audit holds
+gamma over Variations 0–5 and checks Variation 6 as an exact mono null.
 
 ## The panel
 
@@ -789,28 +791,31 @@ belongs in is one where lateral spread is an axis: turning it fans the cluster
 open and shut vertically, which a reader sees without being told what to look at,
 where on stems it moved twenty-one short dashes a few pixels each.
 `LingerScreen::lateralSpread` is the one function between the table's bearings
-and the drawn ones and it is **a marked stand-in** — `10` §3 gives VARIATION as
-per-channel tap permutations plus a lateral-spread scalar and the scalar itself
-is CALIBRATE. What is real is the direction; the floor is not zero because the
-first reflections stay near centre at every setting anyway; and position 6, whose
-ER vanish in a mono sum, is not attempted. When the generator lands that is the
-one function that changes.
+and the drawn ones and it is **still a marked stand-in** after the real tables
+landed: a tap's bearing is its image's and VARIATION does not move it — what
+VARIATION changes is which taps each channel carries — so the scalar is what
+makes the knob visible, and it is not read off the tables. What is real is the
+direction; the floor is not zero because the first reflections stay near centre
+at every setting anyway; and position 6, mono null and all side, is not
+attempted. Replacing it with something the tables carry is the owner's call.
 
 **Three marks, three different claims.**
 
 - A **filled dot** is a core tap: a real time, a real gain and a real bearing,
-  all three off the same `Tap` row the engine will play.
+  all three off the same row of `erTableFor (type)` the engine plays — the
+  current VARIATION's left set, through `erSizeScale` and the end-of-cluster
+  ramp. A core tap the engine plays below the −40 dB floor draws no dot (Room's
+  quietest is −40.0 dB).
 - The **direct sound** is that dot with a ring around it, at t = 0 on the centre
   line — it is not a reflection, and it is what every arrival here is measured
   from. Its centre is pushed in by its own radius so no part of it is drawn on
   the frame, which is the clipping `inputCutRegion` was rewritten to stop on the
   other page.
-- An **infill tap is a faint full-height line**, because its bearing is invented.
-  The 21 core bearings come off `TapTables.h`; the infill stands in for a master
-  sequence that does not exist yet (`10` §3), so drawing it as a dot would put a
-  made-up bearing on the one axis this page exists to show. A line at a time
-  claims the thing that is true — a tap arrives here — and none of the thing that
-  is not.
+- An **infill tap is a faint full-height line**, at its real time off the table
+  and as bright as the density ramp has made it. It was a line because its
+  bearing was invented while the table was a placeholder; the real infill has
+  real bearings, but drawing it as dots changes what the page shows, which no
+  one has asked for, so the marks kept their meanings at integration.
 
 Dot radii run between `kDotMinRadius` and `kDotMaxRadius` against **−40 dB, the
 ER fader's own bottom**, not against the tail's −72. The small end is not zero: a
@@ -1000,18 +1005,19 @@ third time** — that change edits BMO DEQ and was out of this pass's scope. The
 handheld for a five-way control that matters on one page of three, and DEQ's
 own default (`Tint::neutral`, Frosty 2026-09-12) settles which colour anyway.
 
-**`dsp/TapTables.h` is JUCE-free and panel-includable, and it has to stay that
-way.** The panel and the engine read one tap table, so the picture cannot
-quietly stop describing the sound — `11` section 5 names sketch/DSP drift as
-the display's one real risk, and `tests/ui/LayoutTests.cpp` asserts that the
-sketch's first tap time *is* the table's. That is the exception to "the DSP
-pass owns `dsp/`": whoever writes the image-source generator owns the numbers
-in that file, and owes the panel a header that still compiles without JUCE.
+**`dsp/ErTable.h` and `dsp/TapTables.h` are JUCE-free and panel-includable,
+and they have to stay that way.** The panel and the engine read one table —
+`erTableFor (type)` through `erSizeScale` — so the picture cannot quietly stop
+describing the sound: `11` section 5 names sketch/DSP drift as the display's
+one real risk, and `tests/ui/LayoutTests.cpp` asserts that the sketch's first
+tap and span *are* the table's. That is the exception to "the DSP pass owns
+`dsp/`": whoever changes the tables owes the panel headers that still compile
+without JUCE.
 
-The table's numbers today are **placeholder geometry** and are marked as such.
-None of `11` section 6's comb, spacing, level-ceiling or flamming rules is
-claimed of them. When the real tables land, a failing table is **re-seeded, not
-patched**, and the audits run *after* the jitter.
+**The placeholder table is retired** (2026-09-24). `TapTables.h` held 21
+hand-written taps the panel drew until the generated tables landed; nothing
+reads them now, so they are gone, and what stays there is `Tap`,
+`kReferenceSizeM` and the per-tap Size-law helpers.
 
 ## The early reflections (M2)
 
@@ -1022,10 +1028,13 @@ something the spec did not. Figures are in
 `testing-notes/linger-m2-engine-2026-09-23.md`, measured on AURORA.
 
 **`ErTable.h` is the contract and the engine plays whatever it is handed.**
-Nothing in the engine or its tests reads a number out of the stand-in in
-`ErTable.cpp`; every expected tap in `reverb_dsp` is computed at run time from
-`erTableFor (type)` through 10 section 3's laws. When the generator's tables
-land, the tests follow them.
+No engine test pins a table number; every expected tap in `reverb_dsp` is
+computed at run time from `erTableFor (type)` through 10 section 3's laws, so
+the tests followed when the generated tables replaced the stand-in at
+integration (2026-09-24). One test did have to change then: a tap's gain was
+read over a window between its neighbours, which Plate's dark bands and taps
+13 samples apart at half size defeat, so it is now read exactly -- the IR
+summed from the tap to the end less every other tap's closed-form tail.
 
 **Decisions the spec left open, each marked in the code:**
 
@@ -1040,12 +1049,21 @@ land, the tests follow them.
 - **The Size law's window clamp scales the pattern, it drops no tap**: the
   factor `S / S_ref` is clamped so the table's window stays inside
   [5 ms, `windowClampMs`], and gains and band cutoffs follow the clamped
-  factor. Above the clamp SIZE stops changing the ER.
+  factor. Above the clamp SIZE stops changing the ER — and on the real tables
+  every room type's window reaches its clamp at its own default SIZE (Ambience
+  is 150 ms at 12 m and meets its 100 ms clamp at 8 m). **The law is
+  `erSizeScale` in `ErTable.h`, one copy**: the engine forwards to it and
+  `erSpanMsAt (table, size)`, which is t_ER,max in the tail formula, is
+  measured by it, so the tail a host is told and the ER it hears cannot
+  disagree. A test holds the span the engine actually plays inside every
+  type's clamp at SIZE 0.5 m, default and 80 m, equal to `erSpanMsAt` to a
+  sample.
 - **A threshold of 0 is always on.** 10 section 3's ramp
   `clamp((D − θ)/Δ, 0, 1)` would switch the core taps off at D = 0, which
   `ErTable.h` says they never are. Taken literally it also means **an infill
   tap with θ = 1 never sounds** (it reaches zero weight at the top of the
-  knob); the stand-in has one. The generator half should keep θ ≤ 1 − Δ, or
+  knob). The shipped tables keep every θ under 1, so all 48 sound at 100 %;
+  a table that did not would want θ ≤ 1 − Δ, or
   the ramp should become `clamp((D − θ)/Δ + 1, 0, 1)` — a decision for both
   halves, not made here.
 - **The density renormalisation is on the energy the band filters put out**,
@@ -1056,11 +1074,15 @@ land, the tests follow them.
   by a quarter. With both, the bridge holds to about 1e-6 dB.
 - **The diffuser holds the level only on average.** Up to DENSITY 0.6 the
   bridge is exact; above it the three stages fade in and the level moves by up
-  to **0.24 dB** at 48 kHz on the stand-in table (0.29 at 96, 0.22 at 192).
+  to **0.78 dB** on the real tables (Ambience, Energy mode, Var 1, 96 kHz;
+  Taps mode 0.22–0.74, Plate the worst; `measure_reverb density-level` prints
+  the whole table), against 0.24 dB on the stand-in.
   That is a property of taking one output per channel from a feed-forward
   network — only an allpass preserves every input's energy — and not of the
   delays. **11 section 6 asks for 0.2 dB over the whole sweep; this range
-  does not meet it**, and the test holds it to 0.3 dB and says so. The owner
+  does not meet it**. The test holds it to 0.3 dB, and **on the real tables
+  that check is red** — deliberately left red, threshold unchanged, pending
+  the owner's decision on the figures (2026-09-24). The owner
   asked on 2026-09-23 for a feed-forward gain computed in `prepare()` from
   the diffuser's own per-output gain; it was built — the diffuser's energy
   for a one-pole-smeared pulse, tabulated over every crossfade position —
@@ -1115,8 +1137,8 @@ generated -- never edit it**. `dsp/ImageSource.cpp` is the generator and
 `dsp/ErAudit.cpp` the rules of `10` section 3 and `11` section 6 as code. Both
 are offline: `modules/CMakeLists.txt` builds them into `bmo_reverb_ergen`,
 which only `reverb_dsp_tests` and `measure_reverb` link, so the plugin ships
-the numbers and not the machinery. The panel still draws `TapTables.h`'s
-placeholder; moving it onto these tables is integration's.
+the numbers and not the machinery. The panel draws these tables since
+integration (2026-09-24), and the placeholder it drew before is retired.
 
 - **To change a table:** edit its recipe in `ImageSource.cpp` (geometry, beta,
   seed), then `measure_reverb taps --emit`, rebuild, `taps --audit`. The pin
@@ -1159,9 +1181,10 @@ placeholder; moving it onto these tables is integration's.
 - **The late network.** M3: `Fdn.h`, `Absorbent.h`, the input stage and the
   Reverb EQ, pre-delay, SOURCE, modulation — and the wet bus gains a tail term
   beside the ER in `DspCore::process`. M4 is the six types' constants.
-- **The real ER tables.** `dsp/ErTable.cpp` is a stand-in, replaced wholesale
-  by the generator half of M2 on its own branch. The engine and its tests
-  already read whatever table is linked.
+- **The owner's decisions M2 left open.** The ER level over DENSITY 60–100 %
+  (0.78 dB worst against a 0.3 dB bound, that check red); the MIX law;
+  whether `lateralSpread` gives way to something the tables carry; Cavern's
+  flam (i), by ear. Nothing has been heard.
 - **The test suite.** `tests/dsp/ReverbDspTests.cpp` asserts the frame and
   `11` section 6's ER block as it applies to the engine. The table's own
   audits — comb, flamming, mono γ, lateral fraction — belong with the

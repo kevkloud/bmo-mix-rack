@@ -2,10 +2,11 @@
     BMO Linger as a host sees it: schema, value strings, latency, state, presets.
     See EqTests.cpp for why the schema table is written out in full.
 
-    **The DSP under this is still the placeholder** in
-    modules/reverb/dsp/DspCore.h, so what is asserted here is everything that
-    does not depend on there being a reverb yet -- which is the whole of the
-    module's contract with a host. What is missing is named where it would
+    **The DSP under this has early reflections and no tail yet** (M2 of
+    docs/reverb/11-integration-and-test-plan.md section 7), and everything
+    about the sound is asserted JUCE-free in tests/dsp/ReverbDspTests.cpp. What
+    is asserted here is what does not depend on the sound -- which is the
+    whole of the module's contract with a host. What is missing is named where it would
     otherwise sit, rather than left to be noticed.
 */
 
@@ -946,10 +947,10 @@ int main()
     //
     // **No preset level check.** Every other module's suite checks that a
     // preset comes out at the level it went in, against its OUTPUT. This one
-    // has an OUTPUT, so the check belongs -- but the DSP is a pass-through, so
-    // every preset comes out at exactly the input level and the check would
-    // pass for the wrong reason. It is written when there is a reverb to
-    // match. That is a deferral, unlike BMO Defang's, where the absence is by
+    // has an OUTPUT, so the check belongs -- but the module has early
+    // reflections and no tail yet (M2), so a preset's level today says nothing
+    // about the level it will have once the late network is in. It is written
+    // when there is a whole reverb to match (M3). That is a deferral, unlike BMO Defang's, where the absence is by
     // construction.
     //
     // **Nothing about metering or solo**, and those two absences are

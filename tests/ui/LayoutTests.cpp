@@ -44,6 +44,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <algorithm>
 #include <iostream>
+#include <cmath>
 #include <vector>
 
 namespace
@@ -2138,11 +2139,18 @@ void checkReverbPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
         params.setReal (R::Index::size, R::roomDefaults::kSizeM);
         params.setReal (R::Index::predelay, 0.0f);
 
+        // The table the scatter must draw: Room's, at the schema's default
+        // VARIATION, the left set -- the same table, set and Size law the ER
+        // engine plays.
+        const auto defaultVariation = (int) R::specs()[(size_t) R::Index::ervariation].def;
+        const auto& roomTable = R::erTableFor (0);
+        const auto roomScale = R::erSizeScale (roomTable, R::roomDefaults::kSizeM);
+
         checkNear (screen.firstTapTimeMs(),
-                   (double) R::tapTimeMsAt (R::kReferenceTaps[0], R::roomDefaults::kSizeM), 1.0e-4,
+                   (double) (roomTable.variation[defaultVariation].left.taps[0].timeMs * roomScale), 1.0e-4,
                    who + " the screen's first tap is the table's first tap");
         checkNear (screen.lastTapTimeMs(),
-                   (double) R::erSpanMsAt (R::roomDefaults::kSizeM), 1.0e-4,
+                   (double) R::erSpanMsAt (roomTable, R::roomDefaults::kSizeM), 1.0e-4,
                    who + " the screen's last tap is the table's ER span");
 
         // **The EARLY axis spans the real ER window**: the last tap has to land
@@ -2156,13 +2164,19 @@ void checkReverbPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
                    + " ms cluster, which leaves most of the box empty");
 
         // SIZE scales the picture and the window with it, which is the Size law
-        // made visible.
-        params.setReal (R::Index::size, R::roomDefaults::kSizeM * 2.0f);
+        // made visible -- and **holds it at the window clamp**, as the engine
+        // does: Room's window is at its 100 ms clamp at 12 m, so half the size
+        // halves the first tap's time and twice the size leaves it where it is.
+        params.setReal (R::Index::size, R::roomDefaults::kSizeM * 0.5f);
         checkNear (screen.firstTapTimeMs(),
-                   (double) R::tapTimeMsAt (R::kReferenceTaps[0], R::roomDefaults::kSizeM) * 2.0, 1.0e-3,
-                   who + " twice the size is twice the first tap's time");
+                   (double) (roomTable.variation[defaultVariation].left.taps[0].timeMs * roomScale) * 0.5, 1.0e-3,
+                   who + " half the size is half the first tap's time");
         check (screen.erWindowMs() > screen.lastTapTimeMs(),
                who + " the EARLY window follows SIZE");
+        params.setReal (R::Index::size, R::roomDefaults::kSizeM * 2.0f);
+        checkNear (screen.firstTapTimeMs(),
+                   (double) (roomTable.variation[defaultVariation].left.taps[0].timeMs * roomScale), 1.0e-3,
+                   who + " twice the size is held at Room's window clamp, as the engine holds it");
         params.setReal (R::Index::size, R::roomDefaults::kSizeM);
 
         //-- The scatter: three axes, and only the real ones are drawn --------
@@ -2170,78 +2184,149 @@ void checkReverbPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
         // **This is what replaced the mirrored stems.** x is arrival, y is
         // bearing and the radius is gain, so each of the three is asserted as a
         // claim of its own -- a picture that had dropped one of them would still
-        // draw twenty-one marks in roughly the right place.
+        // draw its marks in roughly the right place.
         {
             params.setReal (R::Index::erlevel, 0.0f);
 
             const auto plot = screen.plotBounds();
 
-            for (int i = 0; i < R::kNumReferenceTaps; ++i)
+            // The real tables reach below the scatter's -40 dB floor: Room's
+            // quietest core tap is -40.0 dB at 12 m. A core tap draws a dot
+            // exactly when the engine plays it above the floor, so the check is
+            // on the taps that do, and on why the others do not.
+            const auto& scatter = roomTable.variation[defaultVariation].left;
+            const auto floorGain = std::pow (10.0f, R::LingerScreen::kTapFloorDb / 20.0f);
+            std::vector<int> drawn;
+
+            for (int i = 0, c = 0; i < scatter.numTaps; ++i)
             {
-                const auto dot = screen.tapDot (i);
+                if (scatter.taps[i].theta > 0.0f)
+                    continue;
 
-                check (dot.radius > 0.0f,
-                       who + " tap " + juce::String (i) + " draws no dot at ER level 0 dB");
+                const auto dot = screen.tapDot (c);
+                const auto ms = scatter.taps[i].timeMs * roomScale;
+                const auto quiet = scatter.taps[i].gain / roomScale <= floorGain * 1.0001f
+                                || ms >= roomTable.windowMs * roomScale - 5.0f;
 
-                // Inside the box, dot and all. The EARLY window keeps a tenth of
-                // itself clear after the last tap and `kPanReach` keeps a hard
-                // pan off the frame, so nothing here should be within its own
-                // radius of an edge.
-                check (plot.contains (juce::Rectangle<float> (dot.radius * 2.0f, dot.radius * 2.0f)
-                                          .withCentre (dot.centre)),
-                       who + " tap " + juce::String (i) + "'s dot at "
-                           + dot.centre.toString() + " r " + juce::String (dot.radius, 1)
-                           + " is not inside the plot " + plot.toString());
+                if (dot.radius > 0.0f)
+                {
+                    drawn.push_back (c);
+
+                    // Inside the box, dot and all. The EARLY window keeps a
+                    // tenth of itself clear after the last tap and `kPanReach`
+                    // keeps a hard pan off the frame, so nothing here should
+                    // be within its own radius of an edge.
+                    check (plot.contains (juce::Rectangle<float> (dot.radius * 2.0f, dot.radius * 2.0f)
+                                              .withCentre (dot.centre)),
+                           who + " tap " + juce::String (c) + "'s dot at "
+                               + dot.centre.toString() + " r " + juce::String (dot.radius, 1)
+                               + " is not inside the plot " + plot.toString());
+                }
+                else
+                {
+                    check (quiet, who + " core tap " + juce::String (c)
+                                      + " draws no dot though the engine plays it above the floor");
+                }
+
+                ++c;
             }
+
+            check ((int) drawn.size() * 4 >= screen.coreTapCount() * 3,
+                   who + " only " + juce::String ((int) drawn.size()) + " of "
+                       + juce::String (screen.coreTapCount()) + " core taps draw a dot at ER level 0 dB");
 
             // **x is time**: the taps are tabulated in ascending order, so the
             // dots run left to right and the first one is where the table says.
-            for (int i = 1; i < R::kNumReferenceTaps; ++i)
-                check (screen.tapDot (i).centre.x > screen.tapDot (i - 1).centre.x,
-                       who + " tap " + juce::String (i)
+            for (size_t i = 1; i < drawn.size(); ++i)
+                check (screen.tapDot (drawn[i]).centre.x > screen.tapDot (drawn[i - 1]).centre.x,
+                       who + " tap " + juce::String (drawn[i])
                            + " does not draw to the right of the one before it");
 
-            // **The radius is gain**: the table decays from 0.501 to 0.087, so
-            // the last dot is visibly smaller than the first, and none of them
-            // has collapsed to nothing.
-            check (screen.tapDot (0).radius > screen.tapDot (R::kNumReferenceTaps - 1).radius + 1.0f,
+            // **The radius is gain**: the table's core taps fall by over 20 dB
+            // from the first to the quietest drawn, so that dot is visibly
+            // smaller than the first, and none of them has collapsed to nothing.
+            const auto last = drawn.empty() ? 0 : drawn.back();
+            check (screen.tapDot (0).radius > screen.tapDot (last).radius + 1.0f,
                    who + " the first tap's dot is "
-                       + juce::String (screen.tapDot (0).radius, 2) + " and the last is "
-                       + juce::String (screen.tapDot (R::kNumReferenceTaps - 1).radius, 2)
+                       + juce::String (screen.tapDot (0).radius, 2) + " and the last drawn is "
+                       + juce::String (screen.tapDot (last).radius, 2)
                        + " -- the radius is supposed to be the gain");
-            check (screen.tapDot (R::kNumReferenceTaps - 1).radius >= R::LingerScreen::kDotMinRadius,
-                   who + " the quietest tap's dot has shrunk below the floor radius");
+            check (screen.tapDot (last).radius >= R::LingerScreen::kDotMinRadius,
+                   who + " the quietest drawn tap's dot has shrunk below the floor radius");
 
-            // **y is bearing, and VARIATION fans it.** The table's third tap is
-            // panned +0.34 and its fourth -0.41, so one draws below the axis and
-            // the other above it -- and turning VARIATION up moves both further
-            // from the centre. This is the whole reason the scatter replaced the
-            // stems.
+            // **y is bearing, and VARIATION fans it.** Which core taps are
+            // panned where is read off Room's table rather than written down
+            // here: a core tap panned right of centre in both the Variation 0
+            // and the Variation 6 set draws below the axis, and turning VARIATION
+            // up moves it further from the centre. This is the whole reason the
+            // scatter replaced the stems.
+            const auto coreIndexWhere = [&roomTable] (int v, auto&& wanted)
+            {
+                const auto& set = roomTable.variation[v].left;
+
+                for (int i = 0, core = 0; i < set.numTaps; ++i)
+                    if (set.taps[i].theta <= 0.0f)
+                    {
+                        if (wanted (set.taps[i].pan))
+                            return core;
+
+                        ++core;
+                    }
+
+                return -1;
+            };
+
+            int fanned = -1;
+
+            for (int c = 0; fanned < 0 && c < screen.coreTapCount(); ++c)
+            {
+                const auto rightIn = [&] (int v)
+                {
+                    const auto& set = roomTable.variation[v].left;
+
+                    for (int i = 0, core = 0; i < set.numTaps; ++i)
+                        if (set.taps[i].theta <= 0.0f && core++ == c)
+                            return set.taps[i].pan >= 0.3f;
+
+                    return false;
+                };
+
+                if (rightIn (0) && rightIn (6))
+                    fanned = c;
+            }
+
+            check (fanned >= 0, who + " Room's table has a core tap panned right at both VARIATION ends");
+
             params.setReal (R::Index::ervariation, 6.0f);
             const auto wideSpread = screen.lateralSpread();
-            const auto wideThird  = screen.tapDot (2).centre.y;
+            const auto wideThird  = screen.tapDot (fanned).centre.y;
 
             params.setReal (R::Index::ervariation, 0.0f);
             const auto narrowSpread = screen.lateralSpread();
-            const auto narrowThird  = screen.tapDot (2).centre.y;
+            const auto narrowThird  = screen.tapDot (fanned).centre.y;
 
             check (wideSpread > narrowSpread,
                    who + " VARIATION does not open the lateral spread: "
                        + juce::String (narrowSpread, 3) + " at the bottom and "
                        + juce::String (wideSpread, 3) + " at the top");
             check (wideThird > narrowThird + 4.0f,
-                   who + " VARIATION does not fan the scatter -- tap 3 sits at "
-                       + juce::String (narrowThird, 1) + " narrow and "
+                   who + " VARIATION does not fan the scatter -- core tap " + juce::String (fanned)
+                       + " sits at " + juce::String (narrowThird, 1) + " narrow and "
                        + juce::String (wideThird, 1) + " wide");
 
             params.setReal (R::Index::ervariation,
                             R::specs()[(size_t) R::Index::ervariation].def);
 
-            const auto third  = screen.tapDot (2).centre.y;
-            const auto fourth = screen.tapDot (3).centre.y;
+            const auto rightTap = coreIndexWhere (defaultVariation, [] (float pan) { return pan >= 0.3f; });
+            const auto leftTap  = coreIndexWhere (defaultVariation, [] (float pan) { return pan <= -0.3f; });
+
+            check (rightTap >= 0 && leftTap >= 0, who + " Room's table has core taps panned both ways");
+
+            const auto third  = screen.tapDot (rightTap).centre.y;
+            const auto fourth = screen.tapDot (leftTap).centre.y;
 
             check (third > plot.getCentreY() && fourth < plot.getCentreY(),
-                   who + " tap 3 is panned right and tap 4 left, so one draws below the"
+                   who + " a core tap panned right and one panned left: one draws below the"
                          " centre axis and the other above it");
 
             // The direct sound is the ringed dot at t = 0 on the centre line,
@@ -2330,7 +2415,7 @@ void checkReverbPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
         // renormalising denominator bounded away from zero and so what makes the
         // density sweep continuous and click-free (10 section 3).
         params.setReal (R::Index::erdensity, 0.0f);
-        checkEquals (screen.activeTapCount(), R::kNumReferenceTaps,
+        checkEquals (screen.activeTapCount(), screen.coreTapCount(),
                      who + " the core taps are all on at DENSITY zero");
 
         params.setReal (R::Index::erdensity, 100.0f);

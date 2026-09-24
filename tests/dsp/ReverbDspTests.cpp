@@ -1928,11 +1928,12 @@ int main()
     //== The Size law ========================================================
     //
     // t_k(S) = t_k,ref * S / S_ref, with gains as 1/d. Scaling the times while
-    // keeping the pattern is what preserves a room's identity, and it is the
-    // one piece of the ER generator that exists today -- because the panel
-    // needs it.
+    // keeping the pattern is what preserves a room's identity. `TapTables.h`
+    // keeps the per-tap helpers after the placeholder table left it
+    // (2026-09-24); these rows are written here, not read from any table.
     {
-        const auto& first = kReferenceTaps[0];
+        const Tap first  {  7.3f, 0.50f,  0.05f };
+        const Tap second { 20.9f, 0.21f, -0.40f };
 
         check (near (tapTimeMsAt (first, kReferenceSizeM), first.timeMs),
                "at the reference size a tap is at its tabulated time");
@@ -1941,61 +1942,50 @@ int main()
         check (near (tapGainAt (first, kReferenceSizeM * 2.0f), first.gain * 0.5f),
                "twice the size is half the gain, which is the 1/d law");
 
-        // The pattern is preserved, not merely the endpoints: every ratio
+        // The pattern is preserved, not merely the endpoints: the ratio
         // between two taps is the same at any size. That is the property that
         // makes Size a room control rather than a delay control.
-        bool ratiosHold = true;
-
-        for (int i = 1; i < kNumReferenceTaps; ++i)
-        {
-            const auto a = tapTimeMsAt (kReferenceTaps[i], 5.0f) / tapTimeMsAt (kReferenceTaps[0], 5.0f);
-            const auto b = tapTimeMsAt (kReferenceTaps[i], 60.0f) / tapTimeMsAt (kReferenceTaps[0], 60.0f);
-            ratiosHold = ratiosHold && near (a, b, 1.0e-3f);
-        }
-
-        check (ratiosHold, "the tap pattern is preserved at every size");
-        check (near (erSpanMsAt (kReferenceSizeM),
-                     kReferenceTaps[kNumReferenceTaps - 1].timeMs),
-               "the ER span is the last tap's time");
+        check (near (tapTimeMsAt (second, 5.0f) / tapTimeMsAt (first, 5.0f),
+                     tapTimeMsAt (second, 60.0f) / tapTimeMsAt (first, 60.0f), 1.0e-3f),
+               "the tap pattern is preserved at every size");
     }
 
-    //== The tap table's shape ===============================================
+    //== The shipped tables' shape ===========================================
     //
-    // **The numbers in the table are a placeholder and none of 11 section 6's
-    // rules is asserted against them** -- not the 0.9 ms minimum separation,
-    // not the 2 % gap rule, not the Kuttruff level ceiling, not the flamming
-    // rules. Those go in when the image-source generator lands, and a failing
-    // table is re-seeded rather than patched (10 section 8).
-    //
-    // What is asserted is what the panel and the engine both rely on being
-    // true of *any* table that replaces it: times ascend, gains decay, and
-    // every bearing is a bearing.
+    // What the engine and the panel both rely on of every table, before any
+    // audit: every channel of every VARIATION has its 48 taps ascending in
+    // time, kErCoreTaps of them core (threshold 0), every threshold in
+    // [0, 1] and every bearing a bearing. The rules -- separation, combing,
+    // flamming, gamma, lateral fraction -- are ErAudit's, below.
     {
-        bool ascending = true, decaying = true, panned = true;
+        bool ascending = true, full = true, core = true, thresholds = true, panned = true;
 
-        for (int i = 0; i < kNumReferenceTaps; ++i)
-        {
-            const auto& t = kReferenceTaps[i];
+        for (int type = 0; type < numTypes; ++type)
+            for (const auto& v : erTableFor (type).variation)
+                for (const auto* ch : { &v.left, &v.right })
+                {
+                    full = full && ch->numTaps == kErMaxTaps;
+                    int cores = 0;
 
-            panned = panned && t.pan >= -1.0f && t.pan <= 1.0f;
+                    for (int i = 0; i < ch->numTaps; ++i)
+                    {
+                        const auto& t = ch->taps[i];
+                        cores += t.theta <= 0.0f ? 1 : 0;
+                        thresholds = thresholds && t.theta >= 0.0f && t.theta <= 1.0f;
+                        panned = panned && t.pan >= -1.0f && t.pan <= 1.0f;
 
-            if (i > 0)
-            {
-                ascending = ascending && t.timeMs > kReferenceTaps[i - 1].timeMs;
-                decaying  = decaying  && t.gain  <  kReferenceTaps[i - 1].gain;
-            }
-        }
+                        if (i > 0)
+                            ascending = ascending && t.timeMs >= ch->taps[i - 1].timeMs;
+                    }
 
-        check (ascending, "tap times ascend");
-        check (decaying, "tap gains decay");
+                    core = core && cores == kErCoreTaps;
+                }
+
+        check (full, "every channel of every table carries all 48 taps");
+        check (ascending, "every channel's taps ascend in time");
+        check (core, "every channel has kErCoreTaps core taps, threshold 0");
+        check (thresholds, "every threshold is in [0, 1]");
         check (panned, "every tap's bearing is within -1..+1");
-        check (kNumReferenceTaps == 21, "the base tap count is 21, as 10 section 3 gives it");
-
-        // The first two reflections stay near the centre so the phantom centre
-        // holds -- the one property of the real set the stand-in reproduces,
-        // and the one a re-seeded table must keep.
-        check (std::abs (kReferenceTaps[0].pan) < 0.25f && std::abs (kReferenceTaps[1].pan) < 0.25f,
-               "the first two reflections stay near the centre");
     }
 
     //== The tail figure the host will be told ===============================

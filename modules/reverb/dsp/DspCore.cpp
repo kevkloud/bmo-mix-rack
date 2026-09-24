@@ -12,11 +12,6 @@
 // late network's -- Fdn.h, Absorbent.h -- each with its own .cpp on the same
 // rule.
 
-namespace bmo::reverb
-{
-
-// One definition so the translation unit is not empty and the tap table is
-// linked rather than being discarded as unused inline data.
-const Tap& firstReferenceTap() noexcept { return kReferenceTaps[0]; }
-
-} // namespace bmo::reverb
+// It defines nothing of its own since the placeholder tap table was retired
+// (2026-09-24): it anchored that table with a one-line function, and the
+// library's other translation units now carry its symbols.

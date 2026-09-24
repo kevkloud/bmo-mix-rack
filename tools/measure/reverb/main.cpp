@@ -17,9 +17,9 @@
                                     report once ModuleDsp has the accessor,
                                     across the schema's corners and against
                                     the 30 s ceiling
-        measure_reverb taps         the panel's placeholder tap table at a given
-                                    SIZE (TapTables.h), which the display is
-                                    still drawn from
+        measure_reverb taps         one type's shipped table at a SIZE and
+                                    VARIATION, as the engine plays it and the
+                                    panel's scatter draws it
         measure_reverb taps --audit every ER audit's margin for every shipped
                                     table (ErTable.cpp); --emit writes those
                                     tables from the generator, --reseed,
@@ -201,11 +201,12 @@ void printTail()
 
     // t_ER,max per type: the span the tail formula reads, erSpanMsAt (table,
     // size), at the schema's minimum SIZE, the type's default and the
-    // maximum, beside the type's windowClampMs and, in brackets, the
-    // placeholder figure the formula read before 2026-09-24.
+    // maximum, beside the type's windowClampMs. (The placeholder figure the
+    // formula read before 2026-09-24 was 79.1 * S / 12 ms for every type,
+    // unclamped; the testing note has the old and new side by side.)
     const auto& sizeSpec = specs()[(size_t) Index::size];
-    std::printf ("\n  t_ER,max per type, ms (the placeholder's figure before 2026-09-24 in brackets)\n");
-    std::printf ("  %-10s %8s %18s %18s %18s\n", "type", "clamp", "min SIZE", "default", "max SIZE");
+    std::printf ("\n  t_ER,max per type, ms\n");
+    std::printf ("  %-10s %8s %10s %10s %10s\n", "type", "clamp", "min SIZE", "default", "max SIZE");
 
     for (int t = 0; t < numTypes; ++t)
     {
@@ -213,34 +214,36 @@ void printTail()
         std::printf ("  %-10s %8.1f", kTypeNames[t], (double) table.windowClampMs);
 
         for (const auto s : { sizeSpec.min, constantsFor (t).sizeM, sizeSpec.max })
-            std::printf ("   %7.3f (%7.3f)", (double) erSpanMsAt (table, s), (double) erSpanMsAt (s));
+            std::printf ("   %7.3f", (double) erSpanMsAt (table, s));
 
         std::printf ("\n");
     }
 }
 
-void printTaps (float sizeM)
+/** One type's shipped table as the engine plays it at `sizeM`: the left set
+    of VARIATION `variation`, every tap through `erSizeScale`, the window
+    clamp included. The panel's scatter draws this set. */
+void printTaps (float sizeM, int type, int variation)
 {
-    std::printf ("ER taps at SIZE %.1f m (reference %.1f m)\n",
-                 (double) sizeM, (double) kReferenceSizeM);
-    std::printf ("  %3s %10s %10s %10s %8s\n", "k", "t (ms)", "gain", "dB", "pan");
+    const auto& table = erTableFor (type);
+    const auto& set = table.variation[std::clamp (variation, 0, kErVariations - 1)].left;
+    const auto k = erSizeScale (table, sizeM);
 
-    for (int i = 0; i < kNumReferenceTaps; ++i)
+    std::printf ("%s's ER taps at SIZE %.1f m, VARIATION %d, left (Size factor %.4f, window %.2f ms)\n",
+                 kTypeNames[type], (double) sizeM, variation, (double) k, (double) (table.windowMs * k));
+    std::printf ("  %3s %10s %10s %10s %8s %7s %5s\n", "k", "t (ms)", "gain", "dB", "pan", "theta", "band");
+
+    for (int i = 0; i < set.numTaps; ++i)
     {
-        const auto& t = kReferenceTaps[i];
-        const auto gain = tapGainAt (t, sizeM);
+        const auto& t = set.taps[i];
+        const auto gain = t.gain / k;
 
-        std::printf ("  %3d %10.3f %10.4f %10.2f %8.2f\n", i,
-                     (double) tapTimeMsAt (t, sizeM), (double) gain,
-                     (double) (20.0f * std::log10 (gain)), (double) t.pan);
+        std::printf ("  %3d %10.3f %10.4f %10.2f %8.2f %7.3f %5d\n", i,
+                     (double) (t.timeMs * k), (double) gain, (double) (20.0f * std::log10 (gain)),
+                     (double) t.pan, (double) t.theta, t.band);
     }
 
-    std::printf ("\n  span %.2f ms\n", (double) erSpanMsAt (sizeM));
-    std::printf ("\n  **PLACEHOLDER GEOMETRY.** This is TapTables.h, which the panel's\n"
-                 "  display still reads; none of 11 section 6's rules is claimed of it.\n"
-                 "  The shipped early-reflection tables are ErTable.cpp's, from the\n"
-                 "  image-source generator: `taps --audit` prints them against every\n"
-                 "  rule. Moving the panel onto them is integration's.\n");
+    std::printf ("\n  span %.2f ms (erSpanMsAt, every VARIATION)\n", (double) erSpanMsAt (table, sizeM));
 }
 
 void printConstants()
@@ -254,7 +257,7 @@ void printConstants()
     std::printf ("  coefficient smoothing     %.1f ms\n", (double) DspCore::kSmoothingMs);
     std::printf ("  wet fade in reset()       %.1f ms\n", (double) DspCore::kBypassFadeMs);
     std::printf ("  reported tail ceiling     %.1f s\n", (double) DspCore::kMaxTailSeconds);
-    std::printf ("  base ER tap count         %d\n", kNumReferenceTaps);
+    std::printf ("  core ER taps per channel  %d of %d\n", kErCoreTaps, kErMaxTaps);
     std::printf ("  reference room size       %.1f m\n", (double) kReferenceSizeM);
 
     std::printf ("\n  **Eight lines is the live risk.** The mode-density rule scales\n"
@@ -1189,7 +1192,7 @@ int tapsCommand (int argc, char** argv)
 
 void usage()
 {
-    std::printf ("usage: measure_reverb <latency|tail|taps [size]|constants|schema|bench|hash|density-level>\n"
+    std::printf ("usage: measure_reverb <latency|tail|taps [size [type [var]]]|constants|schema|bench|hash|density-level>\n"
                  "       measure_reverb taps --audit                     every rule's margin, per type\n"
                  "       measure_reverb taps --emit [path]               write ErTableData.inc\n"
                  "       measure_reverb taps --reseed <type> [start] [n] find the first passing seed\n"
@@ -1225,7 +1228,9 @@ int main (int argc, char** argv)
     if (mode == "taps")
     {
         const auto sizeM = argc > 2 ? (float) std::atof (argv[2]) : kReferenceSizeM;
-        printTaps (sizeM);
+        const auto type = argc > 3 ? std::clamp (std::atoi (argv[3]), 0, numTypes - 1) : 0;
+        const auto variation = argc > 4 ? std::atoi (argv[4]) : 2;
+        printTaps (sizeM, type, variation);
         return 0;
     }
 

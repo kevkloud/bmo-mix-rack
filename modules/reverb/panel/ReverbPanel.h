@@ -2,6 +2,7 @@
 
 #include "core/product/ModuleDef.h"
 #include "modules/reverb/dsp/EqNodes.h"
+#include "modules/reverb/dsp/ErTable.h"
 #include "modules/reverb/dsp/TapTables.h"
 #include "modules/reverb/panel/Spectrum.h"
 
@@ -57,11 +58,12 @@ enum class Page { early = 0, tail, eq };
     `core/dsp/AnalyserTap.h` is why the tap itself cannot change the sound or
     the latency.
 
-    **What the spectrum is showing is the dry input**, because `dsp/DspCore.h`
-    is a marked pass-through and there is no reverb under it yet. The tap is at
+    **What the spectrum is showing is the dry input**, because the tap is at
     the point the Reverb EQ acts on -- pre both generators, which is where 10
-    section 2 puts the EQ -- so the wiring is already right and only the signal
-    is missing. It is honest rather than broken, and it is marked at the tap
+    section 2 puts the EQ -- and until M3 builds the input stage and the EQ,
+    that point is the module's input. The early reflections exist since M2;
+    they are after the tap, so they are not in it. The wiring is already
+    right and only the EQ is missing. It is honest rather than broken, and it is marked at the tap
     site, here, and in AGENTS.md so that nobody "fixes" a working analyser.
 
     **It draws in the module's accent, not in LCD green.** A second hue on one
@@ -69,8 +71,10 @@ enum class Page { early = 0, tail, eq };
     is `meterFace`, the token a needle meter's scale is printed on: a value
     rather than a hue, dark in both appearances, which is what a screen is.
 
-    It draws the taps from `TapTables.h`, which is **the same table the engine
-    will play**. 11 section 5 names sketch/DSP drift as the display's one real
+    It draws the taps from `erTableFor (type)` at the current VARIATION, through
+    the Size law the engine plays by (`erSizeScale`) -- **the same table the
+    engine plays**, since 2026-09-24; it drew `TapTables.h`'s placeholder until
+    then. 11 section 5 names sketch/DSP drift as the display's one real
     risk and asks for exactly this: one source of truth, plus a layout test
     asserting the sketch's first tap time equals the table's. That assertion is
     what `firstTapTimeMs` is public for, and every other accessor below is
@@ -96,12 +100,13 @@ enum class Page { early = 0, tail, eq };
     row the engine will play. The direct sound is that dot with a ring around
     it, at t = 0 on the centre line -- it is not a reflection and it is what
     every arrival here is measured from. And **an infill tap is a faint
-    full-height line, because its bearing is invented**: the 21 core bearings
-    come off `TapTables.h` and the infill stands in for a master sequence that
-    does not exist yet (10 section 3), so drawing it as a dot would put a made-
-    up bearing on the one axis this page exists to show. A line at a time makes
-    the claim that is true -- a tap arrives here -- and none of the claim that
-    is not.
+    full-height line**, at its real time off the table and as bright as the
+    density ramp has made it. It was drawn as a line because its bearing was
+    invented while the tables were a placeholder; the real infill has real
+    bearings now, and drawing them as dots would change what the page shows,
+    which nobody has asked for, so the marks keep their meanings. The scatter
+    draws the VARIATION's **left** set: the two channels are one image field
+    heard at two ears, the same taps but for a few split in time.
 
     **TAIL -- three decay curves, low, mid and high.** The page's controls are
     LOW x, HIGH x, MOD DEPTH and MOD RATE, and the single envelope this
@@ -174,6 +179,7 @@ public:
     struct State
     {
         // EARLY.
+        int   type         = 0;       ///< the TYPE detent, whose ER table the scatter draws
         float sizeM        = 12.0f;
         float preDelayMs   = 0.0f;
         float erDensity    = 50.0f;   ///< per cent
@@ -257,12 +263,18 @@ public:
     //== Arithmetic, public so a test can assert it without rendering ==========
 
     /** When the first reflection arrives, in milliseconds, at the current
-        SIZE. **This is the sketch/DSP drift assertion**: it must equal
-        `tapTimeMsAt (kReferenceTaps[0], size)` and it does so by calling it. */
+        SIZE. **This is the sketch/DSP drift assertion**: it must equal the
+        selected type's table, first tap of the VARIATION's set, times
+        `erSizeScale` -- the time the engine plays it at. */
     float firstTapTimeMs() const noexcept;
 
-    /** When the last reflection arrives -- `t_ER,max` in the tail formula. */
+    /** When the last reflection can sound -- `t_ER,max` in the tail formula,
+        `erSpanMsAt (table, size)`, the per-type span inside its clamp. */
     float lastTapTimeMs() const noexcept;
+
+    /** How many core taps (threshold 0) the scatter's set has: the dots
+        `tapDot` indexes, 21 in every shipped table. */
+    int coreTapCount() const noexcept;
 
     /** The right-hand edge of the EARLY page's own time axis: the last tap
         with a tenth of the window left after it, so the last dot is a dot and
@@ -303,14 +315,16 @@ public:
 
     /** How much of a tap's tabulated bearing VARIATION lets through, 0 to 1.
 
-        **A stand-in, and marked as one.** 10 section 3 gives VARIATION as
-        per-channel tap permutations plus a lateral-spread scalar, and the
-        scalar itself is CALIBRATE -- there is no generator to read it off.
-        What is real is the direction: more variation is more lateral spread,
-        the bottom of the travel is not zero because the first reflections stay
-        near centre at every setting anyway, and position 6 is a different
-        construction whose ER vanish in mono, which this does not attempt to
-        draw. When the generator lands, this is the one function that changes.
+        **Still a stand-in, and marked as one.** The tables are real since
+        2026-09-24 and the scatter draws their times, gains and bearings, but a
+        tap's bearing is its image's, which VARIATION does not move: what
+        VARIATION changes is which taps each channel carries. So this scalar is
+        what makes the knob visible on the picture, and it is not read off the
+        tables. What is real is the direction: more variation is more lateral
+        spread, the bottom of the travel is not zero because the first
+        reflections stay near centre at every setting anyway, and position 6 is
+        mono null, all side, which this does not attempt to draw. Replacing it
+        with something the tables carry is an owner decision.
 
         Public so the layout test can assert the fan opens with the knob
         without reading pixels. */
@@ -331,7 +345,8 @@ public:
         float radius = 0.0f;
     };
 
-    /** Core tap `index`'s dot, 0-based into `kReferenceTaps`. */
+    /** Core tap `index`'s dot, 0-based into the scatter set's core taps in
+        time order. */
     TapDot tapDot (int index) const noexcept;
 
     /** The direct sound's dot: t = 0, dead centre, full gain, pushed in by its
@@ -386,10 +401,10 @@ public:
         labels its own way could agree with a label that clips. */
     std::vector<AxisLabel> axisLabels() const;
 
-    /** How many of the table's taps DENSITY has switched on. The real bridge
-        is a continuous ramp over 48 taps with a master sequence that does not
-        exist yet (10 section 3); this is the 21 core taps plus the infill the
-        knob has paid for, so the picture thickens with the control. */
+    /** How many of the table's taps DENSITY has switched on: the core taps,
+        which never switch off, plus every infill tap whose ramp weight is
+        above zero at this density -- the table's own thresholds and the
+        engine's own ramp width, so the picture thickens exactly as the ER do. */
     int activeTapCount() const noexcept;
 
     /** The whole EQ chain at `hz`, in dB: the three designed nodes plus the
@@ -533,6 +548,16 @@ private:
 
     /** A tap's gain in dB as a dot radius, against `kTapFloorDb`. */
     float dotRadiusFor (float db) const noexcept;
+
+    /** The set the EARLY scatter draws: the selected type's table, the
+        current VARIATION, the left channel. */
+    const ErChannel& scatterSet() const noexcept;
+
+    /** The Size factor the engine plays the selected type at. */
+    float sizeFactor() const noexcept;
+
+    /** Core tap `index` of `scatterSet`, or null. */
+    const ErTap* coreTap (int index) const noexcept;
 
     void paintMenu  (juce::Graphics&, juce::Colour ink) const;
     void paintEarly (juce::Graphics&, juce::Rectangle<float> plot, juce::Colour ink) const;

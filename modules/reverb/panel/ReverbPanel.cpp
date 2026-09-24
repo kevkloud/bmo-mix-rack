@@ -137,26 +137,18 @@ namespace
 
     //== The screen's own arithmetic ===========================================
 
-    /** How many infill pulses the density bridge has to spend, over and above
-        the 21 core taps. 48 taps at the top of the knob, 10 section 3. */
-    constexpr int kMaxInfill = 48 - kNumReferenceTaps;
-
     /** `DspCore::kRampWidth`, read through the DSP's own constant so the
         picture's ramp and the engine's cannot disagree about where a tap
         arrives. */
     constexpr float kRampWidth = DspCore::kRampWidth;
 
-    /** Infill tap `i`'s activation threshold, theta_k.
-
-        Spread over the *open* interval (0, 1) rather than over (0, 1]: with the
-        last threshold at exactly 1 its weight is zero at the top of the knob,
-        so the forty-eighth tap would never arrive at all. The 21 core taps keep
-        theta = 0 and are unaffected: they never switch off, which is what keeps
-        the renormalising denominator bounded away from zero and the whole sweep
-        continuous (10 section 3). */
-    constexpr float infillThreshold (int i) noexcept
+    /** An infill tap's ramp weight at DENSITY `d`, 10 section 3's
+        clamp ((D - theta) / ramp, 0, 1) -- the weight the engine plays it at,
+        before renormalisation. Core taps (theta 0) never come through here:
+        they are always on. */
+    float infillWeight (float theta, float d) noexcept
     {
-        return (float) (i + 1) / (float) (kMaxInfill + 1);
+        return juce::jlimit (0.0f, 1.0f, (d - theta) / kRampWidth);
     }
 
     /** The tail onset a type's ATTACK constant selects, in milliseconds.
@@ -261,7 +253,8 @@ void LingerScreen::setState (const State& s)
                      && juce::approximatelyEqual (a.hiDb,      b.hiDb)
                      && juce::approximatelyEqual (a.hiQ,       b.hiQ);
 
-    const auto same = juce::approximatelyEqual (s.sizeM, state.sizeM)
+    const auto same = s.type == state.type
+                   && juce::approximatelyEqual (s.sizeM, state.sizeM)
                    && juce::approximatelyEqual (s.preDelayMs, state.preDelayMs)
                    && juce::approximatelyEqual (s.erDensity, state.erDensity)
                    && juce::approximatelyEqual (s.erLevelDb, state.erLevelDb)
@@ -433,12 +426,48 @@ float LingerScreen::firstTapTimeMs() const noexcept
     // quietly drawing the wrong picture.
     static_assert (! kPreLinkFixed, "the ER scatter is drawn unshifted by PRE-DELAY");
 
-    return tapTimeMsAt (kReferenceTaps[0], state.sizeM);
+    const auto& set = scatterSet();
+    return set.numTaps > 0 ? set.taps[0].timeMs * sizeFactor() : 0.0f;
 }
 
 float LingerScreen::lastTapTimeMs() const noexcept
 {
-    return erSpanMsAt (state.sizeM);
+    return erSpanMsAt (erTableFor (state.type), state.sizeM);
+}
+
+const ErChannel& LingerScreen::scatterSet() const noexcept
+{
+    const auto v = juce::jlimit (0, kErVariations - 1, (int) std::lround (state.variation));
+    return erTableFor (state.type).variation[v].left;
+}
+
+float LingerScreen::sizeFactor() const noexcept
+{
+    return erSizeScale (erTableFor (state.type), state.sizeM);
+}
+
+const ErTap* LingerScreen::coreTap (int index) const noexcept
+{
+    const auto& set = scatterSet();
+    int seen = 0;
+
+    for (int i = 0; i < set.numTaps; ++i)
+        if (set.taps[i].theta <= 0.0f && seen++ == index)
+            return &set.taps[i];
+
+    return nullptr;
+}
+
+int LingerScreen::coreTapCount() const noexcept
+{
+    const auto& set = scatterSet();
+    int count = 0;
+
+    for (int i = 0; i < set.numTaps; ++i)
+        if (set.taps[i].theta <= 0.0f)
+            ++count;
+
+    return count;
 }
 
 float LingerScreen::erWindowMs() const noexcept
@@ -524,7 +553,9 @@ float LingerScreen::dotRadiusFor (float db) const noexcept
 
 LingerScreen::TapDot LingerScreen::tapDot (int index) const noexcept
 {
-    if (index < 0 || index >= kNumReferenceTaps)
+    const auto* tapPtr = coreTap (index);
+
+    if (tapPtr == nullptr)
         return {};
 
     // ER at "Off" draws no taps at all, because "Off" is silence and not
@@ -532,8 +563,14 @@ LingerScreen::TapDot LingerScreen::tapDot (int index) const noexcept
     if (state.erLevelDb <= -39.95f)
         return {};
 
-    const auto& tap = kReferenceTaps[(size_t) index];
-    const auto gain = tapGainAt (tap, state.sizeM);
+    // The time and gain the engine plays the tap at: the Size law with its
+    // window clamp, and the end-of-cluster ramp that fades the last 5 ms of
+    // the window to nothing.
+    const auto& tap = *tapPtr;
+    const auto& table = erTableFor (state.type);
+    const auto k = sizeFactor();
+    const auto ms = tap.timeMs * k;
+    const auto gain = tap.gain / k * ErEngine::endTaper (ms, table.windowMs * k);
 
     if (gain <= 0.0f)
         return {};
@@ -543,11 +580,11 @@ LingerScreen::TapDot LingerScreen::tapDot (int index) const noexcept
     if (db <= kTapFloorDb)
         return {};
 
-    // **The bearing comes off the same `Tap` row the time and the gain do**, so
+    // **The bearing comes off the same table row the time and the gain do**, so
     // there is no second table to drift: the engine will play these bearings.
     // `lateralSpread` is the one thing between the table and the picture, and
     // it is marked.
-    return { { erXFor (tapTimeMsAt (tap, state.sizeM)),
+    return { { erXFor (ms),
                panY (tap.pan * lateralSpread()) },
              dotRadiusFor (db) };
 }
@@ -571,19 +608,20 @@ LingerScreen::TapDot LingerScreen::directDot() const noexcept
 
 int LingerScreen::activeTapCount() const noexcept
 {
-    // **The 21 core taps never switch off.** That is not a simplification: it is
+    // **The core taps never switch off.** That is not a simplification: it is
     // what keeps the renormalising denominator bounded away from zero, and so
     // what makes the whole density sweep continuous and click-free (10
     // section 3). DENSITY spends infill on top of them.
     const auto d = juce::jlimit (0.0f, 1.0f, state.erDensity * 0.01f);
+    const auto& set = scatterSet();
 
-    int infill = 0;
+    int active = 0;
 
-    for (int i = 0; i < kMaxInfill; ++i)
-        if ((d - infillThreshold (i)) / kRampWidth > 0.0f)
-            ++infill;
+    for (int i = 0; i < set.numTaps; ++i)
+        if (set.taps[i].theta <= 0.0f || infillWeight (set.taps[i].theta, d) > 0.0f)
+            ++active;
 
-    return kNumReferenceTaps + infill;
+    return active;
 }
 
 namespace
@@ -967,31 +1005,27 @@ void LingerScreen::paintEarly (juce::Graphics& g, juce::Rectangle<float> plot,
     // The direct sound is not an ER and stays.
     const bool erAudible = state.erLevelDb > -39.95f;
 
-    // **The infill DENSITY spends, as faint full-height lines and not as dots.**
-    // Their bearings are invented -- the 21 core bearings come off `TapTables.h`
-    // and these stand in for a master sequence that does not exist yet (10
-    // section 3) -- and a dot on this page is a claim about bearing. A line at a
-    // time claims only the thing that is true: a tap arrives here. Times are one
-    // per equal window with a deterministic nudge, which 10 section 3 says
-    // sounds smoother than fully random placement at the same density.
+    // **The infill DENSITY spends, as faint full-height lines and not as dots**
+    // -- the table's own infill taps, at their own times under the Size law,
+    // each as bright as its ramp weight at this DENSITY. See the class comment
+    // for why they stay lines now that their bearings are real.
     if (erAudible)
     {
-        const auto d     = juce::jlimit (0.0f, 1.0f, state.erDensity * 0.01f);
-        const auto first = tapTimeMsAt (kReferenceTaps[0], state.sizeM);
-        const auto last  = erSpanMsAt (state.sizeM);
-        const auto span  = juce::jmax (1.0f, last - first);
+        const auto d = juce::jlimit (0.0f, 1.0f, state.erDensity * 0.01f);
+        const auto& set = scatterSet();
+        const auto k = sizeFactor();
 
-        for (int i = 0; i < kMaxInfill; ++i)
+        for (int i = 0; i < set.numTaps; ++i)
         {
-            const auto w = juce::jlimit (0.0f, 1.0f, (d - infillThreshold (i)) / kRampWidth);
+            if (set.taps[i].theta <= 0.0f)
+                continue;
+
+            const auto w = infillWeight (set.taps[i].theta, d);
 
             if (w <= 0.0f)
                 continue;
 
-            // A fixed integer hash for the jitter, so the picture is the same
-            // every time it is drawn and the same on both machines.
-            const auto jitter = 1.0f + 0.03f * (float) (((i * 37) % 7) - 3) / 3.0f;
-            const auto ms = first + span * ((float) i + 0.5f) / (float) kMaxInfill * jitter;
+            const auto ms = set.taps[i].timeMs * k;
 
             g.setColour (ink.withAlpha (0.10f + 0.16f * w));
             g.fillRect (juce::Rectangle<float> (erXFor (ms), plot.getY(),
@@ -1000,12 +1034,12 @@ void LingerScreen::paintEarly (juce::Graphics& g, juce::Rectangle<float> plot,
     }
 
     // The core taps: a filled dot each, at its arrival, at its bearing, sized by
-    // its gain. All three numbers off one `Tap` row.
+    // its gain. All three numbers off one table row.
     if (erAudible)
     {
         g.setColour (ink.withAlpha (0.92f));
 
-        for (int i = 0; i < kNumReferenceTaps; ++i)
+        for (int i = 0; i < coreTapCount(); ++i)
         {
             const auto dot = tapDot (i);
 
@@ -1747,6 +1781,7 @@ void ReverbPanel::refreshScreen()
     // onset is.
     const auto& voicing = constantsFor ((int) context.params.getReal (Index::type));
 
+    s.type         = juce::jlimit (0, numTypes - 1, (int) context.params.getReal (Index::type));
     s.sizeM        = context.params.getReal (Index::size);
     s.preDelayMs   = context.params.getReal (Index::predelay);
     s.erDensity    = context.params.getReal (Index::erdensity);

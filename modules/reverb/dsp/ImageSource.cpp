@@ -144,6 +144,14 @@ namespace
         return timeMs < kProximityHiMs;
     }
 
+    /** Plate's measured rise-and-fall envelope for one band (ImageSource.h). */
+    double plateEnvelope (int band, double timeMs) noexcept
+    {
+        const auto x = std::max (timeMs, 0.0) / kPlatePeakMs[band];
+        return kPlatePeakGain * std::pow (10.0, kPlateBandLevelDb[band] / 20.0)
+             * std::pow (x, kPlateRise) * std::exp (kPlateRise * (1.0 - x));
+    }
+
     /** The filtered energy of one tap under a one-pole low-pass at `hz`:
         a^2 / (2 tau) with tau = 1 / (2 pi f), i.e. a^2 * pi * f. It is what a
         tap contributes to the correlation the audit measures, so it is what
@@ -184,31 +192,31 @@ static const Recipe kRecipes[numTypes]
     { "Hall",       false, 3,    0.82, 200.0,  0.24,  0.68,  1.5, 10.0,  5.0,  1.7,  0.20,   1200.0, 20.0,  0.90,  2u },
     { "Cavern",     false, 4,    0.88, 200.0,  0.15,  0.65,  1.5, 20.0,  5.0,  1.7,  0.20,   1200.0, 20.0,  0.90,  1444u },
 
-    // PLATE -- A PROPOSAL, CALIBRATE THROUGHOUT, AND NOT A ROOM.
+    // PLATE -- CALIBRATE THROUGHOUT, AND NOT A ROOM.
     //
     // Owner decision, 2026-09-23: "plate verbs are a physical metal plate
     // model, not a room model. room rules shouldn't apply." So nothing in this
-    // row, or in the generator's plate path, bends to the room rules -- the
-    // 1-8 ms full-band ban, the 0.9 ms spacing, Kuttruff, the flam rules, the
-    // lateral fraction, Moorer -- and ErAudit does not hold a plate to them.
-    // It is held to its own rules from Frosty's plate research (2026-09-23):
-    // an instant onset, a front-loaded heard energy, and dispersion order.
+    // row, or in the generator's plate path, bends to the room rules, and
+    // ErAudit does not hold a plate to them. It is held instead to rules
+    // taken from measurement -- measured, 16 EMT 140 IRs, research doc
+    // section 8, 2026-09-23 -- which corrected an earlier estimate that a
+    // plate's energy peaks inside 5 ms. It does not: it swells.
     //
     // The model: a 2 m x 1 m steel plate (the EMT 140's), the driver 0.3 m
-    // from a pair of pickups 0.6 m apart -- the real unit's stereo pair is two
-    // pickups, so the receivers are literal. Its 2D image lattice, orders
-    // 0-5, where every path arrives once per band at that band's
-    // bending-wave group speed (kPlateBandSpeed): dispersion, feed-forward,
-    // no allpass. So each band's first arrival is the direct wave at its own
-    // speed, highs first, very nearly as 1/sqrt(f); the lows reach the two
-    // pickups milliseconds apart at every VARIATION; taps sit 0.25 ms apart,
-    // and the table spans 45 ms at the default SIZE (the table at the 22 m
-    // default *is* the EMT; SIZE scales it like any other). Beta is above
-    // every room's -- a free steel edge loses little; the decay is the
-    // damper's, the tail's business -- and gains take the room law at an
-    // equivalent path of 16 m + c t, since a plate's level is its return gain.
-    // What it does not reach is in the testing note.
-    { "Plate",      true,  5,    0.90, 200.0,  0.40,  0.25,   0.0,  0.3, 10.0,  0.0,  0.60,   1200.0, 20.0,  0.90,  243u,  2.0, 16.0, 45.0 },
+    // from the pickups. Its 2D image lattice, orders 0-5, gives the tap
+    // *times*: every path arrives once per band at that band's bending-wave
+    // group speed (kPlateBandSpeed), highs first. The tap *levels* follow the
+    // measured swell, a per-band rise-and-fall envelope (ImageSource.h), so
+    // the bright front is weak and the energy peaks in the teens of
+    // milliseconds. The right pickup hears each split wave later and no
+    // louder: 4-6 ms later in the 500 Hz band, which is split at every
+    // VARIATION because the measured offset is the plate's and not a setting;
+    // about 1 ms in the 2 kHz band; nothing in the 8 kHz band; and the 125 Hz
+    // band is given no imposed offset, because the measurement is not
+    // reliable there. Taps sit 0.25 ms apart, not 0.9 (a room rule; with
+    // 0.9, no seed of 1000 can place 48 taps in the window, see the note).
+    // Window 45 ms at the default SIZE -- the table at 22 m *is* the EMT.
+    { "Plate",      true,  5,    0.90, 200.0,  0.40,  0.25,   0.0,  0.3, 10.0,  0.0,  0.60,   1200.0, 20.0,  0.90,  184u,  2.0, 16.0, 45.0 },
 
     { "Ambience",   false, 3,    0.72, 100.0,  0.40,  0.38,  1.5,  3.0,  8.0,  1.7,  0.20,   1200.0, 10.0,  0.90,  31u },
 };
@@ -332,7 +340,7 @@ bool generateFrom (const Recipe& recipe, int typeIndex, std::uint32_t seed, ErTa
     // so the rooms' 0.9 ms comb spacing does not bind it; they are kept
     // kPlateMinSeparationMs apart only so no two taps coincide.
     const double sepMs = plate ? kPlateMinSeparationMs : kMinSeparationMs;
-    const double reach = (windowMs - sepMs) / (1.0 + kJitter);
+    const double reach = (windowMs - sepMs - (plate ? 2.4 * kPlateSplitHalfMs[2] : 0.0)) / (1.0 + kJitter);
 
     for (const auto& im : images)
         if (im.timeMs[C] > 0.0 && im.timeMs[C] <= reach)
@@ -341,7 +349,7 @@ bool generateFrom (const Recipe& recipe, int typeIndex, std::uint32_t seed, ErTa
     const auto strength = [&recipe, plate] (const Image* im)
     {
         return std::pow (recipe.beta, im->order)
-             / (plate ? recipe.plateEquivalentDistM + kC * im->timeMs[C] / 1000.0 : im->pathM[C]);
+             / (plate ? 1.0 : im->pathM[C]) * (plate ? plateEnvelope (im->band, im->timeMs[C]) / std::pow (recipe.beta, im->order) : 1.0);
     };
 
     std::stable_sort (candidates.begin(), candidates.end(),
@@ -356,7 +364,7 @@ bool generateFrom (const Recipe& recipe, int typeIndex, std::uint32_t seed, ErTa
     // plus both their split offsets -- otherwise no jitter could place them.
     const auto half = [plate] (const Image* im)
     {
-        return plate ? std::max (0.5 * std::abs (im->timeMs[R] - im->timeMs[L]), kPlateSplitMinMs) : 0.0;
+        return plate ? 0.3 * kPlateSplitHalfMs[im->band] : 0.0;
     };
 
     const auto admit = [&chosen, fuseMs, &half] (const Image* im)
@@ -377,7 +385,7 @@ bool generateFrom (const Recipe& recipe, int typeIndex, std::uint32_t seed, ErTa
             if (im->order == 0)
                 admit (im);
 
-    for (int slice = 0; slice < kErCoreTaps; ++slice)
+    for (int slice = 0; slice < kErCoreTaps && (int) chosen.size() < kErCoreTaps; ++slice)
     {
         const double lo = reach * slice / kErCoreTaps, hi = reach * (slice + 1) / kErCoreTaps;
 
@@ -423,9 +431,9 @@ bool generateFrom (const Recipe& recipe, int typeIndex, std::uint32_t seed, ErTa
         // at the lows' speed it is milliseconds, at the highs' a fraction of
         // one, which is the per-output difference a real plate has.
         const auto geometric = 0.5 * (im->timeMs[R] - im->timeMs[L]);
-        splits.push_back ({ plate ? std::max (std::abs (geometric), kPlateSplitMinMs)
+        splits.push_back ({ plate ? kPlateSplitHalfMs[im->band] * (0.8 + 0.4 * rng.unit())
                                   : std::clamp (std::abs (geometric), kSplitMinMs, kSplitMaxMs),
-                            geometric > 0.0 ? 1.0 : (geometric < 0.0 ? -1.0 : (rng.unit() < 0.5 ? 1.0 : -1.0)) });
+                            plate ? 1.0 : geometric > 0.0 ? 1.0 : (geometric < 0.0 ? -1.0 : (rng.unit() < 0.5 ? 1.0 : -1.0)) });
         slots.push_back (s);
     }
 
@@ -456,20 +464,31 @@ bool generateFrom (const Recipe& recipe, int typeIndex, std::uint32_t seed, ErTa
 
         const auto pan = rng.sym();   // a velvet pulse has no image; its bearing is drawn, for the panel
         const auto centre = infillStartMs + cellMs * (cell + 0.5);
+        s.band = plate ? plateInfillBand (centre) : -1;   // a slot keeps one band in both channels
 
         for (int k = 0; k < kReceivers; ++k)
             s.c[k] = { centre, 0.0, pan, 0.0, 0 };
 
-        const auto half = plate ? std::max (kPlateSplitMinMs,
-                                            500.0 * recipe.receiverSpacingM / kPlateBandSpeed[plateInfillBand (centre)]
-                                                * (0.3 + 0.7 * rng.unit()))
+        const auto half = plate ? kPlateSplitHalfMs[plateInfillBand (centre)] * (0.8 + 0.4 * rng.unit())
                                 : kSplitMinMs + (kSplitMaxMs - kSplitMinMs) * rng.unit();
-        splits.push_back ({ half, rng.unit() < 0.5 ? 1.0 : -1.0 });
+        const auto infillSide = rng.unit() < 0.5 ? 1.0 : -1.0;
+        splits.push_back ({ half, plate ? 1.0 : infillSide });
         slots.push_back (s);
     }
 
     const auto coreCount = kErCoreTaps;
     const auto slotCount = (int) slots.size();
+
+    // Every channel holds exactly kErMaxTaps. A recipe that produced more or
+    // fewer slots is a generator bug, and it fails loudly here rather than
+    // writing past the end of an ErChannel.
+    if (slotCount != kErMaxTaps)
+    {
+        if (diag != nullptr)
+            diag->failedAt = 4;
+
+        return false;
+    }
 
     // Every gain follows from a time: the path it implies, and for a velvet
     // pulse the order a reflection over that path typically has.
@@ -484,11 +503,9 @@ bool generateFrom (const Recipe& recipe, int typeIndex, std::uint32_t seed, ErTa
 
         if (plate)
         {
-            const auto late = std::clamp ((c.timeMs - infillStartMs) / (windowMs - infillStartMs), 0.0, 1.0);
-            const auto order = s.core ? s.order : 1.0 + late * (recipe.maxOrder - 1);
             c.pathM = recipe.plateEquivalentDistM + kC * c.timeMs / 1000.0;
-            c.gain  = std::pow (recipe.beta, order) / c.pathM;
-            c.band  = s.core ? s.band : plateInfillBand (c.timeMs);
+            c.band  = s.band;
+            c.gain  = plateEnvelope (c.band, s.c[C].timeMs);   // one wave: the right pickup hears it later, not louder
             return;
         }
 
@@ -505,8 +522,11 @@ bool generateFrom (const Recipe& recipe, int typeIndex, std::uint32_t seed, ErTa
         auto& s = slots[(size_t) i];
         const auto& sp = splits[(size_t) i];
         s.c[C].timeMs = t;
-        s.c[L].timeMs = t - sp.side * sp.halfMs;
-        s.c[R].timeMs = t + sp.side * sp.halfMs;
+        // On a plate the left pickup hears the shared time and the right one
+        // later -- the measured EMT has its right output behind -- so a split
+        // never moves an arrival earlier than the first sound.
+        s.c[L].timeMs = plate ? t : t - sp.side * sp.halfMs;
+        s.c[R].timeMs = plate ? t + 2.0 * sp.halfMs : t + sp.side * sp.halfMs;
 
         for (int k = 0; k < kReceivers; ++k)
             settle (s, k);
@@ -577,7 +597,8 @@ bool generateFrom (const Recipe& recipe, int typeIndex, std::uint32_t seed, ErTa
     for (int i = 0; i < slotCount; ++i)
     {
         const auto& c = slots[(size_t) i].c[C];
-        const auto hz = c.band == 3 ? recipe.proximityCutoffHz : cutoffLaw ((double) (c.band + 1), c.pathM);
+        const auto hz = plate ? kPlateBandCutoffHz[c.band]
+                              : c.band == 3 ? recipe.proximityCutoffHz : cutoffLaw ((double) (c.band + 1), c.pathM);
         energy[(size_t) i] = filteredEnergy (c.gain, hz);
         total[slots[(size_t) i].core ? 0 : 1] += energy[(size_t) i];
     }
@@ -606,7 +627,7 @@ bool generateFrom (const Recipe& recipe, int typeIndex, std::uint32_t seed, ErTa
     // the gamma ladder is still aimed by the brighter slots.
     if (plate)
         for (int i = 0; i < slotCount; ++i)
-            if (slots[(size_t) i].c[C].band == kErBands - 1)
+            if (slots[(size_t) i].c[C].band == 2)
             {
                 isSplit[(size_t) i] = true;
                 split[slots[(size_t) i].core ? 0 : 1] += energy[(size_t) i];
@@ -789,7 +810,9 @@ bool generateFrom (const Recipe& recipe, int typeIndex, std::uint32_t seed, ErTa
         std::sort (blocked.begin(), blocked.end());
 
         double at = infillStartMs;
-        const double end = windowMs - 0.5 * sepMs;
+        // A plate's right arrival can trail its shared time by up to 2.4 half-
+        // offsets, so its infill stops that far short of the window.
+        const double end = windowMs - 0.5 * sepMs - (plate ? 2.4 * kPlateSplitHalfMs[2] : 0.0);
 
         for (const auto& b : blocked)
         {
@@ -810,6 +833,17 @@ bool generateFrom (const Recipe& recipe, int typeIndex, std::uint32_t seed, ErTa
 
     for (const auto& f : free)
         freeMs += std::max (0.0, f.second - f.first);
+
+    // The core can leave no time free at all -- a window too short for its
+    // taps and their split arrivals. That is a failed draw, reported, never a
+    // read past an empty list.
+    if (free.empty() || freeMs <= 0.0)
+    {
+        if (diag != nullptr)
+            diag->failedAt = 3;
+
+        return false;
+    }
 
     const auto freeToTime = [&free] (double x)
     {
@@ -867,6 +901,10 @@ bool generateFrom (const Recipe& recipe, int typeIndex, std::uint32_t seed, ErTa
         }
 
         cutoffHz[3] = recipe.proximityCutoffHz;
+
+        if (plate)
+            for (int b = 0; b < kErBands; ++b)
+                cutoffHz[b] = kPlateBandCutoffHz[b];
     }
 
     //== Assemble, quote at the reference size, and round onto the grid ========

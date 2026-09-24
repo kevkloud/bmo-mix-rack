@@ -1017,10 +1017,10 @@ int main()
 
         check (clamped, "at 80 m every room table's span is its clamp");
 
-        // Plate spans 45 ms at its 22 m default, so even at 80 m it stays
-        // inside its 200 ms clamp: about 164 ms, the Size law and no more.
+        // Plate spans about 39 ms at its 22 m default, so even at 80 m it stays
+        // inside its 200 ms clamp: about 140 ms, the Size law and no more.
         const auto plateSpan = erSpanMsAt (erTableFor (plate), 80.0f);
-        check (plateSpan > 150.0f && plateSpan < 180.0f, "at 80 m Plate's span is its last tap, 150-180 ms, inside its clamp");
+        check (plateSpan > 120.0f && plateSpan < 160.0f, "at 80 m Plate's span is its last tap, 120-160 ms, inside its clamp");
     }
 
     //== The audits of 10 section 3 and 11 section 6, on every shipped table ==
@@ -1234,47 +1234,86 @@ int main()
         check (stillRoom, "Room is still held to every room rule");
         check (! std::isinf (plateRep.margin[ergen::ruleTapCeiling]) && ! std::isinf (plateRep.margin[ergen::ruleGamma]),
                "Plate is still held to the -15.3 dB ceiling and to gamma >= 0");
-        check (std::isinf (roomRep.margin[ergen::rulePlateOnset]) && std::isinf (roomRep.margin[ergen::rulePlateFront])
-                   && std::isinf (roomRep.margin[ergen::rulePlateDispersion]),
-               "Room is not held to the plate rules");
+        bool noPlateRules = true;
 
+        for (const int r : { ergen::rulePlateOnset, ergen::rulePlateFront, ergen::rulePlateSwellTime,
+                             ergen::rulePlateSwellRise, ergen::rulePlateBands, ergen::rulePlateLr500 })
+            noPlateRules = noPlateRules && std::isinf (roomRep.margin[r]);
+
+        check (noPlateRules, "Room is not held to the plate rules");
+
+        // Each measured plate rule (ErAudit.h: measured, 16 EMT 140 IRs,
+        // research doc section 8, 2026-09-23) reddens on a Plate table broken
+        // by hand for it. Times in the table are at 12 m; Plate plays at 22 m.
         const auto fails = [&plateCtx] (const ErTable& broken, int rule)
         {
             return ! ergen::audit (broken, plateCtx).pass[rule];
         };
 
+        const float toDefault = constantsFor (plate).sizeM / kReferenceSizeM;
+
+        const auto tapAt = [toDefault] (const ErChannel& ch, float ms)
         {
-            // The onset moved to 2 ms in one channel.
+            int i = 0;
+
+            while (i < ch.numTaps - 1 && ch.taps[i].timeMs * toDefault < ms)
+                ++i;
+
+            return i;
+        };
+
+        {
+            // The whole left channel of VARIATION 1 starting at 3 ms.
             auto b = erTableFor (plate);
-            auto& ch = b.variation[1].right;
-            const auto shift = 2.0f - ch.taps[0].timeMs;
+            auto& ch = b.variation[1].left;
+            const auto shift = 3.0f / toDefault - ch.taps[0].timeMs;
 
             for (int i = 0; i < ch.numTaps; ++i)
                 ch.taps[i].timeMs += shift;
 
-            check (fails (b, ergen::rulePlateOnset), "a plate whose first tap is at 2 ms fails the onset rule");
+            check (fails (b, ergen::rulePlateOnset), "a plate that starts at 3 ms fails the onset rule");
         }
 
         {
-            // A loud bright tap at 20 ms moves the peak out of the first 5 ms.
+            // A loud bright tap at about 3 ms: the front is no longer weak,
+            // and the swell no longer rises 8 dB over it.
             auto b = erTableFor (plate);
-            auto& ch = b.variation[4].left;
-            int i = 0;
-
-            while (i < ch.numTaps - 1 && ch.taps[i].timeMs * constantsFor (plate).sizeM / kReferenceSizeM < 20.0f)
-                ++i;
-
-            ch.taps[i].gain = 0.3f;
-            ch.taps[i].band = 0;
-            ch.taps[i].theta = 0.0f;
-            check (fails (b, ergen::rulePlateFront), "a plate peaking at 20 ms fails the front-loaded rule");
+            auto& ch = b.variation[2].right;
+            auto& tap = ch.taps[tapAt (ch, 3.0f)];
+            tap.gain = 0.12f;
+            tap.theta = 0.0f;
+            check (fails (b, ergen::rulePlateFront), "a strong tap inside 5 ms fails the front rule");
+            check (fails (b, ergen::rulePlateSwellRise), "... and the swell-rise rule");
         }
 
         {
-            // The first tap relabelled into the dark band: lows before highs.
+            // A loud tap at 35 ms moves the envelope's peak past 25 ms.
             auto b = erTableFor (plate);
-            b.variation[0].left.taps[0].band = kErBands - 1;
-            check (fails (b, ergen::rulePlateDispersion), "a plate whose lows arrive first fails the dispersion rule");
+            auto& ch = b.variation[3].left;
+            auto& tap = ch.taps[tapAt (ch, 35.0f)];
+            tap.gain = 0.12f;
+            tap.theta = 0.0f;
+            tap.band = 0;
+            check (fails (b, ergen::rulePlateSwellTime), "a plate peaking at 35 ms fails the swell-time rule");
+        }
+
+        {
+            // The 8 kHz band's taps relabelled into the 125 Hz band: lows first.
+            auto b = erTableFor (plate);
+            auto& ch = b.variation[0].left;
+
+            for (int i = 0; i < ch.numTaps; ++i)
+                if (ch.taps[i].band == 0)
+                    ch.taps[i].band = kErBands - 1;
+
+            check (fails (b, ergen::rulePlateBands), "a plate whose lows arrive first fails the band-onset rule");
+        }
+
+        {
+            // The right channel of VARIATION 4 made the left: no 500 Hz lag.
+            auto b = erTableFor (plate);
+            b.variation[4].right = b.variation[4].left;
+            check (fails (b, ergen::rulePlateLr500), "a plate with no right-later 500 Hz lag fails the L/R rule");
         }
     }
 

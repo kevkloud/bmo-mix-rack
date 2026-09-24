@@ -42,21 +42,29 @@ namespace bmo::reverb::ergen
     Plate is what binds any source: the -15.3 dB single-tap ceiling (a
     colouration bound), taps inside the window, and gamma >= 0 at VARIATION
     0-5 (mono safety; the rooms' falling ladder is not asserted of it). In
-    their place, three **plate rules**, the structural ones from Frosty's
-    plate research (2026-09-23), physics or sourced:
+    their place, six **plate rules** from measurement -- source: measured,
+    16 EMT 140 IRs, research doc section 8, 2026-09-23. (They replace three
+    rules taken from an earlier estimate, one of which -- "the heard energy
+    peaks in the first 5 ms" -- the measurement showed to be wrong: a plate's
+    energy swells.) On heard energy, every channel of VARIATION 0-5:
 
-      - instant onset: the first tap at or under 1 ms (a real plate has no
-        pre-delay);
-      - front-loaded: the heard energy peaks in the first 5 ms window (the
-        highs are dense by about 5 ms);
-      - dispersion order: each darker band's first arrival comes after the
-        brighter band's (group speed goes as sqrt(f), so highs first).
+      - onset: the first tap at or under 2 ms (measured: sound within ~2 ms);
+      - front: energy inside 5 ms at most 4 % of the first 100 ms
+        (measured 0.1-4 %);
+      - swell time: the 2 ms-window envelope peaks between 10 and 25 ms;
+      - swell rise: that peak at least 8 dB over the 0-5 ms level (measured
+        10-13 dB);
+      - band onsets (10 % of each band's first 100 ms): highs first, the
+        8 kHz band by 4 ms, the 500 Hz band at 8-16 ms (measured about 2.5,
+        10, 13 and 18 ms for 8 k / 2 k / 500 / 125 Hz);
+      - 500 Hz L/R: the right channel's onset 3-7 ms after the left's
+        (measured 3.6-6.4 ms, right later).
 
-    Reported and **not** asserted, because the research labels them estimates:
-    the L/R offset per band (about 5-10 ms in the lows, under 1 ms in the
-    highs), the span (about 30 ms), and how close each band's first arrival
-    sits to 1/sqrt(f). Do not "fix" Plate back into a room: a Plate table that
-    fails a room rule is not failing anything. */
+    Reported and not asserted: every band's onset in each channel, the 2 kHz
+    and 8 kHz L/R offsets (measured 1 kHz 0.8-1.4 ms, 2 kHz -0.2-1.1, 4-8 kHz
+    0), and the span. Do not "fix" Plate back into a room: a Plate table
+    that fails a room rule is not failing anything. */
+
 
 enum Rule
 {
@@ -75,9 +83,12 @@ enum Rule
     ruleMoorer,           ///< Room only: count and span against Moorer's 19 taps, 4.3-79.7 ms
 
     // Plate's own rules -- n/a for a room. See the comment above Rule.
-    rulePlateOnset,       ///< the first tap at or under 1 ms
-    rulePlateFront,       ///< the heard energy peaks in the first 5 ms window
-    rulePlateDispersion,  ///< each band's first arrival after the brighter band's
+    rulePlateOnset,       ///< first tap at or under 2 ms
+    rulePlateFront,       ///< heard energy inside 5 ms <= 4 % of the first 100 ms
+    rulePlateSwellTime,   ///< the 2 ms-window envelope peaks between 10 and 25 ms
+    rulePlateSwellRise,   ///< ... at least 8 dB over its 0-5 ms level
+    rulePlateBands,       ///< band onsets highs first; 8 kHz <= 4 ms; 500 Hz 8-16 ms
+    rulePlateLr500,       ///< 500 Hz onset: right 3-7 ms after left
     numRules
 };
 
@@ -118,10 +129,9 @@ struct Figures
     int    fullSetGapCollisions;        ///< over all 48 taps, adjacent gaps within 2 % -- reported, not a rule
 
     // Plate, reported against the research (all VARIATION 2 unless said).
-    double plateFrontShare;             ///< heard energy inside 5 ms, default density
-    double plateBandFirstMs[kErBands];  ///< each band's first arrival, left channel
-    double plateBandMeanMs[kErBands];   ///< each band's mean arrival, left channel
-    double plateLrMs[kErBands];         ///< VARIATION 5: mean L-R offset per band
+    double plateFrontShare;             ///< heard energy inside 5 ms over the first 100 ms
+    double plateRiseDb, platePeakMs;    ///< the swell: peak over the 0-5 ms level, and when
+    double plateOnsetMs[2][kErBands];   ///< band onsets (10 % of the band's first 100 ms), left / right
 };
 
 struct Report

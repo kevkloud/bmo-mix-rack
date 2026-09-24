@@ -251,3 +251,81 @@ Build of `reverb_dsp_tests measure_reverb` (Debug) exit 0; `reverb_dsp`
 passes. Full DSP-only suite on AURORA, after a targeted build of all 18 test
 targets plus measure_reverb that exited 0: ctest 18/18 passed (tune_hardtune_target
 disabled by design), exit 0.
+
+## Plate re-voiced to the measured EMT 140 (2026-09-24, on AURORA)
+
+Source for every Plate rule now: **measured, 16 EMT 140 IRs, research doc
+section 8, 2026-09-23.** It corrects the earlier estimate that a plate's
+energy peaks inside 5 ms, and the three rules taken from that estimate are
+gone. (The section above headed "Plate -- not a room" describes that
+superseded table; its figures are history.)
+
+**The crash that stopped the last session.** `taps --reseed 4 1 3`
+segfaulted because the forced order-0 arrivals plus the 21 slices could admit
+more than 21 core taps, so a channel was written past its 48 slots. Now the
+slices stop at 21. Any slot count other than 48 fails loudly (stage 4), and so
+does an empty free-time list for the infill (stage 3). `measure_reverb` exits
+non-zero in both cases, and I did not see it crash on any seed.
+
+**The table.** The lattice gives the tap times: every path arrives once per
+band at that band's group speed. The levels follow a per-band rise-and-fall
+envelope fitted to the measurement. Band one-poles are 12 k / 4 k / 1.5 k /
+600 Hz. The right pickup hears a split wave later and no louder. The 500 Hz
+band is offset 4-6 ms and split at every VARIATION. The 2 kHz band is offset
+about 1 ms, at the VARIATION ladder's discretion. The 8 kHz band has no
+offset. The 125 Hz band has no imposed offset, because the measurement is not
+reliable there. Window 45 ms, seed 184, the first seed from 1 that passes.
+
+**Against every measured range** (default SIZE and density; figures at
+VARIATION 2, margins the worst over every channel of VARIATION 0-5):
+
+| rule (asserted) | measured range | table | margin |
+|---|---|---|---|
+| onset: first tap <= 2 ms | within ~2 ms | 0.67 ms | 1.33 ms |
+| front: inside 5 ms <= 4 % of the first 100 ms | 0.1-4 % | 2.17 % | 0.018 |
+| swell peak (2 ms windows) at 10-25 ms | 10-25 ms | 17 ms | 5.0 ms |
+| swell rise over the 0-5 ms level >= 8 dB | 10-13 dB | 13.2 dB | 5.17 dB |
+| band onsets highs first, 8 kHz <= 4 ms, 500 Hz 8-16 ms | see below | in order | 0.09 ms (thin: a right-channel 500 Hz onset near 16 ms) |
+| 500 Hz: right 3-7 ms later | 3.6-6.4 ms | +4.17 ms | 1.17 ms |
+| -15.3 dB tap ceiling | -- | -20.1 dB loudest | 4.83 dB |
+| gamma >= 0 at VARIATION 0-5 | -- | 0.629 ... 0.160 | 0.116 |
+
+| band | measured onset | onset L / R | R - L | measured R - L |
+|---|---|---|---|---|
+| 8 kHz (band 0) | ~2.5 ms | 2.17 / 2.17 ms | 0.00 | 0 (4-8 kHz) |
+| 2 kHz (band 1) | ~10 ms | 6.71 / 6.71 ms | 0.00 at VARIATION 2 | -0.2 to 1.1 (2 kHz); 0.8-1.4 (1 kHz) |
+| 500 Hz (band 2) | ~13 ms | 11.74 / 15.91 ms | +4.17 | 3.6-6.4 |
+| 125 Hz (band 3) | ~18 ms | 21.82 / 21.82 ms | 0.00 | not reliable |
+
+Things to know:
+- The 2 kHz onset is earlier than measured: 6.7 against about 10 ms. Nothing
+  asserts it.
+- The 2 kHz band's L/R offset is 0 at VARIATION 2, because that band is split
+  only where the gamma ladder wants it. It reaches about 1 ms at the wider
+  positions.
+- Span 0.67-38.6 ms.
+- gamma at VARIATION 0 is 0.63, not the rooms' 0.95, because the 500 Hz band
+  is always split. Plate is held to gamma >= 0 only.
+- NED mixing time: not computed. There is no NED tool yet, and the ER table
+  alone is far too sparse for an NED crossing; the density comes from the
+  engine's diffuser.
+
+**Spacing.** Plate's taps are 0.25 ms apart. With the rooms' 0.9 ms, no
+seed of 1000 places the table in its 45 ms window. The arithmetic says why:
+48 taps at 0.9 ms need 42.3 ms, and the right-later offsets leave about 39 ms
+for them. So 0.9 ms would force a window of 55 ms or more, while the measured
+swell is over by 25 ms. It is a comb-spacing rule for discrete room
+reflections. A plate's taps are a dense dispersive cloud, and Plate is exempt
+from room rules (owner, 2026-09-23), so I argue it should not apply.
+
+**Pin.** Re-emitted: only Plate's section of `ErTableData.inc` changed.
+Room, Chamber, Hall, Cavern and Ambience are bit-identical, and the pin test
+regenerates all six and passes.
+
+**Non-vacuity.** One hand edit of Plate in `ErTableData.inc`, then a rebuild
+(exit 0). The edit pushed a VARIATION 1 onset to 2.3 ms, raised a 3.7 ms tap
+and a 19.4 ms tap to 0.2, relabelled VARIATION 0's 8 kHz taps as 125 Hz, and
+copied VARIATION 4's left channel into its right. Run: **every one of the six
+plate rules went red**, plus the pin, "every channel's taps ascend" and
+"exactly 21 core taps". Restored; green. The test file's Plate hand-breaks
+now target the six measured rules, one table broken per rule or pair.

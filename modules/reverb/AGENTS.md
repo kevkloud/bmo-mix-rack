@@ -1029,7 +1029,8 @@ placeholder; moving it onto these tables is integration's.
 - **Known and named, not hidden:** Cavern fails flam rule (i) by 1.5 dB at
   55 m -- a known failure the owner will decide by ear (2026-09-23), not a
   seed to search for. **Plate is not a room** (owner, 2026-09-23): no room
-  rule applies to it, it has three plate rules of its own (`ErAudit.h`), and
+  rule applies to it; it has six plate rules of its own, from 16 measured
+  EMT 140 IRs (`ErAudit.h`), and
   it is a dispersive plate lattice, not a shoebox -- do not fix it back into a
   room. Cavern and Plate go past image order 3.
   `testing-notes/linger-m2-tables-2026-09-23.md` has every figure.

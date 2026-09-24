@@ -382,7 +382,7 @@ void printAudit (int t, const ErTable& table, float directGain = 0.0f)
                  (double) ctx.density * 100.0, (double) ctx.erLevelDb);
     std::printf ("  %-28s %12s %-6s %14s\n", "rule (at default SIZE)", "margin", "unit", "at 12 m, info");
 
-    static const char* units[ergen::numRules] { "ms", "frac", "Hz", "dB", "dB", "dB", "dB", "dB", "frac", "pan", "gamma", "LF", "frac", "ms", "dB", "ms" };
+    static const char* units[ergen::numRules] { "ms", "frac", "Hz", "dB", "dB", "dB", "dB", "dB", "frac", "pan", "gamma", "LF", "frac", "ms", "frac", "ms", "dB", "ms", "ms" };
 
     for (int r = 0; r < ergen::numRules; ++r)
     {
@@ -418,17 +418,18 @@ void printAudit (int t, const ErTable& table, float directGain = 0.0f)
 
     if (ctx.isPlate)
     {
-        // Against the research; reported, not asserted (see ErAudit.h).
-        std::printf ("  plate: heard energy inside 5 ms %.1f %%; span %.2f - %.2f ms (research ~30)\n",
-                     100.0 * f.plateFrontShare, f.firstTapMs, f.lastTapMs);
+        // Against the measured EMT 140s (research doc section 8).
+        std::printf ("  plate: inside 5 ms %.2f %% of the first 100 ms (measured 0.1-4); swell peak at %.0f ms "
+                     "(10-25), %.1f dB over 0-5 ms (10-13); span %.2f - %.2f ms\n",
+                     100.0 * f.plateFrontShare, f.platePeakMs, f.plateRiseDb, f.firstTapMs, f.lastTapMs);
+
+        static const char* bandHz[kErBands] { "8 kHz", "2 kHz", "500 Hz", "125 Hz" };
+        static const char* measured[kErBands] { "~2.5", "~10", "~13", "~18" };
 
         for (int b = 0; b < kErBands; ++b)
-            std::printf ("  plate band %d (%5.1f m/s): first %6.2f ms (x%.2f of band 0; 1/sqrt f gives x%.2f), "
-                         "mean %6.2f ms, VAR 5 mean |L-R| %.2f ms\n", b, ergen::kPlateBandSpeed[b],
-                         f.plateBandFirstMs[b],
-                         f.plateBandFirstMs[0] > 0.0 ? f.plateBandFirstMs[b] / f.plateBandFirstMs[0] : 0.0,
-                         ergen::kPlateBandSpeed[0] / ergen::kPlateBandSpeed[b],
-                         f.plateBandMeanMs[b], f.plateLrMs[b]);
+            std::printf ("  plate band %d (%s): onset L %6.2f ms, R %6.2f ms, R - L %+.2f ms (measured onset %s ms)\n",
+                         b, bandHz[b], f.plateOnsetMs[0][b], f.plateOnsetMs[1][b],
+                         f.plateOnsetMs[1][b] - f.plateOnsetMs[0][b], measured[b]);
     }
 
     std::printf ("  => %s\n", rep.allPass ? "ALL PASS" : "FAILS");
@@ -555,7 +556,7 @@ int tapsCommand (int argc, char** argv)
 
         if (! ergen::generate (t, seed, table, &d))
         {
-            std::printf ("%s: seed %u could not be placed (stage %d: 0 images, 1 core, 2 infill)\n",
+            std::printf ("%s: seed %u could not be placed (stage %d: 0 images, 1 core, 2 infill, 3 no free time, 4 slot count)\n",
                          typeName (t), seed, d.failedAt);
             return 1;
         }

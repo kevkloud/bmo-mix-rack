@@ -173,9 +173,12 @@ const char* ruleName (int rule) noexcept
         case ruleGamma:      return "gamma, 7 positions";
         case ruleLateral:    return "lateral fraction";
         case ruleMoorer:     return "Moorer (Room)";
-        case rulePlateOnset: return "plate: onset <= 1 ms";
-        case rulePlateFront: return "plate: peak in 0-5 ms";
-        case rulePlateDispersion: return "plate: bands in order";
+        case rulePlateOnset:     return "plate: onset <= 2 ms";
+        case rulePlateFront:     return "plate: <= 4 % inside 5 ms";
+        case rulePlateSwellTime: return "plate: swell peak 10-25 ms";
+        case rulePlateSwellRise: return "plate: swell >= 8 dB";
+        case rulePlateBands:     return "plate: band onsets";
+        case rulePlateLr500:     return "plate: 500 Hz R later 3-7";
         default:             return "?";
     }
 }
@@ -560,113 +563,105 @@ Report auditAtSize (const ErTable& table, const AuditContext& ctx, float sizeMf)
             for (int v = 0; v < kErCombVariation; ++v)
                 lower (ruleGamma, g[v]);
 
-        double frontHeard = 0.0, allHeard = 0.0;
+        // The plate rules. Source: measured, 16 EMT 140 IRs, research doc
+        // section 8, 2026-09-23 -- see ErAudit.h. Every channel of VARIATION
+        // 0-5, at the default density, on heard energy (each tap through its
+        // band's one-pole), which is what an IR measurement sees.
+        const auto heardOf = [&] (const Heard& t)
+        {
+            const auto w = weight (t.theta, density) * t.a;
+            return w * w * kPi * t.fc;
+        };
 
-        for (int v = 0; v < kErVariations; ++v)
+        // A band's onset: when its energy reaches 10 % of its first 100 ms.
+        const auto onset = [&] (const std::vector<Heard>& taps, int b)
+        {
+            double total = 0.0, run = 0.0;
+
+            for (const auto& t : taps)
+                if (t.band == b && t.t <= 100.0)
+                    total += heardOf (t);
+
+            for (const auto& t : taps)
+                if (t.band == b && t.t <= 100.0)
+                {
+                    run += heardOf (t);
+
+                    if (run >= 0.1 * total)
+                        return t.t;
+                }
+
+            return kNone;
+        };
+
+        for (int v = 0; v < kErCombVariation; ++v)
+        {
+            double on[2][kErBands] {};
+            int side = 0;
+
             for (const auto* ch : { &table.variation[v].left, &table.variation[v].right })
             {
                 const auto taps = heard (table, *ch, sizeM);
 
-                // Instant onset.
-                lower (rulePlateOnset, 1.0 - taps.front().t);
+                lower (rulePlateOnset, 2.0 - taps.front().t);
 
-                // Front-loaded: heard energy per 5 ms window, peak in the first.
+                double first5 = 0.0, first100 = 0.0;
                 std::vector<double> e;
 
                 for (const auto& t : taps)
                 {
-                    const auto w = weight (t.theta, density) * t.a;
-                    const auto slot = (size_t) (t.t / 5.0);
+                    const auto h = heardOf (t);
+
+                    if (t.t <= 5.0)   first5 += h;
+                    if (t.t <= 100.0) first100 += h;
+
+                    const auto slot = (size_t) (t.t / 2.0);
 
                     if (e.size() <= slot)
                         e.resize (slot + 1, 0.0);
 
-                    e[slot] += w * w * kPi * t.fc;
+                    e[slot] += h;
+                }
 
-                    if (v == 2 && ch == &table.variation[v].left)
+                const auto share = first5 / first100;
+                lower (rulePlateFront, 0.04 - share);
+
+                // The swell, on 2 ms windows: when it peaks, and by how much
+                // over the 0-5 ms level (per window, so the two are comparable).
+                const auto peak = (size_t) (std::max_element (e.begin(), e.end()) - e.begin());
+                const auto peakMs = 2.0 * (double) peak + 1.0;
+                const auto rise = dbPower (e[peak] / std::max (first5 / 2.5, 1.0e-30));
+                lower (rulePlateSwellTime, std::min (peakMs - 10.0, 25.0 - peakMs));
+                lower (rulePlateSwellRise, rise - 8.0);
+
+                for (int b = 0; b < kErBands; ++b)
+                    on[side][b] = onset (taps, b);
+
+                for (int b = 1; b < kErBands; ++b)
+                    lower (rulePlateBands, on[side][b] - on[side][b - 1]);
+
+                lower (rulePlateBands, 4.0 - on[side][0]);
+                lower (rulePlateBands, std::min (on[side][2] - 8.0, 16.0 - on[side][2]));
+
+                if (v == 2)
+                {
+                    for (int b = 0; b < kErBands; ++b)
+                        fig.plateOnsetMs[side][b] = on[side][b];
+
+                    if (side == 0)
                     {
-                        allHeard += w * w * kPi * t.fc;
-                        frontHeard += t.t <= 5.0 ? w * w * kPi * t.fc : 0.0;
+                        fig.plateFrontShare = share;
+                        fig.plateRiseDb = rise;
+                        fig.platePeakMs = peakMs;
                     }
                 }
 
-                double later = 0.0;
-
-                for (size_t w = 1; w < e.size(); ++w)
-                    later = std::max (later, e[w]);
-
-                lower (rulePlateFront, later > 0.0 ? dbPower (e[0] / later) : 0.0);
-
-                // Dispersion order: each present band's first arrival after
-                // the brighter present band's.
-                double first[kErBands];
-
-                for (auto& f : first)
-                    f = kNone;
-
-                for (const auto& t : taps)
-                    first[t.band] = std::min (first[t.band], t.t);
-
-                double previous = -1.0;
-
-                for (int b = 0; b < kErBands; ++b)
-                    if (! std::isinf (first[b]))
-                    {
-                        if (previous >= 0.0)
-                            lower (rulePlateDispersion, first[b] - previous);
-
-                        previous = first[b];
-                    }
+                ++side;
             }
 
-        fig.plateFrontShare = allHeard > 0.0 ? frontHeard / allHeard : 0.0;
-
-        const auto band = [&] (const ErChannel& ch, int b)
-        {
-            std::vector<double> out;
-
-            for (const auto& t : heard (table, ch, sizeM))
-                if (t.band == b)
-                    out.push_back (t.t);
-
-            return out;
-        };
-
-        for (int b = 0; b < kErBands; ++b)
-        {
-            const auto l2 = band (table.variation[2].left, b);
-            double sum = 0.0;
-
-            for (const auto t : l2)
-                sum += t;
-
-            fig.plateBandFirstMs[b] = l2.empty() ? 0.0 : l2.front();
-            fig.plateBandMeanMs[b]  = l2.empty() ? 0.0 : sum / (double) l2.size();
-
-            // VARIATION 5, where nearly every slot is split: each left tap of
-            // the band against the right tap of the same slot -- the one with
-            // the same threshold and bearing, which a split leaves unchanged
-            // on a plate -- over the pairs that were split.
-            const auto l = heard (table, table.variation[5].left, sizeM);
-            const auto r = heard (table, table.variation[5].right, sizeM);
-            double lr = 0.0;
-            int pairs = 0;
-
-            for (const auto& x : l)
-            {
-                if (x.band != b)
-                    continue;
-
-                for (const auto& y : r)
-                    if (y.band == b && y.theta == x.theta && y.pan == x.pan && y.t != x.t)
-                    {
-                        lr += std::abs (x.t - y.t);
-                        ++pairs;
-                        break;
-                    }
-            }
-
-            fig.plateLrMs[b] = pairs > 0 ? lr / pairs : 0.0;
+            // 500 Hz is band 2: the right output's onset 3-7 ms after the left's.
+            const auto lr = on[1][2] - on[0][2];
+            lower (rulePlateLr500, std::min (lr - 3.0, 7.0 - lr));
         }
     }
 

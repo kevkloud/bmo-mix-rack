@@ -174,6 +174,28 @@ inline constexpr double kPlateMinSeparationMs = 0.25;
 inline constexpr double kPlateInfillStartMs   = 0.5;
 inline constexpr double kPlateSplitMinMs      = 0.05;
 
+/** **Plate's envelope, fitted to measurement.** Source: measured, 16 EMT 140
+    IRs, research doc section 8, 2026-09-23. A real plate's energy *rises*
+    10-13 dB to a peak at 10-25 ms and then decays; only 0.1-4 % of the
+    first 100 ms of energy lies inside 5 ms; band onsets (10 % of each band's
+    early energy) come at about 2.5 ms (8 kHz), 10 ms (2 kHz), 13 ms (500 Hz)
+    and 18 ms (125 Hz); the right output's 500 Hz onset is 3.6-6.4 ms later
+    than the left's, 1 kHz 0.8-1.4 ms, 4-8 kHz none. So each band's taps take
+    a rise-and-fall envelope, a (t / T)^k e^(k (1 - t / T)) that peaks at
+    T = kPlatePeakMs[band], at kPlateBandLevelDb[band] under kPlatePeakGain;
+    each band's one-pole sits at kPlateBandCutoffHz[band], so the four bands
+    are 8 kHz-ish, 2 kHz-ish, 500 Hz-ish and 125 Hz-ish content; and a split
+    tap puts its right arrival kPlateSplitHalfMs[band] * 2 after its left.
+    Every figure here is CALIBRATE: the measurement sets the target, not the
+    number. (An earlier estimate said a plate's energy peaks inside 5 ms; the
+    measurement corrected it.) */
+inline constexpr double kPlateBandCutoffHz[kErBands] { 12000.0, 4000.0, 1500.0, 600.0 };
+inline constexpr double kPlatePeakMs[kErBands]       { 4.0, 10.0, 14.0, 24.0 };
+inline constexpr double kPlateBandLevelDb[kErBands]  { -20.0, -4.0, 0.0, -2.0 };
+inline constexpr double kPlateRise                   = 1.5;
+inline constexpr double kPlatePeakGain               = 0.1;
+inline constexpr double kPlateSplitHalfMs[kErBands]  { 0.05, 0.5, 2.5, 0.5 };
+
 /** gamma at VARIATION 0..5: from about 0.95 to about 0.05 (10 section 3).
     Position 0 aims at the first; each later one at an equal share of what is
     left to fall. The audit measures what the table got. */
@@ -191,7 +213,7 @@ struct Diagnostics
     int    imagesConsidered;   ///< images of the recipe's orders inside the window
     int    sharedSlots[kErVariations];
     int    attemptsRejected;   ///< jitter or infill draws redrawn for separation
-    int    failedAt;           ///< when generate returns false: 0 too few images, 1 a core tap, 2 an infill pulse
+    int    failedAt;           ///< when generate returns false: 0 too few images, 1 a core tap, 2 an infill pulse, 3 no free time for the infill, 4 not 48 slots (a bug)
 };
 
 /** Build one type's table from its recipe and `seed`. Returns false when the

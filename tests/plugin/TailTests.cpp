@@ -21,7 +21,7 @@
 
     **The rack clamps its total at thirty seconds too**, as of 2026-09-21, so
     the product has one rule instead of two. The sum is still what a chain
-    under the ceiling reports -- the 8.6223 s two-slot figure is asserted after
+    under the ceiling reports -- the 8.581 s two-slot figure is asserted after
     the clamp as well as before it -- and what the clamp stops is the case the
     slot limit does not: eight BMO Lingers, each honestly reporting its own
     thirty, rendering four minutes of silence onto the end of every offline
@@ -372,7 +372,7 @@ int main()
         apply (rack->getEngineAt (1)->params(), kLong);
         rack->prepareToPlay (kRate, kBlock);
         checkClose (rack->getTailLengthSeconds(), kSummedTail, 1.0e-4,
-                    "8.6223 s is under the ceiling and is still reported as the sum");
+                    "8.581 s is under the ceiling and is still reported as the sum");
 
         // And the rack's ceiling is the module's ceiling, read from the one
         // place it is decided rather than from a second 30.0 written here.

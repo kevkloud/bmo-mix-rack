@@ -130,10 +130,11 @@ struct Line
     std::optional<Ground> light {}, dark {};
 
     /** The finish this line's plate takes in the Textured surface when the
-        user has left the choice to the line (`FinishChoice::house`). BMO is
-        brushed and the collaborations are powder -- Frosty, 2026-09-25. A
-        finish is ground, not ink, so it is the line's to set; Simple ignores
-        it altogether. */
+        user has left the choice to the line (`FinishChoice::house`). Every
+        line is brushed today: the collaborations were powder for an hour on
+        2026-09-25 and Frosty sent LTV Comp back to brushed on seeing it in a
+        rack. The field stays because a finish is ground, not ink, so it is a
+        line's to set if a later one wants its own. Simple ignores it. */
     PlateFinish finish = PlateFinish::brushed;
 
     bool ownsGround() const noexcept { return light.has_value() && dark.has_value(); }

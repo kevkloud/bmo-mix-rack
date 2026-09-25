@@ -34,7 +34,8 @@ public:
         `ringed` is a skirt with a turning grip and a cap on it; `onePiece` is
         a single cap with a chamfered rim. `automatic`, the default, defers to
         the panel's section tag (ModulePanel::tagTextured) and then to the
-        knob's style -- see texturedFormFor for the order. */
+        knob's drawn size -- see texturedFormFor for the order. Input, output
+        and volume are tagged one-piece; nothing else needs a tag. */
     enum class TexturedForm { automatic, ringed, onePiece };
 
     void setTexturedForm (TexturedForm f) noexcept { texturedForm = f; }
@@ -159,9 +160,12 @@ private:
 //==============================================================================
 /** The form a knob takes in the Textured surface, resolved: the knob's own
     tag, else the nearest enclosing section's (ModulePanel::tagTextured), else
-    ringed for a character knob and one-piece for everything else. Never
-    `automatic`. */
+    its size -- one-piece at `Tokens::onePieceMaxRadius` or smaller, ringed
+    above. Never `automatic`. */
 Knob::TexturedForm texturedFormFor (const Knob&);
+
+/** The radius a knob's cap is drawn at, in design pixels. */
+float capRadiusOf (const Knob&);
 
 //==============================================================================
 class BmoLookAndFeel final : public juce::LookAndFeel_V4

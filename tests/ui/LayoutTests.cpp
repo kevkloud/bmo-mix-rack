@@ -39,11 +39,13 @@
 #include "products/util/Product.h"
 #include "products/rack/Product.h"
 
+#include "core/ui/LookAndFeel.h"
 #include "core/ui/ModulePanel.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <algorithm>
 #include <iostream>
+#include <map>
 #include <vector>
 
 namespace
@@ -114,6 +116,28 @@ juce::Component* findNamed (juce::Component& root, const juce::String& name)
     }
 
     return nullptr;
+}
+
+/** Every knob drawn as a knob under `root`, with the caption of the nearest
+    named control above it -- a PlainKnob's, or a ConcentricBand's for the
+    gain inside a band. A selector ring is a ring in both surfaces, so it is
+    left out. */
+void collectTexturedKnobs (juce::Component& root, std::vector<std::pair<juce::String, bmo::ui::Knob*>>& out)
+{
+    for (auto* child : root.getChildren())
+    {
+        if (auto* knob = dynamic_cast<bmo::ui::Knob*> (child);
+            knob != nullptr && knob->getStyle() != bmo::ui::Knob::Style::ring)
+        {
+            juce::String name;
+            for (auto* p = child->getParentComponent(); p != nullptr && name.isEmpty(); p = p->getParentComponent())
+                name = p->getName();
+
+            out.emplace_back (name, knob);
+        }
+
+        collectTexturedKnobs (*child, out);
+    }
 }
 
 /** Every PlainKnob under `root`. */
@@ -3380,6 +3404,63 @@ int main (int argc, char** argv)
 
     withPanel (named ("deq"), [] (bmo::ui::ModulePanel& panel) { checkEquals (panel.getWidth(), 600, "deq opens full standalone"); });
     withPanel (named ("deq compact"), [] (bmo::ui::ModulePanel& panel) { checkEquals (panel.getWidth(), 320, "deq compact width"); });
+
+    //== Textured knob forms ================================================
+    //
+    // Frosty, 2026-09-25: input, output and volume are one-piece; every other
+    // knob is one-piece at BMO FET's ATTACK and RELEASE size or smaller and
+    // ringed above it. The size rule decides without a tag, so these hold it
+    // to the three things that could go wrong without anyone noticing: a
+    // trim that lost its tag, a knob that changes form between a module's two
+    // widths, and a knob sitting so close to the line that a pixel of relayout
+    // would flip it.
+    {
+        using Form = bmo::ui::Knob::TexturedForm;
+        const auto formName = [] (Form f) { return f == Form::ringed ? "ringed" : "one-piece"; };
+
+        std::map<juce::String, std::map<juce::String, Form>> formsByProduct;
+
+        for (const auto& product : all)
+            withPanel (product, [&] (bmo::ui::ModulePanel& panel)
+            {
+                std::vector<std::pair<juce::String, bmo::ui::Knob*>> knobs;
+                collectTexturedKnobs (panel, knobs);
+
+                for (const auto& [name, knob] : knobs)
+                {
+                    const auto who = juce::String (product.who) + " " + name;
+                    const auto form = bmo::ui::texturedFormFor (*knob);
+                    formsByProduct[product.who][name] = form;
+
+                    if (name == "INPUT" || name == "OUTPUT" || name == "VOLUME")
+                        check (form == Form::onePiece, who + " is one-piece: input, output and volume always are");
+
+                    if (knob->getTexturedForm() == Form::automatic)
+                    {
+                        const auto r = bmo::ui::capRadiusOf (*knob);
+                        check (std::abs (r - bmo::ui::Tokens::onePieceMaxRadius) >= 0.25f,
+                               who + "'s cap is " + juce::String (r, 2) + " px, within a quarter pixel of the "
+                                   + juce::String (bmo::ui::Tokens::onePieceMaxRadius, 1)
+                                   + " px one-piece line -- move it, or tag it");
+                    }
+                }
+            });
+
+        for (const auto* name : { "ATTACK", "RELEASE" })
+            check (formsByProduct["fetcomp"][name] == Form::onePiece,
+                   juce::String ("fetcomp ") + name + " is one-piece: it is the size the rule is written against");
+
+        const auto& full    = formsByProduct["deq"];
+        const auto& compact = formsByProduct["deq compact"];
+
+        check (! full.empty() && full.size() == compact.size(), "deq shows the same knobs at both widths");
+
+        for (const auto& [name, form] : full)
+            if (const auto other = compact.find (name); other != compact.end())
+                check (other->second == form,
+                       "deq " + name + " is " + formName (form) + " expanded and "
+                           + formName (other->second) + " compact -- a knob keeps its form across widths");
+    }
 
     // BMO Linger: the paged handheld, walked once per page, plus the bezel,
     // the keys, the grille and the screen's own arithmetic -- none of which

@@ -129,6 +129,11 @@ DeqPanel::DeqPanel (ui::ModuleContext ctx)
     for (auto* c : std::initializer_list<juce::Component*> { &curve, &tabs, &reduction, &active, &autoGain, &output })
         addAndMakeVisible (c);
 
+    // Input, output and volume are one-piece in the Textured surface whatever
+    // their size: they set a level rather than voice the module. Frosty,
+    // 2026-09-25. Everything else follows the size rule in texturedFormFor.
+    output.setTexturedForm (ui::Knob::TexturedForm::onePiece);
+
     bindBand();
 
     // Every child's mouse-ups and wheels, for clampShelfQ.

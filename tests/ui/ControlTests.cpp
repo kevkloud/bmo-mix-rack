@@ -247,9 +247,9 @@ int main()
     //== The surface: Simple by default, the line's finish, the knob's form ===
     //
     // Frosty, 2026-09-25: the plugins as they are are "Simple" and the
-    // default. Textured takes brushed on BMO and powder on the collaborations
+    // default. Textured takes the line's finish -- brushed on every line --
     // unless the user picks one for everything. In Textured, each knob's form
-    // comes from its own tag, then its section's, then its style.
+    // comes from its own tag, then its section's, then its drawn size.
     {
         using namespace bmo::ui;
 
@@ -258,7 +258,7 @@ int main()
 
         overrideSurface (Surface::textured, FinishChoice::house);
         check (finishFor (bmoLine()) == PlateFinish::brushed, "BMO's house finish is brushed");
-        check (finishFor (ltvLine()) == PlateFinish::powder,  "the collaborations' house finish is powder");
+        check (finishFor (ltvLine()) == PlateFinish::brushed, "the collaborations' house finish is brushed too");
 
         overrideSurface (Surface::textured, FinishChoice::powder);
         check (finishFor (bmoLine()) == PlateFinish::powder,  "powder everywhere reaches BMO");
@@ -271,14 +271,32 @@ int main()
         juce::Component section, inner;
         section.addChildComponent (inner);
 
-        Knob character, utility, filter;
-        character.setStyle (Knob::Style::character);
-        utility.setStyle (Knob::Style::utility);
-        filter.setStyle (Knob::Style::filter);
+        // By size: the cap radius is the knob's shorter side, halved, times
+        // its face scale. BMO FET's ATTACK is 15.33 and is one-piece; the
+        // line is Tokens::onePieceMaxRadius, 16.5, and the style plays no
+        // part -- a small character knob is one-piece, a large trim ringed.
+        checkNear ((double) Tokens::onePieceMaxRadius, 16.5, 1.0e-6, "the one-piece line is 16.5 px of cap radius");
 
-        check (texturedFormFor (character) == Knob::TexturedForm::ringed,   "an untagged character knob is ringed");
-        check (texturedFormFor (utility)   == Knob::TexturedForm::onePiece, "an untagged utility knob is one-piece");
-        check (texturedFormFor (filter)    == Knob::TexturedForm::onePiece, "an untagged filter knob is one-piece");
+        Knob character, small, large;
+        character.setStyle (Knob::Style::character);
+        small.setStyle (Knob::Style::character);
+        large.setStyle (Knob::Style::utility);
+
+        character.setSize (100, 100);
+        character.setFaceScale (0.62f);            // 31.0, BMO FET's INPUT
+        small.setSize (46, 46);
+        small.setFaceScale (2.0f / 3.0f);          // 15.33, BMO FET's ATTACK
+        large.setSize (40, 40);
+        large.setFaceScale (0.85f);                // 17.0
+
+        checkNear ((double) capRadiusOf (small), 15.333, 1.0e-3, "a 46 px knob at 2/3 has a 15.33 px cap");
+        check (texturedFormFor (character) == Knob::TexturedForm::ringed,   "a 31 px cap is ringed");
+        check (texturedFormFor (small)     == Knob::TexturedForm::onePiece, "a character knob at FET ATTACK's size is one-piece");
+        check (texturedFormFor (large)     == Knob::TexturedForm::ringed,   "a 17 px trim is ringed");
+
+        Knob edge;
+        edge.setSize (33, 33);                     // 16.5 exactly
+        check (texturedFormFor (edge) == Knob::TexturedForm::onePiece, "exactly on the line is one-piece: 'the same size or smaller'");
 
         // A section tag reaches a knob however deep it sits in the section.
         inner.addChildComponent (character);

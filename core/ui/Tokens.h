@@ -398,6 +398,19 @@ struct Tokens
     static constexpr float knobStroke   = 2.2f;
     static constexpr float trackGap     = 10.0f;   ///< face edge to the dotted track
 
+    /** In the Textured surface, an untagged knob whose cap is this radius or
+        smaller is drawn one-piece; a larger one is ringed. Design pixels, so
+        it does not move with the window's scale.
+
+        Frosty, 2026-09-25: "all knobs the same size or smaller than FET's
+        attack/release knobs should be one piece". Those are 15.33. The line
+        sits half way between BMO DEQ's small knobs -- 16.0 expanded, 15.0
+        compact -- and its THRESH and RANGE at their smallest, 17.0 in a rack,
+        so no knob in the suite changes form between a module's two widths.
+        `ui_layout_tests` holds that, and keeps every knob a quarter of a pixel
+        clear of the line so a relayout cannot tip one over it unnoticed. */
+    static constexpr float onePieceMaxRadius = 16.5f;
+
     /** Ring edge to the dotted track, for a gain that sits inside a selector.
 
         Tighter than `trackGap` because the space is not the same space. A
@@ -526,9 +539,8 @@ enum class Surface { simple, textured };
 /** The finish a textured plate is given. */
 enum class PlateFinish { brushed, powder };
 
-/** What the user chose for the finish: the line's own (`house` -- brushed on
-    BMO, powder on the collaborations; see Line::finish) or one for every
-    plugin. */
+/** What the user chose for the finish: the line's own (`house`; see
+    Line::finish -- brushed on every line today) or one for every plugin. */
 enum class FinishChoice { house, brushed, powder };
 
 Surface surface() noexcept;

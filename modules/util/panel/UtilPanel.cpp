@@ -64,6 +64,11 @@ UtilPanel::UtilPanel (ui::ModuleContext ctx)
              &gain, &pan, &width, &phaseL, &phaseR, &mono })
         addAndMakeVisible (c);
 
+    // Input, output and volume are one-piece in the Textured surface whatever
+    // their size: they set a level rather than voice the module. Frosty,
+    // 2026-09-25. Everything else follows the size rule in texturedFormFor.
+    gain.setTexturedForm (ui::Knob::TexturedForm::onePiece);   // VOLUME
+
     // No setKnobSide here. Tokens::gainKnobSide caps INPUT and OUTPUT at the
     // one size BMO EQ's column can afford; this knob is not one of those and
     // takes the room its own row gives it.

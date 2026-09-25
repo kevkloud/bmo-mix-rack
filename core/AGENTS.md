@@ -109,10 +109,13 @@ rack/     SlotParameter (one generic host parameter, remapped live),
   press in, rules, brackets and buses engraved. It is a machine-wide
   preference in `UI.json` beside the appearance (`ui::surface`), never a
   parameter. It may change **no colour, size or position**: anything that
-  would is not a surface. A line's house finish is `Line::finish` (BMO
-  brushed, collaborations powder). A knob's textured form comes from its tag
+  would is not a surface. A line's house finish is `Line::finish` (brushed
+  on every line). A knob's textured form comes from its tag
   (`setTexturedForm`), then its section's (`ModulePanel::tagTextured`), then
-  its style -- a new knob should be tagged, not left to the fallback. A line
+  its drawn size: one-piece at `Tokens::onePieceMaxRadius` or smaller, ringed
+  above. **Tag every input, output and volume knob one-piece**; leave the
+  rest to size. `ui_layout_tests` fails a trim without its tag and a knob
+  that sits on the line or changes form between a module's widths. A line
   a panel draws into the plate goes through `BmoLookAndFeel::fillEngraved`.
   `docs/ui-material-proposal.md` has the design, the costs and the knob
   allocation table.

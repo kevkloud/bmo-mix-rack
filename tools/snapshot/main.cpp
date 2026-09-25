@@ -777,8 +777,11 @@ int main (int argc, char** argv)
                 const auto form = bmo::ui::texturedFormFor (*k) == bmo::ui::Knob::TexturedForm::ringed
                                       ? "ringed" : "one-piece";
 
+                const auto radius = (float) juce::jmin (k->getWidth(), k->getHeight()) * 0.5f * k->getFaceScale();
+
                 std::cout << "knob\t" << module << "\t" << (label.isEmpty() ? juce::String ("?") : label)
-                          << "\t" << style << "\t" << form << "\t" << source << "\n";
+                          << "\t" << style << "\t" << form << "\t" << source
+                          << "\t" << juce::String (radius, 2) << "\n";
             }
 
             for (auto* child : c.getChildren())

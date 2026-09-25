@@ -10,8 +10,9 @@ against `main`. **Textured** is chosen by the user.
 - Code-drawn (option A below), at the prototype's intensity.
 - Simple is the default and is today's look, knobs included.
 - Textured is the user's choice. Its plate finish is the line's own unless
-  the user picks one for everything: **BMO brushed, the collaborations
-  powder**.
+  the user picks one for everything. **Brushed on every line**: the
+  collaborations were powder for an hour, until Frosty saw LTV Comp in a
+  rack.
 - Divider lines and the bracket and bus lines are laser engraved in Textured.
 - In Textured, each knob's form — ringed or one-piece — is set by a **tag**,
   per knob or per section.
@@ -28,7 +29,8 @@ preference now writes both, so choosing dark mode no longer drops the
 surface.
 
 **The finish.** `Line::finish` is each line's house finish; `ui::finishFor`
-resolves it against the user's choice.
+resolves it against the user's choice. Every line is brushed: LTV was powder
+briefly and Frosty sent it back to brushed on seeing it in a rack.
 
 **The knob tags.** In Textured, `ui::texturedFormFor` resolves a knob's form
 in this order:
@@ -37,8 +39,8 @@ in this order:
 2. `ModulePanel::tagTextured ({ ... }, form)` — the nearest tagged section
    above the knob. Pass knobs, a ConcentricBand, a container, or the panel
    itself for a panel-wide default.
-3. The style: a **character** knob is ringed; a **utility** or **filter** knob
-   is one-piece.
+3. Its size: one-piece at `Tokens::onePieceMaxRadius` (16.5 px of cap
+   radius) or smaller, ringed above. See the allocation below.
 
 Simple ignores all of it.
 
@@ -50,73 +52,89 @@ its resolved form and where the form came from.
 
 ## Knob allocation
 
-No knob carries a tag yet, so every form below comes from step 3. This is
-the table to mark up: change a row and it becomes a `setTexturedForm` on
-that knob, or a `tagTextured` on its section. Listed with
-`BMO_LIST_KNOBS=1`, standalone views. BMO Tune RT has its own editor and is
-not covered here.
+**The rule (Frosty, 2026-09-25):** input, output and volume knobs are
+one-piece. Every other knob is one-piece if its cap is the size of BMO FET's
+ATTACK and RELEASE (15.33 px radius) or smaller, and ringed if it is larger.
 
-| Module | Knob | Style | Textured form |
-|---|---|---|---|
-| BMO CEQ | INPUT | utility | one-piece |
-| BMO CEQ | HIGH | character | ringed |
-| BMO CEQ | MID | character | ringed |
-| BMO CEQ | LOW | character | ringed |
-| BMO CEQ | LO-CUT | filter | one-piece |
-| BMO CEQ | OUTPUT | utility | one-piece |
-| BMO Saturator | INPUT | utility | one-piece |
-| BMO Saturator | DRIVE | character | ringed |
-| BMO Saturator | TONE | character | ringed |
-| BMO Saturator | MIX | character | ringed |
-| BMO Saturator | OUTPUT | utility | one-piece |
-| BMO Util | VOLUME | character | ringed |
-| BMO Util | PAN | character | ringed |
-| BMO Util | WIDTH | character | ringed |
-| BMO Opto | COMP | character | ringed |
-| BMO Opto | MAKEUP | character | ringed |
-| BMO Dimension | DETUNE | character | ringed |
-| BMO Dimension | DRIFT | character | ringed |
-| BMO Dimension | DIMENSION | character | ringed |
-| BMO Dimension | BLOOM | character | ringed |
-| BMO Dimension | BELOW | character | ringed |
-| BMO Dimension | TURN | character | ringed |
-| BMO Dimension | TILT | character | ringed |
-| BMO DEQ | OUTPUT | utility | one-piece |
-| BMO DEQ | SHAPE | filter | one-piece |
-| BMO DEQ | FREQ | character | ringed |
-| BMO DEQ | GAIN | character | ringed |
-| BMO DEQ | Q | character | ringed |
-| BMO DEQ | THRESH | character | ringed |
-| BMO DEQ | RANGE | character | ringed |
-| BMO DEQ | RATIO | character | ringed |
-| BMO DEQ | ATTACK | character | ringed |
-| BMO DEQ | RELEASE | character | ringed |
-| LTV Comp | AMOUNT | character | ringed |
-| LTV Comp | MAKEUP | character | ringed |
-| LTV Comp | ATTACK | utility | one-piece |
-| LTV Comp | RELEASE | utility | one-piece |
-| LTV Comp | DETECT | utility | one-piece |
-| LTV Comp | LOW | utility | one-piece |
-| LTV Comp | HIGH | utility | one-piece |
-| BMO Defang | FREQ | character | ringed |
-| BMO Defang | Q | character | ringed |
-| BMO Defang | THRESH | character | ringed |
-| BMO Defang | RANGE | character | ringed |
-| BMO FET | INPUT | character | ringed |
-| BMO FET | OUTPUT | character | ringed |
-| BMO FET | ATTACK | character | ringed |
-| BMO FET | RELEASE | character | ringed |
-| BMO FET | MIX | utility | one-piece |
-| BMO Linger | DECAY | character | ringed |
-| BMO Linger | DENSITY | character | ringed |
-| BMO Linger | ER SPREAD | character | ringed |
-| BMO Linger | ER HI-CUT | character | ringed |
-| BMO Linger | VARIATION | character | ringed |
-| BMO Linger | SOURCE | character | ringed |
-| BMO Linger | SIZE | character | ringed |
+**How it is built:** the size half is automatic. `texturedFormFor` measures
+the cap as it is drawn, in design pixels so window scaling doesn't move it,
+against `Tokens::onePieceMaxRadius`. So a new knob gets its form with nobody
+deciding. The line is **16.5 px, not 15.33**: BMO DEQ's ATTACK, RATIO and
+RELEASE are 16.0 expanded and 15.0 compact. A line at FET's exact size would
+make them ringed standalone and one-piece in a rack, and SHAPE would do the
+same. 16.5 sits halfway between those (16.0) and the smallest knob that
+should be ringed, DEQ's THRESH and RANGE at 17.0 in a rack. The other half is
+a tag: the nine INPUT, OUTPUT and VOLUME knobs carry
+`setTexturedForm (onePiece)`, because FET's INPUT and OUTPUT (31.0) and
+Util's VOLUME (28.5) would otherwise be ringed by size.
 
-The band gains inside BMO CEQ's selector rings are character knobs and are
-ringed; a ring's own selector is drawn as a ring in both surfaces.
+`ui_layout_tests` holds all of it: input, output and volume one-piece; FET's
+ATTACK and RELEASE one-piece; no DEQ knob changing form between widths; and
+no untagged knob within a quarter pixel of the line, so a relayout cannot
+tip one over it unnoticed. Moving the line to FET's exact 15.33 fails six of
+those checks, which is how the test was proven.
+
+Resolved, standalone views, from `BMO_LIST_KNOBS=1` (Linger lists the knobs
+on its first page; its OUTPUT is tagged too):
+
+| Module | Knob | Cap radius (px) | Textured form | Decided by |
+|---|---|---|---|---|
+| BMO CEQ | INPUT | 14.00 | one-piece | tag |
+| BMO CEQ | HIGH | 13.59 | one-piece | size |
+| BMO CEQ | MID | 13.59 | one-piece | size |
+| BMO CEQ | LOW | 13.59 | one-piece | size |
+| BMO CEQ | LO-CUT | 13.47 | one-piece | size |
+| BMO CEQ | OUTPUT | 14.00 | one-piece | tag |
+| BMO Saturator | INPUT | 14.00 | one-piece | tag |
+| BMO Saturator | DRIVE | 60.06 | ringed | size |
+| BMO Saturator | TONE | 27.37 | ringed | size |
+| BMO Saturator | MIX | 27.37 | ringed | size |
+| BMO Saturator | OUTPUT | 14.00 | one-piece | tag |
+| BMO Util | VOLUME | 28.50 | one-piece | tag |
+| BMO Util | PAN | 28.50 | ringed | size |
+| BMO Util | WIDTH | 28.50 | ringed | size |
+| BMO Opto | COMP | 28.52 | ringed | size |
+| BMO Opto | MAKEUP | 28.52 | ringed | size |
+| BMO Dimension | DETUNE | 19.84 | ringed | size |
+| BMO Dimension | DRIFT | 19.84 | ringed | size |
+| BMO Dimension | DIMENSION | 45.88 | ringed | size |
+| BMO Dimension | BLOOM | 19.84 | ringed | size |
+| BMO Dimension | BELOW | 19.84 | ringed | size |
+| BMO Dimension | TURN | 19.84 | ringed | size |
+| BMO Dimension | TILT | 19.84 | ringed | size |
+| BMO DEQ | OUTPUT | 14.00 / 14.00 compact | one-piece | tag |
+| BMO DEQ | SHAPE | 15.93 / 13.30 compact | one-piece | size |
+| BMO DEQ | FREQ | 23.87 / 18.00 compact | ringed | size |
+| BMO DEQ | GAIN | 23.87 / 18.00 compact | ringed | size |
+| BMO DEQ | Q | 23.87 / 18.00 compact | ringed | size |
+| BMO DEQ | THRESH | 19.50 / 17.00 compact | ringed | size |
+| BMO DEQ | RANGE | 19.50 / 17.00 compact | ringed | size |
+| BMO DEQ | RATIO | 16.00 / 15.00 compact | one-piece | size |
+| BMO DEQ | ATTACK | 16.00 / 15.00 compact | one-piece | size |
+| BMO DEQ | RELEASE | 16.00 / 15.00 compact | one-piece | size |
+| LTV Comp | AMOUNT | 28.52 | ringed | size |
+| LTV Comp | MAKEUP | 28.52 | ringed | size |
+| LTV Comp | ATTACK | 14.00 | one-piece | size |
+| LTV Comp | RELEASE | 14.00 | one-piece | size |
+| LTV Comp | DETECT | 14.00 | one-piece | size |
+| LTV Comp | LOW | 14.00 | one-piece | size |
+| LTV Comp | HIGH | 14.00 | one-piece | size |
+| BMO Defang | FREQ | 26.04 | ringed | size |
+| BMO Defang | Q | 26.04 | ringed | size |
+| BMO Defang | THRESH | 26.04 | ringed | size |
+| BMO Defang | RANGE | 26.04 | ringed | size |
+| BMO FET | INPUT | 31.00 | one-piece | tag |
+| BMO FET | OUTPUT | 31.00 | one-piece | tag |
+| BMO FET | ATTACK | 15.33 | one-piece | size |
+| BMO FET | RELEASE | 15.33 | one-piece | size |
+| BMO FET | MIX | 14.00 | one-piece | size |
+| BMO Linger | DECAY | 13.80 | one-piece | size |
+| BMO Linger | DENSITY | 13.80 | one-piece | size |
+| BMO Linger | ER SPREAD | 13.80 | one-piece | size |
+| BMO Linger | ER HI-CUT | 13.80 | one-piece | size |
+| BMO Linger | VARIATION | 13.80 | one-piece | size |
+| BMO Linger | SOURCE | 13.80 | one-piece | size |
+| BMO Linger | SIZE | 13.80 | one-piece | size |
 
 ## The ask
 
@@ -246,9 +264,8 @@ nothing blurs at 150 % or on a Retina display.
 - **Decide the character** (below).
 - The **selector ring** on BMO EQ's bands, **ChoiceBox** dropdowns, the
   **preset strip's TextButtons** and the **header** are untouched.
-- A **metal treatment for LTV's silver line** — brushed rather than powder —
+- A **metal treatment of its own for LTV's silver line**, if it wants one,
   is one more tile and a line field.
-- **Tag the knobs** from the table above.
 - **Move the material code out of `LookAndFeel.cpp`** into a `ui/Material.*`,
   with its constants as non-themable tokens (like `corner` and `knobStroke`).
 - The contrast test above, and `ui_layout_tests` run on the material build.
@@ -257,9 +274,12 @@ nothing blurs at 150 % or on a Retina display.
 
 ## For Frosty to decide
 
-1. **The knob allocation**, above.
-2. **Whether LTV's silver keeps powder** once it has been seen in a rack
-   beside brushed BMO panels.
+1. **The 16.5 px line** rather than FET's exact 15.33, for the DEQ reason
+   above. The alternative is FET's exact size with DEQ's four knobs tagged by
+   hand.
+2. **MAKEUP** on BMO Opto and LTV Comp sets a level too, but it isn't input,
+   output or volume, so it is ringed by size. Tag it one-piece if it should
+   go with the trims.
 
 ## How to see it
 

@@ -195,6 +195,14 @@ namespace material
 
 bool BmoLookAndFeel::textured() { return material::enabled(); }
 
+float capRadiusOf (const Knob& knob)
+{
+    // The radius drawRotarySlider draws the cap at. The component's own size,
+    // in design pixels: the editor scales the whole panel with a transform,
+    // which never reaches a component's bounds.
+    return (float) juce::jmin (knob.getWidth(), knob.getHeight()) * 0.5f * knob.getFaceScale();
+}
+
 void BmoLookAndFeel::overrideKnobForm (Knob::TexturedForm form) { material::forcedForm = form; }
 
 Knob::TexturedForm texturedFormFor (const Knob& knob)
@@ -204,10 +212,9 @@ Knob::TexturedForm texturedFormFor (const Knob& knob)
     if (material::forcedForm != Knob::TexturedForm::automatic)
         return material::forcedForm;
 
-    // The knob's own tag, then its section's, then its style. A character
-    // knob is the module's voice and gets the ringed form; a trim, a filter
-    // or anything else gets the one-piece cap. That is only the fallback for
-    // an untagged knob -- the tags are where the decision is meant to live.
+    // The knob's own tag, then its section's, then its size. Input, output
+    // and volume carry tags; everything else is decided by how large its cap
+    // is drawn, so a new knob gets the right form without anyone deciding.
     if (knob.getTexturedForm() != Knob::TexturedForm::automatic)
         return knob.getTexturedForm();
 
@@ -219,8 +226,8 @@ Knob::TexturedForm texturedFormFor (const Knob& knob)
             return (Knob::TexturedForm) tag;
     }
 
-    return knob.getStyle() == Knob::Style::character ? Knob::TexturedForm::ringed
-                                                     : Knob::TexturedForm::onePiece;
+    return capRadiusOf (knob) <= Tokens::onePieceMaxRadius ? Knob::TexturedForm::onePiece
+                                                          : Knob::TexturedForm::ringed;
 }
 
 void BmoLookAndFeel::paintPlateFinish (juce::Graphics& g, juce::Rectangle<int> area, PlateFinish finish)

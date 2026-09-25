@@ -1467,6 +1467,11 @@ ReverbPanel::ReverbPanel (ui::ModuleContext ctx)
 
     //== The controls =========================================================
 
+    // Input, output and volume are one-piece in the Textured surface whatever
+    // their size: they set a level rather than voice the module. Frosty,
+    // 2026-09-25. Everything else follows the size rule in texturedFormFor.
+    outputKnob.setTexturedForm (ui::Knob::TexturedForm::onePiece);
+
     for (auto* k : { &densityKnob, &erSpreadKnob, &erHiCutKnob, &variationKnob, &feedKnob, &sizeKnob,
                      &preDelayKnob, &widthKnob, &modRateKnob, &dampLoKnob, &dampHiKnob, &modDepthKnob,
                      &inHiCutKnob, &outputKnob, &decayKnob })

@@ -91,7 +91,6 @@ const Line& ltvLine()
                        juce::Colour (0xff27272b),    // well
                        nearBlack,                    // cap
                        darkInk },                    // ink
-        PlateFinish::powder,
     };
 
     return line;

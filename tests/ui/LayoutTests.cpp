@@ -3408,7 +3408,7 @@ int main (int argc, char** argv)
     //== Textured knob forms ================================================
     //
     // Frosty, 2026-09-25: input, output and volume are one-piece; every other
-    // knob is one-piece at BMO FET's ATTACK and RELEASE size or smaller and
+    // knob is one-piece at BMO Dimension's non-hero size or smaller and
     // ringed above it. The size rule decides without a tag, so these hold it
     // to the three things that could go wrong without anyone noticing: a
     // trim that lost its tag, a knob that changes form between a module's two
@@ -3446,9 +3446,25 @@ int main (int argc, char** argv)
                 }
             });
 
-        for (const auto* name : { "ATTACK", "RELEASE" })
-            check (formsByProduct["fetcomp"][name] == Form::onePiece,
-                   juce::String ("fetcomp ") + name + " is one-piece: it is the size the rule is written against");
+        // The size the rule is written against: BMO Dimension's non-hero
+        // knobs are one-piece, its hero is ringed.
+        for (const auto* name : { "DETUNE", "DRIFT", "BLOOM", "BELOW", "TURN", "TILT" })
+            check (formsByProduct["dim"][name] == Form::onePiece,
+                   juce::String ("dim ") + name + " is one-piece: it is the size the rule is written against");
+
+        check (formsByProduct["dim"]["DIMENSION"] == Form::ringed, "dim DIMENSION, the hero, is ringed");
+
+        // MAKEUP is not input, output or volume (Frosty, 2026-09-25), so it
+        // goes by size -- and at 28.5 px it is ringed.
+        for (const auto* who : { "opto", "ltvcomp" })
+            check (formsByProduct[who]["MAKEUP"] == Form::ringed,
+                   juce::String (who) + " MAKEUP goes by size and is ringed");
+
+        // BMO DEQ's band controls carry a ringed tag: by size they would be
+        // ringed expanded and one-piece compact.
+        for (const auto* name : { "FREQ", "GAIN", "Q" })
+            check (formsByProduct["deq"][name] == Form::ringed && formsByProduct["deq compact"][name] == Form::ringed,
+                   juce::String ("deq ") + name + " is ringed at both widths");
 
         const auto& full    = formsByProduct["deq"];
         const auto& compact = formsByProduct["deq compact"];

@@ -402,14 +402,15 @@ struct Tokens
         smaller is drawn one-piece; a larger one is ringed. Design pixels, so
         it does not move with the window's scale.
 
-        Frosty, 2026-09-25: "all knobs the same size or smaller than FET's
-        attack/release knobs should be one piece". Those are 15.33. The line
-        sits half way between BMO DEQ's small knobs -- 16.0 expanded, 15.0
-        compact -- and its THRESH and RANGE at their smallest, 17.0 in a rack,
-        so no knob in the suite changes form between a module's two widths.
-        `ui_layout_tests` holds that, and keeps every knob a quarter of a pixel
-        clear of the line so a relayout cannot tip one over it unnoticed. */
-    static constexpr float onePieceMaxRadius = 16.5f;
+        Frosty, 2026-09-25: the cut-off is BMO Dimension's non-hero knobs --
+        DETUNE, DRIFT, BLOOM, BELOW, TURN, TILT, 19.84 -- and anything that
+        size or smaller is one-piece. The line sits a pixel past them, because
+        the next untagged knob up is BMO Defang's at 26.04 and a line drawn
+        exactly on 19.84 would leave those six a rounding error from flipping.
+        `ui_layout_tests` keeps every untagged knob a quarter pixel clear of
+        it and fails any knob that changes form between a module's two
+        widths -- which is why BMO DEQ's FREQ, GAIN and Q carry a tag. */
+    static constexpr float onePieceMaxRadius = 21.0f;
 
     /** Ring edge to the dotted track, for a gain that sits inside a selector.
 

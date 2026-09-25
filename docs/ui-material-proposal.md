@@ -39,7 +39,7 @@ in this order:
 2. `ModulePanel::tagTextured ({ ... }, form)` — the nearest tagged section
    above the knob. Pass knobs, a ConcentricBand, a container, or the panel
    itself for a panel-wide default.
-3. Its size: one-piece at `Tokens::onePieceMaxRadius` (16.5 px of cap
+3. Its size: one-piece at `Tokens::onePieceMaxRadius` (21.0 px of cap
    radius) or smaller, ringed above. See the allocation below.
 
 Simple ignores all of it.
@@ -53,26 +53,38 @@ its resolved form and where the form came from.
 ## Knob allocation
 
 **The rule (Frosty, 2026-09-25):** input, output and volume knobs are
-one-piece. Every other knob is one-piece if its cap is the size of BMO FET's
-ATTACK and RELEASE (15.33 px radius) or smaller, and ringed if it is larger.
+one-piece. Every other knob is one-piece if its cap is the size of BMO
+Dimension's non-hero knobs (DETUNE, DRIFT, BLOOM, BELOW, TURN, TILT: 19.84 px
+radius) or smaller, and ringed if it is larger. MAKEUP is not part of the
+input/output/volume rule, so it goes by size and is ringed.
 
 **How it is built:** the size half is automatic. `texturedFormFor` measures
 the cap as it is drawn, in design pixels so window scaling doesn't move it,
 against `Tokens::onePieceMaxRadius`. So a new knob gets its form with nobody
-deciding. The line is **16.5 px, not 15.33**: BMO DEQ's ATTACK, RATIO and
-RELEASE are 16.0 expanded and 15.0 compact. A line at FET's exact size would
-make them ringed standalone and one-piece in a rack, and SHAPE would do the
-same. 16.5 sits halfway between those (16.0) and the smallest knob that
-should be ringed, DEQ's THRESH and RANGE at 17.0 in a rack. The other half is
-a tag: the nine INPUT, OUTPUT and VOLUME knobs carry
-`setTexturedForm (onePiece)`, because FET's INPUT and OUTPUT (31.0) and
-Util's VOLUME (28.5) would otherwise be ringed by size.
+deciding. The line is **21.0 px**, a pixel past Dimension's 19.84, so those
+six are not a rounding error from flipping. The next untagged knob up is
+BMO Defang's at 26.04.
 
-`ui_layout_tests` holds all of it: input, output and volume one-piece; FET's
-ATTACK and RELEASE one-piece; no DEQ knob changing form between widths; and
-no untagged knob within a quarter pixel of the line, so a relayout cannot
-tip one over it unnoticed. Moving the line to FET's exact 15.33 fails six of
-those checks, which is how the test was proven.
+Two sets of knobs carry tags:
+
+- **The nine INPUT, OUTPUT and VOLUME knobs** are tagged one-piece, because
+  FET's INPUT and OUTPUT (31.0) and Util's VOLUME (28.5) would otherwise be
+  ringed by size.
+- **BMO DEQ's FREQ, GAIN and Q** are tagged ringed. They are 23.87 px
+  expanded and 18.0 compact, on opposite sides of the line, so by size alone
+  the same knob would change form when the module moved into a rack. They
+  are the band's own controls, which is what the ringed form marks.
+
+`ui_layout_tests` holds all of it:
+- input, output and volume are one-piece;
+- Dimension's six non-hero knobs are one-piece and DIMENSION is ringed;
+- MAKEUP is ringed on Opto and LTV Comp;
+- DEQ's FREQ, GAIN and Q are ringed at both widths;
+- no DEQ knob changes form between widths;
+- no untagged knob sits within a quarter pixel of the line.
+
+Moving the line without the DEQ tags fails the width check for FREQ, GAIN
+and Q, which is how that guard was proven.
 
 Resolved, standalone views, from `BMO_LIST_KNOBS=1` (Linger lists the knobs
 on its first page; its OUTPUT is tagged too):
@@ -95,20 +107,20 @@ on its first page; its OUTPUT is tagged too):
 | BMO Util | WIDTH | 28.50 | ringed | size |
 | BMO Opto | COMP | 28.52 | ringed | size |
 | BMO Opto | MAKEUP | 28.52 | ringed | size |
-| BMO Dimension | DETUNE | 19.84 | ringed | size |
-| BMO Dimension | DRIFT | 19.84 | ringed | size |
+| BMO Dimension | DETUNE | 19.84 | one-piece | size |
+| BMO Dimension | DRIFT | 19.84 | one-piece | size |
 | BMO Dimension | DIMENSION | 45.88 | ringed | size |
-| BMO Dimension | BLOOM | 19.84 | ringed | size |
-| BMO Dimension | BELOW | 19.84 | ringed | size |
-| BMO Dimension | TURN | 19.84 | ringed | size |
-| BMO Dimension | TILT | 19.84 | ringed | size |
+| BMO Dimension | BLOOM | 19.84 | one-piece | size |
+| BMO Dimension | BELOW | 19.84 | one-piece | size |
+| BMO Dimension | TURN | 19.84 | one-piece | size |
+| BMO Dimension | TILT | 19.84 | one-piece | size |
 | BMO DEQ | OUTPUT | 14.00 / 14.00 compact | one-piece | tag |
 | BMO DEQ | SHAPE | 15.93 / 13.30 compact | one-piece | size |
-| BMO DEQ | FREQ | 23.87 / 18.00 compact | ringed | size |
-| BMO DEQ | GAIN | 23.87 / 18.00 compact | ringed | size |
-| BMO DEQ | Q | 23.87 / 18.00 compact | ringed | size |
-| BMO DEQ | THRESH | 19.50 / 17.00 compact | ringed | size |
-| BMO DEQ | RANGE | 19.50 / 17.00 compact | ringed | size |
+| BMO DEQ | FREQ | 23.87 / 18.00 compact | ringed | tag |
+| BMO DEQ | GAIN | 23.87 / 18.00 compact | ringed | tag |
+| BMO DEQ | Q | 23.87 / 18.00 compact | ringed | tag |
+| BMO DEQ | THRESH | 19.50 / 17.00 compact | one-piece | size |
+| BMO DEQ | RANGE | 19.50 / 17.00 compact | one-piece | size |
 | BMO DEQ | RATIO | 16.00 / 15.00 compact | one-piece | size |
 | BMO DEQ | ATTACK | 16.00 / 15.00 compact | one-piece | size |
 | BMO DEQ | RELEASE | 16.00 / 15.00 compact | one-piece | size |
@@ -274,12 +286,10 @@ nothing blurs at 150 % or on a Retina display.
 
 ## For Frosty to decide
 
-1. **The 16.5 px line** rather than FET's exact 15.33, for the DEQ reason
-   above. The alternative is FET's exact size with DEQ's four knobs tagged by
-   hand.
-2. **MAKEUP** on BMO Opto and LTV Comp sets a level too, but it isn't input,
-   output or volume, so it is ringed by size. Tag it one-piece if it should
-   go with the trims.
+1. **DEQ's FREQ, GAIN and Q**: tagged ringed at both widths. The other
+   defensible call is one-piece at both, matching every other knob on DEQ in
+   a rack.
+2. **The EQ node buttons**: see the recommendation in the session.
 
 ## How to see it
 

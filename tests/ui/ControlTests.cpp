@@ -272,10 +272,11 @@ int main()
         section.addChildComponent (inner);
 
         // By size: the cap radius is the knob's shorter side, halved, times
-        // its face scale. BMO FET's ATTACK is 15.33 and is one-piece; the
-        // line is Tokens::onePieceMaxRadius, 16.5, and the style plays no
-        // part -- a small character knob is one-piece, a large trim ringed.
-        checkNear ((double) Tokens::onePieceMaxRadius, 16.5, 1.0e-6, "the one-piece line is 16.5 px of cap radius");
+        // its face scale. BMO Dimension's non-hero knobs are 19.84 and are
+        // one-piece; the line is Tokens::onePieceMaxRadius, 21.0, and the
+        // style plays no part -- a small character knob is one-piece, a large
+        // trim ringed.
+        checkNear ((double) Tokens::onePieceMaxRadius, 21.0, 1.0e-6, "the one-piece line is 21 px of cap radius");
 
         Knob character, small, large;
         character.setStyle (Knob::Style::character);
@@ -286,16 +287,16 @@ int main()
         character.setFaceScale (0.62f);            // 31.0, BMO FET's INPUT
         small.setSize (46, 46);
         small.setFaceScale (2.0f / 3.0f);          // 15.33, BMO FET's ATTACK
-        large.setSize (40, 40);
-        large.setFaceScale (0.85f);                // 17.0
+        large.setSize (46, 46);
+        large.setFaceScale (1.0f);                 // 23.0
 
         checkNear ((double) capRadiusOf (small), 15.333, 1.0e-3, "a 46 px knob at 2/3 has a 15.33 px cap");
         check (texturedFormFor (character) == Knob::TexturedForm::ringed,   "a 31 px cap is ringed");
         check (texturedFormFor (small)     == Knob::TexturedForm::onePiece, "a character knob at FET ATTACK's size is one-piece");
-        check (texturedFormFor (large)     == Knob::TexturedForm::ringed,   "a 17 px trim is ringed");
+        check (texturedFormFor (large)     == Knob::TexturedForm::ringed,   "a 23 px trim is ringed");
 
         Knob edge;
-        edge.setSize (33, 33);                     // 16.5 exactly
+        edge.setSize (42, 42);                     // 21.0 exactly
         check (texturedFormFor (edge) == Knob::TexturedForm::onePiece, "exactly on the line is one-piece: 'the same size or smaller'");
 
         // A section tag reaches a knob however deep it sits in the section.

@@ -149,6 +149,11 @@ class BmoLookAndFeel final : public juce::LookAndFeel_V4
 public:
     BmoLookAndFeel() { refreshColours(); }
 
+    /** PROTOTYPE: whether the material pass is on (BMO_MATERIAL set), and
+        the plate treatment it adds. See docs/ui-material-proposal.md. */
+    static bool materialEnabled();
+    static void paintPlateMaterial (juce::Graphics&, juce::Rectangle<int> area);
+
     /** Re-reads the tokens. Call after a theme change. */
     void refreshColours();
 

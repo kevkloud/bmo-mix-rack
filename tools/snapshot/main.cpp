@@ -679,6 +679,21 @@ int main (int argc, char** argv)
         juce::Timer::callPendingTimersSynchronously();
     }
 
+    // PROTOTYPE: BMO_PAINT_BENCH=N repaints the whole editor N more times and
+    // prints the mean, so the material pass can be costed against the flat
+    // look on the same machine. A full-editor paint is the worst case: a
+    // running plugin repaints only what changed.
+    if (const auto runs = juce::SystemStats::getEnvironmentVariable ("BMO_PAINT_BENCH", "0").getIntValue(); runs > 0)
+    {
+        const auto start = juce::Time::getMillisecondCounterHiRes();
+
+        for (int i = 0; i < runs; ++i)
+            editor->createComponentSnapshot (editor->getLocalBounds(), false, 2.0f);
+
+        std::cout << "paint: " << (juce::Time::getMillisecondCounterHiRes() - start) / runs
+                  << " ms per full editor at 2x\n";
+    }
+
     const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), false, 2.0f);
 
     // PngOut.h, not an inline createOutputStream: writing over an existing

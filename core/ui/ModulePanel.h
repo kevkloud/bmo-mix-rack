@@ -288,10 +288,20 @@ private:
 
     std::vector<Rule> rules;
 
+    /** PROTOTYPE: the material plate, drawn once at the device's pixel scale
+        and blitted on every paint after. Rebuilt when the size, the scale or
+        the plate colour changes -- a resize or a theme change. */
+    juce::Image plateCache;
+    float plateCacheScale = 0.0f;
+    juce::Colour plateCacheColour;
+
 protected:
 
     /** A hairline through the middle of a row, inset by the padding -- or
         across `span` when one is given. See `Rule::span`. */
+    /** PROTOTYPE: whether the material pass is drawing the plate. */
+    static bool materialPlate();
+
     void drawRule (juce::Graphics& g, juce::Rectangle<int> row,
                    juce::Range<int> span = {}) const
     {
@@ -323,8 +333,6 @@ protected:
         // survive being set in the raw accent at 2.00:1. It keeps the size:
         // the two labels want to be different sizes whichever way the colours
         // fall, and this is the one a panel is navigated by.
-        drawRule (g, row, span);
-
         const auto font = labelFont (kLegendSize, true);
         const auto width = juce::GlyphArrangement::getStringWidth (font, text) + 14.0f;
 
@@ -341,8 +349,20 @@ protected:
         // The panel's plate, passed in rather than read from tokens(): a
         // legend knocks a hole in the rule it sits on, and on an LTV panel
         // that hole has to be silver or the rule shows through it.
-        g.setColour (plate);
-        g.fillRect (box);
+        // PROTOTYPE: on a textured plate a flat knockout shows as a patch, so
+        // the rule is drawn in two pieces that stop at the legend instead.
+        if (materialPlate())
+        {
+            const auto reach = span.isEmpty() ? juce::Range<int> (kPad, getWidth() - kPad) : span;
+            drawRule (g, row, { reach.getStart(), juce::roundToInt (box.getX()) });
+            drawRule (g, row, { juce::roundToInt (box.getRight()), reach.getEnd() });
+        }
+        else
+        {
+            drawRule (g, row, span);
+            g.setColour (plate);
+            g.fillRect (box);
+        }
         drawLabel (g, text, box, juce::Justification::centred, font, accentInk (accent, plate));
     }
 

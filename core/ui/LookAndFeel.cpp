@@ -1,5 +1,6 @@
 #include "LookAndFeel.h"
 #include "ModulePanel.h"
+#include <map>
 
 namespace bmo::ui
 {
@@ -101,6 +102,82 @@ float BmoLookAndFeel::comboTextOverflow (const juce::ComboBox& box)
                              juce::GlyphArrangement::getStringWidth (font, box.getItemText (i)));
 
     return widest - (float) comboTextBox (box).getWidth();
+}
+
+
+//==============================================================================
+// PROTOTYPE -- the material pass. Off unless BMO_MATERIAL is set in the
+// environment, so a snapshot can render both looks from one binary. See
+// docs/ui-material-proposal.md for what it is, what it costs and the rules it
+// keeps. Every value here is a shading of a token, never a colour of its own.
+namespace material
+{
+    bool enabled()
+    {
+        static const bool on = juce::SystemStats::getEnvironmentVariable ("BMO_MATERIAL", {}).isNotEmpty();
+        return on;
+    }
+
+    /** A 128 px tile of fine, non-directional grain -- a powder-coat, not a
+        photograph. Signed around zero and drawn at a few percent, so it moves
+        the plate's luminance by about +/-1.5 % and no ink ratio by more than
+        a rounding step. One fixed seed, built once, so every render of it is
+        the same render. */
+    const juce::Image& grainTile()
+    {
+        static const juce::Image tile = []
+        {
+            constexpr int n = 128;
+            juce::Image img (juce::Image::ARGB, n, n, true);
+            juce::Random rng (0x424d4f);
+            juce::Image::BitmapData bd (img, juce::Image::BitmapData::writeOnly);
+
+            for (int y = 0; y < n; ++y)
+                for (int x = 0; x < n; ++x)
+                {
+                    const auto v = rng.nextFloat() * 2.0f - 1.0f;
+                    const auto a = (juce::uint8) juce::roundToInt (std::abs (v) * 255.0f * 0.035f);
+                    bd.setPixelColour (x, y, v > 0.0f ? juce::Colour (255, 255, 255).withAlpha (a)
+                                                      : juce::Colour (0, 0, 0).withAlpha (a));
+                }
+
+            return img;
+        }();
+
+        return tile;
+    }
+}
+
+bool BmoLookAndFeel::materialEnabled() { return material::enabled(); }
+
+void BmoLookAndFeel::paintPlateMaterial (juce::Graphics& g, juce::Rectangle<int> area)
+{
+    if (! material::enabled())
+        return;
+
+    const auto r = area.toFloat();
+
+    // Light from above: the plate is a hair lighter at the top than at the
+    // bottom. 4 % either way, which is under a third of the step between
+    // plate and plateEdge.
+    g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.05f), r.getX(), r.getY(),
+                                             juce::Colours::black.withAlpha (0.04f), r.getX(), r.getBottom(),
+                                             false));
+    g.fillRect (r);
+
+    if (! juce::SystemStats::getEnvironmentVariable ("BMO_MATERIAL", {}).contains ("nograin"))
+    {
+        g.setTiledImageFill (material::grainTile(), 0, 0, 1.0f);
+        g.fillRect (r);
+    }
+
+    // A machined edge: one lit line along the top, one shaded along the
+    // bottom. In a rack this is also what separates one module from the next.
+    g.setColour (juce::Colours::white.withAlpha (0.35f));
+    g.fillRect (r.withHeight (1.0f));
+    g.setColour (juce::Colours::black.withAlpha (0.18f));
+    g.fillRect (r.withTop (r.getBottom() - 1.0f));
+    g.fillRect (r.withLeft (r.getRight() - 1.0f));
 }
 
 //==============================================================================
@@ -457,18 +534,141 @@ void BmoLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int widt
         }
     }
 
-    g.setColour (dim (face));
-    g.fillEllipse (faceBox);
-    g.setColour (dim (character ? t.outline : t.knobEdge));
-    g.drawEllipse (faceBox.reduced (0.8f), character ? 1.6f : Tokens::knobStroke);
-
-    // Pointer.
+    if (! material::enabled())
     {
-        const auto tip  = radius - 3.0f;
-        const auto tail = radius * 0.05f;
+        g.setColour (dim (face));
+        g.fillEllipse (faceBox);
+        g.setColour (dim (character ? t.outline : t.knobEdge));
+        g.drawEllipse (faceBox.reduced (0.8f), character ? 1.6f : Tokens::knobStroke);
 
+        // Pointer.
+        {
+            const auto tip  = radius - 3.0f;
+            const auto tail = radius * 0.05f;
+
+            g.setColour (dim (pointerInk));
+            g.drawLine ({ at (angle, tail), at (angle, tip) }, 2.6f);
+        }
+        return;
+    }
+
+    // PROTOTYPE material knob: a skirt with a grip, a cap on it, one light
+    // from above. The cap's centre is the token face, flat, so every ratio
+    // measured against `face` still holds where the pointer is read.
+    {
+        const auto capR = radius * 0.80f;
+        const auto capBox = juce::Rectangle<float> (capR * 2.0f, capR * 2.0f).withCentre (centre);
+
+        // Everything but the grip and the pointer is the same every time
+        // this knob paints, so it is drawn once per (size, pixel scale,
+        // colours) and blitted after. A knob repaints on every step of a
+        // drag, and at 30 Hz of automation; the layers below are most of the
+        // cost of a material knob and none of what moves.
+        const auto edgeColour = character ? t.outline : t.knobEdge;
+        const auto pixelScale = g.getInternalContext().getPhysicalPixelScaleFactor();
+        const auto pad = radius * 0.30f;
+        // Snapped to whole device pixels, so the blit below is a straight
+        // copy rather than a resample.
+        const auto snap = [pixelScale] (float v) { return std::floor (v * pixelScale) / pixelScale; };
+        const auto rawArea = faceBox.expanded (pad).withY (faceBox.getY() - pad);
+        const auto area = rawArea.withPosition (snap (rawArea.getX()), snap (rawArea.getY()));
+        const auto key = juce::String (juce::roundToInt (radius * 4.0f)) + "/" + juce::String (pixelScale, 3) + "/"
+                       + face.toString() + "/" + edgeColour.toString() + "/" + (enabled ? "1" : "0");
+
+        static std::map<juce::String, juce::Image> cache;
+
+        auto found = cache.find (key);
+
+        if (found == cache.end())
+        {
+            if (cache.size() > 256)
+                cache.clear();
+
+            const auto w = juce::jmax (1, juce::roundToInt (area.getWidth()  * pixelScale) + 2);
+            const auto h = juce::jmax (1, juce::roundToInt (area.getHeight() * pixelScale) + 2);
+            juce::Image layer (juce::Image::ARGB, w, h, true);
+
+            {
+                juce::Graphics lg (layer);
+                lg.addTransform (juce::AffineTransform::translation (-area.getX(), -area.getY())
+                                     .scaled (pixelScale));
+        // Contact shadow. A radial gradient, not a blurred image: one fill,
+                // no allocation, and it scales with the editor like everything else.
+                {
+                    const auto sc = centre.translated (0.0f, radius * 0.14f);
+                    juce::ColourGradient shadow (juce::Colours::black.withAlpha (enabled ? 0.30f : 0.12f), sc.x, sc.y,
+                                                 juce::Colours::transparentBlack, sc.x + radius * 1.16f, sc.y, true);
+                    shadow.addColour (0.72, juce::Colours::black.withAlpha (enabled ? 0.20f : 0.08f));
+                    lg.setGradientFill (shadow);
+                    lg.fillEllipse (juce::Rectangle<float> (radius * 2.32f, radius * 2.32f).withCentre (sc));
+                }
+
+                // Skirt: the face a step down, lit from the top.
+                const auto skirt = face.interpolatedWith (t.knobEdge, 0.35f);
+                lg.setGradientFill (juce::ColourGradient (dim (skirt.brighter (0.25f)), centre.x, faceBox.getY(),
+                                                         dim (skirt.darker (0.45f)), centre.x, faceBox.getBottom(), false));
+                lg.fillEllipse (faceBox);
+
+                lg.setColour (dim (character ? t.outline : t.knobEdge).withMultipliedAlpha (0.9f));
+                lg.drawEllipse (faceBox.reduced (0.5f), 1.0f);
+
+                // Cap: the token face, with a soft sheen off the top-left and a
+                // bevel -- lit rim above, shaded rim below.
+                lg.setColour (dim (face));
+                lg.fillEllipse (capBox);
+
+                {
+                    const auto hc = centre.translated (-capR * 0.35f, -capR * 0.45f);
+                    juce::ColourGradient sheen (juce::Colours::white.withAlpha (enabled ? 0.30f : 0.10f), hc.x, hc.y,
+                                                juce::Colours::white.withAlpha (0.0f), hc.x + capR * 1.1f, hc.y, true);
+                    lg.setGradientFill (sheen);
+                    lg.fillEllipse (capBox);
+                }
+
+                lg.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (enabled ? 0.70f : 0.25f), centre.x, capBox.getY(),
+                                                         juce::Colours::black.withAlpha (enabled ? 0.30f : 0.10f), centre.x, capBox.getBottom(), false));
+                lg.drawEllipse (capBox.reduced (0.6f), 1.2f);
+            }
+
+            found = cache.emplace (key, std::move (layer)).first;
+        }
+
+        const auto& layer = found->second;
+        g.setImageResamplingQuality (juce::Graphics::lowResamplingQuality);
+        g.drawImage (layer, juce::Rectangle<float> ((float) layer.getWidth() / pixelScale,
+                                                    (float) layer.getHeight() / pixelScale)
+                                .withPosition (area.getPosition()));
+
+        if (! juce::SystemStats::getEnvironmentVariable ("BMO_MATERIAL", {}).contains ("noflutes"))
+        // Grip: fine flutes on the skirt that turn with the knob, so the knob
+        // reads as turning even where the pointer is under a finger.
+        {
+            juce::Path flutes;
+            constexpr int count = 36;
+
+            for (int i = 0; i < count; ++i)
+            {
+                const auto a = angle + juce::MathConstants<float>::twoPi * (float) i / (float) count;
+                flutes.startNewSubPath (at (a, capR + 1.2f));
+                flutes.lineTo          (at (a, radius - 1.0f));
+            }
+
+            g.setColour (juce::Colours::black.withAlpha (enabled ? 0.16f : 0.06f));
+            g.strokePath (flutes, juce::PathStrokeType (1.0f));
+        }
+
+        // Pointer: the same ink, sitting in an engraved groove -- a dark line
+        // a pixel wider underneath it. On the pale caps the pointer is white
+        // at 1.39-1.49:1 by Frosty's call; the groove is what lets a white
+        // line read on a pale cap without changing that call.
+        const auto tip  = capR - 2.5f;
+        const auto tail = capR * 0.18f;
+        const juce::Line<float> line { at (angle, tail), at (angle, tip) };
+
+        g.setColour (juce::Colours::black.withAlpha (enabled ? 0.38f : 0.12f));
+        g.drawLine (line, 4.4f);
         g.setColour (dim (pointerInk));
-        g.drawLine ({ at (angle, tail), at (angle, tip) }, 2.6f);
+        g.drawLine (line, 2.4f);
     }
 }
 
@@ -538,8 +738,46 @@ void BmoLookAndFeel::drawToggleButton (juce::Graphics& g, juce::ToggleButton& bu
             g.fillRoundedRectangle (bounds.expanded ((float) i), Tokens::corner + (float) i);
         }
 
-    g.setColour (fill);
-    g.fillRoundedRectangle (bounds, Tokens::corner);
+    if (material::enabled())
+    {
+        // PROTOTYPE material switch: raised when off, sunk and lit when on,
+        // so on and off differ in form as well as in hue. The gradient is
+        // +/-6 % about the fill, so the ink derived from the fill below
+        // still holds at the label's middle.
+        if (! on)
+        {
+            g.setColour (juce::Colours::black.withAlpha (0.22f));
+            g.fillRoundedRectangle (bounds.translated (0.0f, 1.2f), Tokens::corner);
+        }
+
+        const auto top    = on ? fill.darker (0.10f) : fill.brighter (0.10f);
+        const auto bottom = on ? fill.brighter (0.06f) : fill.darker (0.10f);
+
+        g.setGradientFill (juce::ColourGradient (top, 0.0f, bounds.getY(), bottom, 0.0f, bounds.getBottom(), false));
+        g.fillRoundedRectangle (bounds, Tokens::corner);
+
+        const auto edge = bounds.reduced (0.5f);
+
+        if (on)
+        {
+            // An inner shadow along the top edge: the key is pressed in.
+            g.setColour (juce::Colours::black.withAlpha (0.28f));
+            g.fillRoundedRectangle (edge.withHeight (1.6f), 0.8f);
+        }
+        else
+        {
+            g.setColour (juce::Colours::white.withAlpha (0.45f));
+            g.fillRoundedRectangle (edge.withHeight (1.0f).reduced (1.5f, 0.0f), 0.5f);
+        }
+
+        g.setColour (juce::Colours::black.withAlpha (0.25f));
+        g.drawRoundedRectangle (edge, Tokens::corner, 1.0f);
+    }
+    else
+    {
+        g.setColour (fill);
+        g.fillRoundedRectangle (bounds, Tokens::corner);
+    }
 
     // Ink derived from the fill it sits on rather than always white: white
     // measured 1.98-2.55:1 on the four accents, and 2.43:1 on the old pale

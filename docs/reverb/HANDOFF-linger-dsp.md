@@ -1,9 +1,12 @@
 # Handoff: BMO Linger's DSP
 
 For a fresh session. Written on AURORA, 2026-09-22; revised on AURORA,
-2026-09-23, after PR #25 merged. **The module exists and makes no sound.**
-Everything a host touches is built, tested and merged to `main` (PR #25,
-`68b1616`); what is left is the reverb itself.
+2026-09-23, after PR #25 merged; **revised on ICE QUEEN, 2026-09-24, with M2
+built.** The early reflections play and the tail is silent. Everything a host
+touches is built, tested and merged to `main` (PR #25, `68b1616`); the ER
+generator is on `frosty-linger-m2-er`, green in every suite on ICE QUEEN, and
+**waits at the listening checkpoint** — see "M2 is built" below before
+anything else.
 
 Read this, then `modules/reverb/AGENTS.md`, then `10-dsp-spec.md` in full, then
 `11-integration-and-test-plan.md` §6. `README.md` in this folder indexes the
@@ -27,14 +30,51 @@ the next session inherits.
 `11` §6 holds the exit test for every one of them. **M2 is the milestone that
 decides the module** — the spec says so, and it is where the thesis lives.
 
+### M2 is built, and stopped where it should
+
+On ICE QUEEN, 2026-09-24, branch `frosty-linger-m2-er` from `origin/main`
+`aa4416d`. `testing-notes/linger-m2-er-2026-09-24.md` is the record; read it
+before this section. In one paragraph: `modules/reverb/dsp/ErGenerator.h` is
+the runtime, `ImageSource.h` the offline image-source generator with the
+audit, `TapTables.h` holds six printed tables that the tests re-derive and
+pin, and `DspCore.h` feeds the generator and applies the faders. The whole
+of `11` §6's ER block is asserted in `tests/dsp/ReverbDspTests.cpp` and is
+green; `build-dsp` 18/18, `build-full` 16/16, both after builds that exited
+0. The CPU worst case was measured first: 0.87 % of one core at 48 kHz/128
+and 3.5 % at 192 kHz, against 1.5 % and 5 %.
+
+**What moved against this file and the spec, each recorded in the note:**
+
+- The ER-only ±3 dB flatness rule under 1/3-octave smoothing is not
+  achievable by any sparse cluster at 200 Hz; it is measured and printed, not
+  asserted. Owner to re-specify.
+- The early lateral fraction is asserted on the ER bus, not ISO's figure with
+  the direct sound: the −15.3 dB tap ceiling makes ISO's figure unreachable.
+- The two flamming rules are applied as **ceilings** in the generator, the
+  way 10 §3 applies Kuttruff's, on the energy heard through the band poles.
+- The MIX law is provisional (dry = min(1, 2(1 − mix)), wet = min(1, 2 mix)),
+  and the schema default of 100 % is therefore wet-only. The bus suite's
+  reverb rows were regenerated to say so.
+- VARIATION 6 is built to 05 §9.3 (mono-flat, not mono-empty); 10 §3's
+  "vanish in mono" sentence and the panel label it asks for are wrong.
+- The window clamp is not applied (the Size law stays linear, as the panel).
+- The 150 ms wet fade in `reset()` is not done.
+- The panel still draws Room's table for every type.
+
+**What the next session inherits.** The listening checkpoint below, which
+needs the references installed and source clips on the machine. Then the
+three owner decisions, then M3. Do not start M3 on this branch; branch again
+from `origin/main` once this one has merged.
+
 ### M2 opens with the CPU worst case
 
-`10` §8 says to measure the worst case **first**: DENSITY at 48 taps, three
-diffuser stages, 192 kHz. Build that path before tuning anything and run
-`measure_reverb bench` against `10` §6's budget (≤1.5% of a core at 48 kHz/128,
-≤5% at 192 kHz, Release, median of five, on AURORA). If it does not fit, the tap
-count or the stage count is the thing to argue about, and it is far cheaper to
-argue before the tables are tuned than after.
+*Done: 0.872 % at 48 kHz/128 and 3.508 % at 192 kHz/128, worst case, median
+of five, Release, on ICE QUEEN.* `10` §8 says to measure the worst case
+**first**: DENSITY at 48 taps, three diffuser stages, 192 kHz. Build that path
+before tuning anything and run `measure_reverb bench` against `10` §6's budget
+(≤1.5% of a core at 48 kHz/128, ≤5% at 192 kHz, Release, median of five). If
+it does not fit, the tap count or the stage count is the thing to argue about,
+and it is far cheaper to argue before the tables are tuned than after.
 
 ### M2 ends at a listening checkpoint, not at M3
 

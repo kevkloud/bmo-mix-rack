@@ -2,6 +2,7 @@
 
 #include "Controls.h"
 #include "Line.h"
+#include "LookAndFeel.h"
 #include "core/dsp/AnalyserTap.h"
 #include "core/state/ParamSet.h"
 
@@ -307,9 +308,10 @@ protected:
     {
         const auto reach = span.isEmpty() ? juce::Range<int> (kPad, getWidth() - kPad) : span;
 
-        g.setColour (tokens().hairline);
-        g.fillRect (juce::Rectangle<float> ((float) reach.getStart(), (float) row.getCentreY(),
-                                            (float) reach.getLength(), Tokens::hairlineWeight));
+        juce::RectangleList<float> rule;
+        rule.add ({ (float) reach.getStart(), (float) row.getCentreY(),
+                    (float) reach.getLength(), Tokens::hairlineWeight });
+        BmoLookAndFeel::fillEngraved (g, rule, tokens().hairline);
     }
 
     /** A section name drawn on a rule, in the module's own colour.

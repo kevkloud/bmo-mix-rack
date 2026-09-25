@@ -154,6 +154,11 @@ public:
     static bool materialEnabled();
     static void paintPlateMaterial (juce::Graphics&, juce::Rectangle<int> area);
 
+    /** PROTOTYPE: fills `marks` in `ink` -- as a flat fill when the material
+        pass is off, laser-engraved into the plate when it is on. For the
+        section rules and for the brackets and buses a panel draws. */
+    static void fillEngraved (juce::Graphics&, const juce::RectangleList<float>& marks, juce::Colour ink);
+
     /** Re-reads the tokens. Call after a theme change. */
     void refreshColours();
 

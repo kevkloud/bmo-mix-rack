@@ -118,11 +118,68 @@ namespace material
         return on;
     }
 
+    /** The variants under review, named in BMO_MATERIAL: "brushed" for the
+        brushed plate rather than powder, "cap" for the one-piece knob rather
+        than skirt and cap. e.g. BMO_MATERIAL=brushed,cap. */
+    bool has (const char* word)
+    {
+        return juce::SystemStats::getEnvironmentVariable ("BMO_MATERIAL", {}).contains (word);
+    }
+
+    bool brushed()  { static const bool b = has ("brushed"); return b; }
+    bool capKnob()  { static const bool b = has ("cap");     return b; }
+
     /** A 128 px tile of fine, non-directional grain -- a powder-coat, not a
         photograph. Signed around zero and drawn at a few percent, so it moves
         the plate's luminance by about +/-1.5 % and no ink ratio by more than
         a rounding step. One fixed seed, built once, so every render of it is
         the same render. */
+    /** A 256 x 128 tile of brushed grain: streaks along x, each row its own
+        run of smoothed noise, wrapped so the tile repeats without a seam.
+        About the same amplitude as the powder, all of it in one direction. */
+    const juce::Image& brushedTile()
+    {
+        static const juce::Image tile = []
+        {
+            constexpr int w = 256, h = 128, run = 40;
+            juce::Image img (juce::Image::ARGB, w, h, true);
+            juce::Random rng (0x42727573);
+            juce::Image::BitmapData bd (img, juce::Image::BitmapData::writeOnly);
+
+            std::vector<float> raw ((size_t) w), row ((size_t) w);
+
+            for (int y = 0; y < h; ++y)
+            {
+                for (auto& v : raw)
+                    v = rng.nextFloat() * 2.0f - 1.0f;
+
+                // A wrapped box blur along the row: long streaks, not dots.
+                for (int x = 0; x < w; ++x)
+                {
+                    auto sum = 0.0f;
+                    for (int k = -run / 2; k < run / 2; ++k)
+                        sum += raw[(size_t) ((x + k + w) % w)];
+                    row[(size_t) x] = sum / std::sqrt ((float) run);
+                }
+
+                const auto rowTone = (rng.nextFloat() * 2.0f - 1.0f) * 0.6f;
+
+                for (int x = 0; x < w; ++x)
+                {
+                    const auto v = juce::jlimit (-1.0f, 1.0f, row[(size_t) x] * 0.55f + rowTone
+                                                             + (rng.nextFloat() - 0.5f) * 0.25f);
+                    const auto a = (juce::uint8) juce::roundToInt (std::abs (v) * 255.0f * 0.045f);
+                    bd.setPixelColour (x, y, v > 0.0f ? juce::Colour (255, 255, 255).withAlpha (a)
+                                                      : juce::Colour (0, 0, 0).withAlpha (a));
+                }
+            }
+
+            return img;
+        }();
+
+        return tile;
+    }
+
     const juce::Image& grainTile()
     {
         static const juce::Image tile = []
@@ -165,11 +222,8 @@ void BmoLookAndFeel::paintPlateMaterial (juce::Graphics& g, juce::Rectangle<int>
                                              false));
     g.fillRect (r);
 
-    if (! juce::SystemStats::getEnvironmentVariable ("BMO_MATERIAL", {}).contains ("nograin"))
-    {
-        g.setTiledImageFill (material::grainTile(), 0, 0, 1.0f);
-        g.fillRect (r);
-    }
+    g.setTiledImageFill (material::brushed() ? material::brushedTile() : material::grainTile(), 0, 0, 1.0f);
+    g.fillRect (r);
 
     // A machined edge: one lit line along the top, one shaded along the
     // bottom. In a rack this is also what separates one module from the next.
@@ -178,6 +232,37 @@ void BmoLookAndFeel::paintPlateMaterial (juce::Graphics& g, juce::Rectangle<int>
     g.setColour (juce::Colours::black.withAlpha (0.18f));
     g.fillRect (r.withTop (r.getBottom() - 1.0f));
     g.fillRect (r.withLeft (r.getRight() - 1.0f));
+}
+
+void BmoLookAndFeel::fillEngraved (juce::Graphics& g, const juce::RectangleList<float>& marks, juce::Colour ink)
+{
+    if (! material::enabled())
+    {
+        g.setColour (ink);
+        g.fillRectList (marks);
+        return;
+    }
+
+    // A laser-cut channel, lit from above: the lip below and to the right of
+    // the cut catches the light, the wall above and to the left is in shade,
+    // and the ink sits in the channel. The three are separate lists filled
+    // once each, so crossings -- a bus's ticks on its spine -- are not laid
+    // down twice.
+    auto shifted = [&marks] (float dx, float dy)
+    {
+        auto copy = marks;
+        copy.offsetAll (dx, dy);
+        return copy;
+    };
+
+    g.setColour (juce::Colours::white.withAlpha (0.55f));
+    g.fillRectList (shifted (0.6f, 0.9f));
+
+    g.setColour (juce::Colours::black.withAlpha (0.30f));
+    g.fillRectList (shifted (-0.5f, -0.7f));
+
+    g.setColour (ink);
+    g.fillRectList (marks);
 }
 
 //==============================================================================
@@ -552,11 +637,14 @@ void BmoLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int widt
         return;
     }
 
-    // PROTOTYPE material knob: a skirt with a grip, a cap on it, one light
-    // from above. The cap's centre is the token face, flat, so every ratio
-    // measured against `face` still holds where the pointer is read.
+    // PROTOTYPE material knob, in two forms under review: a skirt with a grip
+    // and a cap on it, or (BMO_MATERIAL=...cap) a one-piece cap with a
+    // chamfered rim. One light from above either way. The cap's centre is the
+    // token face, flat, so every ratio measured against `face` still holds
+    // where the pointer is read.
     {
-        const auto capR = radius * 0.80f;
+        const auto onePiece = material::capKnob();
+        const auto capR = onePiece ? radius : radius * 0.80f;
         const auto capBox = juce::Rectangle<float> (capR * 2.0f, capR * 2.0f).withCentre (centre);
 
         // Everything but the grip and the pointer is the same every time
@@ -592,7 +680,7 @@ void BmoLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int widt
                 juce::Graphics lg (layer);
                 lg.addTransform (juce::AffineTransform::translation (-area.getX(), -area.getY())
                                      .scaled (pixelScale));
-        // Contact shadow. A radial gradient, not a blurred image: one fill,
+                // Contact shadow. A radial gradient, not a blurred image: one fill,
                 // no allocation, and it scales with the editor like everything else.
                 {
                     const auto sc = centre.translated (0.0f, radius * 0.14f);
@@ -604,13 +692,16 @@ void BmoLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int widt
                 }
 
                 // Skirt: the face a step down, lit from the top.
-                const auto skirt = face.interpolatedWith (t.knobEdge, 0.35f);
-                lg.setGradientFill (juce::ColourGradient (dim (skirt.brighter (0.25f)), centre.x, faceBox.getY(),
-                                                         dim (skirt.darker (0.45f)), centre.x, faceBox.getBottom(), false));
-                lg.fillEllipse (faceBox);
+                if (! onePiece)
+                {
+                    const auto skirt = face.interpolatedWith (t.knobEdge, 0.35f);
+                    lg.setGradientFill (juce::ColourGradient (dim (skirt.brighter (0.25f)), centre.x, faceBox.getY(),
+                                                             dim (skirt.darker (0.45f)), centre.x, faceBox.getBottom(), false));
+                    lg.fillEllipse (faceBox);
 
-                lg.setColour (dim (character ? t.outline : t.knobEdge).withMultipliedAlpha (0.9f));
-                lg.drawEllipse (faceBox.reduced (0.5f), 1.0f);
+                    lg.setColour (dim (character ? t.outline : t.knobEdge).withMultipliedAlpha (0.9f));
+                    lg.drawEllipse (faceBox.reduced (0.5f), 1.0f);
+                }
 
                 // Cap: the token face, with a soft sheen off the top-left and a
                 // bevel -- lit rim above, shaded rim below.
@@ -628,6 +719,19 @@ void BmoLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int widt
                 lg.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (enabled ? 0.70f : 0.25f), centre.x, capBox.getY(),
                                                          juce::Colours::black.withAlpha (enabled ? 0.30f : 0.10f), centre.x, capBox.getBottom(), false));
                 lg.drawEllipse (capBox.reduced (0.6f), 1.2f);
+
+                if (onePiece)
+                {
+                    // The chamfer: a band round the rim, lit on top and shaded
+                    // below, and the knob's edge outside it.
+                    const auto band = capR * 0.12f;
+                    lg.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (enabled ? 0.35f : 0.12f), centre.x, capBox.getY(),
+                                                             juce::Colours::black.withAlpha (enabled ? 0.22f : 0.08f), centre.x, capBox.getBottom(), false));
+                    lg.drawEllipse (capBox.reduced (band * 0.5f + 1.0f), band);
+
+                    lg.setColour (dim (edgeColour).withMultipliedAlpha (0.9f));
+                    lg.drawEllipse (capBox.reduced (0.5f), 1.0f);
+                }
             }
 
             found = cache.emplace (key, std::move (layer)).first;
@@ -639,9 +743,9 @@ void BmoLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int widt
                                                     (float) layer.getHeight() / pixelScale)
                                 .withPosition (area.getPosition()));
 
-        if (! juce::SystemStats::getEnvironmentVariable ("BMO_MATERIAL", {}).contains ("noflutes"))
         // Grip: fine flutes on the skirt that turn with the knob, so the knob
         // reads as turning even where the pointer is under a finger.
+        if (! onePiece)
         {
             juce::Path flutes;
             constexpr int count = 36;
@@ -661,7 +765,7 @@ void BmoLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int widt
         // a pixel wider underneath it. On the pale caps the pointer is white
         // at 1.39-1.49:1 by Frosty's call; the groove is what lets a white
         // line read on a pale cap without changing that call.
-        const auto tip  = capR - 2.5f;
+        const auto tip  = onePiece ? capR * 0.86f - 1.0f : capR - 2.5f;
         const auto tail = capR * 0.18f;
         const juce::Line<float> line { at (angle, tail), at (angle, tip) };
 

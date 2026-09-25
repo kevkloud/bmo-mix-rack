@@ -37,8 +37,7 @@ void ModulePanel::paint (juce::Graphics& g)
 {
     const auto plate = panelTokens().plate;
 
-    if (! BmoLookAndFeel::materialEnabled()
-        || juce::SystemStats::getEnvironmentVariable ("BMO_MATERIAL", {}).contains ("noplate"))
+    if (! BmoLookAndFeel::materialEnabled())
     {
         g.fillAll (plate);
     }

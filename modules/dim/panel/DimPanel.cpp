@@ -188,7 +188,7 @@ void DimPanel::paintPanel (juce::Graphics& g)
     //
     // The raw accent at the 0.55 the dotted tracks use, so the bracket is the
     // knobs' own mark rather than a rule: a rule divides, and this joins.
-    g.setColour (context.def.accent.withAlpha (0.55f));
+    std::vector<juce::Rectangle<float>> pieces;
 
     for (const auto& box : pairBoxes)
     {
@@ -199,9 +199,28 @@ void DimPanel::paintPanel (juce::Graphics& g)
         const auto x0 = (float) box.getX() + kBracketInset;
         const auto x1 = (float) box.getRight() - kBracketInset;
 
-        g.fillRect (juce::Rectangle<float> (x0, y - kBracketWeight * 0.5f, x1 - x0, kBracketWeight));
-        g.fillRect (juce::Rectangle<float> (x0, y - kBracketEnd, kBracketWeight, kBracketEnd));
-        g.fillRect (juce::Rectangle<float> (x1 - kBracketWeight, y - kBracketEnd, kBracketWeight, kBracketEnd));
+        pieces.push_back (juce::Rectangle<float> (x0, y - kBracketWeight * 0.5f, x1 - x0, kBracketWeight));
+        pieces.push_back (juce::Rectangle<float> (x0, y - kBracketEnd, kBracketWeight, kBracketEnd));
+        pieces.push_back (juce::Rectangle<float> (x1 - kBracketWeight, y - kBracketEnd, kBracketWeight, kBracketEnd));
+    }
+
+    // PROTOTYPE: engraved when the material pass is on. Off, the three pieces
+    // are filled one by one exactly as before, so the shipped look -- corners
+    // and all -- does not move.
+    if (ui::BmoLookAndFeel::materialEnabled())
+    {
+        juce::RectangleList<float> brackets;
+        for (const auto& r : pieces)
+            brackets.add (r);
+
+        ui::BmoLookAndFeel::fillEngraved (g, brackets, context.def.accent.withAlpha (0.55f));
+    }
+    else
+    {
+        g.setColour (context.def.accent.withAlpha (0.55f));
+
+        for (const auto& r : pieces)
+            g.fillRect (r);
     }
 }
 

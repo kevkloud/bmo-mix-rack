@@ -633,8 +633,7 @@ void FetcompPanel::paintPanel (juce::Graphics& g)
     // The bracket is the controls' colour at the 0.55 alpha the dotted tracks
     // use -- painted here rather than set on a component, so applyAccent
     // cannot reach it and it reads the voicing directly.
-    g.setColour (controlColourFor (lastVoicing, context.def.accent).withAlpha (0.55f));
-    g.fillRectList (bus);
+    ui::BmoLookAndFeel::fillEngraved (g, bus, controlColourFor (lastVoicing, context.def.accent).withAlpha (0.55f));
 }
 
 //==============================================================================

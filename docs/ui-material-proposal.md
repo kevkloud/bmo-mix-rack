@@ -1,8 +1,11 @@
 # Proposal: a material pass for faceplates, knobs and switches
 
-**Status: prototype, for Frosty's call.** Nothing here ships until it is
-chosen. The prototype is behind an environment variable and changes nothing
-unless `BMO_MATERIAL` is set.
+**Status: prototype.** The prototype is behind an environment variable and
+changes nothing unless `BMO_MATERIAL` is set.
+
+**Decided (Frosty, 2026-09-25):** code-drawn (option A). Show brushed beside
+powder. Divider lines and the bracket and bus lines are laser engraved. Show
+both knob forms. The prototype's intensity is right.
 
 Rendered and measured in a Linux cloud session (not ICE QUEEN or AURORA), with
 **stand-in fonts** — FreeSans Bold and DejaVu Sans renamed, held outside the
@@ -40,13 +43,18 @@ A, plus B only for one hero element such as a VU meter face — stays open.
 All in `core/ui/LookAndFeel.cpp` and `core/ui/ModulePanel.*`, gated by
 `BMO_MATERIAL`.
 
-**Faceplate.** Fine, non-directional powder-coat grain (a 128 px tile from a
+**Faceplate, two finishes.** `BMO_MATERIAL=brushed` gives brushed metal: a
+256 × 128 tile of horizontal streaks, each row its own smoothed noise, wrapped
+so it tiles without a seam. Otherwise, powder coat: fine, non-directional powder-coat grain (a 128 px tile from a
 fixed seed, about ±1.5 % luminance), light from above (+5 % at the top, −4 % at
 the bottom), and a machined edge: a lit line along the top, shaded along the
 bottom and right. In a rack, that edge is also what separates one module from
 the next — Palette Book §2 item 7.
 
-**Knobs.** A skirt one step down from the cap, lit from the top, with 36 grip
+**Knobs, two forms.** `BMO_MATERIAL=...,cap` gives a **one-piece cap**: the
+whole knob is the cap, with a chamfered rim lit on top and shaded below, a
+sheen and a contact shadow — no skirt, no grip. Otherwise, the **ringed knob**:
+a skirt one step down from the cap, lit from the top, with 36 grip
 flutes that turn with the value. A cap in the *flat token face*, with a soft
 sheen off the top left and a bevelled rim. A contact shadow underneath (a
 radial gradient, not a blur). The pointer sits in an engraved groove: a dark
@@ -56,6 +64,16 @@ line a pixel wider under it.
 with an inner shadow along the top when on. **On and off now differ in shape
 as well as in hue**, which the Palette Book flagged as failing for colourblind
 users and in screenshots.
+
+**Laser-engraved lines.** The section rules (`ModulePanel::drawRule`), BMO
+Dimension's pair brackets and BMO FET's ratio bus go through one helper,
+`BmoLookAndFeel::fillEngraved`: a channel cut into the plate, lit from above —
+a lit lip below and right of the cut, a shaded wall above and left, the
+line's own ink in the channel. Same colours, same weights, same positions.
+Off, each is drawn exactly as before (Dimension's brackets keep their
+piece-by-piece fill, corners and all). On the dark plate the hairline is
+lighter than the plate, so the cut reads bright — how a laser mark on dark
+anodised metal actually looks.
 
 **Section legends.** On a textured plate the old flat knock-out behind HIGH,
 MID and so on showed as a patch, so the rule is drawn in two pieces that stop
@@ -95,6 +113,12 @@ runs, in the same cloud session:
 | Flat, as shipped | 7.1–7.8 |
 | Material, drawn naively every paint | 53–63 |
 | Material, plate and knob bodies cached | **10.8–11.0** |
+| — powder, one-piece cap | 9.8–11.1 |
+| — brushed, ringed knob | 10.7–11.6 |
+| — brushed, one-piece cap | 10.3–10.6 |
+
+The finish costs nothing once cached; the one-piece cap saves the grip's 36
+lines per knob.
 
 What that means in a running plugin:
 
@@ -129,19 +153,18 @@ nothing blurs at 150 % or on a Retina display.
 
 ## For Frosty to decide
 
-1. **A, B, or the hybrid.**
-2. **Plate finish:** powder-coat grain as prototyped, brushed, or smooth with
-   only the lighting.
-3. **Knob form:** skirt + grip + cap as prototyped, or a simpler single-piece
-   cap with only the bevel and shadow (cheaper, calmer).
-4. **Intensity.** The prototype is deliberately moderate. The sheen, groove and
-   grain are each one constant.
+1. **Plate finish:** powder or brushed — and whether LTV's silver line takes
+   the other one.
+2. **Knob form:** ringed or one-piece — or one per role, e.g. ringed for
+   character knobs and one-piece for utility trims.
 
 ## How to see it
 
 ```
 BMO_MATERIAL=1 build/tools/snapshot rack out.png chain=util,eq,sat,opto
 BMO_MATERIAL=1 build/tools/snapshot rack out.png chain=util,eq,sat,opto appearance=dark
+BMO_MATERIAL=brushed,cap build/tools/snapshot rack out.png chain=util,eq,sat,opto
+BMO_MATERIAL=brushed build/tools/snapshot fetcomp out.png     # the engraved bus
 BMO_PAINT_BENCH=40 BMO_MATERIAL=1 build/tools/snapshot rack out.png chain=util,eq,sat,opto
 ```
 

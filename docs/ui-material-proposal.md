@@ -3,7 +3,10 @@
 **Status: built as a user setting.** The plugins as they are, now called
 **Simple**, are the default and draw pixel-for-pixel what they drew before —
 checked across all ten modules in both appearances and a six-module rack
-against `main`. **Textured** is chosen by the user.
+against `main` — except BMO DEQ, whose graph took BMO Linger's screen and
+whose on-tab number was fixed, both on purpose. (The comparison must be made
+on RGB: on RGBA, Pillow's `getbbox` reads only the alpha channel, and an
+opaque render then compares identical to anything.) **Textured** is chosen by the user.
 
 **Decided (Frosty, 2026-09-25):**
 
@@ -209,22 +212,30 @@ piece-by-piece fill, corners and all). On the dark plate the hairline is
 lighter than the plate, so the cut reads bright — how a laser mark on dark
 anodised metal actually looks.
 
-**BMO DEQ's band tabs and graph.** The tabs are switches and take the
-switch treatment, reading by form in three states: off is a slot cut into the
-plate, on is a raised key outlined all the way round in its band's colour
-(Simple has a bar along the foot instead), and selected is pressed in and lit
-in the band's colour. The solo ring and the dynamics dot are unchanged. The
-graph is a screen set into the plate: an inner shadow along its top and left
-walls, under the nodes, and a lit lip along its foot. **The nodes on the
-curve stay flat** (Frosty, 2026-09-25, after seeing them as shaded pucks). An
-active node that isn't selected keeps its ring in the band's colour. Same
-tokens as Simple throughout.
+**BMO DEQ's band tabs.** The tabs are switches and take the switch
+treatment, reading by form in three states: off is a slot cut into the plate,
+on is a raised key outlined all the way round in its band's colour (Simple
+has a bar along the foot instead), and selected is pressed in and lit in the
+band's colour. The solo ring and the dynamics dot are unchanged. **The nodes
+on the curve stay flat** (Frosty, 2026-09-25, after seeing them as shaded
+pucks).
 
-An on tab's number in Textured takes its ink from the key (`onAccentOf
-(switchOff)`), as every switch label does. **Simple has a legibility bug
-here**: it sets that number in `text1`, which on the pale plate is `#6f6f6f`
-on a `#6f7076` key, 1.02:1, and the number disappears. It is left as it is in
-Simple, because Simple is today's look by definition, until Frosty decides.
+**BMO DEQ's graph is BMO Linger's screen, in both surfaces** (Frosty,
+2026-09-25: "the screen of DEQ should follow the screen of Linger"). A bezel
+cut into the plate in `well` with an `outline` hairline, and in it a dark face
+in `meterFace`: the same value in both appearances, because a screen that
+went pale with the plate would stop reading as a screen. Linger's dot matrix,
+its grid weights (hairline at 0.5, the 0 dB line at 0.8), its screen ink
+(`accentInk (accent, meterFace)`) for the curve, and its tick labels (that ink
+at 0.6, on a punch-out of the face). The nodes keep their band colours and
+their numbers, now set in `meterInk`. This is a change to Simple, on purpose.
+The bezel margin is 3 px (`ResponseView::kBezelPad`), inside the room the
+graph already had, so nothing else on the panel moved.
+
+**DEQ's on-tab number was invisible in Simple and is fixed in both
+surfaces.** It was set in `text1`, which on the pale plate is `#6f6f6f` on a
+`#6f7076` key, 1.02:1. It now takes its ink from the key (`onAccentOf
+(switchOff)`), as every switch label does.
 
 **Section legends.** On a textured plate the old flat knock-out behind HIGH,
 MID and so on showed as a patch, so the rule is drawn in two pieces that stop
@@ -306,10 +317,6 @@ nothing blurs at 150 % or on a Retina display.
 1. **DEQ's FREQ, GAIN and Q**: tagged ringed at both widths. The other
    defensible call is one-piece at both, matching every other knob on DEQ in
    a rack.
-2. **Fix DEQ's on-tab number in Simple too** (1.02:1 in the light
-   appearance; see above). It would be the one change to Simple's pixels.
-3. **BMO Linger's graph and nodes** could take the same screen and puck
-   treatment as DEQ's.
 
 ## How to see it
 

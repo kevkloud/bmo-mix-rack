@@ -410,14 +410,12 @@ public:
                 }
             }
 
-            // An on tab's number in Textured is derived from the key it sits
-            // on, like every switch label. Simple sets it in text1, which on
-            // the pale plate is #6f6f6f on a #6f7076 key -- 1.0:1, the number
-            // gone. Left as it is in Simple until Frosty decides, because
-            // Simple is today's look by definition; see
-            // docs/ui-material-proposal.md.
+            // An on tab's number is derived from the key it sits on, like
+            // every switch label. It was text1 until 2026-09-25, which on the
+            // pale plate is #6f6f6f on a #6f7076 key -- 1.02:1, and the number
+            // was gone. Fixed in both surfaces, Frosty's call.
             const auto ink = isSel ? ui::onAccentOf (mine)
-                           : isOn  ? (ui::BmoLookAndFeel::textured() ? ui::onAccentOf (t.switchOff) : t.text1)
+                           : isOn  ? ui::onAccentOf (t.switchOff)
                                    : t.text2;
             ui::drawLabel (g, juce::String (b + 1), r, juce::Justification::centred, ui::labelFont (12.0f, true), ink);
 

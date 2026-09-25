@@ -88,6 +88,10 @@ public:
         `wellBounds.expanded (kOverhang, 0)`. */
     static constexpr int kOverhang = 8;
 
+    /** The bezel's margin round the screen: a recess in `well`, as BMO
+        Linger's screen sits in. Inside kOverhang, so it costs no layout. */
+    static constexpr float kBezelPad = 3.0f;
+
 private:
     struct Band
     {

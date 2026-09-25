@@ -41,6 +41,7 @@
 #include "modules/reverb/dsp/ImageSource.h"
 #include "modules/reverb/dsp/ReverbDsp.h"
 #include "modules/reverb/dsp/TapTables.h"
+#include "tools/measure/Wav.h"
 
 #include <algorithm>
 #include <chrono>
@@ -396,6 +397,221 @@ void printBench (double rate, int block, bool worst)
     std::printf ("  Wall clock on whatever machine this runs on; name it in the note.\n");
 }
 
+//== Reference measurements ====================================================
+//
+// Two modes for putting the installed reverbs and this one on the same
+// table. `stimulus` writes the impulse file that bmo-tune-hostrender renders
+// through a third-party plugin; `analyse` reads any rendered file back -- a
+// plugin's, or `irwav`'s of this engine -- and prints the ER figures 11
+// section 6 defines. WAVs go only where the caller points them, which is the
+// gitignored packages/reverb-listening/; nothing here writes into the tree.
+
+/** A unit impulse 100 ms in, 3 s of silence after it, stereo, so the plugin
+    has run for a moment before the click and has room to ring. */
+void writeStimulus (const std::string& path, double rate)
+{
+    const auto n = (size_t) (3.1 * rate);
+    std::vector<std::vector<float>> ch (2, std::vector<float> (n, 0.0f));
+    ch[0][(size_t) (0.1 * rate)] = 1.0f;
+    ch[1][(size_t) (0.1 * rate)] = 1.0f;
+
+    std::printf ("%s: %s, impulse at 100 ms, %.1f s, %g Hz\n",
+                 bmo::measure::writeWav (path, ch, rate) ? "wrote" : "COULD NOT WRITE", path.c_str(), (double) n / rate, rate);
+}
+
+/** This engine's own response to the same stimulus, ER-only, to a file the
+    analyser can read alongside a plugin's. */
+void writeIrWav (const std::string& path, int type, float sizeM, float density, int variation)
+{
+    auto v = erOnly();
+    v[Index::type]        = (float) type;
+    v[Index::size]        = sizeM;
+    v[Index::erdensity]   = density;
+    v[Index::ervariation] = (float) variation;
+
+    ReverbDsp dsp;
+    dsp.prepare (kSampleRate, 512, 2);
+    dsp.setParams (v.data(), (int) v.size());
+
+    const auto n = (size_t) (3.1 * kSampleRate);
+    std::vector<std::vector<float>> ch (2, std::vector<float> (n, 0.0f));
+    ch[0][(size_t) (0.1 * kSampleRate)] = 1.0f;
+    ch[1][(size_t) (0.1 * kSampleRate)] = 1.0f;
+
+    for (size_t at = 0; at < n; at += 512)
+    {
+        float* chans[] { ch[0].data() + at, ch[1].data() + at };
+        dsp.setParams (v.data(), (int) v.size());
+        dsp.process (chans, 2, (int) std::min<size_t> (512, n - at));
+    }
+
+    std::printf ("%s: %s (%s, SIZE %.1f m, DENSITY %.0f %%, VARIATION %d, ER-only at 0 dB, MIX 100 %%)\n",
+                 bmo::measure::writeWav (path, ch, kSampleRate) ? "wrote" : "COULD NOT WRITE", path.c_str(),
+                 kTypeNames[type], (double) sizeM, (double) density, variation);
+}
+
+void analyseWav (const std::string& path)
+{
+    std::vector<std::vector<float>> ch;
+    double rate = 0.0;
+
+    if (! bmo::measure::readWav (path, ch, rate) || ch.empty())
+    {
+        std::printf ("cannot read %s\n", path.c_str());
+        return;
+    }
+
+    const auto& l = ch[0];
+    const auto& r = ch.size() > 1 ? ch[1] : ch[0];
+    const auto n  = l.size();
+    const auto ms = [rate] (size_t i) { return 1000.0 * (double) i / rate; };
+    const auto at = [rate] (double t) { return (size_t) (t * 0.001 * rate); };
+
+    // The direct sound: the largest sample in the first 300 ms. A wet-only
+    // render has no direct, so its largest early sample is the first
+    // reflection and every time below is relative to that instead; the
+    // caller knows which it rendered.
+    size_t t0 = 0;
+    float peak = 0.0f;
+    for (size_t i = 0; i < std::min (n, at (300.0)); ++i)
+    {
+        const auto a = std::max (std::abs (l[i]), std::abs (r[i]));
+        if (a > peak) { peak = a; t0 = i; }
+    }
+
+    std::printf ("%s\n  %zu samples at %g Hz, %zu channel(s); reference peak %.4f (%.1f dBFS) at %.1f ms\n",
+                 path.c_str(), n, rate, ch.size(), (double) peak, 20.0 * std::log10 (std::max (peak, 1.0e-9f)), ms (t0));
+
+    const auto energy = [&] (size_t from, size_t to)
+    {
+        double e = 0.0;
+        for (size_t i = std::min (from, n); i < std::min (to, n); ++i)
+            e += (double) l[i] * l[i] + (double) r[i] * r[i];
+        return e;
+    };
+
+    // Early taps: local maxima of |L| + |R| above -40 dB re the reference,
+    // at least 0.5 ms apart, in the first 120 ms after it.
+    std::printf ("  early arrivals (local maxima above -40 dB re reference, first 120 ms):\n");
+    std::printf ("    %8s %8s %8s %8s\n", "ms", "dB", "L", "R");
+    size_t last = 0;
+    int count = 0;
+    for (size_t i = t0 + 1; i + 1 < std::min (n, t0 + at (120.0)) && count < 40; ++i)
+    {
+        const auto a = std::abs (l[i]) + std::abs (r[i]);
+        if (a > std::abs (l[i - 1]) + std::abs (r[i - 1]) && a >= std::abs (l[i + 1]) + std::abs (r[i + 1])
+             && a > peak * 0.01f && (last == 0 || i - last >= at (0.5)))
+        {
+            std::printf ("    %8.2f %8.1f %8.4f %8.4f\n", ms (i) - ms (t0), 20.0 * std::log10 (0.5 * a / peak), (double) l[i], (double) r[i]);
+            last = i;
+            ++count;
+        }
+    }
+
+    // Energy against time, and the decay: Schroeder backward integration,
+    // T60 from the -5..-35 dB fit.
+    {
+        const auto total = energy (t0, n);
+        std::printf ("  energy: first 20 ms %.1f dB, 20-80 ms %.1f dB, 80-500 ms %.1f dB of the total after the reference\n",
+                     10.0 * std::log10 (std::max (energy (t0, t0 + at (20.0)) / total, 1.0e-12)),
+                     10.0 * std::log10 (std::max (energy (t0 + at (20.0), t0 + at (80.0)) / total, 1.0e-12)),
+                     10.0 * std::log10 (std::max (energy (t0 + at (80.0), t0 + at (500.0)) / total, 1.0e-12)));
+
+        std::vector<double> edc (n - t0, 0.0);
+        double acc = 0.0;
+        for (size_t i = n; i-- > t0;)
+        {
+            acc += (double) l[i] * l[i] + (double) r[i] * r[i];
+            edc[i - t0] = acc;
+        }
+
+        const auto dbAt = [&] (size_t i) { return 10.0 * std::log10 (std::max (edc[i] / edc[0], 1.0e-30)); };
+        size_t i5 = 0, i35 = 0;
+        for (size_t i = 0; i < edc.size(); ++i) { if (i5 == 0 && dbAt (i) <= -5.0) i5 = i; if (dbAt (i) <= -35.0) { i35 = i; break; } }
+
+        if (i35 > i5 && i5 > 0)
+        {
+            const auto t60 = 2.0 * (ms (i35) - ms (i5)) / 1000.0;
+            std::printf ("  decay: EDC -5 dB at %.1f ms, -35 dB at %.1f ms -> T60 (T30 x 2) = %.2f s\n", ms (i5), ms (i35), t60);
+        }
+        else
+            std::printf ("  decay: EDC never reaches -35 dB in the file\n");
+
+        // Where the energy stops arriving: the time after which less than
+        // 0.1 % of the total remains.
+        for (size_t i = 0; i < edc.size(); ++i)
+            if (edc[i] / edc[0] < 1.0e-3) { std::printf ("  99.9 %% of the energy has arrived by %.1f ms\n", ms (i)); break; }
+    }
+
+    // Normalised echo density, Abel-Huang, 20 ms window, on the mono sum.
+    {
+        std::printf ("  normalised echo density (20 ms window, mono):");
+        const auto w = at (20.0);
+        for (const auto centre : { 10.0, 20.0, 30.0, 50.0, 80.0, 120.0, 200.0, 350.0 })
+        {
+            const auto c = t0 + at (centre);
+            if (c + w / 2 >= n) break;
+            double s2 = 0.0;
+            for (size_t i = c - w / 2; i < c + w / 2; ++i) { const auto m = 0.5 * (l[i] + r[i]); s2 += m * m; }
+            const auto sigma = std::sqrt (s2 / (double) w);
+            int above = 0;
+            for (size_t i = c - w / 2; i < c + w / 2; ++i) if (std::abs (0.5 * (l[i] + r[i])) > sigma) ++above;
+            std::printf ("  %.0f ms: %.2f", centre, (double) above / (double) w / 0.3173);
+        }
+        std::printf ("\n");
+    }
+
+    // L/R correlation, early and late.
+    if (ch.size() > 1)
+    {
+        const auto gamma = [&] (size_t from, size_t to)
+        {
+            double lr = 0.0, ll = 0.0, rr = 0.0;
+            for (size_t i = std::min (from, n); i < std::min (to, n); ++i) { lr += (double) l[i] * r[i]; ll += (double) l[i] * l[i]; rr += (double) r[i] * r[i]; }
+            return ll > 0.0 && rr > 0.0 ? lr / std::sqrt (ll * rr) : 0.0;
+        };
+        std::printf ("  L/R correlation: 0-80 ms %.3f, 80-500 ms %.3f, 0.5-2 s %.3f\n",
+                     gamma (t0 + 1, t0 + at (80.0)), gamma (t0 + at (80.0), t0 + at (500.0)), gamma (t0 + at (500.0), t0 + at (2000.0)));
+    }
+
+    // Magnitude of the first 80 ms after the reference, octave-smoothed, and
+    // its ripple about a straight tilt -- the same two figures the ER tests
+    // print for this engine.
+    {
+        const auto to = std::min (n, t0 + at (80.0));
+        std::vector<double> f, m;
+        for (double hz = 250.0; hz <= 8000.0; hz *= 2.0)
+        {
+            double p = 0.0;
+            for (int k = -12; k <= 12; ++k)
+            {
+                const auto fk = hz * std::pow (2.0, (double) k / 24.0);
+                const auto w = 2.0 * 3.14159265358979 * fk / rate;
+                double re = 0.0, im = 0.0;
+                for (size_t i = t0; i < to; ++i) { const auto x = 0.5 * (l[i] + r[i]); re += x * std::cos (w * (double) (i - t0)); im -= x * std::sin (w * (double) (i - t0)); }
+                p += re * re + im * im;
+            }
+            f.push_back (std::log2 (hz));
+            m.push_back (10.0 * std::log10 (std::max (p / 25.0, 1.0e-24)));
+        }
+        double sx = 0.0, sy = 0.0, sxx = 0.0, sxy = 0.0;
+        for (size_t i = 0; i < f.size(); ++i) { sx += f[i]; sy += m[i]; sxx += f[i] * f[i]; sxy += f[i] * m[i]; }
+        const auto nn = (double) f.size();
+        const auto slope = (nn * sxy - sx * sy) / (nn * sxx - sx * sx);
+        const auto icept = (sy - slope * sx) / nn;
+        double lo = 1.0e9, hi = -1.0e9;
+        std::printf ("  first 80 ms, octave-smoothed magnitude re 1 kHz:");
+        const auto ref = m[2];
+        for (size_t i = 0; i < f.size(); ++i)
+        {
+            std::printf ("  %.0f Hz %+.1f", std::pow (2.0, f[i]), m[i] - ref);
+            const auto residual = m[i] - (icept + slope * f[i]);
+            lo = std::min (lo, residual); hi = std::max (hi, residual);
+        }
+        std::printf ("\n    tilt %.2f dB/octave, ripple about the tilt %.1f dB peak to peak\n", slope, hi - lo);
+    }
+}
+
 void printTables (int maxTries)
 {
     // Prints the six per-type tables as C++ rows for TapTables.h, after
@@ -425,8 +641,11 @@ void printTables (int maxTries)
 
 void usage()
 {
-    std::printf ("usage: measure_reverb <latency|tail|taps [size]|constants|schema|tables [tries]|bench [rate [block [worst|default]]]\n"
-                 "                       |ir [type [size [density [variation]]]]>\n");
+    std::printf ("usage: measure_reverb <latency|tail|taps [size]|constants|schema|tables [tries]\n"
+                 "                       |bench [rate [block [worst|default]]]|ir [type [size [density [variation]]]]\n"
+                 "                       |samples [density [from [to]]]\n"
+                 "                       |stimulus <out.wav> [rate]|irwav <out.wav> [type [size [density [variation]]]]\n"
+                 "                       |analyse <in.wav>...>\n");
 }
 
 } // namespace
@@ -452,6 +671,29 @@ int main (int argc, char** argv)
                  argc > 3 ? (float) std::atof (argv[3]) : kReferenceSizeM,
                  argc > 4 ? (float) std::atof (argv[4]) : 0.0f,
                  argc > 5 ? std::atoi (argv[5]) : 0);
+        return 0;
+    }
+
+    if (mode == "stimulus" && argc > 2)
+    {
+        writeStimulus (argv[2], argc > 3 ? std::atof (argv[3]) : kSampleRate);
+        return 0;
+    }
+
+    if (mode == "irwav" && argc > 2)
+    {
+        writeIrWav (argv[2],
+                    argc > 3 ? std::atoi (argv[3]) : 0,
+                    argc > 4 ? (float) std::atof (argv[4]) : kReferenceSizeM,
+                    argc > 5 ? (float) std::atof (argv[5]) : 0.0f,
+                    argc > 6 ? std::atoi (argv[6]) : 0);
+        return 0;
+    }
+
+    if (mode == "analyse" && argc > 2)
+    {
+        for (int i = 2; i < argc; ++i)
+            analyseWav (argv[i]);
         return 0;
     }
 

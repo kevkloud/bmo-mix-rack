@@ -285,7 +285,7 @@ knob position.
 | 25 | `inhicut` | IN HI-CUT | 2…20 kHz | *per type* (20 k) | Hz/kHz | L, **owner confirm** |
 | 26 | `erlevel` | ER | −40…0 dB | *per type* (−6) | dB, `Off` at −40 | |
 | 27 | `verblevel` | REVERB | −40…0 dB | *per type* (−6) | as `erlevel` | |
-| 28 | `mix` | MIX | 0…100 % | 100 | % | |
+| 28 | `mix` | MIX | 0…100 % | 50 | % | default 50 since 2026-09-24, Frosty: input unchanged, verb heard |
 | 29 | `output` | OUTPUT | −24…0 dB | 0 | dB | |
 
 **The EQ captions above are the host's, not the panel's.** A lane in a DAW says

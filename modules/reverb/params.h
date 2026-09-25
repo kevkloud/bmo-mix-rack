@@ -1125,12 +1125,14 @@ inline const ParamSpecs& specs()
         S::textParam (kVerbLevel, "Reverb", -40.0f, 0.0f, 0.1f,
                       roomDefaults::kVerbLevelDb, &detail::levelText),
 
-        // 28. MIX. Defaults to 100 %, because the two faders above are the
-        // wet balance and this is the dry/wet one -- a reverb used as a send,
-        // which is the normal case, wants the dry out of the way. **The MIX
-        // law itself is 11 section 7's open owner-confirm item**; what is
-        // frozen here is the range, the step and the default.
-        S::floatParam (kMix, "Mix", 0.0f, 100.0f, 0.1f, 100.0f, F::Percent),
+        // 28. MIX. **Defaults to 50 %, Frosty's call on 2026-09-24**: "input
+        // unchanged but verb heard". Under the law the engine runs
+        // (`DspCore::dryGainFor` / `wetGainFor`: dry = min(1, 2(1 - mix)),
+        // wet = min(1, 2 mix)) 50 % is dry at unity with the wet bus at its
+        // faders, 0 % is dry alone and 100 % is wet alone for send use. It
+        // defaulted to 100 % while the DSP was a wire. The range and the step
+        // are frozen; a default is not, since state stores plain values.
+        S::floatParam (kMix, "Mix", 0.0f, 100.0f, 0.1f, 50.0f, F::Percent),
 
         // 29. OUTPUT. Trim only, cut only.
         S::floatParam (kOutput, "Output", -24.0f, 0.0f, 0.1f, 0.0f, F::Decibels),

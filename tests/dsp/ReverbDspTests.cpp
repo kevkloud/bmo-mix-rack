@@ -854,12 +854,49 @@ int main()
             return std::pair<double, double> { slope, hi - lo };
         };
 
+        // Octave smoothing too, over the same range, so the owner can choose
+        // the rule with both figures in front of them.
+        const auto octaveRippleAt = [] (const Ir& r, float spanMs)
+        {
+            std::vector<double> f, m;
+            const auto to = r.msToSamples (spanMs + 10.0f);
+            for (double hz = 250.0; hz <= 8000.0; hz *= 2.0)
+            {
+                double p = 0.0;
+                for (int k = -12; k <= 12; ++k)
+                {
+                    const auto fk = hz * std::pow (2.0, (double) k / 24.0);
+                    const auto mag = magnitudeAt (r, fk, to);
+                    p += mag * mag;
+                }
+                f.push_back (std::log2 (hz));
+                m.push_back (10.0 * std::log10 (std::max (p / 25.0, 1.0e-24)));
+            }
+
+            double sx = 0.0, sy = 0.0, sxx = 0.0, sxy = 0.0;
+            for (size_t i = 0; i < f.size(); ++i) { sx += f[i]; sy += m[i]; sxx += f[i] * f[i]; sxy += f[i] * m[i]; }
+            const auto n = (double) f.size();
+            const auto slope = (n * sxy - sx * sy) / (n * sxx - sx * sx);
+            const auto icept = (sy - slope * sx) / n;
+
+            double lo = 1.0e9, hi = -1.0e9, rawLo = 1.0e9, rawHi = -1.0e9;
+            for (size_t i = 0; i < f.size(); ++i)
+            {
+                const auto residual = m[i] - (icept + slope * f[i]);
+                lo = std::min (lo, residual); hi = std::max (hi, residual);
+                rawLo = std::min (rawLo, m[i]); rawHi = std::max (rawHi, m[i]);
+            }
+            return std::pair<double, double> { hi - lo, rawHi - rawLo };
+        };
+
         for (const auto density : { 0.0f, 50.0f, 100.0f })
         {
             const auto r = render ([density] (auto& p) { p[Index::erdensity] = density; });
             const auto [tilt, ripple] = rippleAt (r, span);
+            const auto [octave, octaveRaw] = octaveRippleAt (r, span);
             std::cout << "  ER-only magnitude at DENSITY " << density << " %, 1/3-octave smoothed, 200 Hz-10 kHz: tilt "
-                      << tilt << " dB/octave, ripple about the tilt " << ripple << " dB peak to peak\n";
+                      << tilt << " dB/octave, ripple about the tilt " << ripple << " dB peak to peak; octave-smoothed 250 Hz-8 kHz: "
+                      << octave << " dB about the tilt, " << octaveRaw << " dB raw\n";
 
             // **Measured, not asserted.** No sparse cluster meets +-3 dB under
             // 1/3-octave smoothing at 200 Hz -- the band is 46 Hz wide and any

@@ -89,7 +89,7 @@ namespace
         { P::kInHiCut,    "In Hi-Cut",     2000.0f, 20000.0f, 20000.0f,     0 },
         { P::kErLevel,    "ER",             -40.0f,     0.0f,    -6.0f,     0 },
         { P::kVerbLevel,  "Reverb",         -40.0f,     0.0f,    -6.0f,     0 },
-        { P::kMix,        "Mix",              0.0f,   100.0f,   100.0f,     0 },
+        { P::kMix,        "Mix",              0.0f,   100.0f,    50.0f,     0 },
         { P::kOutput,     "Output",         -24.0f,     0.0f,     0.0f,     0 },
     };
 }

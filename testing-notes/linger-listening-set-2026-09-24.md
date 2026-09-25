@@ -66,8 +66,10 @@ the `-mix50` files against the source; play the `-wet` files alone.
 `drum-room`) through the two licensed stand-ins at their factory state:
 `-lexicon224-wet` (UAD Lexicon 224, SmHall A, wet solo, its own 24 ms
 predelay and 2.2 s tail), `-lexicon224-mix50` (the same with wet solo off,
-which the plugin mixes at its own 50 %), and `-verbsuite-wet` (Slate
-VerbSuite Classics). **These have tails and ours does not**, so they are not
+which the plugin mixes at its own 50 %), and `-verbsuite-wet` (Slate VerbSuite Classics, **guitar and drum-room only**:
+headless it rendered the vocal as silence and the drum loop 30 dB down, on
+every try, so those two are not in the set). **These have tails and ours
+does not**, so they are not
 an A/B on the early reflections; they are what a dense, decorrelated onset
 sounds like on this material, which is the Reference-B side of the thesis.
 Renaissance Reverb and Valhalla are still to be installed.

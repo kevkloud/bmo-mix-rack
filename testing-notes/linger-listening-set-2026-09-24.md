@@ -87,3 +87,29 @@ the tests cover, the DENSITY sweep is level-flat to 0.03 dB, γ at VARIATION
 0 and 6 is 0.99 and 0.00, and the ER-only ripple at DENSITY 100 % is 4.6 dB
 octave-smoothed. What the numbers cannot say is whether any of it sounds
 like a room.
+
+## Friday 25 September: the LINGER folder
+
+Frosty recorded into `D:\VISUAL\PLUGINS\MIX RACK\LINGER` on ICE QUEEN, at
+44.1 or 48 kHz (both fine: every tool runs at the file's own rate). Copied into
+`sources/` as `rap-vocal-01` (73 s), `rap-vocal-02` (62 s), `snare-01` (one
+hit), `snare-02` (several hits, mono), `lead-vocal-03` (6.4 s, peaks at
+0 dBFS), `guitar-02` (16 s), `held-note` (10 s), `sine-1k` (10 s, −6.4 dBFS),
+`woodblock` (6 s). `measure_reverb stats` prints these figures.
+
+Rendered through Linger, ER only, same conventions as above: both rap vocals
+at Room 12 and 20 m, wet, and through Ambience at ER −9; both snares and the
+woodblock at Room 12 mixed, wet, wet at DENSITY 100, and Hall 34; the third
+lead vocal mixed and wet; the second guitar across DENSITY and HI-CUT; the held
+note through Room and Hall; the sine wet through Room and Hall. **The
+lead-vocal-03 mix file peaks at +1.1 dBFS**: turn it down. 67 Linger files.
+
+Through the UAD units: rap-vocal-01, snare-02, lead-vocal-03, guitar-02,
+held-note and sine-1k each through Lexicon 224 (wet and mixed), RealVerb-Pro
+(wet) and the Precision Reflection Engine (wet and mixed); rap-vocal-01 and
+snare-02 through Pure Plate. 54 reference files. RealVerb-Pro on the third
+lead vocal peaks at +0.9 dBFS.
+
+The held-note and sine files are for M3's modulation question and are here
+early: nothing modulates yet, so Linger's versions of them are the cluster
+alone.

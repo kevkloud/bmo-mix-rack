@@ -708,10 +708,9 @@ void usage()
 {
     std::printf ("usage: measure_reverb <latency|tail|taps [size]|constants|schema|tables [tries]\n"
                  "                       |bench [rate [block [worst|default]]]|ir [type [size [density [variation]]]]\n"
-                 "                       |samples [density [from [to]]]\n"
+                 "                       |samples [density [from [to]]]|stats <in.wav>...\n"
                  "                       |stimulus <out.wav> [rate]|irwav <out.wav> [type [size [density [variation]]]]\n"
-                 "                       |render <in.wav> <out.wav> [id=value ...]|analyse <in.wav>...>
-");
+                 "                       |render <in.wav> <out.wav> [id=value ...]|analyse <in.wav>...>\n");
 }
 
 } // namespace
@@ -753,6 +752,34 @@ int main (int argc, char** argv)
                     argc > 4 ? (float) std::atof (argv[4]) : kReferenceSizeM,
                     argc > 5 ? (float) std::atof (argv[5]) : 0.0f,
                     argc > 6 ? std::atoi (argv[6]) : 0);
+        return 0;
+    }
+
+    if (mode == "stats" && argc > 2)
+    {
+        // Whole-file figures for a source clip: length, rate, channels, peak,
+        // RMS, and how much of it is silence -- what a take is judged on
+        // before it goes into a listening set.
+        std::printf ("  %-28s %6s %5s %3s %8s %8s %6s\n", "file", "s", "kHz", "ch", "peak", "RMS", "quiet");
+        for (int i = 2; i < argc; ++i)
+        {
+            std::vector<std::vector<float>> ch;
+            double rate = 0.0;
+            if (! bmo::measure::readWav (argv[i], ch, rate) || ch.empty()) { std::printf ("  %-28s cannot read\n", argv[i]); continue; }
+            const auto n = ch[0].size();
+            double peak = 0.0, sum = 0.0; size_t quiet = 0;
+            for (size_t k = 0; k < n; ++k)
+            {
+                double a = 0.0;
+                for (const auto& c : ch) { a = std::max (a, (double) std::abs (c[k])); sum += (double) c[k] * c[k]; }
+                peak = std::max (peak, a);
+                if (a < 1.0e-4) ++quiet;   // under -80 dBFS
+            }
+            const auto rms = std::sqrt (sum / (double) (n * ch.size()));
+            std::string name (argv[i]); const auto slash = name.find_last_of ("/\\"); if (slash != std::string::npos) name = name.substr (slash + 1);
+            std::printf ("  %-28s %6.1f %5.1f %3zu %8.1f %8.1f %5.0f%%\n", name.c_str(), (double) n / rate, rate / 1000.0, ch.size(),
+                         20.0 * std::log10 (std::max (peak, 1.0e-9)), 20.0 * std::log10 (std::max (rms, 1.0e-9)), 100.0 * (double) quiet / (double) n);
+        }
         return 0;
     }
 

@@ -26,7 +26,7 @@ void ModulePanel::paintRules (juce::Graphics& g) const
     }
 }
 
-bool ModulePanel::materialPlate() { return BmoLookAndFeel::materialEnabled(); }
+bool ModulePanel::materialPlate() { return BmoLookAndFeel::textured(); }
 
 Tokens ModulePanel::panelTokens() const
 {
@@ -37,7 +37,7 @@ void ModulePanel::paint (juce::Graphics& g)
 {
     const auto plate = panelTokens().plate;
 
-    if (! BmoLookAndFeel::materialEnabled())
+    if (! BmoLookAndFeel::textured())
     {
         g.fillAll (plate);
     }
@@ -47,18 +47,21 @@ void ModulePanel::paint (juce::Graphics& g)
         // editor's own scale transform times the display's. Caching at design
         // size and letting the transform stretch it would blur the grain.
         const auto scale = g.getInternalContext().getPhysicalPixelScaleFactor();
+        const auto finish = finishFor (context.def.lineOf());
         const auto w = juce::roundToInt ((float) getWidth()  * scale);
         const auto h = juce::roundToInt ((float) getHeight() * scale);
 
         if (plateCache.isNull() || plateCache.getWidth() != w || plateCache.getHeight() != h
-            || ! juce::approximatelyEqual (plateCacheScale, scale) || plateCacheColour != plate)
+            || ! juce::approximatelyEqual (plateCacheScale, scale) || plateCacheColour != plate
+            || plateCacheFinish != finish)
         {
             plateCache = juce::Image (juce::Image::RGB, juce::jmax (1, w), juce::jmax (1, h), false);
             juce::Graphics cg (plateCache);
             cg.addTransform (juce::AffineTransform::scale (scale));
             cg.fillAll (plate);
-            BmoLookAndFeel::paintPlateMaterial (cg, getLocalBounds());
+            BmoLookAndFeel::paintPlateFinish (cg, getLocalBounds(), finish);
             plateCacheScale = scale;
+            plateCacheFinish = finish;
             plateCacheColour = plate;
         }
 

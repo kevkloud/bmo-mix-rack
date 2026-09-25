@@ -124,6 +124,10 @@ public:
         a panel that sizes knobs at layout time sets this with the side. */
     void setFaceScale (float scale)  { knob.setFaceScale (scale); knob.repaint(); }
 
+    /** Tags this knob's form in the Textured surface; see
+        Knob::setTexturedForm. */
+    void setTexturedForm (Knob::TexturedForm f) { knob.setTexturedForm (f); knob.repaint(); }
+
     /** Rewrites the host's text before it is drawn -- a narrow panel's
         "2.10k" for "2.10 kHz". Paint only; the host, the automation lane and
         typed entry keep the full text. Measured by captionOverflow like the

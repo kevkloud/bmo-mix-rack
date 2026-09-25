@@ -28,6 +28,18 @@ public:
     void setStyle (Style s) noexcept   { style = s; }
     Style getStyle() const noexcept    { return style; }
 
+    /** The form this knob takes in the Textured surface. Simple ignores it:
+        every knob there is drawn exactly as it always has been.
+
+        `ringed` is a skirt with a turning grip and a cap on it; `onePiece` is
+        a single cap with a chamfered rim. `automatic`, the default, defers to
+        the panel's section tag (ModulePanel::tagTextured) and then to the
+        knob's style -- see texturedFormFor for the order. */
+    enum class TexturedForm { automatic, ringed, onePiece };
+
+    void setTexturedForm (TexturedForm f) noexcept { texturedForm = f; }
+    TexturedForm getTexturedForm() const noexcept  { return texturedForm; }
+
     /** The module's colour, for the character style. */
     void setAccent (juce::Colour c) noexcept { accent = c; }
     juce::Colour getAccent() const noexcept  { return accent; }
@@ -131,6 +143,7 @@ public:
 
 private:
     Style style = Style::utility;
+    TexturedForm texturedForm = TexturedForm::automatic;
     juce::Colour accent { tokens().accent };
     juce::Colour utilityTint;
     bool  circularHit = false;
@@ -144,20 +157,34 @@ private:
 };
 
 //==============================================================================
+/** The form a knob takes in the Textured surface, resolved: the knob's own
+    tag, else the nearest enclosing section's (ModulePanel::tagTextured), else
+    ringed for a character knob and one-piece for everything else. Never
+    `automatic`. */
+Knob::TexturedForm texturedFormFor (const Knob&);
+
+//==============================================================================
 class BmoLookAndFeel final : public juce::LookAndFeel_V4
 {
 public:
     BmoLookAndFeel() { refreshColours(); }
 
-    /** PROTOTYPE: whether the material pass is on (BMO_MATERIAL set), and
-        the plate treatment it adds. See docs/ui-material-proposal.md. */
-    static bool materialEnabled();
-    static void paintPlateMaterial (juce::Graphics&, juce::Rectangle<int> area);
+    /** Whether the Textured surface is in force. See ui::surface. */
+    static bool textured();
 
-    /** PROTOTYPE: fills `marks` in `ink` -- as a flat fill when the material
-        pass is off, laser-engraved into the plate when it is on. For the
-        section rules and for the brackets and buses a panel draws. */
+    /** A textured plate: its finish, a light from above and a machined
+        edge. Drawn over a plate already filled with its token. */
+    static void paintPlateFinish (juce::Graphics&, juce::Rectangle<int> area, PlateFinish);
+
+    /** Fills `marks` in `ink` -- flat in Simple, laser-engraved into the
+        plate in Textured. For the section rules and for the brackets and
+        buses a panel draws. */
     static void fillEngraved (juce::Graphics&, const juce::RectangleList<float>& marks, juce::Colour ink);
+
+    /** Draws every knob in one form, ignoring the tags, for this process
+        only. `automatic` restores the tags. Tools only -- the snapshot's
+        `knobs=`, so both forms can be compared on the same panel. */
+    static void overrideKnobForm (Knob::TexturedForm);
 
     /** Re-reads the tokens. Call after a theme change. */
     void refreshColours();

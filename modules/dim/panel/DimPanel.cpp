@@ -204,10 +204,10 @@ void DimPanel::paintPanel (juce::Graphics& g)
         pieces.push_back (juce::Rectangle<float> (x1 - kBracketWeight, y - kBracketEnd, kBracketWeight, kBracketEnd));
     }
 
-    // PROTOTYPE: engraved when the material pass is on. Off, the three pieces
+    // Engraved in the Textured surface. In Simple the three pieces
     // are filled one by one exactly as before, so the shipped look -- corners
     // and all -- does not move.
-    if (ui::BmoLookAndFeel::materialEnabled())
+    if (ui::BmoLookAndFeel::textured())
     {
         juce::RectangleList<float> brackets;
         for (const auto& r : pieces)

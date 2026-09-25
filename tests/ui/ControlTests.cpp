@@ -16,6 +16,9 @@
 // previous reading.
 
 #include "core/ui/Controls.h"
+#include "core/ui/Line.h"
+#include "core/ui/LookAndFeel.h"
+#include "core/ui/ModulePanel.h"
 
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -239,6 +242,64 @@ int main()
                    "at the bottom of the range the cap's bottom edge is the body's");
 
         param.setValueNotifyingHost (param.getDefaultValue());
+    }
+
+    //== The surface: Simple by default, the line's finish, the knob's form ===
+    //
+    // Frosty, 2026-09-25: the plugins as they are are "Simple" and the
+    // default. Textured takes brushed on BMO and powder on the collaborations
+    // unless the user picks one for everything. In Textured, each knob's form
+    // comes from its own tag, then its section's, then its style.
+    {
+        using namespace bmo::ui;
+
+        check (surface() == Surface::simple, "a process that has read no preference is Simple");
+        check (! BmoLookAndFeel::textured(), "Simple draws no material");
+
+        overrideSurface (Surface::textured, FinishChoice::house);
+        check (finishFor (bmoLine()) == PlateFinish::brushed, "BMO's house finish is brushed");
+        check (finishFor (ltvLine()) == PlateFinish::powder,  "the collaborations' house finish is powder");
+
+        overrideSurface (Surface::textured, FinishChoice::powder);
+        check (finishFor (bmoLine()) == PlateFinish::powder,  "powder everywhere reaches BMO");
+
+        overrideSurface (Surface::textured, FinishChoice::brushed);
+        check (finishFor (ltvLine()) == PlateFinish::brushed, "brushed everywhere reaches the collaborations");
+
+        overrideSurface (Surface::simple, FinishChoice::house);
+
+        juce::Component section, inner;
+        section.addChildComponent (inner);
+
+        Knob character, utility, filter;
+        character.setStyle (Knob::Style::character);
+        utility.setStyle (Knob::Style::utility);
+        filter.setStyle (Knob::Style::filter);
+
+        check (texturedFormFor (character) == Knob::TexturedForm::ringed,   "an untagged character knob is ringed");
+        check (texturedFormFor (utility)   == Knob::TexturedForm::onePiece, "an untagged utility knob is one-piece");
+        check (texturedFormFor (filter)    == Knob::TexturedForm::onePiece, "an untagged filter knob is one-piece");
+
+        // A section tag reaches a knob however deep it sits in the section.
+        inner.addChildComponent (character);
+        section.getProperties().set (ModulePanel::kTexturedFormTag, (int) Knob::TexturedForm::onePiece);
+        check (texturedFormFor (character) == Knob::TexturedForm::onePiece, "a section tag beats the style");
+
+        // The nearest section wins over one further out.
+        inner.getProperties().set (ModulePanel::kTexturedFormTag, (int) Knob::TexturedForm::ringed);
+        check (texturedFormFor (character) == Knob::TexturedForm::ringed, "the nearest section tag wins");
+
+        // And the knob's own tag beats every section.
+        character.setTexturedForm (Knob::TexturedForm::onePiece);
+        check (texturedFormFor (character) == Knob::TexturedForm::onePiece, "a knob's own tag beats its sections");
+
+        // A tool's override beats everything, and `automatic` hands back.
+        BmoLookAndFeel::overrideKnobForm (Knob::TexturedForm::ringed);
+        check (texturedFormFor (character) == Knob::TexturedForm::ringed, "the override beats a knob's tag");
+        BmoLookAndFeel::overrideKnobForm (Knob::TexturedForm::automatic);
+        check (texturedFormFor (character) == Knob::TexturedForm::onePiece, "automatic restores the tags");
+
+        inner.removeChildComponent (&character);
     }
 
     if (failures == 0)

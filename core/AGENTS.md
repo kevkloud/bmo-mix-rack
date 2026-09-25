@@ -103,5 +103,18 @@ rack/     SlotParameter (one generic host parameter, remapped live),
 - `processBlock` in the rack takes a `ScopedTryLock` and passes audio
   through if the message thread is mid-rebuild. Never block the audio
   thread on the chain lock.
+- **Two surfaces: Simple and Textured** (Frosty, 2026-09-25). Simple is the
+  default and draws exactly what the suite always drew; Textured shades the
+  same tokens -- a brushed or powder plate, knobs with form, switches that
+  press in, rules, brackets and buses engraved. It is a machine-wide
+  preference in `UI.json` beside the appearance (`ui::surface`), never a
+  parameter. It may change **no colour, size or position**: anything that
+  would is not a surface. A line's house finish is `Line::finish` (BMO
+  brushed, collaborations powder). A knob's textured form comes from its tag
+  (`setTexturedForm`), then its section's (`ModulePanel::tagTextured`), then
+  its style -- a new knob should be tagged, not left to the fallback. A line
+  a panel draws into the plate goes through `BmoLookAndFeel::fillEngraved`.
+  `docs/ui-material-proposal.md` has the design, the costs and the knob
+  allocation table.
 - Tokens are the only place colours live. A panel that needs a colour
   takes it from `ui::tokens()` or from its module's `accent`.

@@ -1,16 +1,122 @@
 # Proposal: a material pass for faceplates, knobs and switches
 
-**Status: prototype.** The prototype is behind an environment variable and
-changes nothing unless `BMO_MATERIAL` is set.
+**Status: built as a user setting.** The plugins as they are, now called
+**Simple**, are the default and draw pixel-for-pixel what they drew before —
+checked across all ten modules in both appearances and a six-module rack
+against `main`. **Textured** is chosen by the user.
 
-**Decided (Frosty, 2026-09-25):** code-drawn (option A). Show brushed beside
-powder. Divider lines and the bracket and bus lines are laser engraved. Show
-both knob forms. The prototype's intensity is right.
+**Decided (Frosty, 2026-09-25):**
 
-Rendered and measured in a Linux cloud session (not ICE QUEEN or AURORA), with
-**stand-in fonts** — FreeSans Bold and DejaVu Sans renamed, held outside the
-repository — because the licensed faces are not available there. The lettering
-in those renders is therefore not the real lettering; the shading is.
+- Code-drawn (option A below), at the prototype's intensity.
+- Simple is the default and is today's look, knobs included.
+- Textured is the user's choice. Its plate finish is the line's own unless
+  the user picks one for everything: **BMO brushed, the collaborations
+  powder**.
+- Divider lines and the bracket and bus lines are laser engraved in Textured.
+- In Textured, each knob's form — ringed or one-piece — is set by a **tag**,
+  per knob or per section.
+
+## How it works
+
+**The setting.** `ui::surface()` and `ui::finishChoice()`, stored in
+`LT3 Audio/UI.json` beside the appearance and read on the same 1 Hz poll, so a
+change reaches every open editor within a second. Machine-wide and never a
+parameter, for the reasons the appearance is not one. It is chosen in the
+preset menu under **Surface**: *Simple*, *Textured* (the line's own finish),
+*Textured, brushed everywhere*, *Textured, powder everywhere*. Writing either
+preference now writes both, so choosing dark mode no longer drops the
+surface.
+
+**The finish.** `Line::finish` is each line's house finish; `ui::finishFor`
+resolves it against the user's choice.
+
+**The knob tags.** In Textured, `ui::texturedFormFor` resolves a knob's form
+in this order:
+
+1. `Knob::setTexturedForm` / `PlainKnob::setTexturedForm` — the knob's own tag.
+2. `ModulePanel::tagTextured ({ ... }, form)` — the nearest tagged section
+   above the knob. Pass knobs, a ConcentricBand, a container, or the panel
+   itself for a panel-wide default.
+3. The style: a **character** knob is ringed; a **utility** or **filter** knob
+   is one-piece.
+
+Simple ignores all of it.
+
+**Tools.** `snapshot … surface=textured finish=house|brushed|powder
+knobs=tagged|ringed|onepiece` renders any combination without reading or
+writing UI.json; without `surface=` a render is Simple whatever the machine
+prefers. `BMO_LIST_KNOBS=1 snapshot <module> out.png` prints every knob with
+its resolved form and where the form came from.
+
+## Knob allocation
+
+No knob carries a tag yet, so every form below comes from step 3. This is
+the table to mark up: change a row and it becomes a `setTexturedForm` on
+that knob, or a `tagTextured` on its section. Listed with
+`BMO_LIST_KNOBS=1`, standalone views. BMO Tune RT has its own editor and is
+not covered here.
+
+| Module | Knob | Style | Textured form |
+|---|---|---|---|
+| BMO CEQ | INPUT | utility | one-piece |
+| BMO CEQ | HIGH | character | ringed |
+| BMO CEQ | MID | character | ringed |
+| BMO CEQ | LOW | character | ringed |
+| BMO CEQ | LO-CUT | filter | one-piece |
+| BMO CEQ | OUTPUT | utility | one-piece |
+| BMO Saturator | INPUT | utility | one-piece |
+| BMO Saturator | DRIVE | character | ringed |
+| BMO Saturator | TONE | character | ringed |
+| BMO Saturator | MIX | character | ringed |
+| BMO Saturator | OUTPUT | utility | one-piece |
+| BMO Util | VOLUME | character | ringed |
+| BMO Util | PAN | character | ringed |
+| BMO Util | WIDTH | character | ringed |
+| BMO Opto | COMP | character | ringed |
+| BMO Opto | MAKEUP | character | ringed |
+| BMO Dimension | DETUNE | character | ringed |
+| BMO Dimension | DRIFT | character | ringed |
+| BMO Dimension | DIMENSION | character | ringed |
+| BMO Dimension | BLOOM | character | ringed |
+| BMO Dimension | BELOW | character | ringed |
+| BMO Dimension | TURN | character | ringed |
+| BMO Dimension | TILT | character | ringed |
+| BMO DEQ | OUTPUT | utility | one-piece |
+| BMO DEQ | SHAPE | filter | one-piece |
+| BMO DEQ | FREQ | character | ringed |
+| BMO DEQ | GAIN | character | ringed |
+| BMO DEQ | Q | character | ringed |
+| BMO DEQ | THRESH | character | ringed |
+| BMO DEQ | RANGE | character | ringed |
+| BMO DEQ | RATIO | character | ringed |
+| BMO DEQ | ATTACK | character | ringed |
+| BMO DEQ | RELEASE | character | ringed |
+| LTV Comp | AMOUNT | character | ringed |
+| LTV Comp | MAKEUP | character | ringed |
+| LTV Comp | ATTACK | utility | one-piece |
+| LTV Comp | RELEASE | utility | one-piece |
+| LTV Comp | DETECT | utility | one-piece |
+| LTV Comp | LOW | utility | one-piece |
+| LTV Comp | HIGH | utility | one-piece |
+| BMO Defang | FREQ | character | ringed |
+| BMO Defang | Q | character | ringed |
+| BMO Defang | THRESH | character | ringed |
+| BMO Defang | RANGE | character | ringed |
+| BMO FET | INPUT | character | ringed |
+| BMO FET | OUTPUT | character | ringed |
+| BMO FET | ATTACK | character | ringed |
+| BMO FET | RELEASE | character | ringed |
+| BMO FET | MIX | utility | one-piece |
+| BMO Linger | DECAY | character | ringed |
+| BMO Linger | DENSITY | character | ringed |
+| BMO Linger | ER SPREAD | character | ringed |
+| BMO Linger | ER HI-CUT | character | ringed |
+| BMO Linger | VARIATION | character | ringed |
+| BMO Linger | SOURCE | character | ringed |
+| BMO Linger | SIZE | character | ringed |
+
+The band gains inside BMO CEQ's selector rings are character knobs and are
+ringed; a ring's own selector is drawn as a ring in both surfaces.
 
 ## The ask
 
@@ -38,23 +144,21 @@ second binding rather than a second design, and lines that own their ground.
 B looks best in a screenshot and then costs every one of those. A hybrid —
 A, plus B only for one hero element such as a VU meter face — stays open.
 
-## What the prototype does
+## What Textured draws
 
-All in `core/ui/LookAndFeel.cpp` and `core/ui/ModulePanel.*`, gated by
-`BMO_MATERIAL`.
+In `core/ui/LookAndFeel.cpp` and `core/ui/ModulePanel.*`.
 
-**Faceplate, two finishes.** `BMO_MATERIAL=brushed` gives brushed metal: a
-256 × 128 tile of horizontal streaks, each row its own smoothed noise, wrapped
-so it tiles without a seam. Otherwise, powder coat: fine, non-directional powder-coat grain (a 128 px tile from a
+**Faceplate, two finishes.** Brushed metal: a 256 × 128 tile of horizontal
+streaks, each row its own smoothed noise, wrapped so it tiles without a seam.
+Powder coat: fine, non-directional grain (a 128 px tile from a
 fixed seed, about ±1.5 % luminance), light from above (+5 % at the top, −4 % at
 the bottom), and a machined edge: a lit line along the top, shaded along the
 bottom and right. In a rack, that edge is also what separates one module from
 the next — Palette Book §2 item 7.
 
-**Knobs, two forms.** `BMO_MATERIAL=...,cap` gives a **one-piece cap**: the
-whole knob is the cap, with a chamfered rim lit on top and shaded below, a
-sheen and a contact shadow — no skirt, no grip. Otherwise, the **ringed knob**:
-a skirt one step down from the cap, lit from the top, with 36 grip
+**Knobs, two forms, chosen by tag.** The **one-piece cap**: the whole knob is
+the cap, with a chamfered rim lit on top and shaded below, a sheen and a
+contact shadow — no skirt, no grip. The **ringed knob**: a skirt one step down from the cap, lit from the top, with 36 grip
 flutes that turn with the value. A cap in the *flat token face*, with a soft
 sheen off the top left and a bevelled rim. A contact shadow underneath (a
 radial gradient, not a blur). The pointer sits in an engraved groove: a dark
@@ -70,7 +174,7 @@ Dimension's pair brackets and BMO FET's ratio bus go through one helper,
 `BmoLookAndFeel::fillEngraved`: a channel cut into the plate, lit from above —
 a lit lip below and right of the cut, a shaded wall above and left, the
 line's own ink in the channel. Same colours, same weights, same positions.
-Off, each is drawn exactly as before (Dimension's brackets keep their
+In Simple, each is drawn exactly as before (Dimension's brackets keep their
 piece-by-piece fill, corners and all). On the dark plate the hairline is
 lighter than the plate, so the cut reads bright — how a laser mark on dark
 anodised metal actually looks.
@@ -137,35 +241,34 @@ The cached images are built at the device's real pixel scale
 transform) and blitted snapped to whole pixels, so there is no resampling and
 nothing blurs at 150 % or on a Retina display.
 
-## Still to do if A is chosen
+## Still to do
 
 - **Decide the character** (below).
 - The **selector ring** on BMO EQ's bands, **ChoiceBox** dropdowns, the
   **preset strip's TextButtons** and the **header** are untouched.
 - A **metal treatment for LTV's silver line** — brushed rather than powder —
   is one more tile and a line field.
-- **Move the prototype out of `LookAndFeel.cpp`** into a `ui/Material.*` with
-  its constants as non-themable tokens (like `corner` and `knobStroke`), and
-  drop the environment switch for a real setting.
+- **Tag the knobs** from the table above.
+- **Move the material code out of `LookAndFeel.cpp`** into a `ui/Material.*`,
+  with its constants as non-themable tokens (like `corner` and `knobStroke`).
 - The contrast test above, and `ui_layout_tests` run on the material build.
 - Rebuild on Windows with the real fonts and look at it at 100 % and 150 %,
   on ICE QUEEN or AURORA.
 
 ## For Frosty to decide
 
-1. **Plate finish:** powder or brushed — and whether LTV's silver line takes
-   the other one.
-2. **Knob form:** ringed or one-piece — or one per role, e.g. ringed for
-   character knobs and one-piece for utility trims.
+1. **The knob allocation**, above.
+2. **Whether LTV's silver keeps powder** once it has been seen in a rack
+   beside brushed BMO panels.
 
 ## How to see it
 
 ```
-BMO_MATERIAL=1 build/tools/snapshot rack out.png chain=util,eq,sat,opto
-BMO_MATERIAL=1 build/tools/snapshot rack out.png chain=util,eq,sat,opto appearance=dark
-BMO_MATERIAL=brushed,cap build/tools/snapshot rack out.png chain=util,eq,sat,opto
-BMO_MATERIAL=brushed build/tools/snapshot fetcomp out.png     # the engraved bus
-BMO_PAINT_BENCH=40 BMO_MATERIAL=1 build/tools/snapshot rack out.png chain=util,eq,sat,opto
+build/tools/snapshot rack out.png chain=eq,sat,ltvcomp,fetcomp surface=textured
+build/tools/snapshot rack out.png chain=eq,sat,ltvcomp,fetcomp surface=textured appearance=dark
+build/tools/snapshot rack out.png chain=util,eq,sat,opto surface=textured finish=powder knobs=onepiece
+BMO_PAINT_BENCH=40 build/tools/snapshot rack out.png chain=util,eq,sat,opto surface=textured
+BMO_LIST_KNOBS=1 build/tools/snapshot fetcomp out.png
 ```
 
 Write renders outside the repository or into the gitignored `snapshots/`.

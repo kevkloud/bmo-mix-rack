@@ -106,34 +106,17 @@ float BmoLookAndFeel::comboTextOverflow (const juce::ComboBox& box)
 
 
 //==============================================================================
-// PROTOTYPE -- the material pass. Off unless BMO_MATERIAL is set in the
-// environment, so a snapshot can render both looks from one binary. See
-// docs/ui-material-proposal.md for what it is, what it costs and the rules it
-// keeps. Every value here is a shading of a token, never a colour of its own.
+// The Textured surface. Every value here is a shading of a token -- lighter,
+// darker, or black or white at a fixed low alpha -- never a colour of its own.
+// docs/ui-material-proposal.md has what it is, what it costs, and the rules it
+// keeps.
 namespace material
 {
-    bool enabled()
-    {
-        static const bool on = juce::SystemStats::getEnvironmentVariable ("BMO_MATERIAL", {}).isNotEmpty();
-        return on;
-    }
+    bool enabled() { return surface() == Surface::textured; }
 
-    /** The variants under review, named in BMO_MATERIAL: "brushed" for the
-        brushed plate rather than powder, "cap" for the one-piece knob rather
-        than skirt and cap. e.g. BMO_MATERIAL=brushed,cap. */
-    bool has (const char* word)
-    {
-        return juce::SystemStats::getEnvironmentVariable ("BMO_MATERIAL", {}).contains (word);
-    }
+    /** Set by tools only; see BmoLookAndFeel::overrideKnobForm. */
+    Knob::TexturedForm forcedForm = Knob::TexturedForm::automatic;
 
-    bool brushed()  { static const bool b = has ("brushed"); return b; }
-    bool capKnob()  { static const bool b = has ("cap");     return b; }
-
-    /** A 128 px tile of fine, non-directional grain -- a powder-coat, not a
-        photograph. Signed around zero and drawn at a few percent, so it moves
-        the plate's luminance by about +/-1.5 % and no ink ratio by more than
-        a rounding step. One fixed seed, built once, so every render of it is
-        the same render. */
     /** A 256 x 128 tile of brushed grain: streaks along x, each row its own
         run of smoothed noise, wrapped so the tile repeats without a seam.
         About the same amplitude as the powder, all of it in one direction. */
@@ -180,6 +163,11 @@ namespace material
         return tile;
     }
 
+    /** A 128 px tile of fine, non-directional grain -- a powder-coat, not a
+        photograph. Signed around zero and drawn at a few percent, so it moves
+        the plate's luminance by about +/-1.5 % and no ink ratio by more than
+        a rounding step. One fixed seed, built once, so every render of it is
+        the same render. */
     const juce::Image& grainTile()
     {
         static const juce::Image tile = []
@@ -205,13 +193,38 @@ namespace material
     }
 }
 
-bool BmoLookAndFeel::materialEnabled() { return material::enabled(); }
+bool BmoLookAndFeel::textured() { return material::enabled(); }
 
-void BmoLookAndFeel::paintPlateMaterial (juce::Graphics& g, juce::Rectangle<int> area)
+void BmoLookAndFeel::overrideKnobForm (Knob::TexturedForm form) { material::forcedForm = form; }
+
+Knob::TexturedForm texturedFormFor (const Knob& knob)
 {
-    if (! material::enabled())
-        return;
+    // A tool's override first -- the snapshot's knobs= renders every knob in
+    // one form so the two can be compared on the same panel.
+    if (material::forcedForm != Knob::TexturedForm::automatic)
+        return material::forcedForm;
 
+    // The knob's own tag, then its section's, then its style. A character
+    // knob is the module's voice and gets the ringed form; a trim, a filter
+    // or anything else gets the one-piece cap. That is only the fallback for
+    // an untagged knob -- the tags are where the decision is meant to live.
+    if (knob.getTexturedForm() != Knob::TexturedForm::automatic)
+        return knob.getTexturedForm();
+
+    for (auto* c = knob.getParentComponent(); c != nullptr; c = c->getParentComponent())
+    {
+        const auto tag = (int) c->getProperties().getWithDefault (ModulePanel::kTexturedFormTag, 0);
+
+        if (tag != 0)
+            return (Knob::TexturedForm) tag;
+    }
+
+    return knob.getStyle() == Knob::Style::character ? Knob::TexturedForm::ringed
+                                                     : Knob::TexturedForm::onePiece;
+}
+
+void BmoLookAndFeel::paintPlateFinish (juce::Graphics& g, juce::Rectangle<int> area, PlateFinish finish)
+{
     const auto r = area.toFloat();
 
     // Light from above: the plate is a hair lighter at the top than at the
@@ -222,7 +235,7 @@ void BmoLookAndFeel::paintPlateMaterial (juce::Graphics& g, juce::Rectangle<int>
                                              false));
     g.fillRect (r);
 
-    g.setTiledImageFill (material::brushed() ? material::brushedTile() : material::grainTile(), 0, 0, 1.0f);
+    g.setTiledImageFill (finish == PlateFinish::brushed ? material::brushedTile() : material::grainTile(), 0, 0, 1.0f);
     g.fillRect (r);
 
     // A machined edge: one lit line along the top, one shaded along the
@@ -637,13 +650,13 @@ void BmoLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int widt
         return;
     }
 
-    // PROTOTYPE material knob, in two forms under review: a skirt with a grip
-    // and a cap on it, or (BMO_MATERIAL=...cap) a one-piece cap with a
-    // chamfered rim. One light from above either way. The cap's centre is the
+    // The Textured knob, in the form its tag names (texturedFormFor): a skirt
+    // with a grip and a cap on it, or a one-piece cap with a chamfered rim. One light from above either way. The cap's centre is the
     // token face, flat, so every ratio measured against `face` still holds
     // where the pointer is read.
     {
-        const auto onePiece = material::capKnob();
+        const auto onePiece = knob == nullptr
+                           || texturedFormFor (*knob) == Knob::TexturedForm::onePiece;
         const auto capR = onePiece ? radius : radius * 0.80f;
         const auto capBox = juce::Rectangle<float> (capR * 2.0f, capR * 2.0f).withCentre (centre);
 
@@ -661,7 +674,8 @@ void BmoLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int widt
         const auto rawArea = faceBox.expanded (pad).withY (faceBox.getY() - pad);
         const auto area = rawArea.withPosition (snap (rawArea.getX()), snap (rawArea.getY()));
         const auto key = juce::String (juce::roundToInt (radius * 4.0f)) + "/" + juce::String (pixelScale, 3) + "/"
-                       + face.toString() + "/" + edgeColour.toString() + "/" + (enabled ? "1" : "0");
+                       + face.toString() + "/" + edgeColour.toString() + "/" + (enabled ? "1" : "0")
+                       + (onePiece ? "/one" : "/ringed");
 
         static std::map<juce::String, juce::Image> cache;
 
@@ -844,7 +858,7 @@ void BmoLookAndFeel::drawToggleButton (juce::Graphics& g, juce::ToggleButton& bu
 
     if (material::enabled())
     {
-        // PROTOTYPE material switch: raised when off, sunk and lit when on,
+        // The Textured switch: raised when off, sunk and lit when on,
         // so on and off differ in form as well as in hue. The gradient is
         // +/-6 % about the fill, so the ink derived from the fill below
         // still holds at the label's middle.

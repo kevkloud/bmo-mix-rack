@@ -289,19 +289,39 @@ private:
 
     std::vector<Rule> rules;
 
-    /** PROTOTYPE: the material plate, drawn once at the device's pixel scale
+    /** The textured plate, drawn once at the device's pixel scale
         and blitted on every paint after. Rebuilt when the size, the scale or
         the plate colour changes -- a resize or a theme change. */
     juce::Image plateCache;
     float plateCacheScale = 0.0f;
     juce::Colour plateCacheColour;
+    PlateFinish plateCacheFinish = PlateFinish::brushed;
 
 protected:
 
     /** A hairline through the middle of a row, inset by the padding -- or
         across `span` when one is given. See `Rule::span`. */
-    /** PROTOTYPE: whether the material pass is drawing the plate. */
+    /** Whether the Textured surface is drawing the plate. */
     static bool materialPlate();
+
+public:
+    /** The property a section tag is stored under; see tagTextured. */
+    inline static const juce::Identifier kTexturedFormTag { "bmoTexturedForm" };
+
+    /** Tags a section: every knob inside these components takes `form` in
+        the Textured surface unless it carries a tag of its own. Pass a
+        PlainKnob, a ConcentricBand, a container holding several -- or `this`,
+        which makes it the panel's default. Simple ignores it.
+
+        The resolution order is texturedFormFor's: knob, then the nearest
+        tagged section above it, then the knob's style. */
+    void tagTextured (std::initializer_list<juce::Component*> controls, Knob::TexturedForm form)
+    {
+        for (auto* c : controls)
+            c->getProperties().set (kTexturedFormTag, (int) form);
+    }
+
+protected:
 
     void drawRule (juce::Graphics& g, juce::Rectangle<int> row,
                    juce::Range<int> span = {}) const
@@ -351,7 +371,7 @@ protected:
         // The panel's plate, passed in rather than read from tokens(): a
         // legend knocks a hole in the rule it sits on, and on an LTV panel
         // that hole has to be silver or the rule shows through it.
-        // PROTOTYPE: on a textured plate a flat knockout shows as a patch, so
+        // On a textured plate a flat knockout shows as a patch, so
         // the rule is drawn in two pieces that stop at the legend instead.
         if (materialPlate())
         {

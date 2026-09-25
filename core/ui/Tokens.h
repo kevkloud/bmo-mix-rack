@@ -508,6 +508,40 @@ void setDarkMode (bool);
     `appearance=dark|light`. */
 void overrideAppearance (bool shouldBeDark);
 
+//== Surface ===================================================================
+//
+// **Simple** is the suite as it has always been drawn, and the default.
+// **Textured** is the material pass: a finished plate, knobs with form and
+// light, switches that sit up and press in, and rules, brackets and buses
+// laser-engraved into the plate. Frosty, 2026-09-25.
+//
+// Like the appearance it is a machine-wide preference in UI.json, never a
+// parameter: a parameter would touch specs(), be automatable, and save a look
+// into every session. It changes no colour, no size and no position -- only
+// how the same tokens are shaded -- so every contrast and layout rule holds in
+// both. docs/ui-material-proposal.md has the design and the measurements.
+
+enum class Surface { simple, textured };
+
+/** The finish a textured plate is given. */
+enum class PlateFinish { brushed, powder };
+
+/** What the user chose for the finish: the line's own (`house` -- brushed on
+    BMO, powder on the collaborations; see Line::finish) or one for every
+    plugin. */
+enum class FinishChoice { house, brushed, powder };
+
+Surface surface() noexcept;
+FinishChoice finishChoice() noexcept;
+
+/** Writes the preference and applies it here immediately; other open editors
+    pick it up on their next poll, exactly as `setDarkMode` does. */
+void setSurface (Surface, FinishChoice = FinishChoice::house);
+
+/** For this process only, like `overrideAppearance`: neither written nor read
+    again. Tools only -- `tools/snapshot`'s `surface=` and `finish=`. */
+void overrideSurface (Surface, FinishChoice = FinishChoice::house);
+
 /** A character knob's cap -- and see `accentInk`, which is the other half of
     this and trades places with it between the appearances.
 

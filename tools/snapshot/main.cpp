@@ -14,6 +14,13 @@
 // only: it neither writes nor reads the machine-wide preference, so it cannot
 // flip the look of plugins that happen to be open.
 //
+// "surface=simple|textured" picks the surface, "finish=house|brushed|powder"
+// the textured plate's finish, and "knobs=tagged|ringed|onepiece" draws every
+// knob in one textured form (tagged, the default, follows each knob's tag).
+// All three for this process only, like "appearance": the machine-wide UI.json
+// is neither read nor written. Without "surface=" a render is Simple whatever
+// this machine prefers, so a render never depends on whose machine made it.
+//
 // "theme=<file.json>" overlays a palette, the same flat token -> hex file an
 // editor watches, so a candidate colour can be rendered without writing the
 // machine-wide Themes/Default.json -- a file the user owns and every open
@@ -57,6 +64,7 @@
 #include "tools/snapshot/PngOut.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
+#include <functional>
 #include <iostream>
 #include <optional>
 #include <utility>
@@ -332,6 +340,53 @@ int main (int argc, char** argv)
         bmo::ui::overrideThemeFile (file);
     }
 
+    // The surface, pinned for this process before anything paints. Simple
+    // unless asked, whatever UI.json on this machine says.
+    {
+        auto wantSurface = bmo::ui::Surface::simple;
+        auto wantFinish  = bmo::ui::FinishChoice::house;
+        auto wantForm    = bmo::ui::Knob::TexturedForm::automatic;
+
+        for (int i = first; i < argc; ++i)
+        {
+            const juce::String arg { argv[i] };
+            const auto value = arg.fromFirstOccurrenceOf ("=", false, false);
+
+            if (arg.startsWith ("surface="))
+            {
+                if (value.equalsIgnoreCase ("textured"))    wantSurface = bmo::ui::Surface::textured;
+                else if (! value.equalsIgnoreCase ("simple"))
+                {
+                    std::cerr << "surface is simple or textured, got " << value << '\n';
+                    return 2;
+                }
+            }
+            else if (arg.startsWith ("finish="))
+            {
+                if (value.equalsIgnoreCase ("brushed"))     wantFinish = bmo::ui::FinishChoice::brushed;
+                else if (value.equalsIgnoreCase ("powder")) wantFinish = bmo::ui::FinishChoice::powder;
+                else if (! value.equalsIgnoreCase ("house"))
+                {
+                    std::cerr << "finish is house, brushed or powder, got " << value << '\n';
+                    return 2;
+                }
+            }
+            else if (arg.startsWith ("knobs="))
+            {
+                if (value.equalsIgnoreCase ("ringed"))        wantForm = bmo::ui::Knob::TexturedForm::ringed;
+                else if (value.equalsIgnoreCase ("onepiece")) wantForm = bmo::ui::Knob::TexturedForm::onePiece;
+                else if (! value.equalsIgnoreCase ("tagged"))
+                {
+                    std::cerr << "knobs is tagged, ringed or onepiece, got " << value << '\n';
+                    return 2;
+                }
+            }
+        }
+
+        bmo::ui::overrideSurface (wantSurface, wantFinish);
+        bmo::ui::BmoLookAndFeel::overrideKnobForm (wantForm);
+    }
+
     for (int i = first; i < argc; ++i)
     {
         const juce::String arg { argv[i] };
@@ -359,6 +414,9 @@ int main (int argc, char** argv)
 
             continue;
         }
+
+        if (key == "surface" || key == "finish" || key == "knobs")
+            continue;               // taken in the pass below
 
         if (key == "theme")
             continue;               // taken in the pass above
@@ -679,9 +737,60 @@ int main (int argc, char** argv)
         juce::Timer::callPendingTimersSynchronously();
     }
 
-    // PROTOTYPE: BMO_PAINT_BENCH=N repaints the whole editor N more times and
-    // prints the mean, so the material pass can be costed against the flat
-    // look on the same machine. A full-editor paint is the worst case: a
+    // BMO_LIST_KNOBS=1 prints every knob on the editor and the form it takes
+    // in the Textured surface, with where that form came from: its own tag,
+    // a section tag, or the style fallback. The allocation table in
+    // docs/ui-material-proposal.md is this output.
+    if (juce::SystemStats::getEnvironmentVariable ("BMO_LIST_KNOBS", {}).isNotEmpty())
+    {
+        std::function<void (juce::Component&)> walk = [&] (juce::Component& c)
+        {
+            if (auto* k = dynamic_cast<bmo::ui::Knob*> (&c); k != nullptr
+                && k->getStyle() != bmo::ui::Knob::Style::ring)
+            {
+                juce::String module = "-", label;
+                for (auto* p = c.getParentComponent(); p != nullptr; p = p->getParentComponent())
+                {
+                    if (label.isEmpty() && p->getName().isNotEmpty())
+                        label = p->getName();
+                    if (auto* panel = dynamic_cast<bmo::ui::ModulePanel*> (p))
+                    {
+                        module = panel->getContext().def.name;
+                        break;
+                    }
+                }
+
+                juce::String source = "style";
+                if (k->getTexturedForm() != bmo::ui::Knob::TexturedForm::automatic)
+                    source = "knob";
+                else
+                    for (auto* p = c.getParentComponent(); p != nullptr; p = p->getParentComponent())
+                        if ((int) p->getProperties().getWithDefault (bmo::ui::ModulePanel::kTexturedFormTag, 0) != 0)
+                        {
+                            source = "section";
+                            break;
+                        }
+
+                const auto style = k->getStyle() == bmo::ui::Knob::Style::character ? "character"
+                                 : k->getStyle() == bmo::ui::Knob::Style::filter    ? "filter"
+                                                                                    : "utility";
+                const auto form = bmo::ui::texturedFormFor (*k) == bmo::ui::Knob::TexturedForm::ringed
+                                      ? "ringed" : "one-piece";
+
+                std::cout << "knob\t" << module << "\t" << (label.isEmpty() ? juce::String ("?") : label)
+                          << "\t" << style << "\t" << form << "\t" << source << "\n";
+            }
+
+            for (auto* child : c.getChildren())
+                walk (*child);
+        };
+
+        walk (*editor);
+    }
+
+    // BMO_PAINT_BENCH=N repaints the whole editor N more times and
+    // prints the mean, so the Textured surface can be costed against Simple
+    // on the same machine. A full-editor paint is the worst case: a
     // running plugin repaints only what changed.
     if (const auto runs = juce::SystemStats::getEnvironmentVariable ("BMO_PAINT_BENCH", "0").getIntValue(); runs > 0)
     {

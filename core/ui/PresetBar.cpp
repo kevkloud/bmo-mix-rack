@@ -13,6 +13,10 @@ namespace
         revealFolder,
         deleteCurrent,
         toggleDark,
+        surfaceSimple,
+        surfaceHouse,
+        surfaceBrushed,
+        surfacePowder,
         factoryBase = 2000,
         userBase    = 3000
     };
@@ -92,6 +96,26 @@ void PresetBar::showMenu()
     menu.addSeparator();
     menu.addItem (toggleDark, "Dark mode", true, isDarkMode());
 
+    // The surface sits with the appearance for the same reason: it is about
+    // the plugin, not the sound, and it is machine-wide. Simple is today's
+    // look and the default; Textured takes the line's own finish unless one
+    // is picked for everything.
+    {
+        const auto textured = surface() == Surface::textured;
+        const auto finish = finishChoice();
+
+        juce::PopupMenu surfaceMenu;
+        surfaceMenu.addItem (surfaceSimple, "Simple", true, ! textured);
+        surfaceMenu.addSeparator();
+        surfaceMenu.addItem (surfaceHouse,   "Textured", true, textured && finish == FinishChoice::house);
+        surfaceMenu.addItem (surfaceBrushed, "Textured, brushed everywhere", true,
+                             textured && finish == FinishChoice::brushed);
+        surfaceMenu.addItem (surfacePowder,  "Textured, powder everywhere", true,
+                             textured && finish == FinishChoice::powder);
+
+        menu.addSubMenu ("Surface", surfaceMenu);
+    }
+
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (name),
                         [this, users] (int choice)
     {
@@ -113,6 +137,17 @@ void PresetBar::showMenu()
                                 if (auto* top = getTopLevelComponent())
                                     top->repaint();
                                 break;
+            case surfaceSimple:
+            case surfaceHouse:
+            case surfaceBrushed:
+            case surfacePowder:
+                setSurface (choice == surfaceSimple ? Surface::simple : Surface::textured,
+                            choice == surfaceBrushed ? FinishChoice::brushed
+                          : choice == surfacePowder  ? FinishChoice::powder
+                                                     : FinishChoice::house);
+                if (auto* top = getTopLevelComponent())
+                    top->repaint();
+                break;
             default: break;
         }
 

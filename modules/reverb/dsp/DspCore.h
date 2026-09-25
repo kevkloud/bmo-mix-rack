@@ -48,7 +48,7 @@ enum class ErMode { taps = 0, energy, blend };
     the Size law and its crossfade, four order-banded poles, the density
     bridge and its feed-forward diffuser, seven VARIATION positions, the ER
     hi-cut -- and this class feeds it the mid of the input, takes the ER bus
-    back at table level, and applies the two faders, a **provisional** MIX law
+    back at table level, and applies the two faders, the MIX law
     and OUTPUT with 20 ms smoothing. The late network (M3) and the six type
     blocks (M4) are still to come: REVERB's fader is smoothed and applied to a
     bus that is all zeros, so it already behaves, and the Reverb EQ is not
@@ -300,15 +300,13 @@ public:
         return db <= -39.95f ? 0.0f : std::pow (10.0f, db * 0.05f);
     }
 
-    /** **PROVISIONAL.** The MIX law is one of the three owner decisions
-        `HANDOFF-linger-dsp.md` holds M3 on, and nothing here claims to be it.
-        What is here is the least surprising law that satisfies the one
-        thing 11 section 6 already asserts of it -- at 50 % with the wet
-        faders off the output nulls against dry -- which needs dry at unity
-        there: dry = min(1, 2(1 - mix)), wet = min(1, 2 mix), so 50 % is both
-        at unity and the ends are one or the other alone. Replace, do not
-        tune, when the law is chosen; the test that pins it is written
-        against these two lines. */
+    /** **The MIX law, Frosty's on 2026-09-24.** dry = min(1, 2(1 - mix)),
+        wet = min(1, 2 mix): at 50 % the input is unchanged and the verb is
+        heard at its faders, below it the wet comes down alone, above it the
+        dry goes away alone, and 100 % is verb only, for use as a send. The
+        default is 50 %. `tests/dsp/ReverbDspTests.cpp` pins all five points
+        of it; 11 section 6's null at 50 % with the faders off follows from
+        dry being unity there. */
     static float dryGainFor (float mix) noexcept { return std::min (1.0f, 2.0f * (1.0f - std::clamp (mix, 0.0f, 1.0f))); }
     static float wetGainFor (float mix) noexcept { return std::min (1.0f, 2.0f * std::clamp (mix, 0.0f, 1.0f)); }
 
@@ -345,7 +343,7 @@ public:
         generators, and until then the input and that point are the same
         samples. The ER generator is fed the mid of the input (a mono bus
         feeds it directly), returns the ER bus at table level, and the two
-        faders, the provisional MIX law and OUTPUT are applied here with 20 ms
+        faders, the MIX law and OUTPUT are applied here with 20 ms
         one-pole smoothing on every gain. `verbLevel` is smoothed and applied
         to a bus that is all zeros, so its fader already behaves. */
     void process (float* const* channelData, int numChannels, int numSamples)

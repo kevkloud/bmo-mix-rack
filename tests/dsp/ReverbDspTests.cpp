@@ -898,13 +898,17 @@ int main()
                       << tilt << " dB/octave, ripple about the tilt " << ripple << " dB peak to peak; octave-smoothed 250 Hz-8 kHz: "
                       << octave << " dB about the tilt, " << octaveRaw << " dB raw\n";
 
-            // **Measured, not asserted.** No sparse cluster meets +-3 dB under
-            // 1/3-octave smoothing at 200 Hz -- the band is 46 Hz wide and any
-            // two taps a few ms apart comb wider than that -- so the figure is
-            // recorded here and in the M2 note for the owner to re-specify
-            // (octave smoothing, or a band above 1 kHz), and the listening
-            // pass hears what the number means. See testing-notes.
+            // **The rule, Frosty's on 2026-09-24:** octave-smoothed, 250 Hz to
+            // 8 kHz, ripple about the tilt within 6 dB peak to peak, asserted
+            // at DENSITY 100 % -- where the density bridge is meant to have
+            // taken the discrete cluster's colour out -- and printed at 0 and
+            // 50 %. The 1/3-octave figure 11 section 6 first asked for is
+            // printed beside it: no sparse cluster meets +-3 dB under a 46 Hz
+            // band at 200 Hz, and that is recorded in the M2 note.
             (void) ripple;
+
+            if (density == 100.0f)
+                check (octave <= 6.0, "ER-only magnitude at DENSITY 100 %, octave-smoothed 250 Hz-8 kHz, ripples within 6 dB about its tilt");
         }
     }
 
@@ -1011,7 +1015,31 @@ int main()
             bool null = std::abs (ir.l[0] - 1.0f) <= 1.0e-4f;
             for (int i = 1; i < ir.size(); ++i)
                 null = null && std::abs (ir.l[(size_t) i]) <= 1.0e-4f;
-            check (null, "MIX 50 % with the wet faders off nulls against dry to -80 dB (provisional law)");
+            check (null, "MIX 50 % with the wet faders off nulls against dry to -80 dB");
+        }
+
+        // The MIX law itself, Frosty's on 2026-09-24, at its five points: the
+        // dry sample (sample 0, before any reflection) and the ER energy, each
+        // against the ER-only render at MIX 100 %.
+        {
+            const auto erAt100 = ref.energy (1, to);   // after sample 0: the reflections alone
+
+            struct Point { float mix, dry, wetDb; };
+            for (const auto pt : { Point { 0.0f, 1.0f, -200.0f }, Point { 25.0f, 1.0f, -6.0206f },
+                                   Point { 50.0f, 1.0f, 0.0f }, Point { 75.0f, 0.5f, 0.0f }, Point { 100.0f, 0.0f, 0.0f } })
+            {
+                const auto ir = render ([pt] (auto& p) { p[Index::mix] = pt.mix; });
+                const auto wet = ir.energy (1, to);
+                const auto wetDb = wet > 0.0f ? 10.0f * std::log10 (wet / erAt100) : -200.0f;
+                check (std::abs (ir.l[0] - pt.dry) <= 1.0e-4f, "the MIX law's dry gain is what the law says at 0, 25, 50, 75 and 100 %");
+                check (pt.wetDb <= -100.0f ? wet <= erAt100 * 1.0e-10f : std::abs (wetDb - pt.wetDb) <= 0.1f,
+                       "the MIX law's wet gain is what the law says at 0, 25, 50, 75 and 100 %");
+            }
+
+            check (DspCore::dryGainFor (0.5f) == 1.0f && DspCore::wetGainFor (0.5f) == 1.0f,
+                   "MIX 50 % is dry at unity and wet at unity: input unchanged, verb heard");
+            check (DspCore::dryGainFor (1.0f) == 0.0f && DspCore::wetGainFor (1.0f) == 1.0f,
+                   "MIX 100 % is verb only, for use as a send");
         }
 
         // OUTPUT is a plain trim.

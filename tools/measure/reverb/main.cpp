@@ -78,8 +78,8 @@ int measuredDelay (std::vector<float> values)
 {
     // The dry path is what a host's delay compensation is about, so the
     // impulse is measured with dry audible: MIX at 50 %, where the
-    // provisional law (`DspCore::dryGainFor`) has dry at unity. At the
-    // schema's default of 100 % there is no dry at all and the largest
+    // MIX law (`DspCore::dryGainFor`) has dry at unity. At a MIX of
+    // 100 % there is no dry at all and the largest
     // sample would be an early reflection, which is the effect and not a
     // delay through the module.
     values[Index::mix] = 50.0f;

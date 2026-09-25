@@ -45,16 +45,16 @@ and 3.5 % at 192 kHz, against 1.5 % and 5 %.
 
 **What moved against this file and the spec, each recorded in the note:**
 
-- The ER-only ±3 dB flatness rule under 1/3-octave smoothing is not
-  achievable by any sparse cluster at 200 Hz; it is measured and printed, not
-  asserted. Owner to re-specify.
+- The ER flatness rule is now the owner's of 2026-09-24: octave-smoothed,
+  250 Hz–8 kHz, within 6 dB about the tilt at DENSITY 100 %, asserted and
+  green (4.6 dB). 11 §6's 1/3-octave ±3 dB is printed beside it for the record.
 - The early lateral fraction is asserted on the ER bus, not ISO's figure with
   the direct sound: the −15.3 dB tap ceiling makes ISO's figure unreachable.
 - The two flamming rules are applied as **ceilings** in the generator, the
   way 10 §3 applies Kuttruff's, on the energy heard through the band poles.
-- The MIX law is provisional (dry = min(1, 2(1 − mix)), wet = min(1, 2 mix)),
-  and the schema default of 100 % is therefore wet-only. The bus suite's
-  reverb rows were regenerated to say so.
+- The MIX law is the owner's of 2026-09-24: dry = min(1, 2(1 − mix)),
+  wet = min(1, 2 mix), default 50 %, pinned at five points. The bus suite's
+  reverb rows were regenerated for the default.
 - VARIATION 6 is built to 05 §9.3 (mono-flat, not mono-empty); 10 §3's
   "vanish in mono" sentence and the panel label it asks for are wrong.
 - The window clamp is not applied (the Size law stays linear, as the panel).
@@ -63,7 +63,7 @@ and 3.5 % at 192 kHz, against 1.5 % and 5 %.
 
 **What the next session inherits.** The listening checkpoint below, which
 needs the references installed and source clips on the machine. Then the
-three owner decisions, then M3. Do not start M3 on this branch; branch again
+two remaining owner decisions (the 30 s tail ceiling and `inhicut`), then M3. Do not start M3 on this branch; branch again
 from `origin/main` once this one has merged.
 
 ### M2 opens with the CPU worst case
@@ -93,12 +93,16 @@ mode, it exists by the end of M2, and its position count is permanent at first
 ship — so the last moment to drop it cheaply is the first moment it can be
 heard.
 
-### M3 does not start until three decisions are made
+### M3 does not start until two decisions are made
 
-These are Frosty's, they are open in `11` §7, and M3's tests depend on them:
+These are Frosty's, they are open in `11` §7, and M3's tests depend on them.
+*The first of the original three is made:*
 
-- **The MIX law and its default.** `11` §6's level-law test says "pin one MIX
-  law, test to ±0.1 dB". There is nothing to pin until it is chosen.
+- ~~**The MIX law and its default.**~~ **Decided 2026-09-24:** dry =
+  min(1, 2(1 − mix)), wet = min(1, 2 mix), default 50 %, 100 % verb only for
+  a send. Pinned in `reverb_dsp_tests` at 0 / 25 / 50 / 75 / 100 %.
+  **The ER flatness rule was decided the same evening**: octave-smoothed,
+  250 Hz–8 kHz, within 6 dB about the tilt at DENSITY 100 %, asserted.
 - **The 30 s tail ceiling against a 40 s tail.** `decay` reaches 20 s and
   `damplo`/`damphi` reach 2.0×, so any setting with `decay` × the larger
   multiplier above about 30 s rings longer than `kMaxTailSeconds`

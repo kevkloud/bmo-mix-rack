@@ -416,13 +416,13 @@ const Golden kDefaults[]
     // except the three captured since, which is what says nothing else moved.
     { "reverb",
       // Since 2026-09-24 the early reflections play, so BMO Linger is no
-      // longer a wire at its defaults: MIX 100 % under the provisional law
-      // (DspCore::dryGainFor) is wet only, and these are the ER cluster
-      // alone at ER -6 dB. Captured on ICE QUEEN with --print. They move
-      // again when the tail lands (M3) and when the MIX law is decided.
-      -17.341916445, 0.264768183231,
-      -17.7189194446, 0.250292599201, -18.4023099797, 0.239050850272,
-      -17.4481666361, 0.266498267651, -17.200912, 0.266423046589 },
+      // longer a wire. MIX defaults to 50 %, where the dry is at unity and the
+      // ER cluster sits on top of it at ER -6 dB; the swept row lands at 63 %
+      // MIX, where the dry is coming down. Captured on ICE QUEEN with --print.
+      // They move again when the tail lands (M3).
+      -18.2233374753, 0.240494668484,
+      -18.0282782524, 0.248200848699, -18.1562998652, 0.24939237535,
+      -17.9638397443, 0.253939688206, -18.4815128422, 0.237755179405 },
     { "rack",
       -17.4712562736, 0.361956000328,
       -17.5538728123, 0.361777067184, -16.9709734739, 0.381855756044,
@@ -475,9 +475,9 @@ const Golden kSwept[]
     // every one of BMO Linger's thirty parameters is somewhere else, and a
     // placeholder does not care. This is the row that will move furthest.
     { "reverb",
-      -29.2997688862, 0.066454321146,
-      -29.3166657099, 0.0655126646161, -29.6470242993, 0.0647232532501,
-      -29.1069186845, 0.0686729699373, -29.4869846985, 0.0642356723547 },
+      -29.3102616573, 0.0666008815169,
+      -29.3064005076, 0.0657790899277, -29.6382492467, 0.0650113373995,
+      -29.0961922608, 0.0687868148088, -29.5203567687, 0.0644149556756 },
     { "rack",
       -12.3127888787, 1.16622579098,
       -12.0186864023, 1.15730452538, -11.9707022298, 1.15666925907,

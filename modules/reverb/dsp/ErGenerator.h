@@ -494,7 +494,7 @@ private:
 
     /** The diffuser stage delays, in samples at this rate: a mixed-radix
         ruler in units of 1/48 ms (see `diffuse`). */
-    static constexpr int kStageUnits[kNumStages][4] { { 1, 2, 3, 4 }, { 2, 5, 8, 11 }, { 3, 9, 15, 21 } };
+    static constexpr int kStageUnits[kNumStages][4] { { 1, 9, 2, 10 }, { 3, 13, 4, 14 }, { 5, 17, 6, 18 } };
 
     int stageDelaySamples (int stage, int read) const noexcept
     {
@@ -716,14 +716,22 @@ private:
         DENSITY with the uncorrelated-crossfade normaliser. FIR throughout:
         no poles, cannot ring (10 section 1).
 
-        **The delays are a mixed-radix ruler**, 1..4 units, 4..16 units and
-        21..84 units of 1/48 ms, so the 64 paths through the three stages all
-        have distinct lengths and no stage's reads coincide with any lag its
-        input already carries -- which is what makes the fade of each stage
-        an uncorrelated crossfade and the whole cascade energy-neutral on an
-        impulse train. It runs before the band's pole so that the train it
-        sees is impulses, not tails. CALIBRATE: the density it buys is paid
-        for in comb colour above 1 kHz, and the listening pass decides. */
+        **The rulers are chosen for a flat mono sum** (the owner's rule,
+        2026-09-24: octave-smoothed ripple within 6 dB at DENSITY 100 %).
+        With the reads a, b from the left line and c, d from the right, and
+        a mono cluster in both, the mono sum of a stage is (z^-a + z^-c) / 2
+        and the summed power of its two outputs is 2 + cos(w(a - c)) -
+        cos(w(b - d)). So a - c = b - d = -1 unit of 1/48 ms: the power sum is
+        flat, the mono sum is a two-sample average per stage (-3.7 dB at
+        8 kHz over three, which the tests' tilt removal takes out), and the
+        long side pair b, d -- 9..18 units -- carries the decorrelation and
+        the density. The earlier mixed-radix ruler put the mono sum's notches
+        at 2 and 4 kHz and cost 7.7 dB of ripple. The whole cascade is 42
+        units, under the 0.9 ms tap spacing, so no copy of a tap lands on
+        another; the coincidences among a tap's own paths are in the
+        normaliser's model. It runs before the band's pole so that the train
+        it sees is impulses, not tails. CALIBRATE: the listening pass
+        decides. */
     void diffuse (int bandIdx, float& l, float& r) noexcept
     {
         const auto len = stageLength();
@@ -860,7 +868,11 @@ private:
 
                 const auto gain = c.mode == 2 ? envelope (ms) : std::pow (10.0f, contourDb (ms) * 0.05f);
                 const auto pan  = signedUnit (seed + 2, (std::uint32_t) i) * 0.8f;
-                slot[(size_t) count++] = { ms, gain, pan, 1.0f, 2, 0.0f };
+                // Velvet noise is signed by definition: a random +-1 per pulse is
+                // what keeps a dense cluster from building up at low frequencies
+                // and combing the way an all-positive train does.
+                const auto sign = unit (seed + 1, (std::uint32_t) i) < 0.5f ? -1.0f : 1.0f;
+                slot[(size_t) count++] = { ms, gain, pan, sign, 2, 0.0f };
             }
         }
 

@@ -21,7 +21,7 @@ edited `docs/`, so read this file for what the schema is.
 on ICE QUEEN on 2026-09-24: `dsp/ErGenerator.h` plays the six image-source
 tables in `dsp/TapTables.h` through the Size law, four order-banded poles, the
 DENSITY bridge and its feed-forward diffuser, seven VARIATION positions and the
-ER hi-cut, and `dsp/DspCore.h` applies the faders, a **provisional** MIX law
+ER hi-cut, and `dsp/DspCore.h` applies the faders, the MIX law (Frosty's, 2026-09-24: 50 % is input unchanged with the verb heard, 100 % is verb only for a send)
 and OUTPUT. `dsp/ImageSource.h` is the offline generator the tables were
 printed from. The late network (M3) and the type blocks (M4) are still to come,
 so REVERB's fader moves a silent bus and the Reverb EQ is not in the path.
@@ -50,14 +50,21 @@ one exception named below.
   inherits order 2. `ErGenerator::cutoffHzFor` and `onePoleEnergyGain` are
   the one copy of that law, and the offline audit reads them too.
 - **The diffuser** runs per band, *before* its pole, so it mixes impulses and
-  not tails: three stages, each an orthogonal 2×4 mix of four reads on a
-  mixed-radix ruler of 1..4, 2..11 and 3..21 units of 1/48 ms, the whole
-  cascade under 0.75 ms so no copy of a tap lands on another. Stages fade in
-  at DENSITY 0.6 / 0.75 / 0.9 over 0.1 each, with a per-band, per-stage
-  normaliser computed **exactly** for isolated panned taps by running the
-  cascade's short FIR through the band pole and the hi-cut pole whenever
-  DENSITY or a corner moves. Four naive normalisers were tried first; the
-  sweep is flat to 0.03 dB with this one.
+  not tails: three stages, each an orthogonal 2×4 mix of four reads, with
+  rulers `{1, 9, 2, 10}`, `{3, 13, 4, 14}` and `{5, 17, 6, 18}` units of
+  1/48 ms chosen so that a − c = b − d = −1: the two outputs' summed power is
+  then flat and the mono sum of a stage is a two-sample average, while the
+  long b, d pair carries the decorrelation. The whole cascade is under
+  0.9 ms so no copy of a tap lands on another. Stages fade in at DENSITY
+  0.6 / 0.75 / 0.9 over 0.1 each, with a per-band, per-stage normaliser
+  computed **exactly** for isolated panned taps by running the cascade's
+  short FIR through the band pole and the hi-cut pole whenever DENSITY or a
+  corner moves. Four naive normalisers were tried first; the sweep is flat
+  to 0.03 dB with this one.
+- **The infill pulses are signed**, a random ±1 per pulse from the seed, as
+  velvet noise is by definition. All-positive infill built up at low
+  frequencies and combed: 7.1 dB of octave-smoothed ripple at DENSITY 100 %
+  against 4.6 dB signed, which is what meets the owner's flatness rule.
 - **VARIATION 0..5** widens the bearings (0.12 → 1.0 of the table's pan) and
   moves a growing fraction (0 → 0.92) of each tap's energy to channel-specific
   times ±0.6–2 ms either side, which is "different tap sets per channel" and

@@ -415,9 +415,14 @@ const Golden kDefaults[]
     // in this file tests that. Every row above is byte-identical to 8fed835
     // except the three captured since, which is what says nothing else moved.
     { "reverb",
-      -18.0000001899, 0.237879320979,
-      -18.0000001899, 0.237879320979, -17.9999997391, 0.239933893085,
-      -18.0000001899, 0.237879320979, -18.0000001899, 0.237879320979 },
+      // Since 2026-09-24 the early reflections play, so BMO Linger is no
+      // longer a wire at its defaults: MIX 100 % under the provisional law
+      // (DspCore::dryGainFor) is wet only, and these are the ER cluster
+      // alone at ER -6 dB. Captured on ICE QUEEN with --print. They move
+      // again when the tail lands (M3) and when the MIX law is decided.
+      -38.0106027003, 0.0318510867655,
+      -39.9101318444, 0.0283478107303, -38.0771351065, 0.034519713372,
+      -36.9312639457, 0.0373476333916, -35.5849564735, 0.036906439811 },
     { "rack",
       -17.4712562736, 0.361956000328,
       -17.5538728123, 0.361777067184, -16.9709734739, 0.381855756044,
@@ -470,9 +475,9 @@ const Golden kSwept[]
     // every one of BMO Linger's thirty parameters is somewhere else, and a
     // placeholder does not care. This is the row that will move furthest.
     { "reverb",
-      -18.0000001899, 0.237879320979,
-      -18.0000001899, 0.237879320979, -17.9999997391, 0.239933893085,
-      -18.0000001899, 0.237879320979, -18.0000001899, 0.237879320979 },
+      -29.2997688862, 0.066454321146,
+      -29.3166657099, 0.0655126646161, -29.6470242993, 0.0647232532501,
+      -29.1069186845, 0.0686729699373, -29.4869846985, 0.0642356723547 },
     { "rack",
       -12.3127888787, 1.16622579098,
       -12.0186864023, 1.15730452538, -11.9707022298, 1.15666925907,

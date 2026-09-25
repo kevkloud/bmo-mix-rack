@@ -2237,11 +2237,13 @@ void checkReverbPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
             params.setReal (R::Index::ervariation,
                             R::specs()[(size_t) R::Index::ervariation].def);
 
-            const auto third  = screen.tapDot (2).centre.y;
-            const auto fourth = screen.tapDot (3).centre.y;
+            // Room's table since the image-source tables landed (2026-09-24):
+            // tap 4 bears +0.599 and tap 5 -0.854, the first right/left pair.
+            const auto third  = screen.tapDot (3).centre.y;
+            const auto fourth = screen.tapDot (4).centre.y;
 
             check (third > plot.getCentreY() && fourth < plot.getCentreY(),
-                   who + " tap 3 is panned right and tap 4 left, so one draws below the"
+                   who + " tap 4 is panned right and tap 5 left, so one draws below the"
                          " centre axis and the other above it");
 
             // The direct sound is the ringed dot at t = 0 on the centre line,

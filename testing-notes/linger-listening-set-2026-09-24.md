@@ -23,11 +23,10 @@ their own 44.1 kHz; the renders keep that rate.
 | `drum-room.wav` | DEQ / REFs / DEQ ref ROOM | a drum room, 10.7 s |
 | `drum-loop.wav` | DEQ / REFs / PHRYGIAN D DRUM LOOP | the dry loop, 7.3 s — the snare lives here |
 | `synth.wav` | DEQ / REFs / PHRYGIAN D SYNTH | a held synth, 7.3 s |
+| `808.wav` | DEQ / REFs / PHRYGIAN D 808 audio | the 808, 7.3 s — low end against the cluster |
 
-The DEQ pass's 100-odd serial/parallel A/B renders are **not on ICE QUEEN**:
-they came out of `measure_deq render` into a folder the topology doc asks to
-be short-pathed, and no such folder exists on C: or D: here (the recycle bin
-holds 42 unrelated downloads). They were most likely made on AURORA.
+The DEQ pass's A/B renders were EQ moves on these same dry files (Frosty,
+2026-09-24) and are not needed here.
 
 ## What to listen for, and which files answer it
 
@@ -59,6 +58,10 @@ the `-mix50` files against the source; play the `-wet` files alone.
    ER alone. Blend is the one nobody has heard; if it does not earn its
    place, say so now, because the count of ER MODE is permanent at ship.
 8. **A held note and a hall.** `synth-room12-mix50`, `synth-hall34-mix50`.
+9. **Low end.** `808-room12-mix50`, `808-room24-mix50`, `808-room12-wet`,
+   `808-ambience-er-9`, `808-room12-var6-mix50`: does the cluster cloud or
+   comb the bottom, and does VARIATION 6 keep it in mono. `refs/808-lexicon224-wet`
+   for the reference.
 
 ## The reference leg
 

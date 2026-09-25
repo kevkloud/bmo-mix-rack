@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/ui/Controls.h"
+#include "core/ui/LookAndFeel.h"
 #include "core/ui/Tokens.h"
 #include <juce_audio_processors/juce_audio_processors.h>
 
@@ -297,6 +298,71 @@ public:
         return perRow * tabWidth + (perRow - 1) * gap;
     }
 
+    /** A tab in the Textured surface: the suite's switch, in three states
+        that read by form as well as colour. Off is a slot cut into the plate;
+        on is a raised key whose foot bar is lit; selected is pressed in and
+        lit in the band's colour. Every fill is the same token Simple uses --
+        well, switchOff, the band colour -- shaded by at most 10 %, so the ink
+        chosen against it below still holds. */
+    static void paintTexturedTab (juce::Graphics& g, juce::Rectangle<float> r, bool isSel, bool isOn,
+                                  juce::Colour mine)
+    {
+        const auto& t = ui::tokens();
+        const auto corner = ui::Tokens::corner;
+
+        if (! isSel && ! isOn)
+        {
+            // Recessed: the well, shaded along its top wall, with the lip
+            // below it catching the light.
+            g.setColour (juce::Colours::white.withAlpha (0.40f));
+            g.fillRoundedRectangle (r.translated (0.0f, 1.0f), corner);
+            g.setColour (t.well);
+            g.fillRoundedRectangle (r, corner);
+            g.setGradientFill (juce::ColourGradient (juce::Colours::black.withAlpha (0.28f), 0.0f, r.getY(),
+                                                     juce::Colours::transparentBlack, 0.0f, r.getY() + 5.0f, false));
+            g.fillRoundedRectangle (r, corner);
+            return;
+        }
+
+        if (isSel)
+        {
+            // Pressed in and lit: the engaged switch's glow, a gradient darker
+            // at the top, and an inner shadow along the top edge.
+            for (int i = 3; i >= 1; --i)
+            {
+                g.setColour (mine.withAlpha (0.10f * (float) i / 3.0f));
+                g.fillRoundedRectangle (r.expanded ((float) i), corner + (float) i);
+            }
+
+            g.setGradientFill (juce::ColourGradient (mine.darker (0.10f), 0.0f, r.getY(),
+                                                     mine.brighter (0.06f), 0.0f, r.getBottom(), false));
+            g.fillRoundedRectangle (r, corner);
+            g.setColour (juce::Colours::black.withAlpha (0.28f));
+            g.fillRoundedRectangle (r.reduced (0.5f).withHeight (1.6f), 0.8f);
+        }
+        else
+        {
+            // Raised: a drop shadow, lit from above, a highlight on the top
+            // edge -- and the band's bar along the foot, lit like an LED.
+            g.setColour (juce::Colours::black.withAlpha (0.22f));
+            g.fillRoundedRectangle (r.translated (0.0f, 1.2f), corner);
+            g.setGradientFill (juce::ColourGradient (t.switchOff.brighter (0.10f), 0.0f, r.getY(),
+                                                     t.switchOff.darker (0.10f), 0.0f, r.getBottom(), false));
+            g.fillRoundedRectangle (r, corner);
+            g.setColour (juce::Colours::white.withAlpha (0.45f));
+            g.fillRoundedRectangle (r.reduced (1.5f, 0.0f).withHeight (1.0f).translated (0.0f, 0.5f), 0.5f);
+
+            const auto bar = r.withTop (r.getBottom() - 3.0f).reduced (3.0f, 0.0f);
+            g.setColour (mine.withAlpha (0.35f));
+            g.fillRoundedRectangle (bar.expanded (1.5f), 2.0f);
+            g.setColour (mine);
+            g.fillRect (bar);
+        }
+
+        g.setColour (juce::Colours::black.withAlpha (0.25f));
+        g.drawRoundedRectangle (r.reduced (0.5f), corner, 1.0f);
+    }
+
     juce::Rectangle<int> tabBounds (int band) const
     {
         const auto perRow = (bands + rows - 1) / rows;
@@ -316,27 +382,43 @@ public:
             const auto isSel = b == selected, isOn = on && on (b);
             const auto mine = bandColour ? bandColour (b) : accent;
 
-            g.setColour (isSel ? mine : (isOn ? t.switchOff : t.well));
-            g.fillRoundedRectangle (r, ui::Tokens::corner);
-
-            // A band that is on but not selected still says what it is: a bar
-            // along the foot of its tab in its own colour. The fill cannot do
-            // it -- an unselected tab has to stay quiet enough that the
-            // selected one reads -- but three pixels along the bottom are
-            // unmistakable at a glance and cost the number nothing.
-            if (isOn && ! isSel)
+            if (ui::BmoLookAndFeel::textured())
             {
-                g.setColour (mine);
-                g.fillRect (r.withTop (r.getBottom() - 3.0f).reduced (3.0f, 0.0f));
+                paintTexturedTab (g, r, isSel, isOn, mine);
+            }
+            else
+            {
+                g.setColour (isSel ? mine : (isOn ? t.switchOff : t.well));
+                g.fillRoundedRectangle (r, ui::Tokens::corner);
+
+                // A band that is on but not selected still says what it is: a
+                // bar along the foot of its tab in its own colour. The fill
+                // cannot do it -- an unselected tab has to stay quiet enough
+                // that the selected one reads -- but three pixels along the
+                // bottom are unmistakable at a glance and cost the number
+                // nothing.
+                if (isOn && ! isSel)
+                {
+                    g.setColour (mine);
+                    g.fillRect (r.withTop (r.getBottom() - 3.0f).reduced (3.0f, 0.0f));
+                }
+
+                if (! isSel && ! isOn)
+                {
+                    g.setColour (t.hairline);
+                    g.drawRoundedRectangle (r.reduced (0.5f), ui::Tokens::corner, 1.0f);
+                }
             }
 
-            if (! isSel && ! isOn)
-            {
-                g.setColour (t.hairline);
-                g.drawRoundedRectangle (r.reduced (0.5f), ui::Tokens::corner, 1.0f);
-            }
-
-            const auto ink = isSel ? ui::onAccentOf (mine) : (isOn ? t.text1 : t.text2);
+            // An on tab's number in Textured is derived from the key it sits
+            // on, like every switch label. Simple sets it in text1, which on
+            // the pale plate is #6f6f6f on a #6f7076 key -- 1.0:1, the number
+            // gone. Left as it is in Simple until Frosty decides, because
+            // Simple is today's look by definition; see
+            // docs/ui-material-proposal.md.
+            const auto ink = isSel ? ui::onAccentOf (mine)
+                           : isOn  ? (ui::BmoLookAndFeel::textured() ? ui::onAccentOf (t.switchOff) : t.text1)
+                                   : t.text2;
             ui::drawLabel (g, juce::String (b + 1), r, juce::Justification::centred, ui::labelFont (12.0f, true), ink);
 
             if (dynamic && dynamic (b))

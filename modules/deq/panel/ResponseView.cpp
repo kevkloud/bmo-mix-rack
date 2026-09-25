@@ -220,6 +220,16 @@ void ResponseView::paint (juce::Graphics& g)
     const auto& t = ui::tokens();
     const auto r = plot();
 
+    // In the Textured surface the well is a screen set into the plate: a lit
+    // lip along its foot outside it, drawn first so the well covers all but
+    // that pixel, and the inner shadow along its top wall drawn after the
+    // grid and curve below.
+    if (ui::BmoLookAndFeel::textured())
+    {
+        g.setColour (juce::Colours::white.withAlpha (0.45f));
+        g.fillRoundedRectangle (r.translated (0.0f, 1.0f), ui::Tokens::corner);
+    }
+
     g.setColour (t.well);
     g.fillRoundedRectangle (r, ui::Tokens::corner);
 
@@ -293,6 +303,21 @@ void ResponseView::paint (juce::Graphics& g)
     // 18 kHz sits 7 px from the right-hand side, and a node is 8 px across.
     g.restoreState();
 
+    // The well's inner shadow, over the grid and the curve so the screen
+    // reads as set in, and under the nodes, which sit on the glass.
+    if (ui::BmoLookAndFeel::textured())
+    {
+        g.saveState();
+        g.reduceClipRegion (r.toNearestInt());
+        g.setGradientFill (juce::ColourGradient (juce::Colours::black.withAlpha (0.30f), 0.0f, r.getY(),
+                                                 juce::Colours::transparentBlack, 0.0f, r.getY() + 7.0f, false));
+        g.fillRect (r.withHeight (7.0f));
+        g.setGradientFill (juce::ColourGradient (juce::Colours::black.withAlpha (0.14f), r.getX(), 0.0f,
+                                                 juce::Colours::transparentBlack, r.getX() + 5.0f, 0.0f, false));
+        g.fillRect (r.withWidth (5.0f));
+        g.restoreState();
+    }
+
     const auto sel = selected ? selected() : -1;
     const auto numberFont = ui::labelFont (9.0f, true);
 
@@ -319,6 +344,22 @@ void ResponseView::paint (juce::Graphics& g)
         const auto mine = placementColour ((int) b.placement, accent);
         const auto radius = compact ? kNodeRadiusCompact : kNodeRadius;
         const auto node = juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (at);
+        const auto textured = ui::BmoLookAndFeel::textured();
+
+        // Textured: the node is a puck sitting on the screen -- a soft shadow
+        // under it before it is drawn, a sheen on its upper shoulder after.
+        // The compact node, 8 px across, takes the shadow alone.
+        const auto face = isSel ? node.expanded (compact ? 1.5f : 2.0f) : node;
+
+        if (textured)
+        {
+            const auto sc = face.getCentre().translated (0.0f, compact ? 0.8f : 1.4f);
+            const auto sr = face.getWidth() * 0.5f + (compact ? 1.5f : 2.5f);
+            juce::ColourGradient shadow (juce::Colours::black.withAlpha (0.35f), sc.x, sc.y,
+                                         juce::Colours::transparentBlack, sc.x + sr, sc.y, true);
+            g.setGradientFill (shadow);
+            g.fillEllipse (juce::Rectangle<float> (sr * 2.0f, sr * 2.0f).withCentre (sc));
+        }
 
         if (isSel)
         {
@@ -346,6 +387,17 @@ void ResponseView::paint (juce::Graphics& g)
             g.fillEllipse (node);
             g.setColour (b.on ? mine : t.hairline);
             g.drawEllipse (node, compact ? 1.4f : 1.6f);
+        }
+
+        // The sheen stays on the shoulder, above the number, so the number
+        // is read on the same flat fill it always was.
+        if (textured && ! compact)
+        {
+            const auto hc = face.getCentre().translated (-face.getWidth() * 0.12f, -face.getHeight() * 0.30f);
+            g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.45f), hc.x, hc.y,
+                                                     juce::Colours::white.withAlpha (0.0f),
+                                                     hc.x + face.getWidth() * 0.38f, hc.y, true));
+            g.fillEllipse (face.reduced (1.0f));
         }
 
         if (! compact)

@@ -209,6 +209,23 @@ piece-by-piece fill, corners and all). On the dark plate the hairline is
 lighter than the plate, so the cut reads bright — how a laser mark on dark
 anodised metal actually looks.
 
+**BMO DEQ's band tabs, curve nodes and graph.** The tabs are switches and
+take the switch treatment, reading by form in three states: off is a slot cut
+into the plate, on is a raised key with its band-colour foot bar lit like an
+LED, and selected is pressed in and lit in the band's colour. The solo ring
+and the dynamics dot are unchanged. The nodes on the curve are pucks: a soft
+shadow on the screen and a sheen on the upper shoulder, clear of the number,
+which stays on the same flat fill. The compact view's 8 px nodes take the
+shadow alone. The graph is a screen set into the plate: an inner shadow along
+its top and left walls, under the nodes, and a lit lip along its foot. Same
+tokens as Simple throughout.
+
+An on tab's number in Textured takes its ink from the key (`onAccentOf
+(switchOff)`), as every switch label does. **Simple has a legibility bug
+here**: it sets that number in `text1`, which on the pale plate is `#6f6f6f`
+on a `#6f7076` key, 1.02:1, and the number disappears. It is left as it is in
+Simple, because Simple is today's look by definition, until Frosty decides.
+
 **Section legends.** On a textured plate the old flat knock-out behind HIGH,
 MID and so on showed as a patch, so the rule is drawn in two pieces that stop
 at the legend.
@@ -289,7 +306,10 @@ nothing blurs at 150 % or on a Retina display.
 1. **DEQ's FREQ, GAIN and Q**: tagged ringed at both widths. The other
    defensible call is one-piece at both, matching every other knob on DEQ in
    a rack.
-2. **The EQ node buttons**: see the recommendation in the session.
+2. **Fix DEQ's on-tab number in Simple too** (1.02:1 in the light
+   appearance; see above). It would be the one change to Simple's pixels.
+3. **BMO Linger's graph and nodes** could take the same screen and puck
+   treatment as DEQ's.
 
 ## How to see it
 

@@ -209,15 +209,15 @@ piece-by-piece fill, corners and all). On the dark plate the hairline is
 lighter than the plate, so the cut reads bright — how a laser mark on dark
 anodised metal actually looks.
 
-**BMO DEQ's band tabs, curve nodes and graph.** The tabs are switches and
-take the switch treatment, reading by form in three states: off is a slot cut
-into the plate, on is a raised key with its band-colour foot bar lit like an
-LED, and selected is pressed in and lit in the band's colour. The solo ring
-and the dynamics dot are unchanged. The nodes on the curve are pucks: a soft
-shadow on the screen and a sheen on the upper shoulder, clear of the number,
-which stays on the same flat fill. The compact view's 8 px nodes take the
-shadow alone. The graph is a screen set into the plate: an inner shadow along
-its top and left walls, under the nodes, and a lit lip along its foot. Same
+**BMO DEQ's band tabs and graph.** The tabs are switches and take the
+switch treatment, reading by form in three states: off is a slot cut into the
+plate, on is a raised key outlined all the way round in its band's colour
+(Simple has a bar along the foot instead), and selected is pressed in and lit
+in the band's colour. The solo ring and the dynamics dot are unchanged. The
+graph is a screen set into the plate: an inner shadow along its top and left
+walls, under the nodes, and a lit lip along its foot. **The nodes on the
+curve stay flat** (Frosty, 2026-09-25, after seeing them as shaded pucks). An
+active node that isn't selected keeps its ring in the band's colour. Same
 tokens as Simple throughout.
 
 An on tab's number in Textured takes its ink from the key (`onAccentOf

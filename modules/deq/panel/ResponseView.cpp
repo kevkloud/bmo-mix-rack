@@ -344,23 +344,9 @@ void ResponseView::paint (juce::Graphics& g)
         const auto mine = placementColour ((int) b.placement, accent);
         const auto radius = compact ? kNodeRadiusCompact : kNodeRadius;
         const auto node = juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (at);
-        const auto textured = ui::BmoLookAndFeel::textured();
-
-        // Textured: the node is a puck sitting on the screen -- a soft shadow
-        // under it before it is drawn, a sheen on its upper shoulder after.
-        // The compact node, 8 px across, takes the shadow alone.
-        const auto face = isSel ? node.expanded (compact ? 1.5f : 2.0f) : node;
-
-        if (textured)
-        {
-            const auto sc = face.getCentre().translated (0.0f, compact ? 0.8f : 1.4f);
-            const auto sr = face.getWidth() * 0.5f + (compact ? 1.5f : 2.5f);
-            juce::ColourGradient shadow (juce::Colours::black.withAlpha (0.35f), sc.x, sc.y,
-                                         juce::Colours::transparentBlack, sc.x + sr, sc.y, true);
-            g.setGradientFill (shadow);
-            g.fillEllipse (juce::Rectangle<float> (sr * 2.0f, sr * 2.0f).withCentre (sc));
-        }
-
+        // Flat in both surfaces -- Frosty, 2026-09-25, from a render of them
+        // as shaded pucks. The ring in the band's colour on an active node
+        // that is not selected is what carries it.
         if (isSel)
         {
             const auto big = node.expanded (compact ? 1.5f : 2.0f);
@@ -387,17 +373,6 @@ void ResponseView::paint (juce::Graphics& g)
             g.fillEllipse (node);
             g.setColour (b.on ? mine : t.hairline);
             g.drawEllipse (node, compact ? 1.4f : 1.6f);
-        }
-
-        // The sheen stays on the shoulder, above the number, so the number
-        // is read on the same flat fill it always was.
-        if (textured && ! compact)
-        {
-            const auto hc = face.getCentre().translated (-face.getWidth() * 0.12f, -face.getHeight() * 0.30f);
-            g.setGradientFill (juce::ColourGradient (juce::Colours::white.withAlpha (0.45f), hc.x, hc.y,
-                                                     juce::Colours::white.withAlpha (0.0f),
-                                                     hc.x + face.getWidth() * 0.38f, hc.y, true));
-            g.fillEllipse (face.reduced (1.0f));
         }
 
         if (! compact)

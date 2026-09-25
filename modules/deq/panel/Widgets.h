@@ -300,8 +300,8 @@ public:
 
     /** A tab in the Textured surface: the suite's switch, in three states
         that read by form as well as colour. Off is a slot cut into the plate;
-        on is a raised key whose foot bar is lit; selected is pressed in and
-        lit in the band's colour. Every fill is the same token Simple uses --
+        on is a raised key outlined in the band's colour; selected is pressed
+        in and lit in the band's colour. Every fill is the same token Simple uses --
         well, switchOff, the band colour -- shaded by at most 10 %, so the ink
         chosen against it below still holds. */
     static void paintTexturedTab (juce::Graphics& g, juce::Rectangle<float> r, bool isSel, bool isOn,
@@ -343,20 +343,20 @@ public:
         else
         {
             // Raised: a drop shadow, lit from above, a highlight on the top
-            // edge -- and the band's bar along the foot, lit like an LED.
+            // edge -- and outlined all the way round in the band's colour.
+            // Frosty, 2026-09-25: a full outline rather than Simple's bar
+            // along the foot, so an active band reads from any side of it.
             g.setColour (juce::Colours::black.withAlpha (0.22f));
             g.fillRoundedRectangle (r.translated (0.0f, 1.2f), corner);
             g.setGradientFill (juce::ColourGradient (t.switchOff.brighter (0.10f), 0.0f, r.getY(),
                                                      t.switchOff.darker (0.10f), 0.0f, r.getBottom(), false));
             g.fillRoundedRectangle (r, corner);
             g.setColour (juce::Colours::white.withAlpha (0.45f));
-            g.fillRoundedRectangle (r.reduced (1.5f, 0.0f).withHeight (1.0f).translated (0.0f, 0.5f), 0.5f);
+            g.fillRoundedRectangle (r.reduced (2.5f, 0.0f).withHeight (1.0f).translated (0.0f, 2.0f), 0.5f);
 
-            const auto bar = r.withTop (r.getBottom() - 3.0f).reduced (3.0f, 0.0f);
-            g.setColour (mine.withAlpha (0.35f));
-            g.fillRoundedRectangle (bar.expanded (1.5f), 2.0f);
             g.setColour (mine);
-            g.fillRect (bar);
+            g.drawRoundedRectangle (r.reduced (1.0f), corner, 2.0f);
+            return;
         }
 
         g.setColour (juce::Colours::black.withAlpha (0.25f));

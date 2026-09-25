@@ -450,6 +450,71 @@ void writeIrWav (const std::string& path, int type, float sizeM, float density, 
                  kTypeNames[type], (double) sizeM, (double) density, variation);
 }
 
+/** A WAV through the whole module -- faders, MIX, OUTPUT -- at the schema
+    defaults plus any `id=value` overrides, in real units as the schema shows
+    them, so a listening set is rendered by the code that ships and nothing
+    else. Mono input is duplicated into both channels, which is what the rack
+    does ahead of slot 1. 200 ms of pre-roll lets the gains settle; the file's
+    own rate is used. */
+void renderWav (const std::string& inPath, const std::string& outPath, const std::vector<std::string>& overrides)
+{
+    std::vector<std::vector<float>> in;
+    double rate = 0.0;
+
+    if (! bmo::measure::readWav (inPath, in, rate) || in.empty())
+    {
+        std::printf ("cannot read %s\n", inPath.c_str());
+        return;
+    }
+
+    auto v = defaults();
+
+    for (const auto& o : overrides)
+    {
+        const auto eq = o.find ('=');
+        if (eq == std::string::npos) { std::printf ("bad override %s (want id=value)\n", o.c_str()); return; }
+        const auto id = o.substr (0, eq);
+        const auto value = (float) std::atof (o.c_str() + eq + 1);
+        bool found = false;
+        for (size_t i = 0; i < specs().size(); ++i)
+            if (id == specs()[i].id) { v[i] = value; found = true; }
+        if (! found) { std::printf ("no parameter id %s (see schema)\n", id.c_str()); return; }
+    }
+
+    const auto n = in[0].size();
+    std::vector<std::vector<float>> ch (2, std::vector<float> (n, 0.0f));
+    ch[0] = in[0];
+    ch[1] = in.size() > 1 ? in[1] : in[0];
+
+    ReverbDsp dsp;
+    dsp.prepare (rate, 512, 2);
+    dsp.setParams (v.data(), (int) v.size());
+
+    std::vector<float> zl (512, 0.0f), zr (512, 0.0f);
+    for (int k = 0; k < (int) (0.2 * rate) / 512; ++k)
+    {
+        std::fill (zl.begin(), zl.end(), 0.0f);
+        std::fill (zr.begin(), zr.end(), 0.0f);
+        float* z[] { zl.data(), zr.data() };
+        dsp.process (z, 2, 512);
+    }
+
+    for (size_t at = 0; at < n; at += 512)
+    {
+        float* chans[] { ch[0].data() + at, ch[1].data() + at };
+        dsp.setParams (v.data(), (int) v.size());
+        dsp.process (chans, 2, (int) std::min<size_t> (512, n - at));
+    }
+
+    float peak = 0.0f;
+    for (const auto& c : ch) for (const auto x : c) peak = std::max (peak, std::abs (x));
+
+    std::printf ("%s: %s  (%zu samples at %g Hz, peak %.1f dBFS)", bmo::measure::writeWav (outPath, ch, rate) ? "wrote" : "COULD NOT WRITE",
+                 outPath.c_str(), n, rate, 20.0 * std::log10 (std::max (peak, 1.0e-9f)));
+    for (const auto& o : overrides) std::printf ("  %s", o.c_str());
+    std::printf ("\n");
+}
+
 void analyseWav (const std::string& path)
 {
     std::vector<std::vector<float>> ch;
@@ -645,7 +710,8 @@ void usage()
                  "                       |bench [rate [block [worst|default]]]|ir [type [size [density [variation]]]]\n"
                  "                       |samples [density [from [to]]]\n"
                  "                       |stimulus <out.wav> [rate]|irwav <out.wav> [type [size [density [variation]]]]\n"
-                 "                       |analyse <in.wav>...>\n");
+                 "                       |render <in.wav> <out.wav> [id=value ...]|analyse <in.wav>...>
+");
 }
 
 } // namespace
@@ -687,6 +753,15 @@ int main (int argc, char** argv)
                     argc > 4 ? (float) std::atof (argv[4]) : kReferenceSizeM,
                     argc > 5 ? (float) std::atof (argv[5]) : 0.0f,
                     argc > 6 ? std::atoi (argv[6]) : 0);
+        return 0;
+    }
+
+    if (mode == "render" && argc > 3)
+    {
+        std::vector<std::string> overrides;
+        for (int i = 4; i < argc; ++i)
+            overrides.emplace_back (argv[i]);
+        renderWav (argv[2], argv[3], overrides);
         return 0;
     }
 

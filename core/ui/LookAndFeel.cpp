@@ -896,7 +896,7 @@ void BmoLookAndFeel::drawToggleButton (juce::Graphics& g, juce::ToggleButton& bu
         }
 
         g.setColour (juce::Colours::black.withAlpha (0.25f));
-        g.drawRoundedRectangle (edge, Tokens::corner, 1.0f);
+        strokeInside (g, bounds, Tokens::corner, 1.0f);
     }
     else
     {

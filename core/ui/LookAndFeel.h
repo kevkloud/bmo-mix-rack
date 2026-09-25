@@ -167,6 +167,21 @@ Knob::TexturedForm texturedFormFor (const Knob&);
 /** The radius a knob's cap is drawn at, in design pixels. */
 float capRadiusOf (const Knob&);
 
+/** Strokes a border wholly inside `area`: inset by half its weight, and with
+    its radius brought in by the same amount, so the stroke's outer edge is the
+    very curve a fill of `area` at `radius` has.
+
+    `drawRoundedRectangle (area.reduced (w / 2), radius, w)` -- the way every
+    border in the suite was drawn -- keeps the full radius on the inset
+    rectangle. Its outer edge is then a rounder curve than the fill's, and the
+    fill's corners show through outside the border: Frosty, 2026-09-25, "check
+    the corners on the borders, they sneak through". */
+inline void strokeInside (juce::Graphics& g, juce::Rectangle<float> area, float radius, float weight)
+{
+    const auto half = weight * 0.5f;
+    g.drawRoundedRectangle (area.reduced (half), juce::jmax (0.0f, radius - half), weight);
+}
+
 //==============================================================================
 class BmoLookAndFeel final : public juce::LookAndFeel_V4
 {

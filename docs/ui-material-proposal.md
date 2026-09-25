@@ -232,6 +232,20 @@ their numbers, now set in `meterInk`. This is a change to Simple, on purpose.
 The bezel margin is 3 px (`ResponseView::kBezelPad`), inside the room the
 graph already had, so nothing else on the panel moved.
 
+**Borders sit wholly inside what they border** (Frosty, 2026-09-25: "check
+the corners on the borders, they sneak through"). The suite drew every border
+as `drawRoundedRectangle (area.reduced (w / 2), radius, w)`, which keeps the
+full radius on the inset rectangle, so the fill's corners showed outside the
+stroke. `ui::strokeInside` brings the radius in by the same half weight.
+It is used for the Textured switches and band tabs, all of BMO DEQ's borders
+(tabs, solo ring, gain-reduction bar, screen and bezel), and BMO Linger's
+screen and bezel, which DEQ follows. DEQ's bezel also takes the screen's radius
+plus its pad, so the band of well round the screen is even at the corners.
+Linger changed by about 200 pixels per render, all at those corners.
+The same pattern is still in `core/ui/LevelBars.cpp`, `core/ui/Controls.cpp`
+(four places), `modules/tune/panel/TunePanel.cpp` and
+`modules/deesser/panel/DeesserPanel.cpp`, in Simple, untouched.
+
 **DEQ's on-tab number was invisible in Simple and is fixed in both
 surfaces.** It was set in `text1`, which on the pale plate is `#6f6f6f` on a
 `#6f7076` key, 1.02:1. It now takes its ink from the key (`onAccentOf

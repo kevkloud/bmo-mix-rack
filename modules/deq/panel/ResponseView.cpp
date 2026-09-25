@@ -230,12 +230,16 @@ void ResponseView::paint (juce::Graphics& g)
     const auto face = t.meterFace;
     const auto ink  = ui::accentInk (accent, face);
 
+    // The bezel's corners are the screen's, grown by the pad, so the band of
+    // well between them is the same width all the way round -- at a 3 px pad
+    // a bezel on the screen's own radius pinched in at every corner.
     {
         const auto bezel = r.expanded (kBezelPad);
+        const auto bezelRadius = ui::Tokens::corner + kBezelPad;
         g.setColour (t.well);
-        g.fillRoundedRectangle (bezel, ui::Tokens::corner);
+        g.fillRoundedRectangle (bezel, bezelRadius);
         g.setColour (t.outline);
-        g.drawRoundedRectangle (bezel.reduced (0.5f), ui::Tokens::corner, ui::Tokens::hairlineWeight);
+        ui::strokeInside (g, bezel, bezelRadius, ui::Tokens::hairlineWeight);
     }
 
     g.setColour (face);
@@ -326,6 +330,12 @@ void ResponseView::paint (juce::Graphics& g)
     // Nodes over the well's edge rather than cut by it: band 12's default
     // 18 kHz sits 7 px from the right-hand side, and a node is 8 px across.
     g.restoreState();
+
+    // The screen's own edge, as Linger's has: over the grid and the curve, so
+    // nothing drawn on the face can run to its rim, and under the nodes, which
+    // ride over it.
+    g.setColour (t.outline);
+    ui::strokeInside (g, r, ui::Tokens::corner, ui::Tokens::hairlineWeight);
 
     const auto sel = selected ? selected() : -1;
     const auto numberFont = ui::labelFont (9.0f, true);

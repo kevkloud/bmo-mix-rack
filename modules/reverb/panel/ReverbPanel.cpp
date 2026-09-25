@@ -886,7 +886,7 @@ void LingerScreen::paint (juce::Graphics& g)
     paintMenu (g, ink);
 
     g.setColour (ui::tokens().outline);
-    g.drawRoundedRectangle (bounds.reduced (0.5f), ui::Tokens::corner, ui::Tokens::hairlineWeight);
+    ui::strokeInside (g, bounds, ui::Tokens::corner, ui::Tokens::hairlineWeight);
 }
 
 //==============================================================================
@@ -1820,8 +1820,7 @@ void ReverbPanel::paintPanel (juce::Graphics& g)
     g.setColour (t.well);
     g.fillRoundedRectangle (bezelBox.toFloat(), ui::Tokens::corner);
     g.setColour (ui::tokens().outline);
-    g.drawRoundedRectangle (bezelBox.toFloat().reduced (0.5f), ui::Tokens::corner,
-                            ui::Tokens::hairlineWeight);
+    ui::strokeInside (g, bezelBox.toFloat(), ui::Tokens::corner, ui::Tokens::hairlineWeight);
 
     // The reading for the page that is showing. Small, printed, and the only
     // number on this panel outside DECAY and the three faders.

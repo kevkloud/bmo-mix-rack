@@ -355,12 +355,12 @@ public:
             g.fillRoundedRectangle (r.reduced (2.5f, 0.0f).withHeight (1.0f).translated (0.0f, 2.0f), 0.5f);
 
             g.setColour (mine);
-            g.drawRoundedRectangle (r.reduced (1.0f), corner, 2.0f);
+            ui::strokeInside (g, r, corner, 2.0f);
             return;
         }
 
         g.setColour (juce::Colours::black.withAlpha (0.25f));
-        g.drawRoundedRectangle (r.reduced (0.5f), corner, 1.0f);
+        ui::strokeInside (g, r, corner, 1.0f);
     }
 
     juce::Rectangle<int> tabBounds (int band) const
@@ -406,7 +406,7 @@ public:
                 if (! isSel && ! isOn)
                 {
                     g.setColour (t.hairline);
-                    g.drawRoundedRectangle (r.reduced (0.5f), ui::Tokens::corner, 1.0f);
+                    ui::strokeInside (g, r, ui::Tokens::corner, 1.0f);
                 }
             }
 
@@ -434,7 +434,7 @@ public:
             if (b == soloed)
             {
                 g.setColour (t.text1);
-                g.drawRoundedRectangle (r.reduced (1.0f), ui::Tokens::corner, 2.0f);
+                ui::strokeInside (g, r, ui::Tokens::corner, 2.0f);
             }
         }
     }
@@ -602,7 +602,7 @@ public:
         g.setColour (t.well);
         g.fillRoundedRectangle (bar, 2.0f);
         g.setColour (t.hairline.withAlpha (0.5f));
-        g.drawRoundedRectangle (bar.reduced (0.5f), 2.0f, 1.0f);
+        ui::strokeInside (g, bar, 2.0f, 1.0f);
 
         // Down from the top for gain taken away, up from the bottom for gain
         // added, both over the whole track. One fill or the other, never both.

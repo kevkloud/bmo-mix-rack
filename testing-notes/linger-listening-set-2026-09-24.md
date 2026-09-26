@@ -113,3 +113,49 @@ lead vocal peaks at +0.9 dBFS.
 The held-note and sine files are for M3's modulation question and are here
 early: nothing modulates yet, so Linger's versions of them are the cluster
 alone.
+
+## Friday 25 September: the Renaissance pass in Live
+
+Bounced by Frosty in Ableton Live on ICE QUEEN, RVerb (Waves V17 shell,
+installed 2026-09-25), 48 kHz, 32-bit float, all individual tracks,
+into `D:\VISUAL\PLUGINS\MIX RACK\LINGER\RVERB\`.
+
+- **Decay is 1.81 s, not 1.8.** RVerb's Decay control steps from 1.81 to
+  the next value and will not take 1.8 typed. Files keep the board's `_1.8s`
+  names; the figure is 1.81 everywhere.
+- **Type map** (Frosty, 25th): room → Room, chamber → Chamber, hall →
+  Hall 1, cavern → Church, plate → Plate 1, ambience → Room at Size
+  **19.9 %**.
+- **Extras:** Hall 2 and Church, each at RVerb's own default settings, so
+  every relevant model is in the set.
+- **Preset column:** the factory preset built on the same type, loaded
+  as-is with its own decay (Decay not set to 1.81).
+- **Presets used:** room Bedroom, chamber Concrete Venue Empty, hall Grand
+  Hall, cavern (Church) Cathedral, plate Vocal Plate, ambience Phonebooth,
+  Hall 2 1000 Seat Cavern.
+- **Pass A** (the impulse through every type): 28 files in
+  `packages/reverb-listening/refs/renaissance/`, named
+  `refA_<row>_<full|er|tail>_1.81s` and `refA_<row>_full_preset-<name>`,
+  with `hall2` as the extra row and Church filed under `cavern`. 5.5 s each;
+  every file carries signal, peaks −17 to −40 dBFS. The first export was
+  silent on every track but one because a track was soloed; it was
+  re-bounced, and only the second export is used.
+- **RVerb at its default settings** (Frosty, 25th), matching the UAD units'
+  factory-state renders: `refA_default_full.wav`.
+- **`refA_default_full`'s ER is at −2 dB**, which is RVerb's default. Every
+  other Renaissance file has ER and Reverb at 0 dB.
+- **Pass B** (the dry clips through RVerb): 14 files in `set-2026-09-24/refs/`,
+  on Hall 1 at 1.81 s with ER and Reverb at 0 dB. `sine-1k` and `held-note`
+  are wet through Hall 1 and Plate 1 (`-rverb-hall-wet`, `-rverb-plate-wet`);
+  `vocal-failure`, `rap-vocal-01`, `snare-02`, `drum-room` and `guitar` are
+  each at 100 % (`-rverb-wet`, for a send) and 50 % (`-rverb-mix50`, on the
+  channel), which were Frosty's two use cases. Every file is 77 s and padded
+  with silence after its clip; the 44.1 kHz sources were resampled to 48 kHz
+  by Live.
+- **RVerb's 50 % is equal-power: dry and wet both at −3 dB.** This was
+  measured on ICE QUEEN on `rap-vocal-01` by fitting the mix50 file as a
+  mix of the dry source and the wet file. The fit leaves a residual of
+  −124 dB, so the result is exact, and the renders are sample-aligned with
+  their sources. Linger's law keeps both legs at unity at 50 %, so **Linger's
+  mix50 files are 3 dB hotter than RVerb's** in both the dry and the wet.
+  Turn Linger down 3 dB when comparing the two by ear.

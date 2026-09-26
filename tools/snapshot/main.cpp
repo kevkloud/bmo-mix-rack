@@ -779,9 +779,22 @@ int main (int argc, char** argv)
 
                 const auto radius = (float) juce::jmin (k->getWidth(), k->getHeight()) * 0.5f * k->getFaceScale();
 
+                // Where the default sits on the sweep, 0..1, as the track
+                // draws it, and whether this knob draws a default mark at all
+                // (a dotted track: not a ring, not a filter, not stepped, and
+                // not opted out with setRestMark (false)).
+                const auto range = k->getRange();
+                const auto restPos = range.getLength() > 0.0 && k->isDoubleClickReturnEnabled()
+                                       ? juce::jlimit (0.0, 1.0, k->valueToProportionOfLength (k->getDoubleClickReturnValue()))
+                                       : -1.0;
+                const auto tracked = (k->getStyle() == bmo::ui::Knob::Style::utility
+                                      || k->getStyle() == bmo::ui::Knob::Style::character)
+                                     && k->getStepMarks() <= 1 && k->hasRestMark();
+
                 std::cout << "knob\t" << module << "\t" << (label.isEmpty() ? juce::String ("?") : label)
                           << "\t" << style << "\t" << form << "\t" << source
-                          << "\t" << juce::String (radius, 2) << "\n";
+                          << "\t" << juce::String (radius, 2)
+                          << "\t" << juce::String (restPos, 4) << "\t" << (tracked ? "tracked" : "untracked") << "\n";
             }
 
             for (auto* child : c.getChildren())

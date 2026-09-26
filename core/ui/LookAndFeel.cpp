@@ -484,8 +484,9 @@ void BmoLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int widt
         // carries the same positions whatever its size and a rack reads in one
         // rhythm; the old arc spaced its dots by distance, so a small knob and
         // a large one never agreed. The two ends are the minus and plus,
-        // drawn below. The middle dot is larger, which is what the eye counts
-        // from. Drawn below, once the default is known.
+        // drawn below. All nine dots are alike -- a larger middle one was
+        // tried and dropped, because the default tick is the one mark that
+        // should stand out. Drawn below, once the default is known.
         //
         // In the accent made legible against the plate it is printed on, as a
         // caption is, rather than the raw accent at 0.55: on the pale plate
@@ -528,14 +529,13 @@ void BmoLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int widt
 
         const auto restAngle = startAngle + restPos * (endAngle - startAngle);
 
-        // **The default is a tick**, an index mark struck outward from just
-        // beyond the ring of dots -- Frosty, 2026-09-26. Outside the ring
-        // because a default that is an end of the sweep (the Saturator's TONE
-        // and MIX rest at maximum) would otherwise land on the plus: the old
-        // heavy dot fused with it into one malformed glyph there, and was
-        // suppressed at every end default for that reason. Out here it is
-        // drawn at every default, ends included.
-        const auto restMarked = knob == nullptr || knob->hasRestMark();
+        // **The default is a tick**, struck across the ring and centred on it
+        // exactly where a dot would sit -- Frosty, 2026-09-26. A default at
+        // either end of the sweep gets no mark at all: the minus or plus is
+        // already there, and a knob resting at an end shows it by where its
+        // pointer sits when the panel opens (the Saturator's TONE and MIX).
+        const auto restAtEnd  = restPos <= 0.005f || restPos >= 0.995f;
+        const auto restMarked = (knob == nullptr || knob->hasRestMark()) && ! restAtEnd;
 
         // The dots. A default that lands on one of the eleven positions --
         // PAN's centre, a band gain's 0 dB -- takes that position's place:
@@ -543,14 +543,13 @@ void BmoLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int widt
         // an exclamation mark.
         for (int i = 1; i < 10; ++i)
         {
-            const auto a     = startAngle + (endAngle - startAngle) * (float) i / 10.0f;
-            const auto major = i == 5;
-            const auto size  = major ? (concentric ? 2.4f : 3.0f) : (concentric ? 1.7f : 2.1f);
+            const auto a    = startAngle + (endAngle - startAngle) * (float) i / 10.0f;
+            const auto size = concentric ? 1.7f : 2.1f;
 
             if (restMarked && std::abs (a - restAngle) < 0.02f)
                 continue;
 
-            g.setColour (dim (printInk.withAlpha (enabled ? (major ? 0.85f : 0.6f) : 0.2f)));
+            g.setColour (dim (printInk.withAlpha (enabled ? 0.6f : 0.2f)));
             g.fillEllipse (juce::Rectangle<float> (size, size).withCentre (at (a, track)));
         }
 
@@ -559,11 +558,11 @@ void BmoLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int widt
             // A band's gain has about eight pixels between its ring and its
             // frequency legend, so its tick reaches no further out than the
             // old 5 px dot did, and stays clear of "16k".
-            const auto inner = track + (concentric ? 1.2f : 3.0f);
-            const auto outer = inner + (concentric ? 2.6f : 5.0f);
+            const auto half = concentric ? 2.5f : 3.5f;
 
             g.setColour (dim (printInk));
-            g.drawLine ({ at (restAngle, inner), at (restAngle, outer) }, concentric ? 1.6f : 2.0f);
+            g.drawLine ({ at (restAngle, track - half), at (restAngle, track + half) },
+                        concentric ? 1.6f : 2.0f);
         }
 
         // Drawn rather than set. Neither panel face has a minus sign that

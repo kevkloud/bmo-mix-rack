@@ -261,14 +261,15 @@ bezel.
 
 **Knob tracks: eleven positions as dots, and a tick for the default**
 (Frosty, 2026-09-26, from renders of the old dotted arc, a printed scale, and a
-scale with a value arc). A dot at every tenth of the sweep, so every knob has
-the same positions whatever its size, with the middle dot larger; the ends stay
-the minus and plus. The default is a short tick struck outward from just beyond
-the dots, so it is drawn at every default, ends included, and never fuses with
-the plus. Where the default lands on a position, the tick takes that dot's
-place. Inks are the accent made legible against the plate (`accentInk`), not
-the raw accent at 0.55. Both surfaces; stepped knobs keep their numbered ticks.
-The value arc was shown and not taken.
+scale with a value arc, then a second round). A dot at every tenth of the
+sweep, all alike, so every knob has the same positions whatever its size; the
+ends stay the minus and plus. The default is a short tick across the ring,
+centred exactly where a dot would sit, and it takes that dot's place when the
+default is one of the positions. A default at either end of the sweep gets no
+mark: the minus or plus is already there. Inks are the accent made legible
+against the plate (`accentInk`), not the raw accent at 0.55. Both surfaces;
+stepped knobs keep their numbered ticks. The value arc, and a larger middle
+dot, were shown and not taken.
 
 **DEQ's on-tab number was invisible in Simple and is fixed in both
 surfaces.** It was set in `text1`, which on the pale plate is `#6f6f6f` on a

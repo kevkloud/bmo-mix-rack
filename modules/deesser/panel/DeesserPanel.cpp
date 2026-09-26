@@ -221,7 +221,7 @@ void BandSketch::paint (juce::Graphics& g)
     g.strokePath (curve, juce::PathStrokeType (1.6f));
 
     g.setColour (ui::tokens().outline);
-    g.drawRoundedRectangle (bounds.reduced (0.5f), 3.0f, ui::Tokens::hairlineWeight);
+    ui::strokeInside (g, bounds, 3.0f, ui::Tokens::hairlineWeight);
 }
 
 //==============================================================================

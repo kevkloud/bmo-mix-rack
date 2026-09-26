@@ -332,7 +332,7 @@ void Fader::paintFader (juce::Graphics& g)
     g.setColour (dim (t.well));
     g.fillRoundedRectangle (track, radius);
     g.setColour (dim (tokens().outline));
-    g.drawRoundedRectangle (track.reduced (0.5f), radius, Tokens::hairlineWeight);
+    strokeInside (g, track, radius, Tokens::hairlineWeight);
 
     // What has been travelled, from the foot of the slot up to the cap, in the
     // accent at `kFillAlpha`. This is the part that lets a row of faders be
@@ -364,7 +364,7 @@ void Fader::paintFader (juce::Graphics& g)
     g.setColour (dim (faceOf (accent)));
     g.fillRoundedRectangle (cap, Tokens::corner);
     g.setColour (dim (tokens().knobEdge));
-    g.drawRoundedRectangle (cap.reduced (0.5f), Tokens::corner, Tokens::hairlineWeight);
+    strokeInside (g, cap, Tokens::corner, Tokens::hairlineWeight);
 
     // The centre line, which is what says where on the travel the cap is
     // reading from. `onAccentOf` rather than a literal dark: it is dark on
@@ -1084,7 +1084,7 @@ void OutputMeter::paint (juce::Graphics& g)
     }
 
     g.setColour (t.outline.withAlpha (0.6f));
-    g.drawRoundedRectangle (well.reduced (0.5f), 2.0f, 1.0f);
+    strokeInside (g, well, 2.0f, 1.0f);
 
     drawLabel (g, vuMode ? "VU" : "dBFS", labelArea.toFloat(), juce::Justification::centred,
                labelFont (9.0f), t.text2);
@@ -1396,25 +1396,17 @@ void DynamicsMeter::paint (juce::Graphics& g)
     //
     // The bezel is stroked on a path inset by half its own width, so its outer
     // edge lands on `bounds` with a corner radius of kFaceRadius + half the
-    // width. The face is filled to `bounds` too -- and a *smaller* corner
-    // radius is a squarer corner, which reaches further into the corner than a
-    // rounder one. Fill at a flat 4 and the face pokes out past the frame at
-    // all four corners.
+    // width. The face is filled to `bounds` at exactly that radius, so the two
+    // outer edges are one curve and no corner of the face shows outside the
+    // frame at any weight.
     //
-    // At the suite's 1.5 px the overhang is a fifth of a pixel and has never
-    // been seen. At BMO FET's 4 px it is a visible grey speck at each corner,
-    // outside a black frame and against a dark plate, which is what this
-    // corrects.
-    //
-    // **Derived from the change in thickness, not from the thickness.** The
-    // geometrically exact fill radius is kFaceRadius + half the stroke width,
-    // which at the default works out at 4.75 against the 4.0 this has always
-    // filled -- correct, and it moves every shipped meter's corners. Taking
-    // the *difference* from the default instead leaves 1.5 px filling exactly
-    // 4.0 as before, and carries the same fifth-of-a-pixel overhang up to any
-    // weight rather than letting it grow with the frame. BMO Opto's three
-    // hashes hold, which is the constraint this class works under.
-    const auto faceRadius = kFaceRadius + (bezelThickness - kDefaultBezelThickness) * 0.5f;
+    // Until 2026-09-26 the face took the *change* in thickness from the
+    // default instead, which left the default 1.5 px frame filling a flat 4.0
+    // -- a fifth of a pixel of face outside the frame at every corner, kept so
+    // that BMO Opto's three golden hashes would hold. Frosty had it made exact
+    // (2026-09-26: "fix the rest", with the hashes named), so those hashes
+    // move with this and are re-baselined; see testing-notes.
+    const auto faceRadius = kFaceRadius + bezelThickness * 0.5f;
 
     g.setColour (t.meterFace);
     g.fillRoundedRectangle (bounds, faceRadius);

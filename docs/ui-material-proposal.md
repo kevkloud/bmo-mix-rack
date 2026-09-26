@@ -242,9 +242,12 @@ It is used for the Textured switches and band tabs, all of BMO DEQ's borders
 screen and bezel, which DEQ follows. DEQ's bezel also takes the screen's radius
 plus its pad, so the band of well round the screen is even at the corners.
 Linger changed by about 200 pixels per render, all at those corners.
-The same pattern is still in `core/ui/LevelBars.cpp`, `core/ui/Controls.cpp`
-(four places), `modules/tune/panel/TunePanel.cpp` and
-`modules/deesser/panel/DeesserPanel.cpp`, in Simple, untouched.
+On 2026-09-26 the rest followed (Frosty: "leave tune as is, go ahead and fix
+the rest"): the level bars, the output meter, BMO Linger's faders, BMO
+Defang's sketch box and the needle meters' frame. BMO Tune RT's piano keys are
+left as they are. The needle-meter fix moves BMO Opto's three golden hashes;
+`testing-notes/ui-borders-2026-09-26.md` has the old values and what to
+re-baseline.
 
 **DEQ's on-tab number was invisible in Simple and is fixed in both
 surfaces.** It was set in `text1`, which on the pale plate is `#6f6f6f` on a

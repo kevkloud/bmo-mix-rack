@@ -249,6 +249,16 @@ left as they are. The needle-meter fix moves BMO Opto's three golden hashes;
 `testing-notes/ui-borders-2026-09-26.md` has the old values and what to
 re-baseline.
 
+**BMO Defang's band sketch and ribbon are BMO Linger's screen too**
+(Frosty, 2026-09-26: "apply the same dot matrix/screen treatment to it"). Both
+panes draw through `modules/deesser/panel/Screen.h`: a `well` bezel with an
+`outline` hairline, a `meterFace` face with Linger's dot matrix and its own
+edge, the unity and silence lines at Linger's 0.8, and the curve, the ribbon's
+quiet envelope and its caught highlight all derived against the face. The
+BITE suggestion under the ribbon sits on the plate and is derived against the
+plate. Pane sizes are unchanged; the picture inside each is 3 px in from the
+bezel.
+
 **DEQ's on-tab number was invisible in Simple and is fixed in both
 surfaces.** It was set in `text1`, which on the pale plate is `#6f6f6f` on a
 `#6f7076` key, 1.02:1. It now takes its ink from the key (`onAccentOf

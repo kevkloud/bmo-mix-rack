@@ -117,9 +117,6 @@ namespace material
     /** Set by tools only; see BmoLookAndFeel::overrideKnobForm. */
     Knob::TexturedForm forcedForm = Knob::TexturedForm::automatic;
 
-    /** Set by tools only; see BmoLookAndFeel::overrideTrackStyle. */
-    BmoLookAndFeel::TrackStyle trackStyle = BmoLookAndFeel::TrackStyle::dots;
-
     /** A 256 x 128 tile of brushed grain: streaks along x, each row its own
         run of smoothed noise, wrapped so the tile repeats without a seam.
         About the same amplitude as the powder, all of it in one direction. */
@@ -208,8 +205,6 @@ float capRadiusOf (const Knob& knob)
 
 void BmoLookAndFeel::overrideKnobForm (Knob::TexturedForm form) { material::forcedForm = form; }
 
-void BmoLookAndFeel::overrideTrackStyle (TrackStyle style) { material::trackStyle = style; }
-
 Knob::TexturedForm texturedFormFor (const Knob& knob)
 {
     // A tool's override first -- the snapshot's knobs= renders every knob in
@@ -288,29 +283,6 @@ void BmoLookAndFeel::fillEngraved (juce::Graphics& g, const juce::RectangleList<
 
     g.setColour (ink);
     g.fillRectList (marks);
-}
-
-//==============================================================================
-void BmoLookAndFeel::drawDottedArc (juce::Graphics& g, juce::Point<float> centre, float radius,
-                                    float startAngle, float endAngle, juce::Colour colour,
-                                    float dotSize)
-{
-    // std::abs, because a sweep may run backwards -- a control whose value
-    // rises anti-clockwise hands this a negative span, and the dot count came
-    // out negative and clamped to the minimum eight.
-    const auto span = endAngle - startAngle;
-    const auto count = juce::jlimit (8, 96, juce::roundToInt (radius * std::abs (span) * 0.16f));
-
-    g.setColour (colour);
-
-    for (int i = 0; i <= count; ++i)
-    {
-        const auto a = startAngle + span * (float) i / (float) count;
-        const juce::Point<float> at { centre.x + radius * std::sin (a),
-                                      centre.y - radius * std::cos (a) };
-
-        g.fillEllipse (juce::Rectangle<float> (dotSize, dotSize).withCentre (at));
-    }
 }
 
 //==============================================================================
@@ -499,57 +471,30 @@ void BmoLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int widt
         // off the end pushes them out past the ends instead.
         const auto symbolInset = endAngle >= startAngle ? 0.11f : -0.11f;
 
-        // The dotted ring stops short of the sweep's ends, and the plus and
-        // minus are placed on those two terminal dots rather than beyond them.
-        // They then read as the two ends of the ring itself, in its own
-        // rhythm, instead of as a pair of marks parked just outside it -- at
-        // this radius the old gap was about four pixels of nothing.
+        // The plus and minus sit just inside the sweep's two ends, on the
+        // track, so they read as the two ends of the ring of dots rather than
+        // as a pair of marks parked outside it. The dots below take the nine
+        // positions between them.
         const auto minusAngle = startAngle + symbolInset;
         const auto plusAngle  = endAngle   - symbolInset;
 
-        const auto style = material::trackStyle;
+        // **The track: eleven positions in one rhythm, as dots** -- Frosty,
+        // 2026-09-26, from renders of the old dotted arc beside a printed
+        // scale. A dot at every tenth of the sweep, so every knob in the suite
+        // carries the same positions whatever its size and a rack reads in one
+        // rhythm; the old arc spaced its dots by distance, so a small knob and
+        // a large one never agreed. The two ends are the minus and plus,
+        // drawn below. The middle dot is larger, which is what the eye counts
+        // from. Drawn below, once the default is known.
+        //
+        // In the accent made legible against the plate it is printed on, as a
+        // caption is, rather than the raw accent at 0.55: on the pale plate
+        // the raw orange and lavender dots all but disappeared.
+        const auto printInk   = accentInk (accent, panelTokensFor (slider).plate);
+        const auto concentric = knob != nullptr && knob->getTrackRadius() > 0.0f;
 
-        // PROTOTYPE track styles -- see BmoLookAndFeel::TrackStyle. Their
-        // ink is the accent made legible against the plate it is printed on,
-        // as a caption's is, rather than the raw accent at 0.55.
-        const auto printInk = accentInk (accent, panelTokensFor (slider).plate);
-
-        if (style == TrackStyle::dots)
-        {
-            drawDottedArc (g, centre, track, minusAngle, plusAngle,
-                           dim (accent.withAlpha (enabled ? 0.55f : 0.2f)), 1.6f);
-        }
-        else
-        {
-            // A printed scale: a tick at every tenth of the sweep, the same
-            // eleven positions on every knob in the suite whatever its size,
-            // so the marks can be counted and a rack reads in one rhythm. The
-            // two ends are the minus and plus, drawn below; the middle tick is
-            // longer. Struck radially across the track, as the stepped knobs'
-            // positions already are, so the suite has one scale language.
-            const auto concentric = knob != nullptr && knob->getTrackRadius() > 0.0f;
-            const auto minor = concentric ? 1.6f : 2.2f;
-            const auto major = concentric ? 2.6f : 3.6f;
-
-            juce::Path minorTicks, majorTicks;
-
-            for (int i = 1; i < 10; ++i)
-            {
-                const auto a = startAngle + (endAngle - startAngle) * (float) i / 10.0f;
-                auto& path = i == 5 ? majorTicks : minorTicks;
-                const auto half = i == 5 ? major : minor;
-                path.startNewSubPath (at (a, track - half));
-                path.lineTo          (at (a, track + half));
-            }
-
-            g.setColour (dim (printInk.withAlpha (enabled ? (style == TrackStyle::arc ? 0.35f : 0.55f) : 0.2f)));
-            g.strokePath (minorTicks, juce::PathStrokeType (1.2f));
-            g.setColour (dim (printInk.withAlpha (enabled ? (style == TrackStyle::arc ? 0.5f : 0.85f) : 0.3f)));
-            g.strokePath (majorTicks, juce::PathStrokeType (1.4f));
-        }
-
-        // The heavy dot marks where the control rests -- its default, which is
-        // where double-clicking it already puts it back.
+        // Where the control rests -- its default, which is where
+        // double-clicking it already puts it back.
         //
         // That value is not ours to set: `juce::SliderParameterAttachment`
         // calls `setDoubleClickReturnValue` with the parameter's own default
@@ -557,11 +502,11 @@ void BmoLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int widt
         // carries it. Reading it back here rather than deriving the default a
         // second time is the point -- the mark and the gesture are then one
         // fact, and cannot drift apart. A slider with no attachment keeps the
-        // old behaviour rather than losing its dot.
+        // old behaviour rather than losing its mark.
         //
         // It used to mark *zero*, clamped into range. On a control that cuts
         // and boosts those are the same point, which is why this went unseen
-        // for so long: the comment in ConcentricBand already says the dot is
+        // for so long: the comment in ConcentricBand already says the mark is
         // "where the pointer rests", and on BMO EQ's bipolar band gain it was.
         // On a control that only goes up they are not the same point at all.
         // The Saturator's TONE and BMO EQ's MIX both default to their
@@ -581,71 +526,44 @@ void BmoLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int widt
                                ? (float) juce::jlimit (0.0, 1.0, slider.valueToProportionOfLength (rest))
                                : 0.5f;
 
-        // A control whose default *is* one of its ends puts the dot on top of
-        // the symbol already marking that end -- the Saturator's TONE and MIX
-        // both rest at maximum, and rendered, the dot and the plus fused into
-        // one malformed glyph. The end symbol wins that argument: it says
-        // which way the control increases, which is what you need before you
-        // turn it, and a knob resting at an end already shows that by where
-        // its pointer sits when the panel opens.
-        //
-        // Measured as a pixel clearance converted to an angle at this knob's
-        // own track radius, because the arc a given gap subtends depends on
-        // the radius and these knobs run from 36 px to 53. Seven pixels is the
-        // 5 px dot and the 8.4 px plus just clearing each other.
         const auto restAngle = startAngle + restPos * (endAngle - startAngle);
-        const auto clearArc  = 7.0f / juce::jmax (track, 1.0f);
 
-        const auto collides = std::abs (restAngle - plusAngle)  < clearArc
-                           || std::abs (restAngle - minusAngle) < clearArc;
+        // **The default is a tick**, an index mark struck outward from just
+        // beyond the ring of dots -- Frosty, 2026-09-26. Outside the ring
+        // because a default that is an end of the sweep (the Saturator's TONE
+        // and MIX rest at maximum) would otherwise land on the plus: the old
+        // heavy dot fused with it into one malformed glyph there, and was
+        // suppressed at every end default for that reason. Out here it is
+        // drawn at every default, ends included.
+        const auto restMarked = knob == nullptr || knob->hasRestMark();
 
-        if (style == TrackStyle::dots)
+        // The dots. A default that lands on one of the eleven positions --
+        // PAN's centre, a band gain's 0 dB -- takes that position's place:
+        // the tick is drawn and the dot under it is not, or the pair reads as
+        // an exclamation mark.
+        for (int i = 1; i < 10; ++i)
         {
-            if (! collides && (knob == nullptr || knob->hasRestMark()))
-            {
-                g.setColour (dim (accent));
-                g.fillEllipse (juce::Rectangle<float> (5.0f, 5.0f).withCentre (at (restAngle, track)));
-            }
+            const auto a     = startAngle + (endAngle - startAngle) * (float) i / 10.0f;
+            const auto major = i == 5;
+            const auto size  = major ? (concentric ? 2.4f : 3.0f) : (concentric ? 1.7f : 2.1f);
+
+            if (restMarked && std::abs (a - restAngle) < 0.02f)
+                continue;
+
+            g.setColour (dim (printInk.withAlpha (enabled ? (major ? 0.85f : 0.6f) : 0.2f)));
+            g.fillEllipse (juce::Rectangle<float> (size, size).withCentre (at (a, track)));
         }
-        else
+
+        if (restMarked)
         {
-            const auto concentric = knob != nullptr && knob->getTrackRadius() > 0.0f;
+            // A band's gain has about eight pixels between its ring and its
+            // frequency legend, so its tick reaches no further out than the
+            // old 5 px dot did, and stays clear of "16k".
+            const auto inner = track + (concentric ? 1.2f : 3.0f);
+            const auto outer = inner + (concentric ? 2.6f : 5.0f);
 
-            // The value arc: from where the control rests to where it is, on
-            // the track, so a rack of knobs says at a glance how far each has
-            // been moved from home. A cut-and-boost control fills out from
-            // its centre either way; a control that rests at an end fills
-            // from that end.
-            if (style == TrackStyle::arc && std::abs (angle - restAngle) > 0.01f)
-            {
-                juce::Path fill;
-                fill.addCentredArc (centre.x, centre.y, track, track, 0.0f,
-                                    juce::jmin (restAngle, angle), juce::jmax (restAngle, angle), true);
-                g.setColour (dim (printInk.withAlpha (enabled ? 0.9f : 0.3f)));
-                g.strokePath (fill, juce::PathStrokeType (concentric ? 1.6f : 2.2f,
-                                                          juce::PathStrokeType::curved,
-                                                          juce::PathStrokeType::rounded));
-            }
-
-            // The default as an index mark rather than a heavier dot: a small
-            // triangle outside the track, pointing in at the position. Outside
-            // the ring, so it never fights the minus and plus for the same
-            // spot and is drawn at every default, ends included.
-            if (knob == nullptr || knob->hasRestMark())
-            {
-                const auto inner = track + (concentric ? 2.2f : 3.4f);
-                const auto outer = inner + (concentric ? 3.2f : 4.4f);
-                const auto halfWidth = (concentric ? 2.2f : 3.0f) / juce::jmax (outer, 1.0f);
-
-                juce::Path notch;
-                notch.startNewSubPath (at (restAngle, inner));
-                notch.lineTo (at (restAngle - halfWidth, outer));
-                notch.lineTo (at (restAngle + halfWidth, outer));
-                notch.closeSubPath();
-
-                g.setColour (dim (printInk));
-                g.fillPath (notch);
-            }
+            g.setColour (dim (printInk));
+            g.drawLine ({ at (restAngle, inner), at (restAngle, outer) }, concentric ? 1.6f : 2.0f);
         }
 
         // Drawn rather than set. Neither panel face has a minus sign that
@@ -658,10 +576,8 @@ void BmoLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int widt
             // the ring's outer edge and the frequency legend, which is about
             // eight and a half pixels. At the bare-face size the symbols need
             // fourteen and are drawn straight over the ring. A knob that was
-            // given its track radius is one of those; one that works its own
-            // out is not.
-            const auto concentric = knob != nullptr && knob->getTrackRadius() > 0.0f;
-
+            // given its track radius is one of those (`concentric`, above); one
+            // that works its own out is not.
             const auto arm    = concentric ? 2.8f : 4.2f;
             const auto weight = concentric ? 1.8f : 2.3f;
 

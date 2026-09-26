@@ -259,6 +259,17 @@ BITE suggestion under the ribbon sits on the plate and is derived against the
 plate. Pane sizes are unchanged; the picture inside each is 3 px in from the
 bezel.
 
+**Knob tracks: eleven positions as dots, and a tick for the default**
+(Frosty, 2026-09-26, from renders of the old dotted arc, a printed scale, and a
+scale with a value arc). A dot at every tenth of the sweep, so every knob has
+the same positions whatever its size, with the middle dot larger; the ends stay
+the minus and plus. The default is a short tick struck outward from just beyond
+the dots, so it is drawn at every default, ends included, and never fuses with
+the plus. Where the default lands on a position, the tick takes that dot's
+place. Inks are the accent made legible against the plate (`accentInk`), not
+the raw accent at 0.55. Both surfaces; stepped knobs keep their numbered ticks.
+The value arc was shown and not taken.
+
 **DEQ's on-tab number was invisible in Simple and is fixed in both
 surfaces.** It was set in `text1`, which on the pale plate is `#6f6f6f` on a
 `#6f7076` key, 1.02:1. It now takes its ink from the key (`onAccentOf

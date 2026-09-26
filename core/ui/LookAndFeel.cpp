@@ -117,6 +117,9 @@ namespace material
     /** Set by tools only; see BmoLookAndFeel::overrideKnobForm. */
     Knob::TexturedForm forcedForm = Knob::TexturedForm::automatic;
 
+    /** Set by tools only; see BmoLookAndFeel::overrideTrackStyle. */
+    BmoLookAndFeel::TrackStyle trackStyle = BmoLookAndFeel::TrackStyle::dots;
+
     /** A 256 x 128 tile of brushed grain: streaks along x, each row its own
         run of smoothed noise, wrapped so the tile repeats without a seam.
         About the same amplitude as the powder, all of it in one direction. */
@@ -204,6 +207,8 @@ float capRadiusOf (const Knob& knob)
 }
 
 void BmoLookAndFeel::overrideKnobForm (Knob::TexturedForm form) { material::forcedForm = form; }
+
+void BmoLookAndFeel::overrideTrackStyle (TrackStyle style) { material::trackStyle = style; }
 
 Knob::TexturedForm texturedFormFor (const Knob& knob)
 {
@@ -502,8 +507,46 @@ void BmoLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int widt
         const auto minusAngle = startAngle + symbolInset;
         const auto plusAngle  = endAngle   - symbolInset;
 
-        drawDottedArc (g, centre, track, minusAngle, plusAngle,
-                       dim (accent.withAlpha (enabled ? 0.55f : 0.2f)), 1.6f);
+        const auto style = material::trackStyle;
+
+        // PROTOTYPE track styles -- see BmoLookAndFeel::TrackStyle. Their
+        // ink is the accent made legible against the plate it is printed on,
+        // as a caption's is, rather than the raw accent at 0.55.
+        const auto printInk = accentInk (accent, panelTokensFor (slider).plate);
+
+        if (style == TrackStyle::dots)
+        {
+            drawDottedArc (g, centre, track, minusAngle, plusAngle,
+                           dim (accent.withAlpha (enabled ? 0.55f : 0.2f)), 1.6f);
+        }
+        else
+        {
+            // A printed scale: a tick at every tenth of the sweep, the same
+            // eleven positions on every knob in the suite whatever its size,
+            // so the marks can be counted and a rack reads in one rhythm. The
+            // two ends are the minus and plus, drawn below; the middle tick is
+            // longer. Struck radially across the track, as the stepped knobs'
+            // positions already are, so the suite has one scale language.
+            const auto concentric = knob != nullptr && knob->getTrackRadius() > 0.0f;
+            const auto minor = concentric ? 1.6f : 2.2f;
+            const auto major = concentric ? 2.6f : 3.6f;
+
+            juce::Path minorTicks, majorTicks;
+
+            for (int i = 1; i < 10; ++i)
+            {
+                const auto a = startAngle + (endAngle - startAngle) * (float) i / 10.0f;
+                auto& path = i == 5 ? majorTicks : minorTicks;
+                const auto half = i == 5 ? major : minor;
+                path.startNewSubPath (at (a, track - half));
+                path.lineTo          (at (a, track + half));
+            }
+
+            g.setColour (dim (printInk.withAlpha (enabled ? (style == TrackStyle::arc ? 0.35f : 0.55f) : 0.2f)));
+            g.strokePath (minorTicks, juce::PathStrokeType (1.2f));
+            g.setColour (dim (printInk.withAlpha (enabled ? (style == TrackStyle::arc ? 0.5f : 0.85f) : 0.3f)));
+            g.strokePath (majorTicks, juce::PathStrokeType (1.4f));
+        }
 
         // The heavy dot marks where the control rests -- its default, which is
         // where double-clicking it already puts it back.
@@ -556,10 +599,53 @@ void BmoLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int widt
         const auto collides = std::abs (restAngle - plusAngle)  < clearArc
                            || std::abs (restAngle - minusAngle) < clearArc;
 
-        if (! collides && (knob == nullptr || knob->hasRestMark()))
+        if (style == TrackStyle::dots)
         {
-            g.setColour (dim (accent));
-            g.fillEllipse (juce::Rectangle<float> (5.0f, 5.0f).withCentre (at (restAngle, track)));
+            if (! collides && (knob == nullptr || knob->hasRestMark()))
+            {
+                g.setColour (dim (accent));
+                g.fillEllipse (juce::Rectangle<float> (5.0f, 5.0f).withCentre (at (restAngle, track)));
+            }
+        }
+        else
+        {
+            const auto concentric = knob != nullptr && knob->getTrackRadius() > 0.0f;
+
+            // The value arc: from where the control rests to where it is, on
+            // the track, so a rack of knobs says at a glance how far each has
+            // been moved from home. A cut-and-boost control fills out from
+            // its centre either way; a control that rests at an end fills
+            // from that end.
+            if (style == TrackStyle::arc && std::abs (angle - restAngle) > 0.01f)
+            {
+                juce::Path fill;
+                fill.addCentredArc (centre.x, centre.y, track, track, 0.0f,
+                                    juce::jmin (restAngle, angle), juce::jmax (restAngle, angle), true);
+                g.setColour (dim (printInk.withAlpha (enabled ? 0.9f : 0.3f)));
+                g.strokePath (fill, juce::PathStrokeType (concentric ? 1.6f : 2.2f,
+                                                          juce::PathStrokeType::curved,
+                                                          juce::PathStrokeType::rounded));
+            }
+
+            // The default as an index mark rather than a heavier dot: a small
+            // triangle outside the track, pointing in at the position. Outside
+            // the ring, so it never fights the minus and plus for the same
+            // spot and is drawn at every default, ends included.
+            if (knob == nullptr || knob->hasRestMark())
+            {
+                const auto inner = track + (concentric ? 2.2f : 3.4f);
+                const auto outer = inner + (concentric ? 3.2f : 4.4f);
+                const auto halfWidth = (concentric ? 2.2f : 3.0f) / juce::jmax (outer, 1.0f);
+
+                juce::Path notch;
+                notch.startNewSubPath (at (restAngle, inner));
+                notch.lineTo (at (restAngle - halfWidth, outer));
+                notch.lineTo (at (restAngle + halfWidth, outer));
+                notch.closeSubPath();
+
+                g.setColour (dim (printInk));
+                g.fillPath (notch);
+            }
         }
 
         // Drawn rather than set. Neither panel face has a minus sign that

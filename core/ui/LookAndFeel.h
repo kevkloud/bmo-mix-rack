@@ -205,6 +205,16 @@ public:
         `knobs=`, so both forms can be compared on the same panel. */
     static void overrideKnobForm (Knob::TexturedForm);
 
+    /** PROTOTYPE, for review (Frosty, 2026-09-26): how a knob's track is
+        drawn. `dots` is the suite's dotted arc and heavy rest dot, and the
+        only style a plugin draws until one is chosen. `scale` is a printed
+        scale of radial ticks at fixed tenths of the sweep with a notch
+        outside it marking the default; `arc` is that scale plus a value arc
+        from the default to where the knob is. Tools only -- the snapshot's
+        `tracks=`. */
+    enum class TrackStyle { dots, scale, arc };
+    static void overrideTrackStyle (TrackStyle);
+
     /** Re-reads the tokens. Call after a theme change. */
     void refreshColours();
 

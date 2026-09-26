@@ -385,6 +385,28 @@ int main (int argc, char** argv)
 
         bmo::ui::overrideSurface (wantSurface, wantFinish);
         bmo::ui::BmoLookAndFeel::overrideKnobForm (wantForm);
+
+        // PROTOTYPE, for review: "tracks=dots|scale|arc". See
+        // BmoLookAndFeel::TrackStyle.
+        for (int i = first; i < argc; ++i)
+        {
+            const juce::String arg { argv[i] };
+
+            if (! arg.startsWith ("tracks="))
+                continue;
+
+            const auto value = arg.fromFirstOccurrenceOf ("=", false, false);
+            using TS = bmo::ui::BmoLookAndFeel::TrackStyle;
+
+            if (value == "dots")       bmo::ui::BmoLookAndFeel::overrideTrackStyle (TS::dots);
+            else if (value == "scale") bmo::ui::BmoLookAndFeel::overrideTrackStyle (TS::scale);
+            else if (value == "arc")   bmo::ui::BmoLookAndFeel::overrideTrackStyle (TS::arc);
+            else
+            {
+                std::cerr << "tracks is dots, scale or arc, got " << value << '\n';
+                return 2;
+            }
+        }
     }
 
     for (int i = first; i < argc; ++i)
@@ -415,7 +437,7 @@ int main (int argc, char** argv)
             continue;
         }
 
-        if (key == "surface" || key == "finish" || key == "knobs")
+        if (key == "surface" || key == "finish" || key == "knobs" || key == "tracks")
             continue;               // taken in the pass below
 
         if (key == "theme")

@@ -258,3 +258,6 @@ and it was reverted. The shift was never in the audio: a linear filter at
 7 kHz cannot move 250 Hz relative to 1 kHz by 3 dB. Figures from this mode
 that compare renders are only comparable when their windows start at the
 same reference.
+
+**12 dB/octave, heard:** Frosty listened to the six guitar files in
+`set-2026-09-26-hicut12/` on ICE QUEEN: "12dB is much better."

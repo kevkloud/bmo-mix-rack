@@ -194,3 +194,27 @@ What follows from these:
   comparison, before anything is concluded.
 - **50 % is too subtle for ER-only material.** Items 2, 5 and 6 all say so,
   so a follow-up set at 75 % and 100 % is rendered for them.
+
+**Why Ambience could not move a source back, measured the same day on ICE
+QUEEN.** `vocal-failure` (−21.8 dBFS RMS) was rendered wet-only with the
+tail off. At **ER 0 dB, the fader's top**, the reflection cluster measures
+−28.5 dBFS RMS in Ambience at its own defaults (8 m, DENSITY 40, SPREAD
+30), and −30.7 dBFS RMS in Room 12 m. So at MIX 50 the cluster sits 6.7 dB
+under the dry at best, and 8.9 dB under in Room. The first set's sweep,
+ER −3 to −21, put it 10 to 28 dB under the dry. A reflection field that
+quiet adds colour, not distance. Two things are possible from here, and
+both are Frosty's call once he has heard the follow-up: give the ER fader
+headroom above 0 dB, or raise the cluster's level for each type.
+
+**The follow-up set** is `packages/reverb-listening/set-2026-09-26-wet/`:
+44 files at the new defaults, VARIATION 4 and Taps, with the tail off.
+
+- Room 12 and 20 m on `vocal-failure` and `rap-vocal-01`, at MIX 75 and 100.
+- The drum room across SIZE at MIX 75 and 100.
+- The guitar across DENSITY and ER HI-CUT at MIX 75 and 100.
+- Ambience at its own defaults across ER 0 / −6 / −12 / −18 at MIX 50, on
+  both vocals, with Room alongside.
+- Ambience at ER 0 and −6 at MIX 75. There the dry is 6 dB down, so the
+  cluster sits about level with it.
+
+It has its own `answers.md`.

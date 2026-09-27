@@ -433,7 +433,12 @@ void BmoLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int widt
                 marks.lineTo          (at (angle, stepTrack + (numbered ? 1.5f : 3.0f)));
             }
 
-            g.setColour (dim (accent.withAlpha (enabled ? 0.55f : 0.2f)));
+            // In the accent made legible against the plate, as the dotted
+            // track is -- the raw accent put BMO Linger's lavender VARIATION
+            // marks and numbers at about 2:1 on the pale plate.
+            const auto stepInk = accentInk (accent, panelTokensFor (slider).plate);
+
+            g.setColour (dim (stepInk.withAlpha (enabled ? 0.55f : 0.2f)));
             g.strokePath (marks, juce::PathStrokeType (1.8f));
 
             if (labelEvery > 0)
@@ -443,7 +448,7 @@ void BmoLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int widt
                 // marks are only counted. Same argument the meter's scale
                 // makes: colour marks the system, contrast does the reading.
                 const auto font = labelFont (9.0f);
-                g.setColour (dim (accent));
+                g.setColour (dim (stepInk));
                 g.setFont (font);
 
                 for (int i = 0; i < steps; i += labelEvery)
@@ -457,7 +462,7 @@ void BmoLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int widt
                     // its end.
                     const auto where = at (angle, stepTrack + 8.0f);
 
-                    g.drawText (juce::String (i + 1),
+                    g.drawText (juce::String (i + knob->getStepFirstLabel()),
                                 juce::Rectangle<float> (13.0f, 9.0f).withCentre (where),
                                 juce::Justification::centred, false);
                 }

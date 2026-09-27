@@ -216,9 +216,9 @@ void PlainKnob::setEndMarks (Knob::EndMarks m)
     repaint();
 }
 
-void PlainKnob::setStepMarks (int count, int labelEvery)
+void PlainKnob::setStepMarks (int count, int labelEvery, int firstLabel)
 {
-    knob.setStepMarks (count, labelEvery);
+    knob.setStepMarks (count, labelEvery, firstLabel);
     repaint();
 }
 

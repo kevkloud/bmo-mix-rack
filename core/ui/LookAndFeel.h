@@ -110,11 +110,16 @@ public:
         marks bare. An odd count with a stride of 2 numbers both ends, which is
         the arrangement worth having; nothing stops an even one, it just leaves
         the last mark unnumbered. */
-    void setStepMarks (int count, int labelEvery = 0) noexcept
+    void setStepMarks (int count, int labelEvery = 0, int firstLabel = 1) noexcept
     {
         stepMarks      = juce::jmax (0, count);
         stepLabelEvery = juce::jmax (0, labelEvery);
+        stepFirstLabel = firstLabel;
     }
+
+    /** The number printed at the first mark: 1 for BMO FET's 1..7, 0 for BMO
+        Linger's VARIATION, whose positions are Var 0 to Var 6. */
+    int getStepFirstLabel() const noexcept { return stepFirstLabel; }
 
     int getStepMarks() const noexcept      { return stepMarks; }
     int getStepLabelEvery() const noexcept { return stepLabelEvery; }
@@ -157,6 +162,7 @@ private:
     int   detents = 0;
     int   stepMarks = 0;        ///< see setStepMarks; 0 is the dotted arc
     int   stepLabelEvery = 0;   ///< number every nth mark; 0 draws them bare
+    int   stepFirstLabel = 1;   ///< what the first mark is numbered
     float faceScale = 1.0f;
     float trackRadius = 0.0f;
 };

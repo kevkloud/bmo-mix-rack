@@ -259,17 +259,23 @@ BITE suggestion under the ribbon sits on the plate and is derived against the
 plate. Pane sizes are unchanged; the picture inside each is 3 px in from the
 bezel.
 
-**Knob tracks: eleven positions as dots, and a tick for the default**
-(Frosty, 2026-09-26, from renders of the old dotted arc, a printed scale, and a
-scale with a value arc, then a second round). A dot at every tenth of the
-sweep, all alike, so every knob has the same positions whatever its size; the
-ends stay the minus and plus. The default is a short tick across the ring,
-centred exactly where a dot would sit, and it takes that dot's place when the
-default is one of the positions. A default at either end of the sweep gets no
-mark: the minus or plus is already there. Inks are the accent made legible
-against the plate (`accentInk`), not the raw accent at 0.55. Both surfaces;
-stepped knobs keep their numbered ticks. The value arc, and a larger middle
-dot, were shown and not taken.
+**Knob tracks: eleven positions as dots, no default mark** (Frosty,
+2026-09-26/27). A dot at every tenth of the sweep, all alike, so every knob has
+the same positions whatever its size; the ends stay the minus and plus. Inks
+are the accent made legible against the plate (`accentInk`), not the raw
+accent at 0.55. A default mark was tried as a heavy dot, a notch, a tick across
+the ring and three placements off it, and dropped: 26 of the 51 marked
+defaults do not fall on one of the eleven positions, and any mark there reads
+as off the beat. Double-click still returns a knob to its default. The value
+arc and a larger middle dot were shown and not taken.
+
+**Positions get ticks, amounts get dots.** Every knob was sorted by its
+parameter's steps (`BMO_LIST_KNOBS=1`). BMO FET's ATTACK and RELEASE keep
+their numbered ticks; BMO Linger's VARIATION, seven positions (Var 0 to Var 6),
+now has seven ticks numbered 0, 2, 4, 6 (`setStepMarks (7, 2, 0)`, the third
+argument being the first number). The three filters keep their word legends;
+everything else is continuous, 71 steps or more, and keeps the dots. Stepped
+marks and numbers now print in `accentInk` too.
 
 **DEQ's on-tab number was invisible in Simple and is fixed in both
 surfaces.** It was set in `text1`, which on the pale plate is `#6f6f6f` on a

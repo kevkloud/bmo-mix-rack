@@ -1480,6 +1480,14 @@ ReverbPanel::ReverbPanel (ui::ModuleContext ctx)
         k->setCaptionSize (kCaptionSize);
     }
 
+    // VARIATION is seven positions, not an amount -- Var 0 to Var 6, a
+    // stepped float with a step of one, and Var 6 a different construction
+    // rather than more of Var 5 (params.h). So its face says seven places, as
+    // BMO FET's ATTACK and RELEASE do, numbered 0, 2, 4, 6 from the positions'
+    // own names, rather than eleven dots that the knob never stops on. Frosty,
+    // 2026-09-27.
+    variationKnob.setStepMarks (7, 2, 0);
+
     // **The terse legend on the ring and the full names on the lane.** A legend
     // label sits in a 38 x 15 px box and "Bandpass" does not fit in one; a DAW's
     // automation lane, which has room, should not say "B". `setLegend` is paint

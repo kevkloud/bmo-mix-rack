@@ -96,8 +96,8 @@ defaults to 4 ("2 isnt enough to feel"). Verdicts on every item are in
 set, whose ER levels were too low (the cluster sits 6.7 dB under the dry even
 at ER 0 dB). Heard again in stereo at ER 0 it **moves the voice back,
 subtly**, which passes `11` §6's M2 exit condition; how far it should go is
-M4's. ER HI-CUT is 12 dB/octave from the same day. One open point before
-M3: 250 Hz moved 3 dB at the 7 kHz default when the hi-cut changed.
+M4's. ER HI-CUT is 12 dB/octave from the same day. (A 250 Hz shift noted that day was
+the analyser's window moving, not the sound; see the listening-set note.)
 
 ### M3 does not start until two decisions are made
 

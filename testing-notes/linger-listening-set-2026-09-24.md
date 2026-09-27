@@ -246,9 +246,15 @@ that is under an octave above a 3 kHz corner. Six guitar files with the new
 slope are in `packages/reverb-listening/set-2026-09-26-hicut12/`, not yet
 heard.
 
-**Open: at the 7 kHz default, 250 Hz moved.** On the impulse (first 80 ms,
-octave-smoothed, relative to 1 kHz) 250 Hz reads −5.0 dB with the new
-hi-cut against −2.0 dB with the old one; at 3 kHz and 20 kHz it did not
-move. The likely route is the diffuser's stage normaliser, which models the
-hi-cut in its correlation. It stays inside the flatness rule, but it
-changes the default sound, so it should be understood before M3.
+**Withdrawn the same day: "250 Hz moved at the 7 kHz default" was the
+analyser, not the sound.** `measure_reverb analyse` starts its 80 ms window
+at the loudest reflection. Cutting more top can make a later reflection the
+loudest, and the window then jumps from 113.1 ms to 120.0 ms and skips the
+first 7 ms of the cluster. Every render whose window started at 120.0 ms
+read about −5 dB at 250 Hz (old filter at 3 kHz −4.7, new at 7 kHz −5.0 and
+at 3 kHz −4.7), and every one starting at 113.1 ms read about −2. Taking
+the hi-cut out of the diffuser's normaliser, as a trial, changed nothing,
+and it was reverted. The shift was never in the audio: a linear filter at
+7 kHz cannot move 250 Hz relative to 1 kHz by 3 dB. Figures from this mode
+that compare renders are only comparable when their windows start at the
+same reference.

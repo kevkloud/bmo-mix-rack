@@ -385,6 +385,29 @@ int main (int argc, char** argv)
 
         bmo::ui::overrideSurface (wantSurface, wantFinish);
         bmo::ui::BmoLookAndFeel::overrideKnobForm (wantForm);
+
+        // PROTOTYPE, for review: "restmark=ring|inside|outside|triangle". See
+        // BmoLookAndFeel::RestMark.
+        for (int i = first; i < argc; ++i)
+        {
+            const juce::String arg { argv[i] };
+
+            if (! arg.startsWith ("restmark="))
+                continue;
+
+            const auto value = arg.fromFirstOccurrenceOf ("=", false, false);
+            using RM = bmo::ui::BmoLookAndFeel::RestMark;
+
+            if (value == "ring")          bmo::ui::BmoLookAndFeel::overrideRestMark (RM::ring);
+            else if (value == "inside")   bmo::ui::BmoLookAndFeel::overrideRestMark (RM::inside);
+            else if (value == "outside")  bmo::ui::BmoLookAndFeel::overrideRestMark (RM::outside);
+            else if (value == "triangle") bmo::ui::BmoLookAndFeel::overrideRestMark (RM::triangle);
+            else
+            {
+                std::cerr << "restmark is ring, inside, outside or triangle, got " << value << '\n';
+                return 2;
+            }
+        }
     }
 
     for (int i = first; i < argc; ++i)
@@ -415,7 +438,7 @@ int main (int argc, char** argv)
             continue;
         }
 
-        if (key == "surface" || key == "finish" || key == "knobs")
+        if (key == "surface" || key == "finish" || key == "knobs" || key == "restmark")
             continue;               // taken in the pass below
 
         if (key == "theme")

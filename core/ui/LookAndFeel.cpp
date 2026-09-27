@@ -117,6 +117,9 @@ namespace material
     /** Set by tools only; see BmoLookAndFeel::overrideKnobForm. */
     Knob::TexturedForm forcedForm = Knob::TexturedForm::automatic;
 
+    /** Set by tools only; see BmoLookAndFeel::overrideRestMark. */
+    BmoLookAndFeel::RestMark restMark = BmoLookAndFeel::RestMark::ring;
+
     /** A 256 x 128 tile of brushed grain: streaks along x, each row its own
         run of smoothed noise, wrapped so the tile repeats without a seam.
         About the same amplitude as the powder, all of it in one direction. */
@@ -204,6 +207,8 @@ float capRadiusOf (const Knob& knob)
 }
 
 void BmoLookAndFeel::overrideKnobForm (Knob::TexturedForm form) { material::forcedForm = form; }
+
+void BmoLookAndFeel::overrideRestMark (RestMark mark) { material::restMark = mark; }
 
 Knob::TexturedForm texturedFormFor (const Knob& knob)
 {
@@ -546,14 +551,21 @@ void BmoLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int widt
             const auto a    = startAngle + (endAngle - startAngle) * (float) i / 10.0f;
             const auto size = concentric ? 1.7f : 2.1f;
 
-            if (restMarked && std::abs (a - restAngle) < 0.02f)
+            if (restMarked && material::restMark == RestMark::ring && std::abs (a - restAngle) < 0.02f)
                 continue;
 
             g.setColour (dim (printInk.withAlpha (enabled ? 0.6f : 0.2f)));
             g.fillEllipse (juce::Rectangle<float> (size, size).withCentre (at (a, track)));
         }
 
-        if (restMarked)
+        // A band's gain inside a selector ring has no gap between cap and
+        // track -- the ring is there -- so it takes the outside triangle when
+        // `inside` is asked for.
+        auto restStyle = material::restMark;
+        if (restStyle == RestMark::inside && concentric)
+            restStyle = RestMark::triangle;
+
+        if (restMarked && restStyle == RestMark::ring)
         {
             // A band's gain has about eight pixels between its ring and its
             // frequency legend, so its tick reaches no further out than the
@@ -563,6 +575,36 @@ void BmoLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int widt
             g.setColour (dim (printInk));
             g.drawLine ({ at (restAngle, track - half), at (restAngle, track + half) },
                         concentric ? 1.6f : 2.0f);
+        }
+        else if (restMarked && restStyle == RestMark::inside)
+        {
+            // In the gap between the cap and the dots, on the pointer's own
+            // line: at the default the pointer runs straight into it.
+            const auto gap = track - radius;
+            g.setColour (dim (printInk));
+            g.drawLine ({ at (restAngle, radius + gap * 0.28f), at (restAngle, track - gap * 0.28f) }, 2.0f);
+        }
+        else if (restMarked && restStyle == RestMark::outside)
+        {
+            const auto inner = track + (concentric ? 1.6f : 2.8f);
+            const auto outer = inner + (concentric ? 2.4f : 3.6f);
+            g.setColour (dim (printInk));
+            g.drawLine ({ at (restAngle, inner), at (restAngle, outer) }, concentric ? 1.6f : 2.0f);
+        }
+        else if (restMarked && restStyle == RestMark::triangle)
+        {
+            const auto inner = track + (concentric ? 2.0f : 2.8f);
+            const auto outer = inner + (concentric ? 3.0f : 4.2f);
+            const auto halfWidth = (concentric ? 2.2f : 2.8f) / juce::jmax (outer, 1.0f);
+
+            juce::Path notch;
+            notch.startNewSubPath (at (restAngle, inner));
+            notch.lineTo (at (restAngle - halfWidth, outer));
+            notch.lineTo (at (restAngle + halfWidth, outer));
+            notch.closeSubPath();
+
+            g.setColour (dim (printInk));
+            g.fillPath (notch);
         }
 
         // Drawn rather than set. Neither panel face has a minus sign that

@@ -205,6 +205,16 @@ public:
         `knobs=`, so both forms can be compared on the same panel. */
     static void overrideKnobForm (Knob::TexturedForm);
 
+    /** PROTOTYPE, for review (Frosty, 2026-09-27): where the default mark
+        sits. `ring` is the tick across the ring of dots, and the only mark a
+        plugin draws until one is chosen; `inside` is a tick in the gap between
+        the cap and the dots; `outside` a short tick beyond the dots;
+        `triangle` a small triangle beyond them, pointing in. The three
+        off-ring marks leave every dot in place. Tools only -- the snapshot's
+        `restmark=`. */
+    enum class RestMark { ring, inside, outside, triangle };
+    static void overrideRestMark (RestMark);
+
 
     /** Re-reads the tokens. Call after a theme change. */
     void refreshColours();

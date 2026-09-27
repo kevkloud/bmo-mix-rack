@@ -92,9 +92,12 @@ has listened, not before.
 Frosty listened to the M2 set on ICE QUEEN (HEDD Type 20 MK2). Blend sounded
 like "a slightly worse" Taps, so ER MODE is Taps / Energy, and VARIATION
 defaults to 4 ("2 isnt enough to feel"). Verdicts on every item are in
-`testing-notes/linger-listening-set-2026-09-24.md`. **Ambience did not read
-as distance** ("can't hear it working"), and that is `11` §6's M2 exit
-condition. It is open until a wetter follow-up set is heard.
+`testing-notes/linger-listening-set-2026-09-24.md`. **Ambience** failed the first
+set, whose ER levels were too low (the cluster sits 6.7 dB under the dry even
+at ER 0 dB). Heard again in stereo at ER 0 it **moves the voice back,
+subtly**, which passes `11` §6's M2 exit condition; how far it should go is
+M4's. ER HI-CUT is 12 dB/octave from the same day. One open point before
+M3: 250 Hz moved 3 dB at the 7 kHz default when the hi-cut changed.
 
 ### M3 does not start until two decisions are made
 

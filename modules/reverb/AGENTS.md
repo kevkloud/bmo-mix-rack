@@ -498,20 +498,23 @@ seven positions are an ordered amount of decorrelation rather than seven named
 behaviours, so it is a stepped float, and a stepped float normalises as
 (v − min)/(max − min), which an eighth position at the end would not disturb.
 
-## ER Mode's Blend is defined but unheard
+## ER Mode is two, and Blend was cut
 
 Taps is the image-source table. Energy replaces tap *times* with velvet noise
 enveloped by ER SHAPE and ER SPREAD.
 
-**Blend is a proposal awaiting a listening pass.** The behaviour: image-source
-tap times and pans from Taps, with the Energy generator's Shape/Spread envelope
-replacing the physical `(1/d)·β^n` gain law, energy-renormalised so the mode
-change is not also a level change. That is a coherent third behaviour rather
-than a crossfade between two generators — but nobody has listened to it. It
-holds index 2 now because the index order freezes at first ship and there is no
-way to insert it later, **not because it is settled**. The listening pass
-(`11` section 6) is where it becomes real or becomes a synonym for one of its
-neighbours.
+**There was a third, Blend, and it was cut on 2026-09-26, before ship.** It was
+image-source tap times and pans from Taps, with Energy's envelope replacing the
+physical `(1/d)·β^n` gain law. It held index 2 only so it could be heard before
+the order froze. Frosty heard it at the M2 listening checkpoint on ICE QUEEN
+(HEDD Type 20 MK2), wet, on a vocal and a guitar: "a slightly worse" Taps.
+That made it a synonym for a neighbour rather than a third behaviour, so it
+went while cutting was free. Do not bring it back as a choice position after
+ship: the count is what `ermode`'s normalisation depends on. The write-up is
+`testing-notes/linger-listening-set-2026-09-24.md`.
+
+VARIATION defaults to **4**, not 2, from the same pass ("2 isnt enough to
+feel"). Room's early L/R correlation is 0.21 at 4 and 0.57 at 2.
 
 Variation 6 is the other position that is not what it looks like: it is
 Schroeder's complementary-comb pair, the widest setting *and* the only provably
@@ -645,8 +648,8 @@ which would make a sub-selection the third tallest thing on the panel. A
 rectangle with a word in it is what every switch in the suite is, and a segmented
 row is a line of them that happen to be exclusive.
 
-- **EARLY** — `ermode`, a real three-position choice parameter (Taps / Energy /
-  Blend), replacing the dropdown that control used.
+- **EARLY** — `ermode`, a real two-position choice parameter (Taps / Energy;
+  Blend was cut on 2026-09-26), replacing the dropdown that control used.
 - **EQ** — LOW / MID / HIGH, choosing which node FREQ / GAIN / Q edit. **UI
   state**, `ui.node=low|mid|high`, refused rather than defaulted on an unknown
   value. `specs()` is thirty with two lanes spare and which node a panel is

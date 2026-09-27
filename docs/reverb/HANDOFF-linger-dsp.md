@@ -88,10 +88,13 @@ and the mono sums at VARIATION 0 and 6. Write the set up in
 `testing-notes/`, naming AURORA, and hand it to Frosty. M3 starts after Frosty
 has listened, not before.
 
-**Blend is heard at this checkpoint too**, not at the end. It is an ER-generator
-mode, it exists by the end of M2, and its position count is permanent at first
-ship — so the last moment to drop it cheaply is the first moment it can be
-heard.
+~~**Blend is heard at this checkpoint too.**~~ **Heard and cut, 2026-09-26.**
+Frosty listened to the M2 set on ICE QUEEN (HEDD Type 20 MK2). Blend sounded
+like "a slightly worse" Taps, so ER MODE is Taps / Energy, and VARIATION
+defaults to 4 ("2 isnt enough to feel"). Verdicts on every item are in
+`testing-notes/linger-listening-set-2026-09-24.md`. **Ambience did not read
+as distance** ("can't hear it working"), and that is `11` §6's M2 exit
+condition. It is open until a wetter follow-up set is heard.
 
 ### M3 does not start until two decisions are made
 
@@ -103,7 +106,11 @@ These are Frosty's, they are open in `11` §7, and M3's tests depend on them.
   a send. Pinned in `reverb_dsp_tests` at 0 / 25 / 50 / 75 / 100 %.
   **The ER flatness rule was decided the same evening**: octave-smoothed,
   250 Hz–8 kHz, within 6 dB about the tilt at DENSITY 100 %, asserted.
-- **The 30 s tail ceiling against a 40 s tail.** `decay` reaches 20 s and
+- ~~**The 30 s tail ceiling against a 40 s tail.**~~ **Decided 2026-09-26:
+  raise the ceiling** (Frosty: "raise it"), so `kMaxTailSeconds` goes to 40 s
+  in M3 and "≥ measured" can hold at the corner. That is a `core/` change and
+  every module's tail report moves with it, so it lands with M3's tests, not
+  before. The original question: `decay` reaches 20 s and
   `damplo`/`damphi` reach 2.0×, so any setting with `decay` × the larger
   multiplier above about 30 s rings longer than `kMaxTailSeconds`
   (`core/dsp/ModuleDsp.h`), and `tailSecondsFor` clamps to 30. `11` §6 asks for
@@ -112,9 +119,10 @@ These are Frosty's, they are open in `11` §7, and M3's tests depend on them.
   (`decay` 20 s, `damphi` 2.0). Pick one: clamp the effective T60 in the engine
   at the ceiling; restrict "≥ measured" to settings under it; or accept an
   under-report at the corner and write it down. Then fix `11` §6 to match.
-- **`inhicut` as a parameter or a constant** (`11` §4d), and **whether ER
-  SPREAD greys out in Taps mode or sits inert**. Neither blocks the engine, but
-  both are cheaper to settle before the panel is wired to real sound.
+- ~~**`inhicut` as a parameter or a constant**~~ **Decided 2026-09-26: a
+  parameter, under a clearer name** (Frosty). The name is to be settled when
+  the panel is designed. **Whether ER SPREAD greys out in Taps mode or sits
+  inert** is still open, and with Blend gone it now shapes Energy only.
 
 ### M3 builds everything off `kNumLines`
 
@@ -163,11 +171,9 @@ not heard; nobody has listened to them either. Every other value in
 Chamber, Hall, Cavern, Plate and Ambience have names, a shape and no numbers.
 Fitting them is M4 and it is a listening job, not a desk job.
 
-**`ermode`'s Blend position is defined on paper and unheard** — image-source tap
-times and pans from Taps, with the Energy generator's Shape/Spread envelope
-replacing the physical gain law, energy-renormalised. If it does not survive
-contact with ears, say so before first ship; the position count cannot change
-after. It is heard at the M2 checkpoint above.
+**`ermode`'s Blend position was cut on 2026-09-26** after it was heard at the M2
+checkpoint: it sounded like a slightly worse Taps. ER MODE is two positions,
+and the count cannot change after first ship.
 
 Frosty's decisions still open are listed under "M3 does not start until
 three decisions are made" above — they are not yours to make, but they are
@@ -252,5 +258,4 @@ settled from a desk, and Frosty has said he will bring references:
 - **Whether 3 cents of modulation reads as wobble on a held note.** If it does,
   `04` §3's time-varying orthogonal matrix modulation is the escape hatch — and
   a user has no MOD DEPTH to escape with, because it is a per-type constant now.
-- **Blend**, before its position is frozen by shipping — at the M2
-  checkpoint, with the other ER-only items.
+- ~~**Blend**~~ — heard at the M2 checkpoint and cut, 2026-09-26.

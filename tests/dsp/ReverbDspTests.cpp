@@ -460,8 +460,8 @@ int main()
 
         check (erModeFor (0) == ErMode::taps, "er detent 0 is Taps");
         check (erModeFor (1) == ErMode::energy, "er detent 1 is Energy");
-        check (erModeFor (2) == ErMode::blend, "er detent 2 is Blend");
-        check (erModeFor (7) == ErMode::taps, "an out-of-range er detent falls back to Taps");
+        check (erModeFor (2) == ErMode::taps && erModeFor (7) == ErMode::taps,
+               "an out-of-range er detent, Blend's old 2 included, falls back to Taps");
     }
 
     //== The per-type table, before anything has a chance to apply it =========
@@ -1096,24 +1096,21 @@ int main()
         check (var  <= 1.5f, "a VARIATION change crossfades without a click");
     }
 
-    //== Energy and Blend: finite, and energy-renormalised to the room ===========
+    //== Energy: finite, and energy-renormalised to the room =====================
     {
         const auto taps  = render ([] (auto&) {});
         const auto to    = taps.msToSamples (600.0f);
         const auto eTaps = taps.energy (0, to);
 
-        for (const auto m : { energy, blend })
-        {
-            const auto ir = render ([m] (auto& p) { p[Index::ermode] = (float) m; });
-            bool finite = true;
-            for (int i = 0; i < ir.size(); ++i)
-                finite = finite && std::isfinite (ir.l[(size_t) i]) && std::isfinite (ir.r[(size_t) i]);
-            check (finite, "Energy / Blend mode is finite");
+        const auto ir = render ([] (auto& p) { p[Index::ermode] = (float) energy; });
+        bool finite = true;
+        for (int i = 0; i < ir.size(); ++i)
+            finite = finite && std::isfinite (ir.l[(size_t) i]) && std::isfinite (ir.r[(size_t) i]);
+        check (finite, "Energy mode is finite");
 
-            const auto ratio = 10.0f * std::log10 (ir.energy (0, to) / eTaps);
-            std::cout << "  mode " << (int) m << " energy vs Taps: " << ratio << " dB\n";
-            check (std::abs (ratio) <= 1.0f, "Energy / Blend carry the room's core energy within 1 dB");
-        }
+        const auto ratio = 10.0f * std::log10 (ir.energy (0, to) / eTaps);
+        std::cout << "  Energy vs Taps: " << ratio << " dB\n";
+        check (std::abs (ratio) <= 1.0f, "Energy carries the room's core energy within 1 dB");
     }
 
     //== NaN / silence ==============================================================

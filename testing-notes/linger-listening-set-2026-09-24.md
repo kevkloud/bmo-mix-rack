@@ -159,3 +159,38 @@ into `D:\VISUAL\PLUGINS\MIX RACK\LINGER\RVERB\`.
   their sources. Linger's law keeps both legs at unity at 50 %, so **Linger's
   mix50 files are 3 dB hotter than RVerb's** in both the dry and the wet.
   Turn Linger down 3 dB when comparing the two by ear.
+
+## Saturday 26 September: Frosty's verdicts
+
+Heard by Frosty on ICE QUEEN through HEDD Type 20 MK2 monitors, with mono
+checks done on the interface and headphone amp (L+R). His answers are kept
+word for word in the gitignored
+`packages/reverb-listening/set-2026-09-24/answers.md`; this is the summary.
+
+| # | Item | Verdict |
+|---|---|---|
+| 1 | Blend | Taps "sounds great, small room vibe"; Energy "sounds great, short verb vibe"; Blend "sound[s] like a slightly worse" Taps. **Cut** (his call, same day). |
+| 2 | Room as depth | "depth". At 50 % mix, 12 m and 20 m are hard to tell apart; the wet files "definitely read as a tight bedroom/studio". Needs more than 50 % to judge. |
+| 3 | Default width | "var 06 is much wider, 2 isnt enough to feel. 3 or 4 should be default." **VARIATION defaults to 4** (his call). |
+| 4 | Snare flam | **No flam**: "one legible hit per actual hit". |
+| 5 | Drum room across SIZE | At 50 %, not very different from each other. **No combing or chorus in mono**: "they sum well". |
+| 6 | Guitar, DENSITY and ER HI-CUT | DENSITY "not sure". No boxiness arose in any render, so there was none for HI-CUT to fix. Needs a wetter bounce. |
+| 7 | Ambience as distance | **Fails.** The source does not move back and there is no wash: "can't hear it working". |
+| 8 | Mono at VARIATION 0 and 6 | "they sound the same" summed. Passes: 6 is built mono-flat. |
+| 9 | Held note and hall | No answer. |
+
+Decisions:
+
+- **Tail ceiling: raise it**, so it goes to 40 s in M3.
+- **IN HI-CUT: a parameter, with a clearer name**, to be named when the
+  panel is designed.
+
+What follows from these:
+
+- **Ambience is `11` §6's M2 exit condition, and it did not pass.** The
+  renders were the right test: MIX 50 keeps the dry at unity, and ER ran
+  from −3 to −21 dB over it. So this is not a mix-level artefact. The
+  wetter follow-up set carries it again, at VARIATION 4 and with a Room
+  comparison, before anything is concluded.
+- **50 % is too subtle for ER-only material.** Items 2, 5 and 6 all say so,
+  so a follow-up set at 75 % and 100 % is rendered for them.

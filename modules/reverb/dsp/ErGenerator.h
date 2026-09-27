@@ -38,9 +38,9 @@ struct ErConfig
 {
     int   type      = 0;       ///< index into kTypeTaps
     float sizeM     = kReferenceSizeM;
-    int   mode      = 0;       ///< 0 taps, 1 energy, 2 blend
-    int   variation = 2;       ///< 0..6
-    float spreadMs  = 80.0f;   ///< Energy / Blend envelope sigma
+    int   mode      = 0;       ///< 0 taps, 1 energy
+    int   variation = 4;       ///< 0..6
+    float spreadMs  = 80.0f;   ///< Energy's envelope sigma
     float shape     = 1.0f;    ///< the rise exponent p, a per-type constant
 
     bool operator== (const ErConfig& o) const noexcept
@@ -842,12 +842,8 @@ private:
         }
         else
         {
-            // Taps and Blend: the room's times. Blend replaces the physical
-            // gains with the envelope, evaluated at the same times.
-            if (c.mode == 2)
-                for (int k = 0; k < kNumReferenceTaps; ++k)
-                    slot[(size_t) k].gain = envelope (slot[(size_t) k].timeMs);
-
+            // Taps: the room's times and its physical gains.
+            //
             // Infill: one jittered pulse per equal cell of the window, gain
             // from the contour, nudged clear of **every** tap already placed
             // -- core and infill alike -- by the 0.9 ms separation rule. The
@@ -866,7 +862,7 @@ private:
                         if (std::abs (ms - slot[(size_t) k].timeMs) < kMinSeparationMs)
                             ms = slot[(size_t) k].timeMs + kMinSeparationMs;
 
-                const auto gain = c.mode == 2 ? envelope (ms) : std::pow (10.0f, contourDb (ms) * 0.05f);
+                const auto gain = std::pow (10.0f, contourDb (ms) * 0.05f);
                 const auto pan  = signedUnit (seed + 2, (std::uint32_t) i) * 0.8f;
                 // Velvet noise is signed by definition: a random +-1 per pulse is
                 // what keeps a dense cluster from building up at low frequencies

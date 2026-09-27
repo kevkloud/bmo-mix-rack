@@ -178,7 +178,7 @@ public:
         float preDelayMs   = 0.0f;
         float erDensity    = 50.0f;   ///< per cent
         float erLevelDb    = -6.0f;
-        float variation    = 2.0f;    ///< 0-6, the lateral-spread step
+        float variation    = 4.0f;    ///< 0-6, the lateral-spread step
 
         // TAIL.
         float decaySeconds = 1.8f;
@@ -561,7 +561,7 @@ private:
 
     **One component with two bindings, and that was the decision.** BMO Linger
     uses it twice and the two uses are not the same kind of thing: on EARLY the
-    segments are `ermode`, a real three-position choice parameter a host can
+    segments are `ermode`, a real two-position choice parameter a host can
     automate, and on EQ they are `ui.node`, which is not a parameter and must
     never become one -- `specs()` is thirty with two lanes spare and which node
     a panel is pointed at does not belong in a session.

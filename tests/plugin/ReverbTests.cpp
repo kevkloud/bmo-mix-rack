@@ -78,11 +78,11 @@ namespace
         { P::kEqHi,       "EQ High",        -24.0f,    12.0f,     0.0f,     0 },
         { P::kEqHiQ,      "EQ High Q",       0.10f,    2.00f,    0.71f,     0 },
 
-        { P::kErMode,     "ER Mode",          0.0f,     2.0f,     0.0f,     3 },
+        { P::kErMode,     "ER Mode",          0.0f,     1.0f,     0.0f,     2 },
         { P::kErDensity,  "Density",          0.0f,   100.0f,    50.0f,     0 },
         { P::kErSpread,   "ER Spread",        5.0f,   200.0f,    80.0f,     0 },
         { P::kErHiCut,    "ER Hi-Cut",     1000.0f, 20000.0f,  7000.0f,     0 },
-        { P::kErVariation,"Variation",        0.0f,     6.0f,     2.0f,     0 },
+        { P::kErVariation,"Variation",        0.0f,     6.0f,     4.0f,     0 },
         { P::kModDepth,   "Mod Depth",        0.1f,     0.8f,    0.28f,     0 },
         { P::kModRate,    "Mod Rate",         0.1f,     1.2f,    0.50f,     0 },
         { P::kWidth,      "Width",            0.0f,   200.0f,   100.0f,     0 },
@@ -368,7 +368,7 @@ int main()
 
         check (choice (P::kErMode, 0.0f) == "Taps", "er mode 0 is Taps");
         check (choice (P::kErMode, 1.0f) == "Energy", "er mode 1 is Energy");
-        check (choice (P::kErMode, 2.0f) == "Blend", "er mode 2 is Blend");
+        check (P::numErModes == 2, "ER MODE is two: Blend was cut before ship, 2026-09-26");
 
         // Ambience is 1.0 normalised with six types and 0.833 with seven, so
         // an automation lane that pointed at Ambience would land on Plate.

@@ -37,9 +37,9 @@ namespace bmo::reverb
     `kTypeNames`. */
 enum class Type { room = 0, chamber, hall, cavern, plate, ambience };
 
-/** How the early cluster is generated. See `kErModeNames` in params.h for what
-    Blend is: defined, reachable, and **not yet heard**. */
-enum class ErMode { taps = 0, energy, blend };
+/** How the early cluster is generated. See `kErModeNames` in params.h for why
+    there are two. */
+enum class ErMode { taps = 0, energy };
 
 //==============================================================================
 /** **M2: the early reflections play; the tail is silent.**
@@ -150,7 +150,7 @@ public:
         float erShape       = roomDefaults::kErShape;             ///< per type, the rise exponent p
         float erSpreadMs    = roomDefaults::kErSpreadMs;          ///< 5..200, the envelope sigma
         float erHiCutHz     = 7000.0f;                            ///< 1000..20000, one post-ER shelf
-        int   erVariation   = 2;                                  ///< 0..6; 6 is the comb pair
+        int   erVariation   = 4;                                  ///< 0..6; 6 is the comb pair
 
         float modDepthMs    = roomDefaults::kModDepthMs;     ///< 0.1..0.8
         float modRateHz     = roomDefaults::kModRateHz;      ///< 0.1..1.2

@@ -419,10 +419,12 @@ const Golden kDefaults[]
       // longer a wire. MIX defaults to 50 %, where the dry is at unity and the
       // ER cluster sits on top of it at ER -6 dB; the swept row lands at 63 %
       // MIX, where the dry is coming down. Captured on ICE QUEEN with --print.
+      // Recaptured 2026-09-26, also on ICE QUEEN, when VARIATION's default
+      // went from 2 to 4 and ER MODE lost Blend on Frosty's listening pass.
       // They move again when the tail lands (M3).
-      -18.2233374753, 0.240494668484,
-      -18.0282782524, 0.248200848699, -18.1562998652, 0.24939237535,
-      -17.9638397443, 0.253939688206, -18.4815128422, 0.237755179405 },
+      -18.2402305879, 0.241089984775,
+      -17.9901570061, 0.248804330826, -18.2283447844, 0.244417577982,
+      -17.8814990236, 0.25810956955, -18.5910195801, 0.23694960773 },
     { "rack",
       -17.4712562736, 0.361956000328,
       -17.5538728123, 0.361777067184, -16.9709734739, 0.381855756044,
@@ -475,9 +477,9 @@ const Golden kSwept[]
     // every one of BMO Linger's thirty parameters is somewhere else, and a
     // placeholder does not care. This is the row that will move furthest.
     { "reverb",
-      -29.3102616573, 0.0666008815169,
-      -29.3064005076, 0.0657790899277, -29.6382492467, 0.0650113373995,
-      -29.0961922608, 0.0687868148088, -29.5203567687, 0.0644149556756 },
+      -29.3090278655, 0.0666008815169,
+      -29.3021609153, 0.0657790899277, -29.6351041587, 0.0650113373995,
+      -29.0873452658, 0.0687868148088, -29.5272275951, 0.0644149556756 },
     { "rack",
       -12.3127888787, 1.16622579098,
       -12.0186864023, 1.15730452538, -11.9707022298, 1.15666925907,

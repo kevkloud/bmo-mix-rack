@@ -1812,8 +1812,12 @@ void checkReverbPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
                            where + " the segmented row at " + row->getBounds().toString()
                                  + " is outside the reserved row " + box.toString());
 
-                    checkEquals (row->numSegments(), 3,
-                                 where + " the segmented row should have three segments");
+                    // EARLY is ER MODE, two since Blend was cut on 2026-09-26;
+                    // EQ is LOW / MID / HIGH.
+                    const auto expected = p == R::Page::early ? 2 : 3;
+                    checkEquals (row->numSegments(), expected,
+                                 where + " the segmented row should have " + juce::String (expected)
+                                     + " segments");
 
                     // The segments tile the row, and every word fits its own
                     // segment. A segmented row is the other place on this panel

@@ -1349,7 +1349,7 @@ ReverbPanel::ReverbPanel (ui::ModuleContext ctx)
 
       // **One component, two bindings.** `Segments` carries the argument; the
       // binding is four lines below and in `setNode`.
-      erModeSegments ({ kErModeNames[taps], kErModeNames[energy], kErModeNames[blend] },
+      erModeSegments ({ kErModeNames[taps], kErModeNames[energy] },
                       context.def.accent),
       nodeSegments ({ "LOW", "MID", "HIGH" }, context.def.accent),
 

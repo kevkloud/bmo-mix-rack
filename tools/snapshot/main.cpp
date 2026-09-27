@@ -794,7 +794,8 @@ int main (int argc, char** argv)
                 std::cout << "knob\t" << module << "\t" << (label.isEmpty() ? juce::String ("?") : label)
                           << "\t" << style << "\t" << form << "\t" << source
                           << "\t" << juce::String (radius, 2)
-                          << "\t" << juce::String (restPos, 4) << "\t" << (tracked ? "tracked" : "untracked") << "\n";
+                          << "\t" << juce::String (restPos, 4) << "\t" << (tracked ? "tracked" : "untracked")
+                          << "\t" << editor->getLocalArea (k, k->getLocalBounds()).toString() << "\n";
             }
 
             for (auto* child : c.getChildren())

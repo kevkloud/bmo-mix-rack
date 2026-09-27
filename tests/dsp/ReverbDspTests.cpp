@@ -969,12 +969,31 @@ int main()
             // magnitudes differ by -- the open setting is itself a pole and
             // not a wire, so a bare -3 dB against it would be the wrong
             // number to ask for.
-            const auto design = ErGenerator::onePoleMagnitudeDb (ErGenerator::onePoleCoefFor (hz, 48000.0), hz, 48000.0);
+            const auto coef   = ErGenerator::hiCutCoefFor (hz, 48000.0);
+            const auto design = ErGenerator::hiCutMagnitudeDb (coef, hz, 48000.0);
             check (std::abs (design + 3.0103) <= 0.3, "the ER hi-cut's design is -3 dB at its corner, within 10 %");
+
+            // 12 dB/octave (Frosty, 2026-09-26), against the one pole it
+            // replaced at the same corner, an octave above and two.
+            if (hz <= 4000.0f)
+            {
+                const auto one = ErGenerator::onePoleCoefFor (hz, 48000.0);
+                for (const auto m : { 2.0, 4.0 })
+                    std::cout << "  hi-cut " << hz << " Hz at " << m << "x: two poles "
+                              << ErGenerator::hiCutMagnitudeDb (coef, m * hz, 48000.0) << " dB, one pole "
+                              << ErGenerator::onePoleMagnitudeDb (one, m * hz, 48000.0) << " dB\n";
+
+                // At four times the corner the pair is 4.2 dB (4 kHz) and
+                // 5.0 dB (2 kHz) below the one pole it replaced, on ICE QUEEN
+                // 2026-09-26; the knee is soft, so the gap keeps growing above.
+                const auto gap = ErGenerator::hiCutMagnitudeDb (coef, 4.0 * hz, 48000.0)
+                               - ErGenerator::onePoleMagnitudeDb (one, 4.0 * hz, 48000.0);
+                check (gap <= -3.5, "the ER hi-cut is two poles: 3.5 dB or more under one pole at 4x its corner");
+            }
 
             const auto cut = render ([hz] (auto& p) { p[Index::erhicut] = hz; });
             const auto measured = 20.0 * std::log10 (magnitudeAt (cut, hz, to) / magnitudeAt (open, hz, to));
-            const auto expected = design - ErGenerator::onePoleMagnitudeDb (ErGenerator::onePoleCoefFor (20000.0f, 48000.0), hz, 48000.0);
+            const auto expected = design - ErGenerator::hiCutMagnitudeDb (ErGenerator::hiCutCoefFor (20000.0f, 48000.0), hz, 48000.0);
             std::cout << "  hi-cut " << hz << " Hz: " << measured << " dB at the corner against the open pole, design " << expected << " dB\n";
             check (std::abs (measured - expected) <= 0.3, "the running ER hi-cut matches its design at the corner");
 
@@ -987,7 +1006,12 @@ int main()
                     c += open.l[(size_t) i] * cut.l[(size_t) (i + k)];
                 if (c > best) { best = c; lag = k; }
             }
-            check (std::abs (lag) <= 1, "the hi-cut moves no tap (peak lag 0, +-1 sample)");
+            // Two poles have twice one pole's group delay: 2 samples at a
+            // 2 kHz corner, 0.04 ms. That is the filter's own delay, not a
+            // tap moving -- taps are 0.9 ms apart at the least -- so the
+            // bound is +-2 since the hi-cut went to 12 dB/octave.
+            std::cout << "  hi-cut " << hz << " Hz: peak lag " << lag << " samples\n";
+            check (std::abs (lag) <= 2, "the hi-cut moves no tap (peak lag within its own group delay, +-2 samples)");
         }
     }
 

@@ -149,8 +149,8 @@ public:
             for (auto& f : b)
                 f.reset();
 
-        hiCutL.reset();
-        hiCutR.reset();
+        hiCutL.reset();  hiCutL2.reset();
+        hiCutR.reset();  hiCutR2.reset();
         hiCutCoef = hiCutTarget;
     }
 
@@ -169,7 +169,7 @@ public:
     void setHiCut (float hz) noexcept
     {
         const auto f = std::clamp (hz, 20.0f, (float) sampleRate * 0.45f);
-        hiCutTarget = onePoleCoef (f);
+        hiCutTarget = hiCutCoefFor (f, sampleRate);
     }
 
     //== Processing ============================================================
@@ -243,8 +243,8 @@ public:
             }
 
             hiCutCoef += (hiCutTarget - hiCutCoef) * smooth;
-            l = hiCutL.process (l, hiCutCoef);
-            r = hiCutR.process (r, hiCutCoef);
+            l = hiCutL2.process (hiCutL.process (l, hiCutCoef), hiCutCoef);
+            r = hiCutR2.process (hiCutR.process (r, hiCutCoef), hiCutCoef);
 
             // TYPE's dip: raised cosine to silence, swap, and back.
             if (dipping)
@@ -358,6 +358,30 @@ public:
         const auto k = 2.0f - std::cos (w);
         const auto a = k - std::sqrt (std::max (k * k - 1.0f, 0.0f));
         return std::clamp (1.0f - a, 1.0e-6f, 1.0f);
+    }
+
+    /** The coefficient for **each** of the ER hi-cut's two identical poles,
+        so that the pair is -3 dB at `hz` and falls at 12 dB/octave above it.
+
+        Frosty asked for 12 dB/octave on 2026-09-26: at 6 dB/octave, moving
+        the corner from 7 kHz to 3 kHz changed the cluster by only 3-4 dB at
+        4-8 kHz, "too subtle for such a big difference". Each pole is solved
+        to be -1.5 dB at `hz` (power 1/sqrt2) exactly as `onePoleCoefFor`
+        solves one pole to -3 dB (power 1/2): the same quadratic with
+        k = (p - cos w) / (p - 1), p = sqrt2 here and 2 there. */
+    static float hiCutCoefFor (float hz, double rate) noexcept
+    {
+        constexpr float p = 1.41421356f;
+        const auto w = 2.0f * 3.14159265f * std::clamp (hz, 1.0f, (float) rate * 0.499f) / (float) rate;
+        const auto k = (p - std::cos (w)) / (p - 1.0f);
+        const auto a = k - std::sqrt (std::max (k * k - 1.0f, 0.0f));
+        return std::clamp (1.0f - a, 1.0e-6f, 1.0f);
+    }
+
+    /** |H(f)| of the hi-cut's pair of poles with that per-pole coefficient. */
+    static double hiCutMagnitudeDb (float coef, double hz, double rate) noexcept
+    {
+        return 2.0 * onePoleMagnitudeDb (coef, hz, rate);
     }
 
     /** |H(f)| of that pole, for the tests to compare the running filter
@@ -532,22 +556,25 @@ private:
             const auto c = bandCoef[b];
 
             // Inner product of two FIRs after each has been through the band's
-            // pole **and the ER hi-cut's**, which also sits after the
-            // diffuser and adds its own memory to the correlation -- at its
-            // most open, 20 kHz, it still moves the lag-1 figure by 0.06 and
-            // the sweep by 0.3 dB. On to where the tails are below -80 dB.
+            // pole **and the ER hi-cut's two**, which also sit after the
+            // diffuser and add their own memory to the correlation -- at its
+            // most open, 20 kHz, one of them alone moved the lag-1 figure by
+            // 0.06 and the sweep by 0.3 dB. On to where the tails are below
+            // -80 dB; two poles in cascade ring for about twice as long.
             const auto h = hiCutTarget;
             const auto filteredDot = [c, h] (const std::array<float, kMaxFir>& x, const std::array<float, kMaxFir>& y, int length)
             {
-                const auto tail = (int) std::ceil (9.2f / std::max (std::min (c, h), 1.0e-3f));
-                float zx = 0.0f, zy = 0.0f, hx = 0.0f, hy = 0.0f, e = 0.0f;
+                const auto tail = (int) std::ceil (2.0f * 9.2f / std::max (std::min (c, h), 1.0e-3f));
+                float zx = 0.0f, zy = 0.0f, hx = 0.0f, hy = 0.0f, gx = 0.0f, gy = 0.0f, e = 0.0f;
                 for (int i = 0; i < length + tail; ++i)
                 {
                     zx += c * ((i < length ? x[(size_t) i] : 0.0f) - zx);
                     zy += c * ((i < length ? y[(size_t) i] : 0.0f) - zy);
                     hx += h * (zx - hx);
                     hy += h * (zy - hy);
-                    e += hx * hy;
+                    gx += h * (hx - gx);
+                    gy += h * (hy - gy);
+                    e += gx * gy;
                 }
                 return e;
             };
@@ -1052,7 +1079,7 @@ private:
     int     stageDelay[kNumStages][4] {};
     float   lastNormDensity = -1.0f, lastNormHiCut = -1.0f;
 
-    OnePole hiCutL, hiCutR;
+    OnePole hiCutL, hiCutL2, hiCutR, hiCutR2;   ///< two poles a side: 12 dB/octave
     float   hiCutCoef = 1.0f, hiCutTarget = 1.0f;
 };
 

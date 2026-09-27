@@ -218,3 +218,37 @@ headroom above 0 dB, or raise the cluster's level for each type.
   cluster sits about level with it.
 
 It has its own `answers.md`.
+
+## Saturday 26 September, later: the wetter set, heard
+
+Heard by Frosty on ICE QUEEN. **Item 1 was heard on the monitors, in stereo.
+Items 2–5 were heard first on headphones with the headphone amp left in
+mono by mistake**; Frosty caught it and heard them again in stereo. The
+mono answers are kept, labelled, in `set-2026-09-26-wet/answers.md`, and
+only the stereo ones below count. Round 1 was not affected: its width
+verdict was made on the monitors, before the deliberate mono checks.
+
+| # | Item | Stereo verdict |
+|---|---|---|
+| 1 | Room as depth, wetter | "100% definitely works"; with ER only it is "tough to tell at 75". |
+| 2 | Drum room across SIZE | Reads at MIX 100; "hard to say at mix 75". |
+| 3 | Guitar, DENSITY | "reads at 75 and 100% after listening in stereo". In mono it had been indistinguishable, because the mono sum cancels most of what DENSITY changes at VARIATION 4. **DENSITY's range stays as it is.** |
+| 3 | Guitar, ER HI-CUT | Heard once, in mono: no boxiness, and 3000 against 7000 "too subtle for such a big difference". Measured in stereo it is 3–4 dB at 4–8 kHz. **12 dB/octave** is Frosty's call. |
+| 4 | Ambience as distance | At MIX 50 the voice moves back, "subtley"; at MIX 75 Ambience at ER 0 and Room at ER 0 are clearly different. **This passes `11` §6's M2 exit condition.** How far it should go is left for M4 (Frosty's call). |
+| 5 | VARIATION 4 | "good default width". |
+
+**ER HI-CUT went to 12 dB/octave the same day**: two identical poles, each
+solved to be −1.5 dB at the corner, so the pair is −3 dB where the knob
+says. At four times the corner the pair is 4.2–5.0 dB under the old single
+pole. On the impulse, going from 7 kHz to 3 kHz now takes 6.1 dB off at
+8 kHz, where it took 4.2 dB before. At 4 kHz the change is small, because
+that is under an octave above a 3 kHz corner. Six guitar files with the new
+slope are in `packages/reverb-listening/set-2026-09-26-hicut12/`, not yet
+heard.
+
+**Open: at the 7 kHz default, 250 Hz moved.** On the impulse (first 80 ms,
+octave-smoothed, relative to 1 kHz) 250 Hz reads −5.0 dB with the new
+hi-cut against −2.0 dB with the old one; at 3 kHz and 20 kHz it did not
+move. The likely route is the diffuser's stage normaliser, which models the
+hi-cut in its correlation. It stays inside the flatness rule, but it
+changes the default sound, so it should be understood before M3.

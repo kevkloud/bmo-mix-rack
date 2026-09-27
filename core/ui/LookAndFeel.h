@@ -82,7 +82,11 @@ public:
 
         Off means no rest mark at any size. For a control whose default *is* an
         end of its range, the pointer already says so when the panel opens.
-        Frosty, 2026-09-16. */
+        Frosty, 2026-09-16.
+
+        **No knob draws a default mark at present** (Frosty, 2026-09-27; see
+        drawRotarySlider). The flag is kept so one can return without touching
+        every panel that has an opinion about it. */
     void setRestMark (bool b) noexcept { restMark = b; }
     bool hasRestMark() const noexcept  { return restMark; }
 
@@ -205,15 +209,6 @@ public:
         `knobs=`, so both forms can be compared on the same panel. */
     static void overrideKnobForm (Knob::TexturedForm);
 
-    /** PROTOTYPE, for review (Frosty, 2026-09-27): where the default mark
-        sits. `ring` is the tick across the ring of dots, and the only mark a
-        plugin draws until one is chosen; `inside` is a tick in the gap between
-        the cap and the dots; `outside` a short tick beyond the dots;
-        `triangle` a small triangle beyond them, pointing in. The three
-        off-ring marks leave every dot in place. Tools only -- the snapshot's
-        `restmark=`. */
-    enum class RestMark { ring, inside, outside, triangle };
-    static void overrideRestMark (RestMark);
 
 
     /** Re-reads the tokens. Call after a theme change. */

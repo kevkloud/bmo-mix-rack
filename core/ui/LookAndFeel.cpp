@@ -117,9 +117,6 @@ namespace material
     /** Set by tools only; see BmoLookAndFeel::overrideKnobForm. */
     Knob::TexturedForm forcedForm = Knob::TexturedForm::automatic;
 
-    /** Set by tools only; see BmoLookAndFeel::overrideRestMark. */
-    BmoLookAndFeel::RestMark restMark = BmoLookAndFeel::RestMark::ring;
-
     /** A 256 x 128 tile of brushed grain: streaks along x, each row its own
         run of smoothed noise, wrapped so the tile repeats without a seam.
         About the same amplitude as the powder, all of it in one direction. */
@@ -207,8 +204,6 @@ float capRadiusOf (const Knob& knob)
 }
 
 void BmoLookAndFeel::overrideKnobForm (Knob::TexturedForm form) { material::forcedForm = form; }
-
-void BmoLookAndFeel::overrideRestMark (RestMark mark) { material::restMark = mark; }
 
 Knob::TexturedForm texturedFormFor (const Knob& knob)
 {
@@ -490,8 +485,7 @@ void BmoLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int widt
         // rhythm; the old arc spaced its dots by distance, so a small knob and
         // a large one never agreed. The two ends are the minus and plus,
         // drawn below. All nine dots are alike -- a larger middle one was
-        // tried and dropped, because the default tick is the one mark that
-        // should stand out. Drawn below, once the default is known.
+        // tried and dropped.
         //
         // In the accent made legible against the plate it is printed on, as a
         // caption is, rather than the raw accent at 0.55: on the pale plate
@@ -499,112 +493,19 @@ void BmoLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int widt
         const auto printInk   = accentInk (accent, panelTokensFor (slider).plate);
         const auto concentric = knob != nullptr && knob->getTrackRadius() > 0.0f;
 
-        // Where the control rests -- its default, which is where
-        // double-clicking it already puts it back.
-        //
-        // That value is not ours to set: `juce::SliderParameterAttachment`
-        // calls `setDoubleClickReturnValue` with the parameter's own default
-        // when it attaches, so every attached knob in the suite already
-        // carries it. Reading it back here rather than deriving the default a
-        // second time is the point -- the mark and the gesture are then one
-        // fact, and cannot drift apart. A slider with no attachment keeps the
-        // old behaviour rather than losing its mark.
-        //
-        // It used to mark *zero*, clamped into range. On a control that cuts
-        // and boosts those are the same point, which is why this went unseen
-        // for so long: the comment in ConcentricBand already says the mark is
-        // "where the pointer rests", and on BMO EQ's bipolar band gain it was.
-        // On a control that only goes up they are not the same point at all.
-        // The Saturator's TONE and BMO EQ's MIX both default to their
-        // *maximum*, so the dot sat at the far end of the dial from anywhere
-        // the control had ever been, and every panel opened with its pointers
-        // apparently parked away from their own marked rest positions.
-        //
-        // valueToProportionOfLength rather than arithmetic across the range:
-        // it is the same mapping the pointer goes through, so a skewed control
-        // would keep the two together. Nothing in the suite is skewed today,
-        // which is exactly why it is worth spending the call now.
-        const auto range = slider.getRange();
-        const auto rest  = slider.isDoubleClickReturnEnabled()
-                             ? slider.getDoubleClickReturnValue()
-                             : juce::jlimit (range.getStart(), range.getEnd(), 0.0);
-        const auto restPos = range.getLength() > 0.0
-                               ? (float) juce::jlimit (0.0, 1.0, slider.valueToProportionOfLength (rest))
-                               : 0.5f;
-
-        const auto restAngle = startAngle + restPos * (endAngle - startAngle);
-
-        // **The default is a tick**, struck across the ring and centred on it
-        // exactly where a dot would sit -- Frosty, 2026-09-26. A default at
-        // either end of the sweep gets no mark at all: the minus or plus is
-        // already there, and a knob resting at an end shows it by where its
-        // pointer sits when the panel opens (the Saturator's TONE and MIX).
-        const auto restAtEnd  = restPos <= 0.005f || restPos >= 0.995f;
-        const auto restMarked = (knob == nullptr || knob->hasRestMark()) && ! restAtEnd;
-
-        // The dots. A default that lands on one of the eleven positions --
-        // PAN's centre, a band gain's 0 dB -- takes that position's place:
-        // the tick is drawn and the dot under it is not, or the pair reads as
-        // an exclamation mark.
+        // **No default mark** -- Frosty, 2026-09-27. A heavy dot, a notch, a
+        // tick across the ring and three placements off it were all rendered;
+        // any default that is not on one of the eleven positions reads as off
+        // the beat wherever its mark sits, and 26 of the suite's 51 are not.
+        // Double-click still returns a knob to its default. Knob::setRestMark
+        // is kept so a mark can return without touching every panel.
         for (int i = 1; i < 10; ++i)
         {
             const auto a    = startAngle + (endAngle - startAngle) * (float) i / 10.0f;
             const auto size = concentric ? 1.7f : 2.1f;
 
-            if (restMarked && material::restMark == RestMark::ring && std::abs (a - restAngle) < 0.02f)
-                continue;
-
             g.setColour (dim (printInk.withAlpha (enabled ? 0.6f : 0.2f)));
             g.fillEllipse (juce::Rectangle<float> (size, size).withCentre (at (a, track)));
-        }
-
-        // A band's gain inside a selector ring has no gap between cap and
-        // track -- the ring is there -- so it takes the outside triangle when
-        // `inside` is asked for.
-        auto restStyle = material::restMark;
-        if (restStyle == RestMark::inside && concentric)
-            restStyle = RestMark::triangle;
-
-        if (restMarked && restStyle == RestMark::ring)
-        {
-            // A band's gain has about eight pixels between its ring and its
-            // frequency legend, so its tick reaches no further out than the
-            // old 5 px dot did, and stays clear of "16k".
-            const auto half = concentric ? 2.5f : 3.5f;
-
-            g.setColour (dim (printInk));
-            g.drawLine ({ at (restAngle, track - half), at (restAngle, track + half) },
-                        concentric ? 1.6f : 2.0f);
-        }
-        else if (restMarked && restStyle == RestMark::inside)
-        {
-            // In the gap between the cap and the dots, on the pointer's own
-            // line: at the default the pointer runs straight into it.
-            const auto gap = track - radius;
-            g.setColour (dim (printInk));
-            g.drawLine ({ at (restAngle, radius + gap * 0.28f), at (restAngle, track - gap * 0.28f) }, 2.0f);
-        }
-        else if (restMarked && restStyle == RestMark::outside)
-        {
-            const auto inner = track + (concentric ? 1.6f : 2.8f);
-            const auto outer = inner + (concentric ? 2.4f : 3.6f);
-            g.setColour (dim (printInk));
-            g.drawLine ({ at (restAngle, inner), at (restAngle, outer) }, concentric ? 1.6f : 2.0f);
-        }
-        else if (restMarked && restStyle == RestMark::triangle)
-        {
-            const auto inner = track + (concentric ? 2.0f : 2.8f);
-            const auto outer = inner + (concentric ? 3.0f : 4.2f);
-            const auto halfWidth = (concentric ? 2.2f : 2.8f) / juce::jmax (outer, 1.0f);
-
-            juce::Path notch;
-            notch.startNewSubPath (at (restAngle, inner));
-            notch.lineTo (at (restAngle - halfWidth, outer));
-            notch.lineTo (at (restAngle + halfWidth, outer));
-            notch.closeSubPath();
-
-            g.setColour (dim (printInk));
-            g.fillPath (notch);
         }
 
         // Drawn rather than set. Neither panel face has a minus sign that

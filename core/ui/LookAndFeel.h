@@ -115,6 +115,17 @@ public:
         stepMarks      = juce::jmax (0, count);
         stepLabelEvery = juce::jmax (0, labelEvery);
         stepFirstLabel = firstLabel;
+
+        // **A stepped knob sweeps 270 degrees, from 7:30 to 4:30**, rather
+        // than JUCE's 288. Seven positions then fall every 45 degrees, so the
+        // second and the second-to-last sit flat -- dead on 9 and 3 o'clock --
+        // and the whole scale lands on the 45-degree grid a detented
+        // hardware dial is engraved on. Frosty, 2026-09-27. The pointer goes
+        // through the same angles, so it still lands on a mark at every
+        // position. A continuous knob keeps JUCE's sweep.
+        if (stepMarks > 1)
+            setRotaryParameters (juce::MathConstants<float>::pi * 1.25f,
+                                 juce::MathConstants<float>::pi * 2.75f, true);
     }
 
     /** The number printed at the first mark: 1 for BMO FET's 1..7, 0 for BMO

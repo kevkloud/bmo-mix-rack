@@ -186,8 +186,11 @@ void DimPanel::paintPanel (juce::Graphics& g)
     // lavender on the pale well is 1.37:1 against 1.73 on the plate -- and a
     // bracket sits under no caption at all.
     //
-    // The raw accent at the 0.55 the dotted tracks use, so the bracket is the
-    // knobs' own mark rather than a rule: a rule divides, and this joins.
+    // In the captions' colour, so the bracket is the knobs' own mark rather
+    // than a rule: a rule divides, and this joins. Stepped for the plate in
+    // light and raw in dark, as the captions are (Frosty, 2026-09-30).
+    const auto bracketInk = (ui::isDarkMode() ? context.def.accent
+                                              : ui::accentInk (context.def.accent)).withAlpha (0.55f);
     std::vector<juce::Rectangle<float>> pieces;
 
     for (const auto& box : pairBoxes)
@@ -213,11 +216,11 @@ void DimPanel::paintPanel (juce::Graphics& g)
         for (const auto& r : pieces)
             brackets.add (r);
 
-        ui::BmoLookAndFeel::fillEngraved (g, brackets, context.def.accent.withAlpha (0.55f));
+        ui::BmoLookAndFeel::fillEngraved (g, brackets, bracketInk);
     }
     else
     {
-        g.setColour (context.def.accent.withAlpha (0.55f));
+        g.setColour (bracketInk);
 
         for (const auto& r : pieces)
             g.fillRect (r);

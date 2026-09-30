@@ -26,6 +26,20 @@ juce::String compactFrequency (const juce::String& text)
     return text;
 }
 
+// A control's caption: in the light appearance, the colour system stepped to
+// be legible on the plate -- the ink its dotted track and plus and minus are
+// drawn in -- and in the dark one, the colour system as it stands.
+//
+// Light was the raw colour from 0.2.3 (1.72-2.00:1 on the pale plate), which
+// left every knob in two colours once its marks moved to the stepped ink.
+// Frosty, 2026-09-30, from before-and-after renders of every panel: stepped
+// in light, raw in dark, where the stepped ink turned the captions pale and
+// took the module's colour out of them.
+static juce::Colour captionInk (juce::Colour system, const juce::Component& c)
+{
+    return isDarkMode() ? system : accentInk (system, panelTokensFor (c).plate);
+}
+
 //==============================================================================
 PlainKnob::PlainKnob (juce::RangedAudioParameter& param, const juce::String& captionText,
                       Knob::Style style, float faceScale, juce::Colour accent, juce::Colour captionColourIn)
@@ -120,17 +134,9 @@ void PlainKnob::paint (juce::Graphics& g)
                             : (knob.getUtilityTint().isTransparent() ? tokens().track
                                                                      : knob.getUtilityTint());
 
-    // The colour system as it stands, not stepped for contrast. A caption is
-    // the larger of a panel's two labels -- 15 pt against a section legend's
-    // 13 -- and it names a knob you are already looking at, where the legend
-    // is what you navigate by. So the raw colour goes here and the legible
-    // step goes on the legend; see ModulePanel::drawRuleLegend.
-    //
-    // The two swapped in 0.2.3 and the swap costs contrast here: on the pale
-    // plate a caption goes from 4.57-4.69:1 to 1.72-2.00:1, and on the dark
-    // one from 9.07 to 5.87. Frosty's call, taken on a render with those
-    // numbers in front of him. Do not "fix" it.
-    const auto ink = captionColour.isTransparent() ? system : captionColour;
+    // Stepped in light, raw in dark -- see captionInk, and do not undo either
+    // half without Frosty: both were his call, on renders.
+    const auto ink = captionColour.isTransparent() ? captionInk (system, knob) : captionColour;
 
 
     // Hung off the knob's own bottom edge, not the component's. The two are
@@ -380,9 +386,9 @@ void Fader::paint (juce::Graphics& g)
     // Derived here rather than cached in the constructor, so editing the theme
     // file recolours an open panel. PlainKnob::paint carries the argument, and
     // the ink is the same: a fader is a character control, so its caption is
-    // the module's colour as it stands rather than a legible step of it.
+    // the module's colour, stepped in light and raw in dark (captionInk).
     const auto system = panelAccentFor (*this, accentColour);
-    const auto ink = captionColour.isTransparent() ? system : captionColour;
+    const auto ink = captionColour.isTransparent() ? captionInk (system, *this) : captionColour;
 
     drawLabel (g, caption, captionBox().toFloat(),
                juce::Justification::centred, captionFont (captionSize),
@@ -899,7 +905,7 @@ void ChoiceBox::paint (juce::Graphics& g)
     // theme file recolours an open panel: the editors repaint on a theme change
     // but do not rebuild their controls. PlainKnob::paint, same reason.
     const auto system = panelAccentFor (box, accentColour);
-    const auto ink = captionColour.isTransparent() ? system : captionColour;
+    const auto ink = captionColour.isTransparent() ? captionInk (system, box) : captionColour;
 
     drawLabel (g, caption, captionBox().toFloat(),
                juce::Justification::centred, captionFont (captionSize),

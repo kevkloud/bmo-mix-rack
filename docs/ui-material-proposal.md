@@ -27,7 +27,7 @@ opaque render then compares identical to anything.) **Textured** is chosen by th
 change reaches every open editor within a second. Machine-wide and never a
 parameter, for the reasons the appearance is not one. It is chosen in the
 preset menu under **Surface**: *Simple*, *Textured* (the line's own finish),
-*Textured, brushed everywhere*, *Textured, powder everywhere*. Writing either
+*Brushed* and *Powder* (that finish on every line). Writing either
 preference now writes both, so choosing dark mode no longer drops the
 surface.
 

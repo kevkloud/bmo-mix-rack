@@ -99,7 +99,9 @@ void PresetBar::showMenu()
     // The surface sits with the appearance for the same reason: it is about
     // the plugin, not the sound, and it is machine-wide. Simple is today's
     // look and the default; Textured takes the line's own finish (brushed on
-    // every line today) unless one is picked for everything.
+    // every line today), and Brushed or Powder puts that finish on every line.
+    // One word each (Frosty, 2026-09-30): the submenu already says Surface,
+    // so "Textured, brushed everywhere" said it twice.
     {
         const auto textured = surface() == Surface::textured;
         const auto finish = finishChoice();
@@ -108,10 +110,8 @@ void PresetBar::showMenu()
         surfaceMenu.addItem (surfaceSimple, "Simple", true, ! textured);
         surfaceMenu.addSeparator();
         surfaceMenu.addItem (surfaceHouse,   "Textured", true, textured && finish == FinishChoice::house);
-        surfaceMenu.addItem (surfaceBrushed, "Textured, brushed everywhere", true,
-                             textured && finish == FinishChoice::brushed);
-        surfaceMenu.addItem (surfacePowder,  "Textured, powder everywhere", true,
-                             textured && finish == FinishChoice::powder);
+        surfaceMenu.addItem (surfaceBrushed, "Brushed", true, textured && finish == FinishChoice::brushed);
+        surfaceMenu.addItem (surfacePowder,  "Powder",  true, textured && finish == FinishChoice::powder);
 
         menu.addSubMenu ("Surface", surfaceMenu);
     }

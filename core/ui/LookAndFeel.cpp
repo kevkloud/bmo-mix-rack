@@ -528,7 +528,12 @@ void BmoLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int widt
             const auto arm    = concentric ? 2.8f : 4.2f;
             const auto weight = concentric ? 1.8f : 2.3f;
 
-            g.setColour (dim (accent));
+            // In the dotted track's ink, not the raw accent -- Frosty,
+            // 2026-09-30, on BMO Tune RT in light mode, where the raw lime
+            // plus and minus sat beside olive dots and read as two colours.
+            // Full strength rather than the dots' 0.6, as the step numbers
+            // are: the symbols are read, the dots are only counted.
+            g.setColour (dim (printInk));
 
             // Both ends, on every tracked knob. The minus used to appear only
             // where the control's range went below zero, which read the pair

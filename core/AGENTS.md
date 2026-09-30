@@ -104,7 +104,10 @@ rack/     SlotParameter (one generic host parameter, remapped live),
   through if the message thread is mid-rebuild. Never block the audio
   thread on the chain lock.
 - **Two surfaces: Simple and Textured** (Frosty, 2026-09-25). Simple is the
-  default and draws exactly what the suite always drew; Textured shades the
+  default and is the suite's flat look -- though not pixel-for-pixel what it
+  drew before this pass: the dotted knob tracks, the 270-degree stepped
+  sweep, the inked captions and the inside borders changed it on purpose
+  (`docs/ui-material-proposal.md` lists them); Textured shades the
   same tokens -- a brushed or powder plate, knobs with form, switches that
   press in, rules, brackets and buses engraved. It is a machine-wide
   preference in `UI.json` beside the appearance (`ui::surface`), never a

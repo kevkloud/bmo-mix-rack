@@ -1,12 +1,27 @@
 # Proposal: a material pass for faceplates, knobs and switches
 
 **Status: built as a user setting.** The plugins as they are, now called
-**Simple**, are the default and draw pixel-for-pixel what they drew before —
-checked across all ten modules in both appearances and a six-module rack
-against `main` — except BMO DEQ, whose graph took BMO Linger's screen and
-whose on-tab number was fixed, both on purpose. (The comparison must be made
-on RGB: on RGBA, Pillow's `getbbox` reads only the alpha channel, and an
-opaque render then compares identical to anything.) **Textured** is chosen by the user.
+**Simple**, are the default. **Simple is not pixel-for-pixel what `main`
+drew.** When the surface first landed it was -- checked across all ten
+modules in both appearances and a six-module rack, except BMO DEQ, whose
+graph took BMO Linger's screen and whose on-tab number was fixed -- but later
+decisions, each Frosty's and each on purpose, changed it on both surfaces:
+
+- Every tracked knob's track is eleven dots in one rhythm with a default
+  tick outside the ring, printed in the accent ink (`c3b1c21`, `23c723b`:
+  the tick was then removed again).
+- Stepped knobs sweep 270 degrees instead of 288, so the pointer angle and
+  the drag mapping change on BMO FET's ATTACK and RELEASE and BMO Linger's
+  VARIATION (`ab4b65f`); VARIATION gains seven numbered ticks (`0b46f0f`).
+- A knob's plus and minus, and in light its caption, take its track's ink
+  (`37c0266`, `6dbc842`).
+- Borders are drawn inside their shapes (`7fd12ed`, `52084dc`), and BMO
+  Defang's sketch and ribbon take BMO Linger's screen (`f938082`).
+
+A tester comparing against an earlier build will see all of these; none is a
+regression. (A comparison must be made on RGB: on RGBA, Pillow's `getbbox`
+reads only the alpha channel, and an opaque render then compares identical
+to anything.) **Textured** is chosen by the user.
 
 **Decided (Frosty, 2026-09-25):**
 

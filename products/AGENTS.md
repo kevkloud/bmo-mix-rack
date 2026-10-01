@@ -262,8 +262,18 @@ direct clash with a currently-sold hardware reverb pedal. The working title
 "B Verb" was set aside because it echoes a reference product's own name one
 letter apart, which is what the no-third-party-names rule exists to prevent.
 
-Reserved for later products (not built, do not reuse): `Bdyn` dynamics,
-`Bovr` overdrive, `Bcmp` compressor.
+Reserved for later products (not built, do not reuse). Display names, module
+ids, bundle ids and preset extensions are NOT allocated until the first build
+of each; allocate them in the identity table above, not here.
+
+| Code | Appointed as | Brief |
+|---|---|---|
+| `Bovr` | **Distortion** effect | A distortion, not a second saturator: BMO Saturator already owns drive, tone and blend, so this must be a recognisably different voice (harder, more clipped, more characterful). Settle the voice before the build. |
+| `Bcmp` | **Transparent digital compressor, with a threshold control** | The clean counterpart to BMO FET (no threshold, colours the signal), BMO Opto (two knobs, opto behaviour) and LTV Comp (vocal, AMOUNT-driven). Threshold is a real, labelled control; the aim is to add as little character as possible. Lookahead is likely, so latency must be reported honestly. |
+| `Bgat` | **Gate / expander** | Downward gate and expander in one module. Each dynamics module owns its own envelope code (see `docs/fet-comp/00-repo-conventions.md`), so it does not share BMO DEQ's or Defang's detector. |
+| `Blim` | **Limiter** | A ceiling-style limiter. Decide early whether it is true-peak and whether it uses lookahead; both bear on latency reporting. |
+| `Bclp` | **Clipper** | A hard/soft clipper. Distinct from `Bovr` (character) and `Blim` (ceiling by gain reduction): it shapes peaks by waveshaping. Oversampling is the main design question. |
+| `Bdyn` | dynamics (generic) | Left reserved with no brief. Largely superseded by the compressor, gate/expander and limiter slots above; retire it or give it a purpose before the next allocation. |
 
 **`Bdes` and `Bdly` are not on that list and must not go back on it.** The BMO
 FET change re-listed `Bdes` as reserved "de-esser" while the table two sections
@@ -272,7 +282,7 @@ up already gives it to BMO Defang, and BMO Linger's branch still carried `Bdly`
 table is right both times: a code is reserved *or* in the table, never both,
 and a merge that unions two edits of this list re-reserves whatever each side
 spent. Four codes have now been spent off the reserved list -- `Bdes`, `Bfet`,
-`Brvb`, `Bdly` -- and the three above are what is left.
+`Brvb`, `Bdly` -- and the six in the table above are what is left.
 
 ## BMO EQ and BMO DEQ — settle BMO EQ's name
 

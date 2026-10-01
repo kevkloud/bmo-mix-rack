@@ -3809,6 +3809,95 @@ void testFxLinkTiesTheLanesTrio()
     }
 }
 
+//==============================================================================
+// The review's fixes, 2026-10-01. **Every test below moves a parameter, or
+// feeds something hostile, while there is signal in the loop, and then
+// measures what came out** -- the one shape of test the file did not have, and
+// the shape every defect the review found needed in order to be seen.
+//==============================================================================
+
+/** Renders the way a host does: `setParams`, then `setTempo`, then `process`,
+    every block, with `before (offset)` free to move a value in `v` first. */
+template <typename BeforeBlock>
+void renderAsHost (P::DwellDsp& dsp, std::vector<float>& v, Block& block, int n, int chunk,
+                   BeforeBlock&& before, double bpm = 0.0, bool tempoValid = false)
+{
+    for (int offset = 0; offset < n; offset += chunk)
+    {
+        const auto count = std::min (chunk, n - offset);
+
+        before (offset);
+        dsp.setParams (v.data(), (int) v.size());
+        dsp.setTempo (bpm, tempoValid, tempoValid);
+
+        float* channels[] { block.left.data() + offset, block.right.data() + offset };
+        dsp.process (channels, 2, count);
+    }
+}
+
+/** **One non-finite input sample with DUCK up must not silence the module.**
+
+    The ducker's key filter and its follower run on the dry input, and a
+    one-pole or a log follower handed a NaN keeps it: the gain reduction became
+    NaN, the output guard turned every sample into 0 -- dry included -- and
+    only a `reset` brought it back. `testSilenceDenormalsAndNaN` runs at DUCK
+    0, where the ducker is branched past, and so could not see it.
+
+    The render with the bad sample is held against the same render without it:
+    the one sample that was not a number is replaced, so a second later the two
+    must agree to the level. */
+void testANonFiniteInputWithDuckUpRecovers()
+{
+    constexpr auto rate = 48000.0;
+    const auto n = (int) (rate * 2.0);
+
+    for (const auto duck : { 6.0f, 24.0f })
+    {
+        for (const auto bad : { std::numeric_limits<float>::quiet_NaN(),
+                                std::numeric_limits<float>::infinity() })
+        {
+            const auto render = [&] (bool spoil)
+            {
+                P::DwellDsp dsp;
+                dsp.prepare (rate, 512, 2);
+
+                auto v = defaults();
+                v[P::Index::duck] = duck;
+
+                Block block { n };
+
+                for (int i = 0; i < n; ++i)
+                {
+                    const auto s = (float) (0.1 * std::sin (2.0 * P::kPiD * 440.0 * (double) i / rate));
+                    block.left[(size_t) i] = block.right[(size_t) i] = s;
+                }
+
+                if (spoil)
+                    block.left[1000] = bad;
+
+                renderAsHost (dsp, v, block, n, 512, [] (int) {});
+                return block.left;
+            };
+
+            const auto clean = render (false);
+            const auto spoilt = render (true);
+
+            const auto want = rms (clean, n - (int) rate, (int) rate);
+            const auto got  = rms (spoilt, n - (int) rate, (int) rate);
+
+            char buf[160];
+            std::snprintf (buf, sizeof (buf),
+                           "one %s input sample at DUCK %.0f dB: the last second is back to the "
+                           "clean render's level (%.6f, want %.6f)",
+                           std::isnan (bad) ? "NaN" : "infinite", (double) duck, got, want);
+
+            check (allFinite (spoilt) && want > 0.01
+                       && std::abs (20.0 * std::log10 (std::max (got, 1.0e-30) / want)) < 0.01,
+                   buf);
+        }
+    }
+}
+
 } // namespace
 
 //==============================================================================
@@ -3863,6 +3952,9 @@ int main()
     testTheMainLoopIsUndisturbedByASendWithFxLive();
     testCrushFloorStopsGrowing();
     testFxLinkTiesTheLanesTrio();
+
+    // The review's fixes, 2026-10-01.
+    testANonFiniteInputWithDuckUpRecovers();
 
     std::printf ("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

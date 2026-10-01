@@ -618,6 +618,18 @@ private:
         At DUCK 0 the whole stage is branched past rather than multiplying by
         1.0 -- `11` §4g wants the null bit-exact -- and the lane never sees
         this function at all (10 §11.3: the lane's whole job is to be heard). */
+    /** **The key is sanitised before it reaches any state.** A one-pole and a
+        log follower both keep a NaN or an infinity they are handed, for good:
+        the gain reduction became NaN, the output guard below turned every
+        sample into 0 -- the dry with it -- and only a `reset` recovered. The
+        engines already refuse a non-finite sample at their ring writes; this is
+        the same refusal at the ducker's door. Measured on AURORA 2026-10-01:
+        one NaN at DUCK 6 dB took the output to exact zeros for good. */
+    static double finiteOrZero (float x) noexcept
+    {
+        return std::isfinite (x) ? (double) x : 0.0;
+    }
+
     float duckGainFor (double keyL, double keyR, int nch) noexcept
     {
         const auto peak = nch >= 2 ? 0.5 * (std::abs (keyL) + std::abs (keyR))
@@ -700,8 +712,8 @@ private:
 
             if (ducking)
             {
-                const auto keyL = duckKey[0].highPass ((double) dry[0][i]);
-                const auto keyR = nch >= 2 ? duckKey[1].highPass ((double) dry[1][i]) : 0.0;
+                const auto keyL = duckKey[0].highPass (finiteOrZero (dry[0][i]));
+                const auto keyR = nch >= 2 ? duckKey[1].highPass (finiteOrZero (dry[1][i])) : 0.0;
                 gr = duckGainFor (keyL, keyR, nch);
             }
 

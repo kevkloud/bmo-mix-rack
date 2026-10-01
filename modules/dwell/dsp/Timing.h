@@ -171,6 +171,60 @@ inline LapResponse lapResponseAt (double w, int character, double timeSeconds,
     return r;
 }
 
+/** The lowest sample rate the suite runs at. A delay counted in samples is
+    longest in seconds there, so it is the rate a bound in seconds is taken
+    at. */
+inline constexpr double kLowestSampleRate = 44100.0;
+
+/** **What an in-loop FX stage adds to every lap, in seconds, as a bound**
+    (10 §11a). The stage's magnitude never adds to a lap -- every type is
+    non-expanding -- but two of them delay it, and the delay compounds per
+    repeat like the filters'.
+
+    - **Diffuse: the six allpasses' peak group delays, summed.** A Schroeder
+      allpass of length `D` and coefficient `a` delays by
+      `D (1 - a^2) / (1 - 2a cos wD + a^2)`, at most `D (1 + a) / (1 - a)`;
+      the six peaks line up wherever every length divides the period, and at
+      AMOUNT 100 the lengths are whole milliseconds, so every multiple of
+      1 kHz takes the full sum -- 0.71 s a lap at AMOUNT 100, against the 0.13 s
+      the lengths add up to. Each length is counted half a sample long, for
+      its rounding. **Conservative by design** (2026-10-01; Frosty to confirm):
+      measured on AURORA over every character, FEEDBACK 35-96.9 % and TIME
+      1-2000 ms at 48 kHz, the real decay ran between 8 % and 88 % of this
+      figure, 27 % of it on average at AMOUNT 100 and 53 % at AMOUNT 35. A
+      figure built from the slowest frequency there is cannot be beaten by a
+      render; a figure fitted to the renders could be, at a frequency the grid
+      did not try.
+    - **Crush: the sample-and-hold**, which holds a sample for up to
+      `divisor - 1` more, at the lowest rate.
+    - **Pan/Tremolo** is a memoryless gain and adds nothing. */
+inline double fxLapDelaySeconds (bool on, int type, float amountPercent) noexcept
+{
+    if (! on)
+        return 0.0;
+
+    const auto amount = std::clamp ((double) amountPercent * 0.01, 0.0, 1.0);
+
+    if (type == kDiffuse)
+    {
+        if (amount <= 0.0)
+            return 0.0;
+
+        const auto a = FxStage::kDiffuseCoefficient * amount;
+        auto sum = 0.0;
+
+        for (const auto ms : FxStage::kStageDelaysMs)
+            sum += (ms * 0.001 * amount + 0.5 / kLowestSampleRate) * (1.0 + a) / (1.0 - a);
+
+        return sum;
+    }
+
+    if (type == kCrush)
+        return (std::ceil (1.0 + amount * FxStage::kCrushHoldSpan) - 1.0) / kLowestSampleRate;
+
+    return 0.0;
+}
+
 /** One engine's tail: at each frequency, the laps its loop gain needs to fall
     60 dB, times the lap that frequency actually takes; the longest wins.
 
@@ -258,16 +312,25 @@ inline double tailSecondsFor (const float* v, int count) noexcept
     const auto character = (int) v[Index::character];
     const auto lowCut = (double) v[Index::lowCut], highCut = (double) v[Index::highCut];
 
+    const auto mainFx = fxLapDelaySeconds (v[Index::fx] > 0.5f, (int) v[Index::fxType], v[Index::fxAmount]);
+
     auto tail = engineTailSeconds (mainT, (double) feedbackGainFor (v[Index::feedback], 1.0),
-                                   character, lowCut, highCut, 0.0);
+                                   character, lowCut, highCut, mainFx);
 
     if (v[Index::hold] > 0.5f)
     {
+        // `fx_link` hands the lane the main's trio or its own, exactly as
+        // `DspCore::applyParams` does.
+        const auto linked = v[Index::fxLink] > 0.5f;
+        const auto laneFx = linked ? mainFx
+                                   : fxLapDelaySeconds (v[Index::laneFx] > 0.5f, (int) v[Index::laneFxType],
+                                                        v[Index::laneFxAmount]);
+
         // The detent is a literal: lane_gain at 0 is FREEZE (laneGainFor).
         const auto laneTail = v[Index::laneGain] >= 0.0f
                                 ? kTailCeilingSeconds
                                 : engineTailSeconds (laneT, (double) laneGainFor (v[Index::laneGain], 1.0),
-                                                     character, lowCut, highCut, 0.0);
+                                                     character, lowCut, highCut, laneFx);
         tail = std::max (tail, laneTail);
     }
 

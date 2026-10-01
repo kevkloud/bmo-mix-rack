@@ -190,12 +190,26 @@ namespace
         return 10.0 * std::log10 (std::max (p / 9.0, 1.0e-24));
     }
 
+    /** What `stepRatioAcross` measured, and how many times the edit it was
+        asked to measure actually ran. `settled` is the largest step over the
+        last quarter second against the same first-half figure: the new
+        setting's own level, so a ratio near it is the level moving and not a
+        click. Printed, not asserted. */
+    struct StepRatio { float ratio; int edits; float settled; };
+
     /** Runs a steady 1 kHz sine through the module while `edit` is applied
         at the halfway point, and returns the largest sample-to-sample step
         in the output over the second half relative to the largest over the
-        first -- a click is a step the signal did not have before. */
-    float stepRatioAcross (const std::function<void (std::vector<float>&)>& setup,
-                           const std::function<void (std::vector<float>&)>& edit)
+        first -- a click is a step the signal did not have before.
+
+        **The edit lands on the first block boundary at or after the halfway
+        point**, and the count of edits comes back with the ratio. Until the
+        2026-09-30 review it was applied only when a block started exactly
+        at 24000, and with 256-sample blocks none does: the edit never ran in
+        940 block iterations, and all five "does not click" checks were
+        comparing a steady sine with itself. */
+    StepRatio stepRatioAcross (const std::function<void (std::vector<float>&)>& setup,
+                               const std::function<void (std::vector<float>&)>& edit)
     {
         auto v = defaults();
         v[Index::verblevel] = -40.0f;
@@ -212,12 +226,16 @@ namespace
         for (int i = 0; i < total; ++i)
             l[(size_t) i] = r[(size_t) i] = 0.5f * std::sin (2.0f * 3.14159265f * 1000.0f * (float) i / 48000.0f);
 
-        float before = 0.0f, after = 0.0f;
+        float before = 0.0f, after = 0.0f, settled = 0.0f;
+        int edits = 0;
 
         for (int at = 0; at < total; at += 256)
         {
-            if (at == total / 2)
+            if (edits == 0 && at >= total / 2)
+            {
                 edit (v);
+                ++edits;
+            }
 
             float* chans[] { l.data() + at, r.data() + at };
             dsp.setParams (v.data(), (int) v.size());
@@ -229,9 +247,10 @@ namespace
             const auto step = std::abs (l[(size_t) i] - l[(size_t) i - 1]);
             if (i < total / 2 && i > 12000) before = std::max (before, step);
             if (i >= total / 2) after = std::max (after, step);
+            if (i >= total - 12000) settled = std::max (settled, step);
         }
 
-        return before > 0.0f ? after / before : 0.0f;
+        return { before > 0.0f ? after / before : 0.0f, edits, before > 0.0f ? settled / before : 0.0f };
     }
 
     //== Steady noise through the module ======================================
@@ -1057,10 +1076,12 @@ int main()
         check (constant, "ER energy is constant within +-0.2 dB across the DENSITY sweep");
         check (finite, "every sample across the DENSITY sweep is finite");
 
-        const auto ratio = stepRatioAcross ([] (auto& p) { p[Index::erdensity] = 0.0f; },
-                                            [] (auto& p) { p[Index::erdensity] = 100.0f; });
-        std::cout << "  step ratio across a DENSITY jump 0 -> 100 %: " << ratio << '\n';
-        check (ratio <= 1.5f, "a DENSITY jump does not click");
+        const auto jump = stepRatioAcross ([] (auto& p) { p[Index::erdensity] = 0.0f; },
+                                           [] (auto& p) { p[Index::erdensity] = 100.0f; });
+        std::cout << "  step ratio across a DENSITY jump 0 -> 100 %: " << jump.ratio << " (" << jump.edits
+                  << " edit; settled at " << jump.settled << ")\n";
+        check (jump.edits == 1, "the DENSITY jump was actually applied");
+        check (jump.ratio <= 1.5f, "a DENSITY jump does not click");
     }
 
     //== ER hi-cut: -3 dB where it says, and no tap moves =========================
@@ -1216,16 +1237,31 @@ int main()
     }
 
     //== Parameter changes do not click ==========================================
+    //
+    // **What these measure, since the edit really runs (2026-09-30):** the
+    // largest sample-to-sample step from the change on, against the largest
+    // the steady 1 kHz ER output had before it. So a check passes when the
+    // change makes no step bigger than the signal's own biggest, and it
+    // cannot see a click smaller than that. Where the new setting is quieter
+    // -- Hall, 24 m, Energy, VARIATION 6 are all quieter than Room at 1 kHz --
+    // the largest step in the window is one of the few samples before the
+    // edit lands and the ratio sits just under one whatever the change did.
+    // VARIATION 6 read 1.76 here once the edit ran and before the comb line
+    // was kept current: entering 6 read an empty line, and that was a step.
     {
         const auto type = stepRatioAcross ([] (auto&) {}, [] (auto& p) { p[Index::type] = (float) hall; });
         const auto size = stepRatioAcross ([] (auto&) {}, [] (auto& p) { p[Index::size] = 24.0f; });
         const auto mode = stepRatioAcross ([] (auto&) {}, [] (auto& p) { p[Index::ermode] = (float) energy; });
         const auto var  = stepRatioAcross ([] (auto&) {}, [] (auto& p) { p[Index::ervariation] = 6.0f; });
-        std::cout << "  step ratios: TYPE " << type << ", SIZE " << size << ", ER MODE " << mode << ", VARIATION " << var << '\n';
-        check (type <= 1.5f, "a TYPE switch dips and swaps without a click");
-        check (size <= 1.5f, "a SIZE jump crossfades without a click");
-        check (mode <= 1.5f, "an ER MODE change crossfades without a click");
-        check (var  <= 1.5f, "a VARIATION change crossfades without a click");
+        std::cout << "  step ratios (settled level in brackets): TYPE " << type.ratio << " (" << type.settled << "), SIZE "
+                  << size.ratio << " (" << size.settled << "), ER MODE " << mode.ratio << " (" << mode.settled
+                  << "), VARIATION " << var.ratio << " (" << var.settled << ")\n";
+        check (type.edits == 1 && size.edits == 1 && mode.edits == 1 && var.edits == 1,
+               "each parameter change was actually applied, once");
+        check (type.ratio <= 1.5f, "a TYPE switch dips and swaps without a click");
+        check (size.ratio <= 1.5f, "a SIZE jump crossfades without a click");
+        check (mode.ratio <= 1.5f, "an ER MODE change crossfades without a click");
+        check (var.ratio  <= 1.5f, "a VARIATION change crossfades without a click");
     }
 
     //== A built table is never left unweighted ===================================

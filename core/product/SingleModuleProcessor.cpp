@@ -106,7 +106,7 @@ void SingleModuleProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
     // one channel and silence. BusLayouts.h says why at length.
     buses::spreadInputAcrossOutputs (buffer, numIn, numOut);
 
-    engine.process (buffer.getArrayOfWritePointers(), numOut, numSamples);
+    engine.process (buffer.getArrayOfWritePointers(), numOut, numSamples, HostTempo {});
 }
 
 //==============================================================================

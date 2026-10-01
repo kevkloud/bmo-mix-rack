@@ -118,6 +118,55 @@ public:
     */
     virtual void setSolo (int) noexcept {}
 
+    /** The host's tempo for the block about to be processed.
+
+        `bpm` is quarter notes per minute. `valid` says whether the host told us
+        one at all, and `playing` whether its transport is running.
+
+        **Once per block, on the audio thread, after `setParams` and before
+        `process`** -- see core/product/ModuleEngine.h, which is the only
+        caller. Inside a rack every slot is handed the same three values for
+        the same block, read once from the host, so two modules synced to the
+        tempo cannot disagree about it.
+
+        `valid` is false whenever the host gave no playhead, no position or no
+        usable tempo, and then `bpm` is 0.0 -- never a figure a module could
+        mistake for a tempo -- and `playing` is false. The three cases are
+        deliberately one, down to the last value: a module has nothing
+        different to do about any of them, so it is not made, or able, to
+        tell them apart. A tempo the host does send but which is not a tempo
+        (zero, negative, not finite) is the third case. A stopped transport is not one of them: it is
+        `playing == false` with `valid` still true and `bpm` intact whenever the
+        host knows a tempo, because a delay synced to 120 bpm is still synced to
+        120 bpm while the transport is parked.
+
+        **What to do when the tempo is missing or the transport stops is the
+        module's own policy, not the plumbing's.** The expected one is to hold
+        the last valid tempo, fall back to its own time parameter if it has
+        never seen one, and never flush its state on stop -- but only the
+        module knows what holding means for it, which is why `bpm` arrives as
+        0.0 rather than as a remembered value somebody else chose.
+
+        **Deliberately not carried:** PPQ position, time signature, sample or
+        second position, loop points and record state. Nothing in the suite
+        consumes them; a tempo-synced delay needs a period, not a beat to
+        anchor it to. Carrying a position nobody reads invites beat-aligned
+        behaviour that would also need loop and resync handling to be right. A
+        later module that is genuinely beat-anchored gets its own defaulted
+        virtual beside this one, rather than this one growing wider for
+        everybody.
+
+        **Defaulted to do nothing, like the two hooks above it**, so no
+        module that has no use for a tempo changes, and its output is
+        bit-identical with or without a host playhead --
+        tests/plugin/TempoTests.cpp holds that for every registered module. */
+    virtual void setTempo (double bpm, bool valid, bool playing) noexcept
+    {
+        (void) bpm;
+        (void) valid;
+        (void) playing;
+    }
+
     /** The module's analyser tap, or null if it has none. The panel reads the
         window; the DSP writes it. See core/dsp/AnalyserTap.h for why it cannot
         change the sound or the latency. */

@@ -509,7 +509,7 @@ void RackProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
 
     for (auto& s : slots)
         if (s.engine != nullptr)
-            s.engine->process (buffer.getArrayOfWritePointers(), numOut, numSamples);
+            s.engine->process (buffer.getArrayOfWritePointers(), numOut, numSamples, HostTempo {});
 }
 
 juce::AudioProcessorEditor* RackProcessor::createEditor()

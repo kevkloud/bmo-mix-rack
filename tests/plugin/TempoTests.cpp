@@ -781,6 +781,63 @@ int main()
                     "dwell with SYNC on hears the playhead's tempo");
         }
 
+        // **The same two facts with Dwell in a rack, among modules that do
+        // not listen** (2026-10-01). The carve-out above takes Dwell out of
+        // the rack walk below as well, which left a slot's tempo reaching a
+        // real consumer untested: the probes prove the plumbing, not that
+        // Dwell's own SYNC hears it through a slot.
+        {
+            const auto named = [&] (const char* id) -> const bmo::ModuleDef*
+            {
+                for (const auto* def : registry)
+                    if (juce::String (def->id) == id)
+                        return def;
+
+                return nullptr;
+            };
+
+            const auto* util  = named ("util");
+            const auto* dwell = named ("dwell");
+            const auto* eq    = named ("eq");
+
+            expect (util != nullptr && dwell != nullptr && eq != nullptr,
+                    "the rack case finds util, dwell and eq in the registry");
+
+            if (util != nullptr && dwell != nullptr && eq != nullptr)
+            {
+                const auto run = [&] (Host host, bool synced)
+                {
+                    auto rack = bmo::products::createRack();
+                    rack->addModule (*util);
+                    rack->addModule (*dwell);
+                    rack->addModule (*eq);
+
+                    if (synced)
+                    {
+                        auto& params = rack->getEngineAt (1)->params();
+                        params.setReal ("sync", 1.0f);
+                        params.setReal ("note", 3.0f);   // 1/16: 125 ms at 120 bpm, inside the render
+                        params.setReal ("feedback", 60.0f);
+                        params.setReal ("mix", 50.0f);
+                    }
+
+                    return render (*rack, host);
+                };
+
+                const auto quiet = run (Host::none, false);
+                expect (identical (quiet, run (Host::steady, false)),
+                        "dwell in a rack with SYNC off is byte-identical with a playhead at 120 bpm");
+                expect (identical (quiet, run (Host::moving, false)),
+                        "dwell in a rack with SYNC off is byte-identical with a moving playhead");
+
+                const auto synced = run (Host::steady, true);
+                expect (identical (synced, run (Host::steady, true)),
+                        "dwell in a rack with SYNC on renders the same twice at 120 bpm");
+                expect (! identical (run (Host::none, true), synced),
+                        "dwell in a rack with SYNC on hears the playhead's tempo through its slot");
+            }
+        }
+
        #if BMO_TEMPO_TESTS_TUNE
         // BMO Tune RT runs on the same SingleModuleProcessor but is not in the
         // rack's registry, so the walk above never reaches it. It is linked in

@@ -314,6 +314,16 @@ namespace
     constexpr int kHeroRow   = kHeroKnob + kCaptionRow + kValueRow;   // 152
     constexpr int kValuePair = kPairKnob + kCaptionRow + kValueRow;   // 122
     constexpr int kPairRow   = kPairKnob + kCaptionRow;               // 108
+
+    /** The secondary knobs: the cuts, the loop, DUCK and both AMOUNTs. They print
+        their values (13 §4: "you cannot tell 6 kHz from 18 kHz on HI CUT
+        without dragging it"), and they do it inside the same 108 px row they
+        had without one, by drawing the knob a step smaller. The 14 px could
+        not come from anywhere else: the depth column's three rows fill 340 of
+        the 383 px between the DELAY and TONE rules, and those two lines are
+        the grid all three columns are cut on. So the panel has three sizes,
+        hero, primary and secondary, rather than two. */
+    constexpr int kValueKnob = kPairRow - kCaptionRow - kValueRow;   // 72
     constexpr int kStripRow  = 20;
     constexpr int kSwitchRow = 28;
 
@@ -662,6 +672,16 @@ DwellPanel::DwellPanel (ui::ModuleContext ctx)
     laneTime.setShowsValue (true);
     laneLevel.setShowsValue (true);
 
+    // And the secondary knobs, which print theirs for the reason 13 §4 gave:
+    // every one of them is in Hertz, decibels or a percent that means
+    // something, and none of those is found by eye. See kValueKnob for where
+    // the 14 px came from.
+    for (auto* k : { &lowCut, &highCut, &drive, &modRate, &modDepth, &duck })
+    {
+        k->setKnobSide (kValueKnob);
+        k->setShowsValue (true);
+    }
+
     //== The lane gain knob ====================================================
     //
     // **The catch at unity.** `lane_gain` is the one control on this panel
@@ -832,8 +852,9 @@ void DwellPanel::buildFxAmount (bool lane, int type)
                                             amountCaptionFor (type),
                                             ui::Knob::Style::character,
                                             kPairFace, context.def.accent);
-    slot->setKnobSide (kPairKnob);
+    slot->setKnobSide (kValueKnob);
     slot->setCaptionSize (kCaption);
+    slot->setShowsValue (true);
     held = type;
 
     if (lane)
@@ -1118,20 +1139,20 @@ void DwellPanel::placeRuledSwitch (juce::Rectangle<int> band, const juce::String
 
 void DwellPanel::placeDuckBand (juce::Rectangle<int> row)
 {
-    duck.setKnobSide (kPairKnob);
+    duck.setKnobSide (kValueKnob);
     duck.setCaptionSize (kCaption);
 
     // Where a knob's face stops and its name starts, worked out the way
     // PlainKnob::resized does it, so the bar and its name land on the same two
     // lines the knob beside them uses.
-    const auto knobTop    = row.getY() + (row.getHeight() - kCaptionRow - kPairKnob) / 2;
-    const auto captionTop = knobTop + kPairKnob;
+    const auto knobTop    = row.getY() + (row.getHeight() - kCaptionRow - kValueRow - kValueKnob) / 2;
+    const auto captionTop = knobTop + kValueKnob;
 
     duck.setBounds (row.removeFromLeft (row.getWidth() / 2));
 
     auto bar = row.reduced (kSwitchGap, 0);
 
-    duckMeter->setBounds (bar.getX(), knobTop + (kPairKnob - kDuckBarHeight) / 2,
+    duckMeter->setBounds (bar.getX(), knobTop + (kValueKnob - kDuckBarHeight) / 2,
                           bar.getWidth(), kDuckBarHeight);
     duckMeterCaption = { bar.getX(), captionTop, bar.getWidth(), kCaptionRow - 4 };
 }
@@ -1262,7 +1283,7 @@ void DwellPanel::layOutFace (juce::Rectangle<int> column, int& delayRuleTop, int
     toneRuleTop = face.area.getY();
     addRule (face.take (kRule), "TONE");
     face.air();
-    placePair (lowCut, highCut, face.take (kPairRow), kPairKnob);
+    placePair (lowCut, highCut, face.take (kPairRow), kValueKnob);
 
     face.breakAir();
     placeFxBand (face.take (kGateRow));
@@ -1286,9 +1307,9 @@ void DwellPanel::layOutDepth (juce::Rectangle<int> column, int toneRuleTop)
 
     addRule (top.take (kRule), "LOOP");
     top.air();
-    placeSingle (drive, top.take (kPairRow), kPairKnob);
+    placeSingle (drive, top.take (kPairRow), kValueKnob);
     top.air();
-    placePair (modRate, modDepth, top.take (kPairRow), kPairKnob);
+    placePair (modRate, modDepth, top.take (kPairRow), kValueKnob);
 
     // **DUCK gets the break.** It is not part of the loop's colour: it is the
     // main delay's wet being pushed out of the way of the dry, applied after

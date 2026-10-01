@@ -1132,6 +1132,32 @@ void checkDwellFace (bmo::ui::ModulePanel& panel, const juce::String& who, bool 
     **Every one of the twenty-six is drawn**: ten on the face, six in the depth
     column and ten in the lane. Nothing in this schema is live, automatable and
     on no panel at all, which is what the redesign exists to guarantee. */
+/** Every knob on BMO Dwell prints its value, at both widths.
+
+    Until 2026-10-01 seven of them did not -- DRIVE, RATE, DEPTH, DUCK, both
+    cuts and both AMOUNTs -- which is a spec deviation (`docs/delay/13` §4
+    asks for Hertz on the cuts and RATE, dB on DUCK) and meant HI CUT at
+    6 kHz and at 18 kHz could only be told apart by dragging it. They print
+    inside the same row by drawing a step smaller (kValueKnob in
+    modules/dwell/panel/DwellPanel.cpp), so turning one back off would move
+    nothing else, and nothing but this would notice. */
+void checkDwellValues (bmo::ui::ModulePanel& panel, const juce::String& who)
+{
+    std::vector<bmo::ui::PlainKnob*> knobs;
+    collectKnobs (panel, knobs);
+
+    auto shown = 0;
+
+    for (auto* knob : knobs)
+        if (knob->isVisible() && knob->getParentComponent() != nullptr)
+        {
+            ++shown;
+            check (knob->isShowingValue(), who + " knob '" + knob->getName() + "' shows no value");
+        }
+
+    check (shown > 0, who + " has no knobs to check");
+}
+
 void checkDwellRevealed (bmo::ui::ModulePanel& panel, const juce::String& who, bool expanded)
 {
     // The depth column, by caption. DUCK's GR bar is named for what it reads.
@@ -2007,6 +2033,7 @@ int main (int argc, char** argv)
         checkEquals (panel.getWidth(), 840, "dwell opens wide standalone");
         checkDwellFace     (panel, "dwell", true);
         checkDwellRevealed (panel, "dwell", true);
+        checkDwellValues   (panel, "dwell");
         check (findNamed (panel, "expand") != nullptr,
                "dwell has no expand arrow on the panel");
     });
@@ -2016,6 +2043,7 @@ int main (int argc, char** argv)
         checkEquals (panel.getWidth(), 280, "dwell compact width");
         checkDwellFace     (panel, "dwell compact", false);
         checkDwellRevealed (panel, "dwell compact", false);
+        checkDwellValues   (panel, "dwell compact");
     });
 
     // **The view is not a parameter.** docs/delay/13 §6a and

@@ -26,6 +26,20 @@ juce::String compactFrequency (const juce::String& text)
     return text;
 }
 
+// A control's caption: in the light appearance, the colour system stepped to
+// be legible on the plate -- the ink its dotted track and plus and minus are
+// drawn in -- and in the dark one, the colour system as it stands.
+//
+// Light was the raw colour from 0.2.3 (1.72-2.00:1 on the pale plate), which
+// left every knob in two colours once its marks moved to the stepped ink.
+// Frosty, 2026-09-30, from before-and-after renders of every panel: stepped
+// in light, raw in dark, where the stepped ink turned the captions pale and
+// took the module's colour out of them.
+static juce::Colour captionInk (juce::Colour system, const juce::Component& c)
+{
+    return isDarkMode() ? system : accentInk (system, panelTokensFor (c).plate);
+}
+
 //==============================================================================
 PlainKnob::PlainKnob (juce::RangedAudioParameter& param, const juce::String& captionText,
                       Knob::Style style, float faceScale, juce::Colour accent, juce::Colour captionColourIn)
@@ -120,17 +134,9 @@ void PlainKnob::paint (juce::Graphics& g)
                             : (knob.getUtilityTint().isTransparent() ? tokens().track
                                                                      : knob.getUtilityTint());
 
-    // The colour system as it stands, not stepped for contrast. A caption is
-    // the larger of a panel's two labels -- 15 pt against a section legend's
-    // 13 -- and it names a knob you are already looking at, where the legend
-    // is what you navigate by. So the raw colour goes here and the legible
-    // step goes on the legend; see ModulePanel::drawRuleLegend.
-    //
-    // The two swapped in 0.2.3 and the swap costs contrast here: on the pale
-    // plate a caption goes from 4.57-4.69:1 to 1.72-2.00:1, and on the dark
-    // one from 9.07 to 5.87. Frosty's call, taken on a render with those
-    // numbers in front of him. Do not "fix" it.
-    const auto ink = captionColour.isTransparent() ? system : captionColour;
+    // Stepped in light, raw in dark -- see captionInk, and do not undo either
+    // half without Frosty: both were his call, on renders.
+    const auto ink = captionColour.isTransparent() ? captionInk (system, knob) : captionColour;
 
 
     // Hung off the knob's own bottom edge, not the component's. The two are
@@ -216,9 +222,9 @@ void PlainKnob::setEndMarks (Knob::EndMarks m)
     repaint();
 }
 
-void PlainKnob::setStepMarks (int count, int labelEvery)
+void PlainKnob::setStepMarks (int count, int labelEvery, int firstLabel)
 {
-    knob.setStepMarks (count, labelEvery);
+    knob.setStepMarks (count, labelEvery, firstLabel);
     repaint();
 }
 
@@ -332,7 +338,7 @@ void Fader::paintFader (juce::Graphics& g)
     g.setColour (dim (t.well));
     g.fillRoundedRectangle (track, radius);
     g.setColour (dim (tokens().outline));
-    g.drawRoundedRectangle (track.reduced (0.5f), radius, Tokens::hairlineWeight);
+    strokeInside (g, track, radius, Tokens::hairlineWeight);
 
     // What has been travelled, from the foot of the slot up to the cap, in the
     // accent at `kFillAlpha`. This is the part that lets a row of faders be
@@ -364,7 +370,7 @@ void Fader::paintFader (juce::Graphics& g)
     g.setColour (dim (faceOf (accent)));
     g.fillRoundedRectangle (cap, Tokens::corner);
     g.setColour (dim (tokens().knobEdge));
-    g.drawRoundedRectangle (cap.reduced (0.5f), Tokens::corner, Tokens::hairlineWeight);
+    strokeInside (g, cap, Tokens::corner, Tokens::hairlineWeight);
 
     // The centre line, which is what says where on the travel the cap is
     // reading from. `onAccentOf` rather than a literal dark: it is dark on
@@ -380,9 +386,9 @@ void Fader::paint (juce::Graphics& g)
     // Derived here rather than cached in the constructor, so editing the theme
     // file recolours an open panel. PlainKnob::paint carries the argument, and
     // the ink is the same: a fader is a character control, so its caption is
-    // the module's colour as it stands rather than a legible step of it.
+    // the module's colour, stepped in light and raw in dark (captionInk).
     const auto system = panelAccentFor (*this, accentColour);
-    const auto ink = captionColour.isTransparent() ? system : captionColour;
+    const auto ink = captionColour.isTransparent() ? captionInk (system, *this) : captionColour;
 
     drawLabel (g, caption, captionBox().toFloat(),
                juce::Justification::centred, captionFont (captionSize),
@@ -899,7 +905,7 @@ void ChoiceBox::paint (juce::Graphics& g)
     // theme file recolours an open panel: the editors repaint on a theme change
     // but do not rebuild their controls. PlainKnob::paint, same reason.
     const auto system = panelAccentFor (box, accentColour);
-    const auto ink = captionColour.isTransparent() ? system : captionColour;
+    const auto ink = captionColour.isTransparent() ? captionInk (system, box) : captionColour;
 
     drawLabel (g, caption, captionBox().toFloat(),
                juce::Justification::centred, captionFont (captionSize),
@@ -1084,7 +1090,7 @@ void OutputMeter::paint (juce::Graphics& g)
     }
 
     g.setColour (t.outline.withAlpha (0.6f));
-    g.drawRoundedRectangle (well.reduced (0.5f), 2.0f, 1.0f);
+    strokeInside (g, well, 2.0f, 1.0f);
 
     drawLabel (g, vuMode ? "VU" : "dBFS", labelArea.toFloat(), juce::Justification::centred,
                labelFont (9.0f), t.text2);
@@ -1396,25 +1402,17 @@ void DynamicsMeter::paint (juce::Graphics& g)
     //
     // The bezel is stroked on a path inset by half its own width, so its outer
     // edge lands on `bounds` with a corner radius of kFaceRadius + half the
-    // width. The face is filled to `bounds` too -- and a *smaller* corner
-    // radius is a squarer corner, which reaches further into the corner than a
-    // rounder one. Fill at a flat 4 and the face pokes out past the frame at
-    // all four corners.
+    // width. The face is filled to `bounds` at exactly that radius, so the two
+    // outer edges are one curve and no corner of the face shows outside the
+    // frame at any weight.
     //
-    // At the suite's 1.5 px the overhang is a fifth of a pixel and has never
-    // been seen. At BMO FET's 4 px it is a visible grey speck at each corner,
-    // outside a black frame and against a dark plate, which is what this
-    // corrects.
-    //
-    // **Derived from the change in thickness, not from the thickness.** The
-    // geometrically exact fill radius is kFaceRadius + half the stroke width,
-    // which at the default works out at 4.75 against the 4.0 this has always
-    // filled -- correct, and it moves every shipped meter's corners. Taking
-    // the *difference* from the default instead leaves 1.5 px filling exactly
-    // 4.0 as before, and carries the same fifth-of-a-pixel overhang up to any
-    // weight rather than letting it grow with the frame. BMO Opto's three
-    // hashes hold, which is the constraint this class works under.
-    const auto faceRadius = kFaceRadius + (bezelThickness - kDefaultBezelThickness) * 0.5f;
+    // Until 2026-09-26 the face took the *change* in thickness from the
+    // default instead, which left the default 1.5 px frame filling a flat 4.0
+    // -- a fifth of a pixel of face outside the frame at every corner, kept so
+    // that BMO Opto's three golden hashes would hold. Frosty had it made exact
+    // (2026-09-26: "fix the rest", with the hashes named), so those hashes
+    // move with this and are re-baselined; see testing-notes.
+    const auto faceRadius = kFaceRadius + bezelThickness * 0.5f;
 
     g.setColour (t.meterFace);
     g.fillRoundedRectangle (bounds, faceRadius);

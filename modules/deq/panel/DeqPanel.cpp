@@ -129,6 +129,11 @@ DeqPanel::DeqPanel (ui::ModuleContext ctx)
     for (auto* c : std::initializer_list<juce::Component*> { &curve, &tabs, &reduction, &active, &autoGain, &output })
         addAndMakeVisible (c);
 
+    // Input, output and volume are one-piece in the Textured surface whatever
+    // their size: they set a level rather than voice the module. Frosty,
+    // 2026-09-25. Everything else follows the size rule in texturedFormFor.
+    output.setTexturedForm (ui::Knob::TexturedForm::onePiece);
+
     bindBand();
 
     // Every child's mouse-ups and wheels, for clampShelfQ.
@@ -252,6 +257,14 @@ void DeqPanel::bindBand()
     ratio   = knob (Control::ratio,   "RATIO");
     attack  = knob (Control::attack,  "ATTACK");
     release = knob (Control::release, "RELEASE");
+
+    // FREQ, GAIN and Q are ringed in the Textured surface at both widths.
+    // By size they would not be: 23.9 px expanded is over the one-piece line
+    // and 18.0 compact is under it, so the same knob would change form when
+    // the module moved into a rack. They are the band's own controls, which
+    // is what the ringed form marks everywhere else -- 2026-09-25.
+    for (auto* k : { freq.get(), gain.get(), q.get() })
+        k->setTexturedForm (ui::Knob::TexturedForm::ringed);
 
     for (auto* c : std::initializer_list<juce::Component*> {
              shape.get(), dynOn.get(), mode.get(), place.get(),

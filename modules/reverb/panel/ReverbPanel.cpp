@@ -886,7 +886,7 @@ void LingerScreen::paint (juce::Graphics& g)
     paintMenu (g, ink);
 
     g.setColour (ui::tokens().outline);
-    g.drawRoundedRectangle (bounds.reduced (0.5f), ui::Tokens::corner, ui::Tokens::hairlineWeight);
+    ui::strokeInside (g, bounds, ui::Tokens::corner, ui::Tokens::hairlineWeight);
 }
 
 //==============================================================================
@@ -1467,6 +1467,11 @@ ReverbPanel::ReverbPanel (ui::ModuleContext ctx)
 
     //== The controls =========================================================
 
+    // Input, output and volume are one-piece in the Textured surface whatever
+    // their size: they set a level rather than voice the module. Frosty,
+    // 2026-09-25. Everything else follows the size rule in texturedFormFor.
+    outputKnob.setTexturedForm (ui::Knob::TexturedForm::onePiece);
+
     for (auto* k : { &densityKnob, &erSpreadKnob, &erHiCutKnob, &variationKnob, &feedKnob, &sizeKnob,
                      &preDelayKnob, &widthKnob, &modRateKnob, &dampLoKnob, &dampHiKnob, &modDepthKnob,
                      &inHiCutKnob, &outputKnob, &decayKnob })
@@ -1474,6 +1479,14 @@ ReverbPanel::ReverbPanel (ui::ModuleContext ctx)
         k->setKnobSide (kKnobSide);
         k->setCaptionSize (kCaptionSize);
     }
+
+    // VARIATION is seven positions, not an amount -- Var 0 to Var 6, a
+    // stepped float with a step of one, and Var 6 a different construction
+    // rather than more of Var 5 (params.h). So its face says seven places, as
+    // BMO FET's ATTACK and RELEASE do, numbered 0, 2, 4, 6 from the positions'
+    // own names, rather than eleven dots that the knob never stops on. Frosty,
+    // 2026-09-27.
+    variationKnob.setStepMarks (7, 2, 0);
 
     // **The terse legend on the ring and the full names on the lane.** A legend
     // label sits in a 38 x 15 px box and "Bandpass" does not fit in one; a DAW's
@@ -1815,8 +1828,7 @@ void ReverbPanel::paintPanel (juce::Graphics& g)
     g.setColour (t.well);
     g.fillRoundedRectangle (bezelBox.toFloat(), ui::Tokens::corner);
     g.setColour (ui::tokens().outline);
-    g.drawRoundedRectangle (bezelBox.toFloat().reduced (0.5f), ui::Tokens::corner,
-                            ui::Tokens::hairlineWeight);
+    ui::strokeInside (g, bezelBox.toFloat(), ui::Tokens::corner, ui::Tokens::hairlineWeight);
 
     // The reading for the page that is showing. Small, printed, and the only
     // number on this panel outside DECAY and the three faders.

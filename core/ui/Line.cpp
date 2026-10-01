@@ -96,6 +96,18 @@ const Line& ltvLine()
     return line;
 }
 
+PlateFinish finishFor (const Line& line)
+{
+    switch (finishChoice())
+    {
+        case FinishChoice::brushed: return PlateFinish::brushed;
+        case FinishChoice::powder:  return PlateFinish::powder;
+        case FinishChoice::house:   break;
+    }
+
+    return line.finish;
+}
+
 std::optional<juce::Colour> inkFor (const Line& line)
 {
     if (! line.ownsGround())

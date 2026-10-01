@@ -1,4 +1,5 @@
 #include "DeesserPanel.h"
+#include "modules/deesser/panel/Screen.h"
 #include "modules/deesser/params.h"
 
 namespace bmo::deesser
@@ -141,14 +142,11 @@ float BandSketch::responseDbAt (float hz) const noexcept
 
 void BandSketch::paint (juce::Graphics& g)
 {
-    const auto t = ui::panelTokensFor (*this);
     const auto bounds = getLocalBounds().toFloat();
-    const auto plot = bounds.reduced (1.0f);
 
-    // A recess, like every other ground cut into a faceplate. panelTokensFor
-    // rather than tokens(), so an LTV plate would move the well with it.
-    g.setColour (t.well);
-    g.fillRoundedRectangle (bounds, 3.0f);
+    // A screen, as BMO Linger's is: see Screen.h.
+    const auto face = Screen::paint (g, *this, bounds);
+    const auto plot = face.reduced (1.0f);
 
     const auto xFor = [&plot] (float hz)
     {
@@ -166,14 +164,13 @@ void BandSketch::paint (juce::Graphics& g)
 
     // Unity, so the depth of the cut is read against something rather than
     // guessed at from the height of the box.
-    g.setColour (ui::tokens().hairline);
+    g.setColour (Screen::baseline());
     g.fillRect (juce::Rectangle<float> (plot.getX(), zero, plot.getWidth(),
                                         ui::Tokens::hairlineWeight));
 
-    // The band, legible against the well it is drawn on rather than trusted to
-    // be -- the well is pale in one appearance and dark in the other, and the
-    // raw accent cannot clear both. See modules/AGENTS.md: no hex in a panel.
-    const auto ink = ui::accentInk (accent, t.well);
+    // The band, derived against the face it is drawn on rather than trusted
+    // to be legible there. See modules/AGENTS.md: no hex in a panel.
+    const auto ink = Screen::ink (accent);
 
     juce::Path curve;
 
@@ -220,8 +217,7 @@ void BandSketch::paint (juce::Graphics& g)
     g.setColour (ink);
     g.strokePath (curve, juce::PathStrokeType (1.6f));
 
-    g.setColour (ui::tokens().outline);
-    g.drawRoundedRectangle (bounds.reduced (0.5f), 3.0f, ui::Tokens::hairlineWeight);
+    Screen::paintEdge (g, face);
 }
 
 //==============================================================================

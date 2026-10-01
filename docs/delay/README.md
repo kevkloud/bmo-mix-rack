@@ -71,9 +71,9 @@ by dispatched agents on AURORA, 2026-09-20, under `HANDOFF-groundwork.md`.
     delay would be fixed, which defeats the point of an emphasis path.
 16. **The accent is the orchid `#f094e6`** (2026-09-21), measured 6.49:1 dark
     and 1.81:1 pale off a render. It spends the last wide hue arc in the rack.
-    **Superseded 2026-10-01: Pikachu yellow `#f8d030`**, with a charcoal
-    light-ground ink and cheek-red gates, after BMO Linger merged 2.1 degrees
-    from the orchid. `products/AGENTS.md` has the row.
+    **Superseded 2026-10-01: jade `#46c988`**, after BMO Linger merged 2.1
+    degrees from the orchid (and a same-day detour through Pikachu yellow).
+    `products/AGENTS.md` has the row.
 
 ## Decided (Frosty, 2026-09-21, second pass) — the table is settled
 

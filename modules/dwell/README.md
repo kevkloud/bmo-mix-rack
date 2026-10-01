@@ -32,8 +32,7 @@ dsp/
   DspCore.h/.cpp           parameters in real units; one engine, held twice
   DwellDsp.h               the ModuleDsp adapter, and the zero-latency rule
 presets/FactoryPresets.h Init only, until the module has a sound to preset
-Module.h/.cpp            the ModuleDef: accent #f8d030 (Pikachu), its light-ground
-                         ink and its gate red; one width, 380
+Module.h/.cpp            the ModuleDef: accent #46c988 (jade); one width, 380
 panel/                   BMO Linger's paged handheld: a screen with TONE / LANE /
                          FX tabs, the page's controls, and a foot that never changes
 dsp/GainLaws.h           the two loop-gain laws, shared by the engine and the screen

@@ -1134,21 +1134,13 @@ void checkDwellPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
     check (! panel.getContext().def.isExpandable(), who + " a paged module has nothing to expand into");
     checkEquals (panel.getContext().def.expandedWidth, 0, who + " declares no second width");
 
-    //== The light-ground ink is declared, and legible ========================
+    //== Suite inks: Dwell declares no light-ground ink of its own ===========
     //
-    // Charcoal, in place of the olive `accentInk` derives from Pikachu yellow
-    // (modules/dwell/Module.h, kLightInk). Declared from module(), so it exists
-    // by the time a panel does; and it has to clear the 4.5:1 every derived
-    // ink is held to on the light plate.
-    {
-        const auto ink = bmo::ui::declaredLightInk (panel.getContext().def.accent);
-
-        check (! ink.isTransparent(), who + " declares no light-ground ink");
-        check (bmo::ui::contrastRatio (ink, juce::Colour (0xffefefef)) >= 4.5f,
-               who + " the light-ground ink reads at "
-                   + juce::String (bmo::ui::contrastRatio (ink, juce::Colour (0xffefefef)), 2)
-                   + ":1 on the light plate, under 4.5");
-    }
+    // Jade, on the inks the suite derives (Frosty, 2026-10-01). Dwell carried
+    // a declared charcoal for a few hours under Pikachu yellow; the mechanism
+    // stays in core for themes, and this says Dwell is not using it.
+    check (bmo::ui::declaredLightInk (panel.getContext().def.accent).isTransparent(),
+           who + " declares a light-ground ink; jade is meant to run on the derived one");
 
     //== The captions, page by page, written out ==============================
     const char* const foot[] { "TIME", "FEEDBACK", "MIX", "SYNC" };

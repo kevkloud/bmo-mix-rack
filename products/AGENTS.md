@@ -151,42 +151,32 @@ and 840 with an arrow on its own panel, until 2026-10-01; it is now BMO
 Linger's paged handheld at one width, 380, like Linger itself -- see
 `modules/dwell/AGENTS.md`. **DEQ is the only module with two widths.**
 
-**BMO Dwell is Pikachu yellow `#f8d030`, an owner-approved exception to the
-contrast band** (Frosty, 2026-10-01). It held the orchid `#f094e6` from
-2026-09-21 until BMO Linger merged at `#e694e0`, 2.1 degrees away; in a rack
-render the two read as one pink, and Dwell, unshipped, was the one to move.
-Jade, indigo, violet, BMO Opto's neutral and an in-band mustard `#d8ae06` were
-rendered beside it; Frosty took the true yellow.
+**BMO Dwell is jade `#46c988`, inside the band and on the suite's own inks**
+(Frosty, 2026-10-01): **6.42:1** on `#2e2e32` and **1.83:1** on `#efefef`,
+measured off a rendered knob face with `Inspect.exe`. Its light-mode ink is the
+derived one (`#2a7851` on the pale plate), its lit buttons take the accent and
+its choice rows the utility azure, as every module's do.
 
-**It breaks the band, knowingly**: measured off a rendered knob face with
-`Inspect.exe`, **9.05:1** on `#2e2e32` against a shipped 5.87-7.19, and
-**1.30:1** on `#efefef` against 1.64-2.00 -- BMO Tune RT's lime is the only
-other accent that bright, and Tune is not in the rack. At 48.0 degrees it is
-16.3 from BMO Saturator's orange, the nearest neighbour; the renders read them
-apart without trouble.
+**It is the rack's tightest new pair, and that is known.** At 150.0 degrees it
+sits in the widest gap left -- 21.1 from BMO Util's green and 22.0 from BMO
+DEQ's teal -- under the 26.8 the teal and the utility azure already live with.
+On the dark plate the renders read it apart from both; on the pale plate the
+three greens read close. Chosen anyway, side by side with Util, over the
+alternative below.
 
-**Two inks of its own go with it, and neither is a hex in the panel:**
+**How it got here, so it is not walked again.** The orchid `#f094e6`
+(2026-09-21) until BMO Linger merged at `#e694e0`, 2.1 degrees away. Then, the
+same day, **Pikachu yellow `#f8d030`** -- 9.05 / 1.30, out of band at both ends
+-- with a declared charcoal light-mode ink and cheek-red buttons, built,
+committed and reverted for jade on a side-by-side render. Indigo `#baa8f8` read
+as Dimension's lavender, violet `#e198f4` as Linger's family, and an in-band
+mustard `#d8ae06` lost what made the yellow worth having. The olive-gold
+`#b2bb54` and the pale gold `#e6e278` stay rejected.
 
-- **Charcoal `#3a3a3e` on a light ground** (9.85:1), declared through
-  `ui::declareLightInk`, because the ink `accentInk` derives from a yellow is
-  olive and Frosty turned it down against amber, deep brown and cheek red.
-  Every caption, dotted track, mark and legend on the light plate takes it;
-  the dark plate keeps the yellow. Dwell is the first module to declare one.
-- **Cheek red `#b3261e` on its lit buttons** -- SEND, HOLD, CHOP, FX, ON and
-  LINK, and their glow -- in both appearances. 5.68:1 on the light plate but
-  **2.07:1 on the dark**, so a lit button there reads by its glow and its
-  label rather than by its edge. Recorded, not hidden.
-
-**And its choice rows are not the utility azure.** The top button row of each
-page is red -- CHARACTER, the lane's gates, the main FX types -- and STEREO and
-the lane's FX types light in the yellow. Dwell is the one module whose
-selection rows are not `switchAlt`. While FX LINK holds the lane's FX to the
-main delay's, they show the yellow **dimmed by transparency**, not stepped
-toward grey, which turned it olive. `modules/dwell/Module.h` carries all three colours and why.
-
-Two golds are still out: the olive-gold `#b2bb54` ("i hate this color") and the
-pale gold `#e6e278`. Pikachu yellow is neither -- it is brighter and warmer
-than both -- and was asked for by name.
+**`ui::declareLightInk` stays in core** -- an accent may name its own ink on a
+light ground, for every caption, track, mark and legend `accentInk` colours --
+because themes will want it. No module declares one today, and
+`tests/ui/LayoutTests.cpp` checks that Dwell does not.
 
 **"Dwell" is cleared to ship on a USPTO search alone** (`docs/delay/20`):
 no live mark in audio software or musical instruments; the nearest live class 9
@@ -415,7 +405,7 @@ there are distinguishable ones.
 | *(not an accent)* utility azure `#4fb8e8` | | 198.8° | 6.02 | -- |
 | BMO DEQ | `#5ecfc0` teal | 172.0° | **7.19** | 1.64 |
 | BMO Defang | `#ea9f9a` muted coral | 3.8° | 6.39 | 1.84 |
-| BMO Dwell -- **an owner-approved exception to the contrast band** | `#f8d030` Pikachu yellow | 48.0° | **9.05** | **1.30** |
+| BMO Dwell | `#46c988` jade | 150.0° | 6.42 | 1.83 |
 | BMO Linger | `#e694e0` mauve-orchid | 304.4° | 6.23 | 1.89 |
 | BMO Tune RT (not in the rack) | `#b6e35d` lime | 80.1° | **9.10** | **1.29** |
 | LTV Comp -- **unsigned, and on the LTV ground** | `#a2a8ff` periwinkle | 236.1° | 6.17 | 1.91 |

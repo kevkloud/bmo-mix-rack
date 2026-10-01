@@ -583,14 +583,14 @@ DwellPanel::DwellPanel (ui::ModuleContext ctx)
       modRate  (context.params.param (Index::modRate),  "RATE",   ui::Knob::Style::character, kPageFace, context.def.accent),
       modDepth (context.params.param (Index::modDepth), "DEPTH",  ui::Knob::Style::character, kPageFace, context.def.accent),
       duck     (context.params.param (Index::duck),     "DUCK",   context.def.accent),
-      sendHeld (context.params.param (Index::send),     "SEND", juce::Colour (kGateColour)),
-      hold     (context.params.param (Index::hold),     "HOLD", juce::Colour (kGateColour)),
-      chop     (context.params.param (Index::chop),     "CHOP", juce::Colour (kGateColour)),
+      sendHeld (context.params.param (Index::send),     "SEND", context.def.accent),
+      hold     (context.params.param (Index::hold),     "HOLD", context.def.accent),
+      chop     (context.params.param (Index::chop),     "CHOP", context.def.accent),
       // **ON, not FX.** It sits on the LANE page beside the lane's AMOUNT,
       // under the lane's own type row; "FX" there would read as the main
       // delay's gate, which has its own page. Component name LANE FX.
-      laneFx   (context.params.param (Index::laneFx),   "ON",   juce::Colour (kGateColour)),
-      fxLink   (context.params.param (Index::fxLink),   "LINK", juce::Colour (kGateColour)),
+      laneFx   (context.params.param (Index::laneFx),   "ON",   context.def.accent),
+      fxLink   (context.params.param (Index::fxLink),   "LINK", context.def.accent),
       laneGain  (context.params.param (Index::laneGain),  "TAIL",  ui::Knob::Style::character, kPageFace, context.def.accent),
       laneTime  (context.params.param (Index::laneTime),  "TIME",  ui::Knob::Style::character, kPageFace, context.def.accent),
       // The lane's sync division, in LANE TIME's cell while SYNC is on, exactly
@@ -598,26 +598,26 @@ DwellPanel::DwellPanel (ui::ModuleContext ctx)
       // (params.h), so the two swap together.
       laneNote  (context.params.param (Index::laneNote),  "NOTE",  ui::Knob::Style::character, kPageFace, context.def.accent),
       laneLevel (context.params.param (Index::laneLevel), "LEVEL", ui::Knob::Style::character, kPageFace, context.def.accent),
-      fx       (context.params.param (Index::fx),       "FX",   juce::Colour (kGateColour)),
+      fx       (context.params.param (Index::fx),       "FX",   context.def.accent),
       screen   (context.params, context.def.accent, context.gainReductionDb)
 {
     character = std::make_unique<ChoiceRow> (context.params.param (Index::character),
                                              juce::StringArray { "CLEAN", "TAPE", "BUCKET" },
-                                             juce::Colour (kGateColour), 13.0f, 3, kSwitchGap);
+                                             ui::tokens().switchAlt, 13.0f, 3, kSwitchGap);
 
     stereo = std::make_unique<ChoiceRow> (context.params.param (Index::stereo),
                                           juce::StringArray { "STEREO", "PING-PONG", "DUAL" },
-                                          context.def.accent, 12.0f, 3, kSwitchGap);
+                                          ui::tokens().switchAlt, 12.0f, 3, kSwitchGap);
 
     fxType = std::make_unique<ChoiceRow> (context.params.param (Index::fxType),
                                           fxTypeLabels(),
-                                          juce::Colour (kGateColour), 12.0f, 3, kSwitchGap);
+                                          ui::tokens().switchAlt, 12.0f, 3, kSwitchGap);
 
     // The lane's cells: the same words off the same list, with prefixed
     // component names. See ChoiceRow's class comment.
     laneFxType = std::make_unique<ChoiceRow> (context.params.param (Index::laneFxType),
                                               fxTypeLabels(),
-                                              context.def.accent, 12.0f, 3, kSwitchGap, "LANE");
+                                              ui::tokens().switchAlt, 12.0f, 3, kSwitchGap, "LANE");
 
     laneGain.setName  ("LANE TAIL");
     laneTime.setName  ("LANE TIME");
@@ -803,16 +803,14 @@ void DwellPanel::refreshFxLinkFollowing()
     // **Dimmed, not switched off.** The disabled look in this suite means "this
     // stage is not running", which a followed control is not -- it is running,
     // on the main delay's numbers. So the accent is dimmed by transparency
-    // (kFollowAlpha): the same yellow, quieter. It used to step toward the
-    // hairline grey, which turns a yellow olive (Frosty, 2026-10-01: "dim
-    // instead of grey"). Module.cpp declares the light-ground ink for the
-    // dimmed colour as well, so the caption stays charcoal.
+    // (kFollowAlpha): the same accent, quieter, rather than a step toward the
+    // hairline grey (Frosty, 2026-10-01: "dim instead of grey").
     const auto followed = context.def.accent.withAlpha (kFollowAlpha);
     const auto own      = context.def.accent;
     const auto linked   = context.params.getReal (Index::fxLink) > 0.5f;
 
     if (laneFxType != nullptr)
-        laneFxType->setRowTint (linked ? followed : own);
+        laneFxType->setRowTint (linked ? followed : ui::tokens().switchAlt);
 
     if (laneFxAmount != nullptr)
         laneFxAmount->setAccent (linked ? followed : own);
@@ -1040,7 +1038,7 @@ void DwellPanel::paintPanel (juce::Graphics& g)
         if (! lit || c.getBounds().isEmpty() || c.getParentComponent() != this)
             return;
 
-        const juce::DropShadow bloom { juce::Colour (kGateColour).withAlpha (0.55f), 14, {} };
+        const juce::DropShadow bloom { accent.withAlpha (0.55f), 14, {} };
         bloom.drawForRectangle (g, c.getBounds());
     };
 

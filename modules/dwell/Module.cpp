@@ -7,22 +7,21 @@
 namespace bmo::dwell
 {
 
-/** **Pikachu yellow** (DECIDED, Frosty 2026-10-01), an owner-approved exception
-    to the contrast band: measured off a rendered knob face at 9.05:1 on the
-    dark plate `#2e2e32` and 1.30:1 on the pale `#efefef`, against a shipped
-    5.87-7.19 and 1.64-2.00. `products/AGENTS.md` carries the row and the
-    argument.
+/** **Jade** (DECIDED, Frosty 2026-10-01), inside the suite's band and on the
+    suite's own inks: the light-mode ink is the one `ui::accentInk` derives, the
+    lit buttons take the accent and the choice rows the shared azure, as every
+    module's do. Hue 150.0, in the widest gap left in the rack -- 21.1 degrees
+    from BMO Util's green and 22.0 from BMO DEQ's teal, which makes it the
+    tightest pair after the teal and the utility azure's 26.8, and on the light
+    plate the three read close. `products/AGENTS.md` carries the row.
 
-    It replaced the orchid `#f094e6` (2026-09-21), which BMO Linger's
-    `#e694e0` landed 2.1 degrees from when it merged -- in a rack the two read
-    as one pink, and Dwell was the unshipped one. Jade, indigo, violet, BMO
-    Opto's neutral and an in-band mustard were rendered beside it first.
-
-    Two colours go with it, in `Module.h`: `kLightInk`, the charcoal every ink
-    on a light ground takes instead of the olive `ui::accentInk` would derive
-    from a yellow (declared below, in `module()`), and `kGateColour`, the
-    cheek red of the lit buttons. Nothing in the panel names a hex. */
-inline constexpr juce::uint32 kAccent = 0xfff8d030;
+    The road here, so it is not walked again: the orchid `#f094e6`
+    (2026-09-21) until BMO Linger merged at `#e694e0`, 2.1 degrees away; then,
+    the same day, Pikachu yellow `#f8d030` with a charcoal light-mode ink and
+    cheek-red buttons, built and committed and then reverted for this on a
+    side-by-side render. The machinery that made the yellow possible stays in
+    core -- `ui::declareLightInk` -- for themes. */
+inline constexpr juce::uint32 kAccent = 0xff46c988;
 
 const ModuleDef& module()
 {
@@ -46,17 +45,6 @@ const ModuleDef& module()
     // FEEDBACK is the one caption that does not fit one at 15 pt -- it
     // measures about 125 -- so the foot's trio takes uneven cells. See
     // `DwellPanel`.
-    // The light-ground ink, declared before anything can paint. See kLightInk
-    // in Module.h and ui::declareLightInk.
-    // Twice: the accent, and the accent dimmed for the lane's linked FX
-    // (kFollowAlpha), which is a different colour to the lookup.
-    static const bool inkDeclared = [] {
-        ui::declareLightInk (juce::Colour (kAccent), juce::Colour (kLightInk));
-        ui::declareLightInk (juce::Colour (kAccent).withAlpha (kFollowAlpha), juce::Colour (kLightInk));
-        return true;
-    }();
-    juce::ignoreUnused (inkDeclared);
-
     static const ModuleDef def {
         kModuleId, kModuleName, kSchemaVersion,
         380, juce::Colour (kAccent),

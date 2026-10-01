@@ -186,26 +186,18 @@ did not.
 
 ## The accent is decided
 
-**The accent is Pikachu yellow `#f8d030`** (DECIDED, Frosty 2026-10-01), an
-owner-approved exception to the contrast band at 9.05:1 dark and 1.30:1 pale.
-It replaced the orchid `#f094e6` (2026-09-21) when BMO Linger merged at
-`#e694e0`, 2.1 degrees away. `products/AGENTS.md` carries the allocation row and
-the full argument.
+**The accent is jade `#46c988`** (DECIDED, Frosty 2026-10-01), inside the band at
+6.42:1 dark and 1.83:1 pale, on the suite's own inks: the derived light-mode
+ink, lit buttons in the accent, choice rows in the utility azure.
+`products/AGENTS.md` carries the row, the neighbours (21.1 degrees from Util's
+green, 22.0 from DEQ's teal -- known, and chosen on a side-by-side render) and
+the road through the orchid and Pikachu yellow that led here.
 
-Three colours, all in `Module.h`/`Module.cpp`, and **nothing in the panel names
-a hex**:
-
-- `kAccent` — the yellow: knob faces, the screen's ink, and the lit cell of
-  STEREO and the lane's FX types (not the utility azure — Frosty's call),
-  dimmed by `kFollowAlpha` while FX LINK is on.
-- `kLightInk` — charcoal `#3a3a3e`, declared through `ui::declareLightInk`, so
-  every caption, track, mark and legend on a light ground is charcoal rather
-  than the olive `accentInk` would derive. The dark plate keeps the yellow.
-- `kGateColour` — cheek red `#b3261e` for SEND, HOLD, CHOP, FX, ON and LINK and
-  their glow, and for the top button row of every page (CHARACTER, the gates,
-  the main FX types), in both appearances.
-
-The olive-gold `#b2bb54` and the pale gold `#e6e278` stay rejected.
+`Module.cpp` carries it as `kAccent`, and **nothing in the panel names a hex**.
+`Module.h` carries one style constant, `kFollowAlpha`: the lane's FX row and
+AMOUNT are dimmed by transparency while FX LINK holds them, not stepped toward
+grey. `ui::declareLightInk` stays in core for themes; Dwell does not use it,
+and the layout test says so.
 
 ## What stage 1 is not
 

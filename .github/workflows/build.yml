@@ -131,11 +131,29 @@ jobs:
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
 
+      # Two settings, both from measurements taken on 2026-10-01.
+      #
+      # max-size: the Windows cache was 99.4 to 99.99 % full at 800M on every
+      # run, which means one whole build's objects just about fit and the next
+      # module will not. Past that point the cache evicts entries it wrote
+      # earlier in the same build and the hit rate falls for good. 1200M is
+      # room for the suite to grow; macOS uses about 160M and is unaffected.
+      #
+      # save: only a push saves a cache; a pull request restores and does not
+      # save. Every run used to save a fresh timestamped archive, about 755 MB
+      # on Windows, and the repository was at 10.6 GB of GitHub's 10 GB cache
+      # allowance, so archives were being evicted to make room for ones nobody
+      # would read. A pull request still starts from main's latest cache. What
+      # it gives up is its own second run restoring its own first, which was
+      # worth at most the gap between a 77 % and a 97 % hit rate -- and the
+      # Build step took 36 to 49 minutes at 97 % either way, because most of
+      # it is link-time work no compiler cache can serve.
       - name: Compiler cache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
           key: ${{ matrix.name }}
-          max-size: 800M
+          max-size: 1200M
+          save: ${{ github.event_name != 'pull_request' }}
 
       - name: Configure
         shell: bash

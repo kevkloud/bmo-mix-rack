@@ -38,7 +38,7 @@ Nothing was wrong. The old figures describe a panel that no longer exists.
 
 | | |
 |---|---|
-| machine | AURORA (the laptop), user folder `C:\Users\thesp` |
+| machine | AURORA (the laptop) |
 | date | 2026-10-01 |
 | tree rendered | `17593e2`, branch `frosty-host-tempo-plumbing` |
 | stands for | `main` at `a531a13` (merge of #30, which carries #28) |

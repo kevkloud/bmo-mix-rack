@@ -167,12 +167,18 @@ jobs:
       # worth at most the gap between a 77 % and a 97 % hit rate -- and the
       # Build step took 36 to 49 minutes at 97 % either way, because most of
       # it is link-time work no compiler cache can serve.
+      #
+      # And only a push that built without link-time optimisation, which is a
+      # push to main. A tag or a hand-started run restores main's cache too --
+      # the modules, tests and tools compile the same either way and are
+      # served from it; only the plugin targets' own files differ -- but a
+      # cache it saved would sit under a ref nothing else can read from.
       - name: Compiler cache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
           key: ${{ matrix.name }}
           max-size: 1200M
-          save: ${{ github.event_name != 'pull_request' }}
+          save: ${{ github.event_name == 'push' && env.BMO_LTO == 'OFF' }}
 
       - name: Configure
         shell: bash

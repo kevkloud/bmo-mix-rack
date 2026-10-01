@@ -22,11 +22,15 @@
     everything the engine will be built on top of already agrees with itself.
 */
 
+#include "modules/reverb/dsp/ImageSource.h"
 #include "modules/reverb/dsp/ReverbDsp.h"
 #include "modules/reverb/dsp/TapTables.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
+#include <functional>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -55,6 +59,305 @@ namespace
             v.push_back (s.def);
 
         return v;
+    }
+
+    //== Rendering the early reflections =======================================
+
+    struct Ir
+    {
+        std::vector<float> l, r;
+        double rate = 48000.0;
+
+        int    size() const noexcept { return (int) l.size(); }
+        float  energy (int from, int to) const noexcept
+        {
+            float e = 0.0f;
+            for (int i = std::max (0, from); i < std::min (to, size()); ++i)
+                e += l[(size_t) i] * l[(size_t) i] + r[(size_t) i] * r[(size_t) i];
+            return e;
+        }
+        int msToSamples (float ms) const noexcept { return (int) std::lround (ms * 0.001 * rate); }
+    };
+
+    /** The ER-only condition every rule in 11 section 6's ER block is written
+        in: REVERB off, ER at 0 dB, MIX 100 %, OUTPUT 0 dB, ER HI-CUT open.
+        `edit` then moves whatever the test is about. A pre-roll of 300 ms of
+        silence lets every smoothed gain, the density weighting and any
+        crossfade a parameter change started settle before the impulse. */
+    Ir render (const std::function<void (std::vector<float>&)>& edit,
+               double rate = 48000.0, int block = 512, float seconds = 0.6f, int channels = 2)
+    {
+        auto v = defaults();
+        v[Index::verblevel] = -40.0f;
+        v[Index::erlevel]   = 0.0f;
+        v[Index::mix]       = 100.0f;
+        v[Index::output]    = 0.0f;
+        v[Index::erhicut]   = 20000.0f;
+        v[Index::erdensity] = 0.0f;
+        v[Index::ervariation] = 0.0f;
+        edit (v);
+
+        ReverbDsp dsp;
+        dsp.prepare (rate, block, channels);
+        dsp.setParams (v.data(), (int) v.size());
+
+        const auto preroll = (int) (0.3 * rate);
+        const auto n       = (int) (seconds * rate);
+
+        std::vector<float> l ((size_t) (preroll + n), 0.0f), r ((size_t) (preroll + n), 0.0f);
+        l[(size_t) preroll] = 1.0f;
+        r[(size_t) preroll] = 1.0f;
+
+        for (int at = 0; at < preroll + n; at += block)
+        {
+            const auto count = std::min (block, preroll + n - at);
+            float* chans[] { l.data() + at, r.data() + at };
+            dsp.setParams (v.data(), (int) v.size());
+            dsp.process (chans, channels, count);
+        }
+
+        Ir ir;
+        ir.rate = rate;
+        ir.l.assign (l.begin() + preroll, l.end());
+        ir.r.assign (channels > 1 ? r.begin() + preroll : l.begin() + preroll, channels > 1 ? r.end() : l.end());
+        return ir;
+    }
+
+    /** A tap as measured off an IR: the sample where |l| + |r| peaks inside
+        `window` samples after `from`, and its gain as the constant-power sum
+        of the two channels' DC sums over that window -- the one-pole band
+        filters have unity DC gain, so the sum recovers the table's gain
+        while the peak alone would be attenuated by the filter. */
+    struct Measured { int sample; float gain; };
+
+    Measured measureTap (const Ir& ir, int from, int to)
+    {
+        int best = from;
+        float peak = -1.0f;
+        float sumL = 0.0f, sumR = 0.0f;
+
+        for (int i = from; i < std::min (to, ir.size()); ++i)
+        {
+            const auto a = std::abs (ir.l[(size_t) i]) + std::abs (ir.r[(size_t) i]);
+            if (a > peak) { peak = a; best = i; }
+            sumL += ir.l[(size_t) i];
+            sumR += ir.r[(size_t) i];
+        }
+
+        return { best, std::sqrt (sumL * sumL + sumR * sumR) };
+    }
+
+    float db (float x) { return 20.0f * std::log10 (std::max (x, 1.0e-12f)); }
+
+    /** L/R correlation of the ER bus over its span. */
+    float correlation (const Ir& ir, int to)
+    {
+        double lr = 0.0, ll = 0.0, rr = 0.0;
+        for (int i = 0; i < std::min (to, ir.size()); ++i)
+        {
+            lr += ir.l[(size_t) i] * ir.r[(size_t) i];
+            ll += ir.l[(size_t) i] * ir.l[(size_t) i];
+            rr += ir.r[(size_t) i] * ir.r[(size_t) i];
+        }
+        return ll > 0.0 && rr > 0.0 ? (float) (lr / std::sqrt (ll * rr)) : 0.0f;
+    }
+
+    /** Magnitude of the mono IR at one frequency, by direct summation. */
+    double magnitudeAt (const Ir& ir, double hz, int to)
+    {
+        double re = 0.0, im = 0.0;
+        const auto w = 2.0 * 3.14159265358979 * hz / ir.rate;
+        for (int i = 0; i < std::min (to, ir.size()); ++i)
+        {
+            const auto m = 0.5 * (ir.l[(size_t) i] + ir.r[(size_t) i]);
+            re += m * std::cos (w * i);
+            im -= m * std::sin (w * i);
+        }
+        return std::sqrt (re * re + im * im);
+    }
+
+    /** 1/3-octave smoothed magnitude in dB: the power mean over nine
+        frequencies spanning the band. */
+    double thirdOctaveDb (const Ir& ir, double centreHz, int to)
+    {
+        double p = 0.0;
+        for (int k = -4; k <= 4; ++k)
+        {
+            const auto f = centreHz * std::pow (2.0, (double) k / 24.0);
+            const auto m = magnitudeAt (ir, f, to);
+            p += m * m;
+        }
+        return 10.0 * std::log10 (std::max (p / 9.0, 1.0e-24));
+    }
+
+    /** What `stepRatioAcross` measured, and how many times the edit it was
+        asked to measure actually ran. `settled` is the largest step over the
+        last quarter second against the same first-half figure: the new
+        setting's own level, so a ratio near it is the level moving and not a
+        click. Printed, not asserted. */
+    struct StepRatio { float ratio; int edits; float settled; };
+
+    /** Runs a steady 1 kHz sine through the module while `edit` is applied
+        at the halfway point, and returns the largest sample-to-sample step
+        in the output over the second half relative to the largest over the
+        first -- a click is a step the signal did not have before.
+
+        **The edit lands on the first block boundary at or after the halfway
+        point**, and the count of edits comes back with the ratio. Until the
+        2026-09-30 review it was applied only when a block started exactly
+        at 24000, and with 256-sample blocks none does: the edit never ran in
+        940 block iterations, and all five "does not click" checks were
+        comparing a steady sine with itself. */
+    StepRatio stepRatioAcross (const std::function<void (std::vector<float>&)>& setup,
+                               const std::function<void (std::vector<float>&)>& edit)
+    {
+        auto v = defaults();
+        v[Index::verblevel] = -40.0f;
+        v[Index::erlevel]   = 0.0f;
+        v[Index::mix]       = 100.0f;
+        setup (v);
+
+        ReverbDsp dsp;
+        dsp.prepare (48000.0, 256, 2);
+        dsp.setParams (v.data(), (int) v.size());
+
+        constexpr int total = 48000;
+        std::vector<float> l ((size_t) total), r ((size_t) total);
+        for (int i = 0; i < total; ++i)
+            l[(size_t) i] = r[(size_t) i] = 0.5f * std::sin (2.0f * 3.14159265f * 1000.0f * (float) i / 48000.0f);
+
+        float before = 0.0f, after = 0.0f, settled = 0.0f;
+        int edits = 0;
+
+        for (int at = 0; at < total; at += 256)
+        {
+            if (edits == 0 && at >= total / 2)
+            {
+                edit (v);
+                ++edits;
+            }
+
+            float* chans[] { l.data() + at, r.data() + at };
+            dsp.setParams (v.data(), (int) v.size());
+            dsp.process (chans, 2, std::min (256, total - at));
+        }
+
+        for (int i = 1; i < total; ++i)
+        {
+            const auto step = std::abs (l[(size_t) i] - l[(size_t) i - 1]);
+            if (i < total / 2 && i > 12000) before = std::max (before, step);
+            if (i >= total / 2) after = std::max (after, step);
+            if (i >= total - 12000) settled = std::max (settled, step);
+        }
+
+        return { before > 0.0f ? after / before : 0.0f, edits, before > 0.0f ? settled / before : 0.0f };
+    }
+
+    //== Steady noise through the module ======================================
+    //
+    // The review of PR #27 (2026-09-30) found the ER going permanently silent
+    // on paths the impulse renders above never take: a second prepare(), a
+    // first block longer than the TYPE dip, a TYPE change at a large block. An
+    // impulse can land in a silent stretch and say nothing, so these run a
+    // fixed white noise instead -- every tap is busy on every sample, and an
+    // exact zero on the output means a silent table, not a quiet input.
+
+    /** The setting the review reproduced every silence in: Taps, DENSITY 50,
+        VARIATION 4, ER at 0 dB, REVERB off, MIX 100 %. */
+    std::vector<float> erOnly (int type)
+    {
+        auto v = defaults();
+        v[Index::type]        = (float) type;
+        v[Index::ermode]      = (float) taps;
+        v[Index::erdensity]   = 50.0f;
+        v[Index::ervariation] = 4.0f;
+        v[Index::erlevel]     = 0.0f;
+        v[Index::verblevel]   = -40.0f;
+        v[Index::mix]         = 100.0f;
+        return v;
+    }
+
+    /** Sample `n` of a fixed white noise in -0.5..0.5, hashed from its index
+        so that two instances fed "the same samples" really are, whatever
+        block size or start point each one ran with. */
+    float noiseAt (int n)
+    {
+        auto x = (std::uint32_t) n * 2654435761u + 0x9e3779b9u;
+        x ^= x >> 15; x *= 0x2c1b3c6du;
+        x ^= x >> 12; x *= 0x297a2d39u;
+        x ^= x >> 15;
+        return (float) ((double) x / 4294967296.0 - 0.5);
+    }
+
+    struct Stereo { std::vector<float> l, r; };
+
+    /** Runs samples [from, to) of the noise through `dsp` in blocks of
+        `block`, calling `before (at)` ahead of each block -- where a test
+        moves a parameter -- and appends what comes out to `out`. `silent`
+        feeds zeros over the same span instead. */
+    void runNoise (ReverbDsp& dsp, Stereo& out, int from, int to, int block,
+                   const std::function<void (int)>& before = {}, bool silent = false)
+    {
+        std::vector<float> l ((size_t) block), r ((size_t) block);
+
+        for (int at = from; at < to; at += block)
+        {
+            const auto n = std::min (block, to - at);
+
+            if (before)
+                before (at);
+
+            for (int i = 0; i < n; ++i)
+                l[(size_t) i] = r[(size_t) i] = silent ? 0.0f : noiseAt (at + i);
+
+            float* chans[] { l.data(), r.data() };
+            dsp.process (chans, 2, n);
+
+            out.l.insert (out.l.end(), l.begin(), l.begin() + n);
+            out.r.insert (out.r.end(), r.begin(), r.begin() + n);
+        }
+    }
+
+    /** Mean power of both channels over [from, to), in dB; -300 for silence. */
+    double powerDb (const Stereo& s, int from, int to)
+    {
+        double p = 0.0;
+        for (int i = from; i < to; ++i)
+            p += (double) s.l[(size_t) i] * s.l[(size_t) i] + (double) s.r[(size_t) i] * s.r[(size_t) i];
+        p /= 2.0 * (double) std::max (1, to - from);
+        return p > 0.0 ? 10.0 * std::log10 (p) : -300.0;
+    }
+
+    /** The power of a - b over [from, to) against the power of a, in dB:
+        how far two renders that should be the same sample for sample are
+        from it. */
+    double residualDb (const Stereo& a, const Stereo& b, int from, int to)
+    {
+        double d = 0.0, p = 0.0;
+        for (int i = from; i < to; ++i)
+        {
+            const auto dl = (double) a.l[(size_t) i] - b.l[(size_t) i];
+            const auto dr = (double) a.r[(size_t) i] - b.r[(size_t) i];
+            d += dl * dl + dr * dr;
+            p += (double) a.l[(size_t) i] * a.l[(size_t) i] + (double) a.r[(size_t) i] * a.r[(size_t) i];
+        }
+        return p > 0.0 ? 10.0 * std::log10 (std::max (d, 1.0e-300) / p) : 0.0;
+    }
+
+    /** The longest run of samples at or under `floor` in magnitude, in
+        either channel, over [from, to). A floor of zero counts exact zeros;
+        a small one counts near-silence too, which is what a silent table
+        behind still-ringing band poles looks like. */
+    int longestRunUnder (const Stereo& s, int from, int to, float floor)
+    {
+        int longest = 0, runL = 0, runR = 0;
+        for (int i = from; i < std::min (to, (int) s.l.size()); ++i)
+        {
+            runL = std::abs (s.l[(size_t) i]) <= floor ? runL + 1 : 0;
+            runR = std::abs (s.r[(size_t) i]) <= floor ? runR + 1 : 0;
+            longest = std::max (longest, std::max (runL, runR));
+        }
+        return longest;
     }
 }
 
@@ -284,8 +587,8 @@ int main()
 
         check (erModeFor (0) == ErMode::taps, "er detent 0 is Taps");
         check (erModeFor (1) == ErMode::energy, "er detent 1 is Energy");
-        check (erModeFor (2) == ErMode::blend, "er detent 2 is Blend");
-        check (erModeFor (7) == ErMode::taps, "an out-of-range er detent falls back to Taps");
+        check (erModeFor (2) == ErMode::taps && erModeFor (7) == ErMode::taps,
+               "an out-of-range er detent, Blend's old 2 included, falls back to Taps");
     }
 
     //== The per-type table, before anything has a chance to apply it =========
@@ -395,28 +698,970 @@ int main()
                "zero latency with every parameter at its minimum");
     }
 
-    //== The placeholder is a wire, and says so ==============================
+    //==========================================================================
+    //== M2: the early reflections. 11 section 6's ER block, in the ER-only
+    //== condition: REVERB off, ER at 0 dB, MIX 100 %, hi-cut open.
+    //==========================================================================
+
+    //== The baked tables are the geometry's, to the printed precision ========
+    //
+    // This is what makes "re-seeded, not patched" enforceable: every row in
+    // TapTables.h is re-derived here from `imagesource::geometryFor`, so a
+    // number edited by hand fails the build.
     {
-        ReverbDsp dsp;
-        dsp.prepare (48000.0, 512, 2);
+        bool match = true;
 
-        const auto v = defaults();
-        dsp.setParams (v.data(), (int) v.size());
+        for (int t = 0; t < kNumTapTypes; ++t)
+        {
+            const auto rows = imagesource::table (imagesource::geometryFor (t));
 
-        constexpr int n = 512;
-        std::vector<float> left ((size_t) n, 0.0f), right ((size_t) n, 0.0f);
-        left[0] = 1.0f;
-        right[0] = 1.0f;
+            if ((int) rows.size() != kNumReferenceTaps) { match = false; continue; }
 
-        float* channels[] { left.data(), right.data() };
-        dsp.process (channels, 2, n);
+            for (int k = 0; k < kNumReferenceTaps; ++k)
+            {
+                const auto& baked = kTypeTaps[t][k];
+                match = match && std::abs (baked.timeMs - rows[(size_t) k].timeMs) <= 0.0006f
+                              && std::abs (baked.gain   - rows[(size_t) k].gain)   <= 0.00006f
+                              && std::abs (baked.pan    - rows[(size_t) k].pan)    <= 0.0006f
+                              && baked.order == rows[(size_t) k].order;
+            }
 
-        bool unchanged = near (left[0], 1.0f) && near (right[0], 1.0f);
+            check (imagesource::audit (rows)[0] == 0, "the generated table passes its own audit");
+        }
 
-        for (int i = 1; i < n; ++i)
-            unchanged = unchanged && left[(size_t) i] == 0.0f && right[(size_t) i] == 0.0f;
+        check (match, "every baked table matches the image-source generator to the printed precision");
+        check (kNumTapTypes == numTypes, "the tap tables cover exactly the schema's types");
+    }
 
-        check (unchanged, "the placeholder passes audio through untouched and adds no tail");
+    //== The comb rules, as assertions on the tables =============================
+    {
+        for (int t = 0; t < kNumTapTypes; ++t)
+        {
+            const auto* table = kTypeTaps[t];
+            bool separated = true, distinct = true, ceilinged = true, kuttruff = true;
+
+            for (int k = 1; k < kNumReferenceTaps; ++k)
+                separated = separated && table[k].timeMs - table[k - 1].timeMs >= 0.9f;
+
+            for (int i = 1; i < kNumReferenceTaps; ++i)
+                for (int j = i + 1; j < kNumReferenceTaps; ++j)
+                {
+                    const auto gi = table[i].timeMs - table[i - 1].timeMs;
+                    const auto gj = table[j].timeMs - table[j - 1].timeMs;
+                    distinct = distinct && std::abs (gi - gj) / std::max (gi, gj) >= 0.02f;
+                }
+
+            for (int k = 0; k < kNumReferenceTaps; ++k)
+            {
+                ceilinged = ceilinged && db (table[k].gain) <= -15.3f + 0.01f;
+
+                if (table[k].timeMs >= 2.0f && table[k].timeMs <= 20.0f)
+                    kuttruff = kuttruff && db (table[k].gain) <= imagesource::kuttruffCeilingDb (table[k].timeMs, table[k].pan) + 0.01f;
+            }
+
+            check (separated, "no two taps closer than 0.9 ms");
+            check (distinct,  "no two inter-tap gaps within 2 % of each other");
+            check (ceilinged, "no single tap above -15.3 dB");
+            check (kuttruff,  "taps in the 2-20 ms window obey Kuttruff's ceiling");
+        }
+    }
+
+    //== ER taps: the engine plays the table ======================================
+    //
+    // At DENSITY minimum, hi-cut open, VARIATION 0: every core tap of every
+    // type is found in the rendered IR within +-1 sample of the table and
+    // within +-0.2 dB of its gain.
+    {
+        for (int t = 0; t < kNumTapTypes; ++t)
+        {
+            const auto ir = render ([t] (auto& v) { v[Index::type] = (float) t; });
+            const auto* table = kTypeTaps[t];
+            bool timesOk = true, gainsOk = true;
+
+            for (int k = 0; k < kNumReferenceTaps; ++k)
+            {
+                const auto expected = ir.msToSamples (table[k].timeMs);
+                const auto next     = k + 1 < kNumReferenceTaps ? ir.msToSamples (table[k + 1].timeMs) : expected + 40;
+                const auto m        = measureTap (ir, expected - 2, std::min (expected + 40, next - 1));
+
+                timesOk = timesOk && std::abs (m.sample - expected) <= 1;
+                gainsOk = gainsOk && std::abs (db (m.gain) - db (table[k].gain)) <= 0.2f;
+
+                if (! (std::abs (m.sample - expected) <= 1) || ! (std::abs (db (m.gain) - db (table[k].gain)) <= 0.2f))
+                    std::cerr << "  type " << t << " tap " << k << ": expected " << expected << " / " << db (table[k].gain)
+                              << " dB, got " << m.sample << " / " << db (m.gain) << " dB\n";
+            }
+
+            check (timesOk, "every core tap arrives within one sample of the table");
+            check (gainsOk, "every core tap's gain is within 0.2 dB of the table");
+        }
+
+        // A tap inside 8 ms goes through the proximity band, whose one-pole
+        // sits below 1.5 kHz: its peak sample is well under its DC sum.
+        {
+            ReverbDsp dsp;
+            dsp.prepare (48000.0, 512, 2);
+            auto v = defaults();
+            dsp.setParams (v.data(), (int) v.size());
+            check (dsp.getCore().earlyReflections().bandCutoffHz (0) < 1500.0f,
+                   "the proximity band's one-pole is below 1.5 kHz");
+            check (dsp.getCore().earlyReflections().bandCutoffHz (1) > dsp.getCore().earlyReflections().bandCutoffHz (3),
+                   "higher orders are darker");
+        }
+    }
+
+    //== Mono compatibility: gamma >= 0 at all seven VARIATION positions =========
+    {
+        float gamma[7] {};
+
+        for (int v = 0; v < 7; ++v)
+        {
+            const auto ir = render ([v] (auto& p) { p[Index::ervariation] = (float) v; });
+            gamma[v] = correlation (ir, ir.msToSamples (erSpanMsAt (0, roomDefaults::kSizeM) + 10.0f));
+        }
+
+        bool nonNegative = true, monotone = true;
+        for (int v = 0; v < 7; ++v) nonNegative = nonNegative && gamma[v] >= -1.0e-4f;
+        for (int v = 1; v < 6; ++v) monotone = monotone && gamma[v] <= gamma[v - 1] + 1.0e-4f;
+
+        check (nonNegative, "gamma >= 0 at every VARIATION, so the mono loss never exceeds 3 dB");
+        check (monotone, "gamma falls monotonically from VARIATION 0 to 5");
+        check (gamma[0] >= 0.90f, "VARIATION 0 is nearly mono (gamma >= 0.9)");
+        check (gamma[5] <= 0.15f, "VARIATION 5 is nearly decorrelated (gamma <= 0.15)");
+        check (std::abs (gamma[6]) <= 0.03f, "VARIATION 6's complementary pair has gamma of zero");
+
+        // VARIATION 6: the mono sum is exactly flat -- (M + D) + (M - D) = 2 M.
+        {
+            const auto ir = render ([] (auto& p) { p[Index::ervariation] = 6.0f; });
+            const auto to = ir.msToSamples (erSpanMsAt (0, roomDefaults::kSizeM) + 20.0f);
+            double sum = 0.0, each = 0.0;
+            for (int i = 0; i < to; ++i)
+            {
+                const auto s = ir.l[(size_t) i] + ir.r[(size_t) i];
+                sum  += s * s;
+                each += ir.l[(size_t) i] * ir.l[(size_t) i] + ir.r[(size_t) i] * ir.r[(size_t) i];
+            }
+            check (std::abs (sum / each - 1.0) < 0.02, "VARIATION 6 sums to mono with the energy of one channel pair -- the comb pair cancels exactly");
+        }
+
+        for (int v = 0; v < 7; ++v)
+            std::cout << "  gamma[" << v << "] = " << gamma[v] << '\n';
+    }
+
+    //== Flamming, on the rendered Room IR ========================================
+    {
+        const auto ir = render ([] (auto&) {});
+        const auto span = erSpanMsAt (0, roomDefaults::kSizeM);
+
+        // Each tap's energy as heard: the IR's energy between it and the next.
+        const auto e25 = ir.energy (0, ir.msToSamples (25.0f));
+        bool ruleI = true;
+        for (int k = 0; k < kNumReferenceTaps; ++k)
+        {
+            const auto& t = kTypeTaps[0][k];
+            if (t.timeMs > 25.0f)
+            {
+                const auto from = ir.msToSamples (t.timeMs) - 1;
+                const auto to   = k + 1 < kNumReferenceTaps ? ir.msToSamples (kTypeTaps[0][k + 1].timeMs) - 1 : from + 200;
+                ruleI = ruleI && ir.energy (from, to) <= e25 * std::pow (10.0f, -1.2f) * 1.02f;
+            }
+        }
+        check (ruleI, "no tap after 25 ms is above -12 dB relative to the ER energy at 25 ms");
+
+        std::vector<float> windows;
+        for (float w = 0.0f; w < span + 5.0f; w += 5.0f)
+            windows.push_back (ir.energy (ir.msToSamples (w), ir.msToSamples (w + 5.0f)));
+
+        size_t peak = 0;
+        for (size_t w = 1; w < windows.size(); ++w)
+            if (windows[w] > windows[peak]) peak = w;
+
+        // A window holding only the one-pole tail of the tap before it is
+        // empty for this rule: under -30 dB re the peak window.
+        bool ruleII = true;
+        auto previous = windows[peak];
+        for (size_t w = peak + 1; w < windows.size(); ++w)
+        {
+            if (windows[w] <= windows[peak] * 1.0e-3f) continue;
+            if (windows[w] > previous * 1.02f)   // 2 % for the one-pole tails that spill into the next window
+            {
+                ruleII = false;
+                std::cerr << "  window " << w * 5 << " ms rises: " << 10.0f * std::log10 (windows[w] / previous) << " dB over the last non-empty window\n";
+            }
+            previous = windows[w];
+        }
+        check (ruleII, "energy per 5 ms window never rises again after the peak window: no second onset");
+
+        check (ir.energy (0, ir.msToSamples (30.0f)) >= 0.5f * ir.energy (0, ir.msToSamples (span + 5.0f)),
+               "at least half the ER energy arrives before 30 ms");
+    }
+
+    //== Lateral energy at the default VARIATION ==================================
+    //
+    // ISO 3382-1's LF divides the lateral energy in 5-80 ms by the total
+    // energy in 0-80 ms *including the direct sound*. With every tap held at
+    // or under -15.3 dB (the colouration ceiling, 10 section 3) the whole
+    // cluster is about a tenth of the direct sound's energy, so that figure
+    // cannot reach 0.10 whatever the bearings do -- it is printed for the
+    // record. What VARIATION actually controls is asserted instead: the
+    // lateral fraction **of the ER bus itself**, in the same 0.10-0.35 range
+    // 10 section 3 gives, at the default position. The lateral component is
+    // (L - R)^2 / 2, which is what a figure-of-eight facing the source hears.
+    {
+        const auto ir = render ([] (auto& p) { p[Index::ervariation] = 2.0f; });
+        double lateral = 0.0, er = 0.0;
+
+        for (int i = ir.msToSamples (5.0f); i < ir.msToSamples (80.0f); ++i)
+        {
+            const auto d = ir.l[(size_t) i] - ir.r[(size_t) i];
+            lateral += 0.5 * d * d;
+        }
+        for (int i = 0; i < ir.msToSamples (80.0f); ++i)
+            er += ir.l[(size_t) i] * ir.l[(size_t) i] + ir.r[(size_t) i] * ir.r[(size_t) i];
+
+        const auto lfIso = lateral / (er + 2.0);
+        const auto lfEr  = lateral / er;
+        std::cout << "  early lateral fraction at VARIATION 2: ISO (with direct) " << lfIso << ", of the ER bus " << lfEr << '\n';
+        check (lfEr >= 0.10 && lfEr <= 0.35, "the ER bus's lateral fraction is 0.10-0.35 at the default VARIATION");
+    }
+
+    //== ER-only: self-terminating, ramped out, and flat ==========================
+    {
+        const auto ir = render ([] (auto&) {});
+        const auto span = erSpanMsAt (0, roomDefaults::kSizeM);
+        const auto er   = ir.energy (0, ir.msToSamples (span + 5.0f));
+        const auto after = ir.energy (ir.msToSamples (span + 5.0f), ir.size());
+
+        check (after <= er * 1.0e-6f, "energy after (ER span + 5 ms) is at least 60 dB below the ER energy");
+
+        const auto& last = kTypeTaps[0][kNumReferenceTaps - 1];
+        const auto& prev = kTypeTaps[0][kNumReferenceTaps - 2];
+        check (last.gain < prev.gain && last.timeMs - prev.timeMs >= 5.0f,
+               "the last tap ramps out: it is quieter than the one before and at least 5 ms after it");
+
+        // 1/3-octave smoothed magnitude, 200 Hz - 10 kHz, at three densities.
+        //
+        // **The tilt is removed before the +-3 dB band is applied**: the
+        // order-banded one-poles 10 section 3 asks for sit at 4-9 kHz and
+        // darken every tap by design, so the raw response falls across the
+        // top octave and no table could make it flat. What the rule is there
+        // to catch is comb ripple, which is what is left after a straight
+        // line in dB against log-frequency is taken out.
+        //
+        // **And it is asserted at DENSITY 100 %, not at 0 %.** Twenty-one
+        // discrete taps in solo comb by their nature -- two equal taps 1.7 ms
+        // apart are a comb with a 580 Hz period, and a 1/3-octave band at
+        // 250 Hz is 46 Hz wide and cannot smooth it -- and that colouration
+        // is exactly what the density bridge exists to take out (10 section
+        // 3). The 0 % and 50 % figures print so the listening pass can see
+        // what the taps alone do.
+        const auto rippleAt = [] (const Ir& r, float spanMs)
+        {
+            std::vector<double> f, m;
+            const auto to = r.msToSamples (spanMs + 10.0f);
+            for (double hz = 200.0; hz <= 10000.0; hz *= std::pow (2.0, 1.0 / 3.0))
+            {
+                f.push_back (std::log2 (hz));
+                m.push_back (thirdOctaveDb (r, hz, to));
+            }
+
+            double sx = 0.0, sy = 0.0, sxx = 0.0, sxy = 0.0;
+            for (size_t i = 0; i < f.size(); ++i) { sx += f[i]; sy += m[i]; sxx += f[i] * f[i]; sxy += f[i] * m[i]; }
+            const auto n = (double) f.size();
+            const auto slope = (n * sxy - sx * sy) / (n * sxx - sx * sx);
+            const auto icept = (sy - slope * sx) / n;
+
+            double lo = 1.0e9, hi = -1.0e9;
+            for (size_t i = 0; i < f.size(); ++i)
+            {
+                const auto residual = m[i] - (icept + slope * f[i]);
+                lo = std::min (lo, residual);
+                hi = std::max (hi, residual);
+            }
+            return std::pair<double, double> { slope, hi - lo };
+        };
+
+        // Octave smoothing too, over the same range, so the owner can choose
+        // the rule with both figures in front of them.
+        const auto octaveRippleAt = [] (const Ir& r, float spanMs)
+        {
+            std::vector<double> f, m;
+            const auto to = r.msToSamples (spanMs + 10.0f);
+            for (double hz = 250.0; hz <= 8000.0; hz *= 2.0)
+            {
+                double p = 0.0;
+                for (int k = -12; k <= 12; ++k)
+                {
+                    const auto fk = hz * std::pow (2.0, (double) k / 24.0);
+                    const auto mag = magnitudeAt (r, fk, to);
+                    p += mag * mag;
+                }
+                f.push_back (std::log2 (hz));
+                m.push_back (10.0 * std::log10 (std::max (p / 25.0, 1.0e-24)));
+            }
+
+            double sx = 0.0, sy = 0.0, sxx = 0.0, sxy = 0.0;
+            for (size_t i = 0; i < f.size(); ++i) { sx += f[i]; sy += m[i]; sxx += f[i] * f[i]; sxy += f[i] * m[i]; }
+            const auto n = (double) f.size();
+            const auto slope = (n * sxy - sx * sy) / (n * sxx - sx * sx);
+            const auto icept = (sy - slope * sx) / n;
+
+            double lo = 1.0e9, hi = -1.0e9, rawLo = 1.0e9, rawHi = -1.0e9;
+            for (size_t i = 0; i < f.size(); ++i)
+            {
+                const auto residual = m[i] - (icept + slope * f[i]);
+                lo = std::min (lo, residual); hi = std::max (hi, residual);
+                rawLo = std::min (rawLo, m[i]); rawHi = std::max (rawHi, m[i]);
+            }
+            return std::pair<double, double> { hi - lo, rawHi - rawLo };
+        };
+
+        for (const auto density : { 0.0f, 50.0f, 100.0f })
+        {
+            const auto r = render ([density] (auto& p) { p[Index::erdensity] = density; });
+            const auto [tilt, ripple] = rippleAt (r, span);
+            const auto [octave, octaveRaw] = octaveRippleAt (r, span);
+            std::cout << "  ER-only magnitude at DENSITY " << density << " %, 1/3-octave smoothed, 200 Hz-10 kHz: tilt "
+                      << tilt << " dB/octave, ripple about the tilt " << ripple << " dB peak to peak; octave-smoothed 250 Hz-8 kHz: "
+                      << octave << " dB about the tilt, " << octaveRaw << " dB raw\n";
+
+            // **The rule, Frosty's on 2026-09-24:** octave-smoothed, 250 Hz to
+            // 8 kHz, ripple about the tilt within 6 dB peak to peak, asserted
+            // at DENSITY 100 % -- where the density bridge is meant to have
+            // taken the discrete cluster's colour out -- and printed at 0 and
+            // 50 %. The 1/3-octave figure 11 section 6 first asked for is
+            // printed beside it: no sparse cluster meets +-3 dB under a 46 Hz
+            // band at 200 Hz, and that is recorded in the M2 note.
+            (void) ripple;
+
+            if (density == 100.0f)
+                check (octave <= 6.0, "ER-only magnitude at DENSITY 100 %, octave-smoothed 250 Hz-8 kHz, ripples within 6 dB about its tilt");
+        }
+    }
+
+    //== Density: constant energy, no click, and 2000 pulses/s at the top ========
+    {
+        float e0 = 0.0f;
+        bool constant = true, finite = true;
+
+        for (int step = 0; step <= 20; ++step)
+        {
+            const auto d = (float) step * 5.0f;
+            const auto ir = render ([d] (auto& p) { p[Index::erdensity] = d; });
+            const auto span = erSpanMsAt (0, roomDefaults::kSizeM);
+            const auto e = ir.energy (0, ir.msToSamples (span + 15.0f));
+
+            if (step == 0) e0 = e;
+            constant = constant && std::abs (10.0f * std::log10 (e / e0)) <= 0.2f;
+            std::cout << "  DENSITY " << d << " %: " << 10.0f * std::log10 (e / e0) << " dB re DENSITY 0\n";
+
+            for (int i = 0; i < ir.size(); ++i)
+                finite = finite && std::isfinite (ir.l[(size_t) i]) && std::isfinite (ir.r[(size_t) i]);
+
+            if (step == 20)
+            {
+                int pulses = 0;
+                float peak = 0.0f;
+                for (int i = 0; i < ir.msToSamples (span); ++i)
+                    peak = std::max (peak, std::abs (ir.l[(size_t) i]));
+                for (int i = 0; i < ir.msToSamples (span); ++i)
+                    if (std::abs (ir.l[(size_t) i]) > peak * 0.001f)
+                        ++pulses;
+                const auto rate = (float) pulses / (span * 0.001f);
+                std::cout << "  pulse rate at DENSITY 100 %: " << rate << " /s\n";
+                check (rate >= 2000.0f, "at the top of DENSITY the pulse rate clears 2000/s");
+            }
+        }
+
+        check (constant, "ER energy is constant within +-0.2 dB across the DENSITY sweep");
+        check (finite, "every sample across the DENSITY sweep is finite");
+
+        const auto jump = stepRatioAcross ([] (auto& p) { p[Index::erdensity] = 0.0f; },
+                                           [] (auto& p) { p[Index::erdensity] = 100.0f; });
+        std::cout << "  step ratio across a DENSITY jump 0 -> 100 %: " << jump.ratio << " (" << jump.edits
+                  << " edit; settled at " << jump.settled << ")\n";
+        check (jump.edits == 1, "the DENSITY jump was actually applied");
+        check (jump.ratio <= 1.5f, "a DENSITY jump does not click");
+    }
+
+    //== ER hi-cut: -3 dB where it says, and no tap moves =========================
+    {
+        const auto open = render ([] (auto&) {});
+        const auto to   = open.msToSamples (erSpanMsAt (0, roomDefaults::kSizeM) + 10.0f);
+
+        for (const auto hz : { 2000.0f, 4000.0f, 8000.0f, 16000.0f })
+        {
+            // Two claims, separately. The design's corner is -3 dB where it
+            // says: analytic, on the coefficient. And the running filter is
+            // the design: the IR with the cut, against the IR with the cut
+            // "open" at 20 kHz, drops at the corner by what the two designs'
+            // magnitudes differ by -- the open setting is itself a pole and
+            // not a wire, so a bare -3 dB against it would be the wrong
+            // number to ask for.
+            const auto coef   = ErGenerator::hiCutCoefFor (hz, 48000.0);
+            const auto design = ErGenerator::hiCutMagnitudeDb (coef, hz, 48000.0);
+            check (std::abs (design + 3.0103) <= 0.3, "the ER hi-cut's design is -3 dB at its corner, within 10 %");
+
+            // 12 dB/octave (Frosty, 2026-09-26), against the one pole it
+            // replaced at the same corner, an octave above and two.
+            if (hz <= 4000.0f)
+            {
+                const auto one = ErGenerator::onePoleCoefFor (hz, 48000.0);
+                for (const auto m : { 2.0, 4.0 })
+                    std::cout << "  hi-cut " << hz << " Hz at " << m << "x: two poles "
+                              << ErGenerator::hiCutMagnitudeDb (coef, m * hz, 48000.0) << " dB, one pole "
+                              << ErGenerator::onePoleMagnitudeDb (one, m * hz, 48000.0) << " dB\n";
+
+                // At four times the corner the pair is 4.2 dB (4 kHz) and
+                // 5.0 dB (2 kHz) below the one pole it replaced, on ICE QUEEN
+                // 2026-09-26; the knee is soft, so the gap keeps growing above.
+                const auto gap = ErGenerator::hiCutMagnitudeDb (coef, 4.0 * hz, 48000.0)
+                               - ErGenerator::onePoleMagnitudeDb (one, 4.0 * hz, 48000.0);
+                check (gap <= -3.5, "the ER hi-cut is two poles: 3.5 dB or more under one pole at 4x its corner");
+            }
+
+            const auto cut = render ([hz] (auto& p) { p[Index::erhicut] = hz; });
+            const auto measured = 20.0 * std::log10 (magnitudeAt (cut, hz, to) / magnitudeAt (open, hz, to));
+            const auto expected = design - ErGenerator::hiCutMagnitudeDb (ErGenerator::hiCutCoefFor (20000.0f, 48000.0), hz, 48000.0);
+            std::cout << "  hi-cut " << hz << " Hz: " << measured << " dB at the corner against the open pole, design " << expected << " dB\n";
+            check (std::abs (measured - expected) <= 0.3, "the running ER hi-cut matches its design at the corner");
+
+            // Cross-correlate: the lag of the largest correlation is 0, +-1.
+            double best = -1.0; int lag = 99;
+            for (int k = -3; k <= 3; ++k)
+            {
+                double c = 0.0;
+                for (int i = 8; i < to - 8; ++i)
+                    c += open.l[(size_t) i] * cut.l[(size_t) (i + k)];
+                if (c > best) { best = c; lag = k; }
+            }
+            // Two poles have twice one pole's group delay: 2 samples at a
+            // 2 kHz corner, 0.04 ms. That is the filter's own delay, not a
+            // tap moving -- taps are 0.9 ms apart at the least -- so the
+            // bound is +-2 since the hi-cut went to 12 dB/octave.
+            std::cout << "  hi-cut " << hz << " Hz: peak lag " << lag << " samples\n";
+            check (std::abs (lag) <= 2, "the hi-cut moves no tap (peak lag within its own group delay, +-2 samples)");
+        }
+    }
+
+    //== Level laws ==============================================================
+    {
+        const auto ref = render ([] (auto&) {});
+        const auto to  = ref.msToSamples (erSpanMsAt (0, roomDefaults::kSizeM) + 10.0f);
+        const auto e0  = ref.energy (0, to);
+
+        for (const auto level : { -6.0f, -12.0f, -24.0f })
+        {
+            const auto ir = render ([level] (auto& p) { p[Index::erlevel] = level; });
+            const auto moved = 10.0f * std::log10 (ir.energy (0, to) / e0);
+            check (std::abs (moved - level) <= 0.1f, "the ER fader moves the IR energy by exactly its dB figure");
+        }
+
+        {
+            const auto ir = render ([] (auto& p) { p[Index::erlevel] = -40.0f; });
+            check (ir.energy (0, to) <= e0 * 1.0e-10f, "ER at -40 is off, not -40 dB");
+        }
+
+        // MIX 50 %, both faders off: the output nulls against dry.
+        {
+            const auto ir = render ([] (auto& p) { p[Index::erlevel] = -40.0f; p[Index::mix] = 50.0f; });
+            bool null = std::abs (ir.l[0] - 1.0f) <= 1.0e-4f;
+            for (int i = 1; i < ir.size(); ++i)
+                null = null && std::abs (ir.l[(size_t) i]) <= 1.0e-4f;
+            check (null, "MIX 50 % with the wet faders off nulls against dry to -80 dB");
+        }
+
+        // The MIX law itself, Frosty's on 2026-09-24, at its five points: the
+        // dry sample (sample 0, before any reflection) and the ER energy, each
+        // against the ER-only render at MIX 100 %.
+        {
+            const auto erAt100 = ref.energy (1, to);   // after sample 0: the reflections alone
+
+            struct Point { float mix, dry, wetDb; };
+            for (const auto pt : { Point { 0.0f, 1.0f, -200.0f }, Point { 25.0f, 1.0f, -6.0206f },
+                                   Point { 50.0f, 1.0f, 0.0f }, Point { 75.0f, 0.5f, 0.0f }, Point { 100.0f, 0.0f, 0.0f } })
+            {
+                const auto ir = render ([pt] (auto& p) { p[Index::mix] = pt.mix; });
+                const auto wet = ir.energy (1, to);
+                const auto wetDb = wet > 0.0f ? 10.0f * std::log10 (wet / erAt100) : -200.0f;
+                check (std::abs (ir.l[0] - pt.dry) <= 1.0e-4f, "the MIX law's dry gain is what the law says at 0, 25, 50, 75 and 100 %");
+                check (pt.wetDb <= -100.0f ? wet <= erAt100 * 1.0e-10f : std::abs (wetDb - pt.wetDb) <= 0.1f,
+                       "the MIX law's wet gain is what the law says at 0, 25, 50, 75 and 100 %");
+            }
+
+            check (DspCore::dryGainFor (0.5f) == 1.0f && DspCore::wetGainFor (0.5f) == 1.0f,
+                   "MIX 50 % is dry at unity and wet at unity: input unchanged, verb heard");
+            check (DspCore::dryGainFor (1.0f) == 0.0f && DspCore::wetGainFor (1.0f) == 1.0f,
+                   "MIX 100 % is verb only, for use as a send");
+        }
+
+        // OUTPUT is a plain trim.
+        {
+            const auto ir = render ([] (auto& p) { p[Index::output] = -12.0f; });
+            check (std::abs (10.0f * std::log10 (ir.energy (0, to) / e0) + 12.0f) <= 0.1f, "OUTPUT trims the whole output");
+        }
+    }
+
+    //== Block size: bit-identical for fixed parameters ===========================
+    {
+        const auto ref = render ([] (auto&) {}, 48000.0, 512, 0.25f);
+        bool identical = true;
+
+        for (const auto block : { 1, 16, 32, 64, 127, 2048 })
+        {
+            const auto ir = render ([] (auto&) {}, 48000.0, block, 0.25f);
+            for (int i = 0; i < ref.size(); ++i)
+                identical = identical && ir.l[(size_t) i] == ref.l[(size_t) i] && ir.r[(size_t) i] == ref.r[(size_t) i];
+        }
+
+        check (identical, "the IR is bit-identical at block sizes 1, 16, 32, 64, 127, 512 and 2048");
+    }
+
+    //== Sample rate: tap times in ms do not move ================================
+    {
+        for (const auto rate : { 44100.0, 96000.0, 192000.0 })
+        {
+            const auto ir = render ([] (auto&) {}, rate, 512, 0.3f);
+            bool ok = true;
+
+            for (int k = 0; k < kNumReferenceTaps; ++k)
+            {
+                const auto expected = ir.msToSamples (kTypeTaps[0][k].timeMs);
+                const auto next     = k + 1 < kNumReferenceTaps ? ir.msToSamples (kTypeTaps[0][k + 1].timeMs) : expected + 40;
+                const auto m        = measureTap (ir, expected - 2, std::min (expected + 40, next - 1));
+                ok = ok && std::abs ((double) m.sample / rate * 1000.0 - kTypeTaps[0][k].timeMs) <= 0.1;
+            }
+
+            check (ok, "tap times in ms are within 0.1 ms at every rate");
+        }
+    }
+
+    //== Parameter changes do not click ==========================================
+    //
+    // **What these measure, since the edit really runs (2026-09-30):** the
+    // largest sample-to-sample step from the change on, against the largest
+    // the steady 1 kHz ER output had before it. So a check passes when the
+    // change makes no step bigger than the signal's own biggest, and it
+    // cannot see a click smaller than that. Where the new setting is quieter
+    // -- Hall, 24 m, Energy, VARIATION 6 are all quieter than Room at 1 kHz --
+    // the largest step in the window is one of the few samples before the
+    // edit lands and the ratio sits just under one whatever the change did.
+    // VARIATION 6 read 1.76 here once the edit ran and before the comb line
+    // was kept current: entering 6 read an empty line, and that was a step.
+    {
+        const auto type = stepRatioAcross ([] (auto&) {}, [] (auto& p) { p[Index::type] = (float) hall; });
+        const auto size = stepRatioAcross ([] (auto&) {}, [] (auto& p) { p[Index::size] = 24.0f; });
+        const auto mode = stepRatioAcross ([] (auto&) {}, [] (auto& p) { p[Index::ermode] = (float) energy; });
+        const auto var  = stepRatioAcross ([] (auto&) {}, [] (auto& p) { p[Index::ervariation] = 6.0f; });
+        std::cout << "  step ratios (settled level in brackets): TYPE " << type.ratio << " (" << type.settled << "), SIZE "
+                  << size.ratio << " (" << size.settled << "), ER MODE " << mode.ratio << " (" << mode.settled
+                  << "), VARIATION " << var.ratio << " (" << var.settled << ")\n";
+        check (type.edits == 1 && size.edits == 1 && mode.edits == 1 && var.edits == 1,
+               "each parameter change was actually applied, once");
+        check (type.ratio <= 1.5f, "a TYPE switch dips and swaps without a click");
+        check (size.ratio <= 1.5f, "a SIZE jump crossfades without a click");
+        check (mode.ratio <= 1.5f, "an ER MODE change crossfades without a click");
+        check (var.ratio  <= 1.5f, "a VARIATION change crossfades without a click");
+    }
+
+    //== A built table is never left unweighted ===================================
+    //
+    // The review of PR #27, 2026-09-30, measured exact-zero output for good on
+    // three paths with one cause: `rebuild()` zeroed every tap's weight and
+    // left the weighing to the next block's density update, which skips when
+    // DENSITY has not moved. A second prepare() with nothing changed, a fresh
+    // instance whose first block is longer than the TYPE dip, and a TYPE
+    // change at a 4096 block all ended silent; at small blocks the same defect
+    // was a dropout inside every TYPE change. Each path is asserted here, in
+    // the ER-only setting the review used.
+    {
+        // (a) A second prepare() plays exactly what a fresh instance does, at
+        // every type -- straight after the first at 48 kHz / 512, and after a
+        // reset() at 44.1 kHz / 256.
+        struct Case { double rate; int block; bool resetFirst; };
+        for (const auto c : { Case { 48000.0, 512, false }, Case { 44100.0, 256, true } })
+        {
+            bool same = true;
+            const auto n = (int) (0.5 * c.rate);
+
+            for (int t = 0; t < numTypes; ++t)
+            {
+                const auto v = erOnly (t);
+
+                ReverbDsp fresh;
+                fresh.prepare (c.rate, c.block, 2);
+                fresh.setParams (v.data(), (int) v.size());
+                Stereo a;
+                runNoise (fresh, a, 0, n, c.block);
+
+                ReverbDsp again;
+                again.prepare (c.rate, c.block, 2);
+                again.setParams (v.data(), (int) v.size());
+                Stereo warm;
+                runNoise (again, warm, 0, n / 2, c.block);
+                if (c.resetFirst)
+                    again.reset();
+                again.prepare (c.rate, c.block, 2);
+                again.setParams (v.data(), (int) v.size());
+                Stereo b;
+                runNoise (again, b, 0, n, c.block);
+
+                const auto pa = powerDb (a, n / 2, n), pb = powerDb (b, n / 2, n);
+                if (! (pa > -100.0 && std::abs (pa - pb) <= 0.01))
+                {
+                    same = false;
+                    std::cerr << "  " << kTypeNames[t] << " at " << c.rate << " / " << c.block << (c.resetFirst ? " after reset()" : "")
+                              << ": fresh " << pa << " dB, prepared twice " << pb << " dB\n";
+                }
+            }
+
+            check (same, c.resetFirst ? "reset() then prepare() plays what a fresh instance does, within 0.01 dB, at every type"
+                                      : "a second prepare() plays what a fresh instance does, within 0.01 dB, at every type");
+        }
+
+        // (b) A fresh instance plays at every block size, and plays the same
+        // thing: the TYPE dip of a first block that is not Room must not
+        // finish inside a block that also built the table.
+        {
+            bool playing = true, invariant = true;
+            const auto n = 48000;
+
+            for (int t = 0; t < numTypes; ++t)
+            {
+                double reference = 0.0;
+
+                for (const auto block : { 64, 512, 2048, 3000, 4096, 8192 })
+                {
+                    const auto v = erOnly (t);
+                    ReverbDsp dsp;
+                    dsp.prepare (48000.0, block, 2);
+                    dsp.setParams (v.data(), (int) v.size());
+                    Stereo s;
+                    runNoise (dsp, s, 0, n, block);
+
+                    const auto p = powerDb (s, n / 2, n);
+                    if (block == 64)
+                        reference = p;
+
+                    if (! (p > -100.0))
+                        playing = false;
+                    if (! (std::abs (p - reference) <= 0.01))
+                        invariant = false;
+
+                    if (! (p > -100.0) || ! (std::abs (p - reference) <= 0.01))
+                        std::cerr << "  fresh " << kTypeNames[t] << " at block " << block << ": " << p
+                                  << " dB against " << reference << " dB at block 64\n";
+                }
+            }
+
+            check (playing, "a fresh instance is not silent at any type or block size, 64 to 8192");
+            check (invariant, "a fresh instance's level is the same at every block size, within 0.01 dB");
+        }
+
+        // (c) A running Room switched to Hall at a 4096 block boundary
+        // settles at Hall's own level -- against a fresh Hall fed the same
+        // noise, so the two match sample for sample once the line has turned
+        // over.
+        {
+            const auto block = 4096, n = 72000;
+            const auto roomV = erOnly (room), hallV = erOnly (hall);
+
+            ReverbDsp dsp;
+            dsp.prepare (48000.0, block, 2);
+            dsp.setParams (roomV.data(), (int) roomV.size());
+            Stereo s;
+            runNoise (dsp, s, 0, n, block, [&] (int at) {
+                if (at >= 24000)
+                    dsp.setParams (hallV.data(), (int) hallV.size());
+            });
+
+            ReverbDsp ref;
+            ref.prepare (48000.0, 64, 2);
+            ref.setParams (hallV.data(), (int) hallV.size());
+            Stereo h;
+            runNoise (ref, h, 0, n, 64);
+
+            const auto p = powerDb (s, 48000, n), ph = powerDb (h, 48000, n);
+            std::cout << "  Room -> Hall at block 4096: " << p << " dB one second on, a fresh Hall " << ph << " dB\n";
+            check (p > -100.0 && std::abs (p - ph) <= 0.01,
+                   "a TYPE change at a 4096 block recovers to the new type's steady level, within 0.01 dB");
+        }
+
+        // (d) And inside the change, the only exact zero is the designed
+        // one: the dip's raised cosine touches zero at its midpoint, one
+        // sample, and the new table plays from the next. The review measured
+        // 546 samples of exact zero at block 2048 and 34 at 256 and 512, with
+        // the switch landing elsewhere in the block than it does here.
+        //
+        // **Exact zero alone undercounts the dropout**: the old set's band
+        // poles and the hi-cut go on ringing out after its weights are gone,
+        // so a silent table reads as tiny non-zero samples for the first
+        // fifty or so. The near-silence run under -100 dBFS is asserted too,
+        // against what the designed dip alone gives: its gain is under 2e-4
+        // -- a -25 dBFS noise under -100 dBFS -- for about 13 samples either
+        // side of the midpoint, so 48 samples (1 ms) is the dip with room to
+        // spare and not a dropout.
+        {
+            bool short_ = true, quiet = true;
+
+            for (const auto block : { 256, 512, 2048 })
+            {
+                const auto roomV = erOnly (room), hallV = erOnly (hall);
+                ReverbDsp dsp;
+                dsp.prepare (48000.0, block, 2);
+                dsp.setParams (roomV.data(), (int) roomV.size());
+                Stereo s;
+                int switchedAt = -1;
+                runNoise (dsp, s, 0, 48000, block, [&] (int at) {
+                    if (at >= 24000 && switchedAt < 0)
+                    {
+                        switchedAt = at;
+                        dsp.setParams (hallV.data(), (int) hallV.size());
+                    }
+                });
+
+                const auto run  = longestRunUnder (s, switchedAt, switchedAt + 9600, 0.0f);
+                const auto hush = longestRunUnder (s, switchedAt, switchedAt + 9600, 1.0e-5f);
+                std::cout << "  Room -> Hall at block " << block << ": longest exact-zero run " << run
+                          << " samples, longest under -100 dBFS " << hush << " samples\n";
+                short_ = short_ && run <= 1;
+                quiet  = quiet && hush <= 48;
+            }
+
+            check (short_, "a TYPE change outputs exact zero for at most the dip's one midpoint sample, at blocks 256, 512 and 2048");
+            check (quiet, "a TYPE change is under -100 dBFS for no longer than the dip itself (48 samples), at blocks 256, 512 and 2048");
+        }
+    }
+
+    //== VARIATION 6 never replays what it heard before it was left ==============
+    //
+    // The review's experiment, exactly: a burst at VARIATION 6, then 5 through
+    // a second of silent input, then back to 6 with the input still silent.
+    // The comb pair's delay line was written only while VARIATION was 6, so
+    // coming back read the burst out of it a second after it ended -- 0.112
+    // peak, -19 dBFS, from ~64 samples to +39 ms. Silence in has to be
+    // silence out.
+    {
+        for (const auto away : { 5, 4 })
+        {
+            auto v = erOnly (room);
+            v[Index::ervariation] = 6.0f;
+
+            ReverbDsp dsp;
+            dsp.prepare (48000.0, 512, 2);
+            dsp.setParams (v.data(), (int) v.size());
+
+            Stereo s;
+            runNoise (dsp, s, 0, 9600, 512);                                    // the burst, at 6
+
+            v[Index::ervariation] = (float) away;
+            dsp.setParams (v.data(), (int) v.size());
+            runNoise (dsp, s, 9600, 9600 + 48000, 512, {}, true);               // a second of silence, away
+
+            v[Index::ervariation] = 6.0f;
+            dsp.setParams (v.data(), (int) v.size());
+            const auto back = (int) s.l.size();
+            runNoise (dsp, s, back, back + 9600, 512, {}, true);                // back at 6, still silent
+
+            float peak = 0.0f;
+            for (int i = back; i < (int) s.l.size(); ++i)
+                peak = std::max (peak, std::max (std::abs (s.l[(size_t) i]), std::abs (s.r[(size_t) i])));
+
+            std::cout << "  VARIATION 6 -> " << away << " -> 6 through silence: peak " << db (peak) << " dBFS after returning\n";
+            check (peak <= 1.0e-6f, "returning to VARIATION 6 through silence is silent (below -120 dBFS): no stale comb audio");
+        }
+    }
+
+    //== A finished crossfade leaves the diffuser's normaliser on the new set =====
+    //
+    // `weigh()` updates the per-band powers the diffuser's normaliser is built
+    // from only for the active set, and the crossfade flips which set that is
+    // without weighing it again -- so a table change at a steady DENSITY kept
+    // the old set's powers, and the old set's normaliser, for good. Against a
+    // fresh instance fed the same noise, the two must agree sample for sample
+    // once the line has turned over.
+    {
+        struct Move { const char* what; int index; float value; };
+        bool same = true;
+
+        for (const auto m : { Move { "VARIATION 4 -> 0", Index::ervariation, 0.0f },
+                              Move { "VARIATION 4 -> 5", Index::ervariation, 5.0f },
+                              Move { "ER MODE Taps -> Energy", Index::ermode, (float) energy },
+                              Move { "SIZE -> 30 m", Index::size, 30.0f } })
+        {
+            auto v = erOnly (room);
+            v[Index::erdensity] = 100.0f;      // all three diffuser stages in
+            auto to = v;
+            to[(size_t) m.index] = m.value;
+
+            ReverbDsp dsp;
+            dsp.prepare (48000.0, 512, 2);
+            dsp.setParams (v.data(), (int) v.size());
+            Stereo s;
+            runNoise (dsp, s, 0, 72000, 512, [&] (int at) {
+                if (at >= 24000)
+                    dsp.setParams (to.data(), (int) to.size());
+            });
+
+            ReverbDsp ref;
+            ref.prepare (48000.0, 512, 2);
+            ref.setParams (to.data(), (int) to.size());
+            Stereo h;
+            runNoise (ref, h, 0, 72000, 512);
+
+            const auto r = residualDb (h, s, 48000, 72000);
+            std::cout << "  " << m.what << " at DENSITY 100: " << r << " dB residual against a fresh instance there\n";
+            same = same && r <= -100.0;
+        }
+
+        check (same, "after a table crossfade the output is a fresh instance's, sample for sample (residual under -100 dB)");
+    }
+
+    //== reset() in the middle of a crossfade finishes the move ===================
+    //
+    // reset() cleared the fade flag without flipping to the set the fade was
+    // going to, and the config was already recorded as current -- so the old
+    // table went on playing until something else changed. The same for a
+    // TYPE dip cut short before its midpoint, which had not built the new
+    // table yet.
+    //
+    // The bar is -80 dB and not the -100 the crossfade check above uses:
+    // **a reset() instance and a fresh one differ by -86 dB even when nothing
+    // moved at all** (measured on AURORA, 2026-09-30, and steady from 200 ms
+    // on), because reset() snaps the smoothed values -- the ER hi-cut's
+    // coefficient, the fader gains -- to their targets, where a fresh
+    // instance glides there from its construction defaults and, in float,
+    // stalls a few hundred ulps short. (Holding the hi-cut's glide alone
+    // moved the floor to -91 dB.) The old table playing on measured +0.18 dB.
+    {
+        struct Move { const char* what; int index; float value; };
+        bool landed = true;
+
+        for (const auto m : { Move { "a VARIATION crossfade", Index::ervariation, 0.0f },
+                              Move { "a TYPE dip", Index::type, (float) hall } })
+        {
+            auto v = erOnly (room);
+            auto to = v;
+            to[(size_t) m.index] = m.value;
+
+            ReverbDsp dsp;
+            dsp.prepare (48000.0, 512, 2);
+            dsp.setParams (v.data(), (int) v.size());
+            Stereo warm;
+            runNoise (dsp, warm, 0, 24000, 512);
+            dsp.setParams (to.data(), (int) to.size());
+            runNoise (dsp, warm, 24000, 24064, 64);        // 64 samples into a 1440-sample move
+            dsp.reset();
+            Stereo s;
+            runNoise (dsp, s, 0, 24000, 512);
+
+            ReverbDsp ref;
+            ref.prepare (48000.0, 512, 2);
+            ref.setParams (to.data(), (int) to.size());
+            Stereo h;
+            runNoise (ref, h, 0, 24000, 512);
+
+            const auto r = residualDb (h, s, 14400, 24000);
+            std::cout << "  reset() in " << m.what << ": " << r << " dB residual against a fresh instance at the new setting\n";
+            landed = landed && r <= -80.0;
+        }
+
+        check (landed, "reset() during a crossfade or a TYPE dip lands on the new setting, not the old one (residual under -80 dB)");
+    }
+
+    //== Energy: finite, and energy-renormalised to the room =====================
+    {
+        const auto taps  = render ([] (auto&) {});
+        const auto to    = taps.msToSamples (600.0f);
+        const auto eTaps = taps.energy (0, to);
+
+        const auto ir = render ([] (auto& p) { p[Index::ermode] = (float) energy; });
+        bool finite = true;
+        for (int i = 0; i < ir.size(); ++i)
+            finite = finite && std::isfinite (ir.l[(size_t) i]) && std::isfinite (ir.r[(size_t) i]);
+        check (finite, "Energy mode is finite");
+
+        const auto ratio = 10.0f * std::log10 (ir.energy (0, to) / eTaps);
+        std::cout << "  Energy vs Taps: " << ratio << " dB\n";
+        check (std::abs (ratio) <= 1.0f, "Energy carries the room's core energy within 1 dB");
+    }
+
+    //== NaN / silence ==============================================================
+    {
+        bool finite = true;
+
+        for (int t = 0; t < numTypes; ++t)
+            for (const auto density : { 0.0f, 100.0f })
+                for (const auto v : { 0, 6 })
+                {
+                    ReverbDsp dsp;
+                    dsp.prepare (48000.0, 256, 2);
+                    auto p = defaults();
+                    p[Index::type] = (float) t;
+                    p[Index::erdensity] = density;
+                    p[Index::ervariation] = (float) v;
+                    p[Index::size] = t % 2 ? 80.0f : 0.5f;
+                    dsp.setParams (p.data(), (int) p.size());
+
+                    std::vector<float> l (256), r (256);
+                    for (int block = 0; block < 40; ++block)
+                    {
+                        for (int i = 0; i < 256; ++i)
+                        {
+                            const auto x = block < 10 ? (i % 48 < 24 ? 1.0f : -1.0f)   // a +-1 square
+                                         : block < 20 ? 1.0f                              // a DC step
+                                         : block < 30 ? 1.0e-38f                          // denormal-range input
+                                                      : 0.0f;
+                            l[(size_t) i] = r[(size_t) i] = x;
+                        }
+                        float* chans[] { l.data(), r.data() };
+                        dsp.process (chans, 2, 256);
+                        for (int i = 0; i < 256; ++i)
+                            finite = finite && std::isfinite (l[(size_t) i]) && std::isfinite (r[(size_t) i]);
+                    }
+                }
+
+        check (finite, "every sample is finite over squares, DC, denormal input and silence at every type and both size ends");
+
+        // After reset(), zeros in gives exactly zeros out.
+        {
+            ReverbDsp dsp;
+            dsp.prepare (48000.0, 256, 2);
+            auto p = defaults();
+            dsp.setParams (p.data(), (int) p.size());
+            std::vector<float> l (256, 1.0f), r (256, 1.0f);
+            float* chans[] { l.data(), r.data() };
+            dsp.process (chans, 2, 256);
+            dsp.reset();
+            std::fill (l.begin(), l.end(), 0.0f);
+            std::fill (r.begin(), r.end(), 0.0f);
+            bool zeros = true;
+            for (int block = 0; block < 4; ++block)
+            {
+                dsp.process (chans, 2, 256);
+                for (int i = 0; i < 256; ++i)
+                    zeros = zeros && l[(size_t) i] == 0.0f && r[(size_t) i] == 0.0f;
+            }
+            check (zeros, "after reset(), zeros in gives exactly zeros out");
+        }
+    }
+
+    //== Buses: a mono bus is finite and within 3 dB of a stereo channel ===========
+    {
+        const auto stereo = render ([] (auto&) {});
+        const auto mono   = render ([] (auto&) {}, 48000.0, 512, 0.6f, 1);
+        const auto to     = stereo.msToSamples (erSpanMsAt (0, roomDefaults::kSizeM) + 10.0f);
+
+        double eStereo = 0.0, eMono = 0.0;
+        for (int i = 1; i < to; ++i)
+        {
+            eStereo += stereo.l[(size_t) i] * stereo.l[(size_t) i];
+            eMono   += mono.l[(size_t) i] * mono.l[(size_t) i];
+        }
+
+        const auto diff = 10.0 * std::log10 (eMono / eStereo);
+        std::cout << "  mono bus vs one stereo channel: " << diff << " dB\n";
+        check (std::abs (diff) <= 3.0, "a mono bus hears the ER within 3 dB of a stereo channel");
     }
 
     //== The Size law ========================================================
@@ -453,43 +1698,47 @@ int main()
                "the ER span is the last tap's time");
     }
 
-    //== The tap table's shape ===============================================
+    //== The tap tables' shape ===============================================
     //
-    // **The numbers in the table are a placeholder and none of 11 section 6's
-    // rules is asserted against them** -- not the 0.9 ms minimum separation,
-    // not the 2 % gap rule, not the Kuttruff level ceiling, not the flamming
-    // rules. Those go in when the image-source generator lands, and a failing
-    // table is re-seeded rather than patched (10 section 8).
-    //
-    // What is asserted is what the panel and the engine both rely on being
-    // true of *any* table that replaces it: times ascend, gains decay, and
-    // every bearing is a bearing.
+    // What the panel and the engine both rely on being true of every table:
+    // times ascend, the gain contour falls, every bearing is a bearing, and
+    // the first two reflections stay near the centre so the phantom centre
+    // holds. Gains are *not* asserted to fall tap by tap: the level ceilings
+    // flatten the early cluster to one figure, so what falls is the contour
+    // -- the least-squares slope of dB against time -- and the last tap.
     {
-        bool ascending = true, decaying = true, panned = true;
-
-        for (int i = 0; i < kNumReferenceTaps; ++i)
+        for (int t = 0; t < kNumTapTypes; ++t)
         {
-            const auto& t = kReferenceTaps[i];
+            const auto* table = kTypeTaps[t];
+            bool ascending = true, panned = true, ordered = true;
+            float sx = 0.0f, sy = 0.0f, sxx = 0.0f, sxy = 0.0f;
 
-            panned = panned && t.pan >= -1.0f && t.pan <= 1.0f;
-
-            if (i > 0)
+            for (int i = 0; i < kNumReferenceTaps; ++i)
             {
-                ascending = ascending && t.timeMs > kReferenceTaps[i - 1].timeMs;
-                decaying  = decaying  && t.gain  <  kReferenceTaps[i - 1].gain;
+                panned  = panned  && table[i].pan >= -1.0f && table[i].pan <= 1.0f;
+                ordered = ordered && table[i].order >= 1 && table[i].order <= 3;
+
+                if (i > 0)
+                    ascending = ascending && table[i].timeMs > table[i - 1].timeMs;
+
+                const auto y = 20.0f * std::log10 (table[i].gain);
+                sx += table[i].timeMs; sy += y; sxx += table[i].timeMs * table[i].timeMs; sxy += table[i].timeMs * y;
             }
+
+            const auto n = (float) kNumReferenceTaps;
+            const auto slope = (n * sxy - sx * sy) / (n * sxx - sx * sx);
+
+            check (ascending, "tap times ascend");
+            check (slope < 0.0f, "the gain contour falls with time");
+            check (table[kNumReferenceTaps - 1].gain < table[0].gain, "the last tap is quieter than the first");
+            check (panned, "every tap's bearing is within -1..+1");
+            check (ordered, "every tap's order is 1..3");
+            check (std::abs (table[0].pan) < 0.25f && std::abs (table[1].pan) < 0.25f,
+                   "the first two reflections stay near the centre");
+            check (table[0].timeMs < 5.0f, "a deliberate allocation inside 5 ms");
         }
 
-        check (ascending, "tap times ascend");
-        check (decaying, "tap gains decay");
-        check (panned, "every tap's bearing is within -1..+1");
         check (kNumReferenceTaps == 21, "the base tap count is 21, as 10 section 3 gives it");
-
-        // The first two reflections stay near the centre so the phantom centre
-        // holds -- the one property of the real set the stand-in reproduces,
-        // and the one a re-seeded table must keep.
-        check (std::abs (kReferenceTaps[0].pan) < 0.25f && std::abs (kReferenceTaps[1].pan) < 0.25f,
-               "the first two reflections stay near the centre");
     }
 
     //== The tail figure the host will be told ===============================
@@ -524,6 +1773,45 @@ int main()
         delayed.preDelayMs = 250.0f;
         check (DspCore::tailSecondsFor (delayed) > DspCore::tailSecondsFor (p),
                "pre-delay lengthens the reported tail");
+
+        // **t_ER,max is the span of the mode in use.** Energy mode lays its
+        // pulses over its own window, 3.1 x ER SPREAD up to 500 ms, and not
+        // over the Taps table's 61 ms; the formula added the Taps span in
+        // both modes until the 2026-09-30 review, so at a short DECAY a
+        // bounce cut most of an Energy cluster off.
+        //   0 + 1.8 * 1.20 + 500 ms + 0.05 = 2.71
+        DspCore::Params spread = p;
+        spread.erMode     = ErMode::energy;
+        spread.erSpreadMs = 200.0f;
+        check (near (DspCore::tailSecondsFor (spread), 2.71f, 1.0e-3f),
+               "Energy mode's tail carries its own 500 ms window at ER SPREAD 200");
+
+        // And the figure covers what actually plays, in both modes, at the
+        // shortest DECAY -- where the ER span is most of the answer.
+        for (const auto mode : { taps, energy })
+        {
+            const auto edit = [mode] (std::vector<float>& v)
+            {
+                v[Index::ermode]  = (float) mode;
+                v[Index::erspread] = 200.0f;
+                v[Index::decay]   = 0.1f;
+            };
+
+            const auto ir = render (edit, 48000.0, 512, 1.0f);
+
+            auto v = defaults();
+            edit (v);
+            ReverbDsp dsp;
+            const auto tail = dsp.tailSecondsForParams (v.data(), (int) v.size());
+            const auto cut  = (int) (tail * 48000.0);
+            const auto all  = ir.energy (0, ir.size());
+            const auto past = ir.energy (cut, ir.size());
+
+            std::cout << "  reported tail in " << (mode == taps ? "Taps" : "Energy") << " mode at DECAY 0.1 s: " << tail
+                      << " s; ER energy past it " << 10.0f * std::log10 (std::max (past, 1.0e-30f) / all) << " dB\n";
+            check (past <= all * 1.0e-6f,
+                   "the reported tail covers the rendered ER to -60 dB in both modes at DECAY 0.1 s");
+        }
     }
 
     //== The Reverb EQ: three nodes, fixed shapes, and one mode ===============
@@ -850,6 +2138,164 @@ int main()
             check (unstable == 0,
                    "every corner of the EQ's own ranges designs a stable, finite filter");
         }
+    }
+
+    //== A room under 6 m is earlier and tighter, and no louder ===============
+    //
+    // A tap's gain is 1 / d, so halving the room doubles it, and SIZE reaches
+    // 0.5 m. The review of PR #27 measured what that does at the settings a
+    // user actually has -- each type's own voicing, MIX at its default, pink
+    // noise at -18 dBFS RMS, on AURORA -- and the output went over full scale
+    // under about 4 m and read +18.6 dBFS at Room 0.5 m. Nothing below 6 m was
+    // in either listening set.
+    //
+    // Frosty's two calls. 2026-10-01: stop the gain rising below 6 m, so
+    // everything he heard stays as it was. That held the gain and not the
+    // level -- with the times still shrinking the taps bunch up and sum more
+    // coherently in the bass, worth up to 7 dB at 0.5 m, and the bottom corner
+    // still read +1.8 dBFS. 2026-10-02: flatten it, because short of a room
+    // mode a real room's reflections never double what went in. So below 6 m
+    // the gain eases down as (SIZE / 6) ^ 0.25, about 1.5 dB per halving,
+    // which is what the bunching was adding. The times are untouched all the
+    // way down. These checks are those two decisions.
+    {
+        const auto& first = kTypeTaps[room][0];
+        const auto atFloorGain = tapGainAt (first, kGainFloorSizeM);
+
+        // (b) The law itself: untouched from 6 m up, easing down below.
+        bool lawAbove = true, easesBelow = true, stillEarlier = true;
+
+        for (const auto size : { 6.0f, 8.0f, 12.0f, 24.0f, 80.0f })
+            lawAbove = lawAbove && near (tapGainAt (first, size), first.gain * kReferenceSizeM / size, 1.0e-6f);
+
+        float previous = atFloorGain;
+
+        for (const auto size : { 5.9f, 3.0f, 2.0f, 1.0f, 0.5f })
+        {
+            const auto gain = tapGainAt (first, size);
+
+            easesBelow   = easesBelow
+                        && near (gain, atFloorGain * std::pow (size / kGainFloorSizeM, kSmallRoomSlope), 1.0e-6f)
+                        && gain < previous;
+            stillEarlier = stillEarlier && tapTimeMsAt (first, size) < tapTimeMsAt (first, kGainFloorSizeM);
+            previous     = gain;
+        }
+
+        check (lawAbove,     "at 6 m and above a tap's gain is the 1/d law, exactly as it was heard");
+        check (easesBelow,   "below 6 m a tap's gain eases down from its 6 m figure as (SIZE / 6) ^ 0.25");
+        check (stillEarlier, "below 6 m a tap still arrives earlier, so a smaller room is still a tighter one");
+
+        // A fixed pink noise at -18 dBFS RMS, two seconds: the file's own
+        // hashed white noise through the usual three-decade pinking filter, so
+        // every platform runs the same samples.
+        const auto n = 96000;
+        std::vector<float> pink ((size_t) n);
+        {
+            double b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0, sum = 0;
+
+            for (int i = 0; i < n; ++i)
+            {
+                const auto w = (double) noiseAt (i);
+                b0 = 0.99886 * b0 + w * 0.0555179;  b1 = 0.99332 * b1 + w * 0.0750759;
+                b2 = 0.96900 * b2 + w * 0.1538520;  b3 = 0.86650 * b3 + w * 0.3104856;
+                b4 = 0.55000 * b4 + w * 0.5329522;  b5 = -0.7616 * b5 - w * 0.0168980;
+                const auto p = b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362;
+                b6 = w * 0.115926;
+                pink[(size_t) i] = (float) p;
+                sum += p * p;
+            }
+
+            const auto k = std::pow (10.0, -18.0 / 20.0) / std::sqrt (sum / (double) n);
+            for (auto& s : pink)
+                s = (float) ((double) s * k);
+        }
+
+        /** Peak of both channels, in dBFS, of the pink noise through `v`. */
+        const auto peakThrough = [&pink, n] (const std::vector<float>& v)
+        {
+            ReverbDsp dsp;
+            dsp.prepare (48000.0, 512, 2);
+            dsp.setParams (v.data(), (int) v.size());
+
+            std::vector<float> l (512), r (512);
+            float peak = 0.0f;
+
+            for (int at = 0; at < n; at += 512)
+            {
+                const auto count = std::min (512, n - at);
+
+                for (int i = 0; i < count; ++i)
+                    l[(size_t) i] = r[(size_t) i] = pink[(size_t) (at + i)];
+
+                float* chans[] { l.data(), r.data() };
+                dsp.setParams (v.data(), (int) v.size());
+                dsp.process (chans, 2, count);
+
+                for (int i = 0; i < count; ++i)
+                    peak = std::max (peak, std::max (std::abs (l[(size_t) i]), std::abs (r[(size_t) i])));
+            }
+
+            return db (peak);
+        };
+
+        // (a) No type goes over full scale at the settings a user has, at any
+        // SIZE. Measured: -0.7 dBFS at the worst corner (Room at 0.5 m), where
+        // the uncapped law read +18.6 and the cap alone +1.8.
+        float worst = -300.0f;
+        std::string worstAt;
+
+        for (int t = 0; t < numTypes; ++t)
+            for (const auto size : { 0.5f, 1.0f, 2.0f, 3.0f, 4.0f, 6.0f, 8.0f, 12.0f, 24.0f, 80.0f })
+            {
+                auto v = defaults();
+                v[Index::type] = (float) t;
+
+                for (const auto& s : typeSettings (t))
+                    if (const auto index = indexOfParam (specs(), s.id); index >= 0)
+                        v[(size_t) index] = s.value;
+
+                v[Index::size] = size;
+
+                if (const auto peak = peakThrough (v); peak > worst)
+                {
+                    worst   = peak;
+                    worstAt = std::string (kTypeNames[t]) + " at " + std::to_string (size) + " m";
+                }
+            }
+
+        if (! (worst < 0.0f))
+            std::cerr << "  worst output peak " << worst << " dBFS, " << worstAt << '\n';
+
+        check (worst < 0.0f,
+               "pink noise at -18 dBFS RMS stays under full scale at every type's own voicing and every SIZE");
+
+        // (c) Smaller, not louder: with the ER alone, a small room's peak
+        // stays close to the 6 m room's -- measured between 2.2 dB above
+        // (Plate at 3 m) and 3.5 dB below (Chamber at 0.5 m), where the
+        // uncapped law put 0.5 m 23 to 28 dB above it. One slope for six
+        // tables cannot land every type on zero, and it errs quiet.
+        bool held = true;
+
+        for (int t = 0; t < numTypes; ++t)
+        {
+            auto v = erOnly (t);
+            v[Index::size] = kGainFloorSizeM;
+            const auto atFloor = peakThrough (v);
+
+            for (const auto size : { 0.5f, 1.0f, 2.0f, 3.0f })
+            {
+                v[Index::size] = size;
+                const auto rise = peakThrough (v) - atFloor;
+
+                if (! (rise <= 3.0f && rise >= -4.5f))
+                {
+                    held = false;
+                    std::cerr << "  " << kTypeNames[t] << " at " << size << " m: " << rise << " dB against its 6 m peak\n";
+                }
+            }
+        }
+
+        check (held, "the ER alone at 0.5 to 3 m peaks within +3 / -4.5 dB of its 6 m peak");
     }
 
     //== prepare() and reset() are reachable and do not throw ================

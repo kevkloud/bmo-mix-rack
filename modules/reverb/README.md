@@ -6,9 +6,10 @@ Two spaces in one module — the early reflections that tell you where you are,
 and the tail that tells you how big it is — each with its own fader, so you can
 have one without the other. No latency.
 
-> **Not finished.** The panel, the parameters and the display are real; the
-> processing is a marked placeholder that passes audio through untouched.
-> Nothing here has been heard. See `AGENTS.md` and `docs/reverb/`.
+> **Not finished.** The panel, the parameters, the display and the early
+> reflections are real; the tail is not built yet, so REVERB's fader moves a
+> silent bus and the EQ page's curve is not yet in the sound. Nothing here has
+> been heard. See `AGENTS.md` and `docs/reverb/`.
 
 ## The shape of it
 
@@ -132,15 +133,15 @@ the three EQ frequencies and says `LO CUT` and `HI CUT` when they are cuts.
 see what you are shaping. It is the only thing on this panel measured from the
 audio; EARLY and TAIL are drawn from the controls alone and cost nothing.
 
-> While the processing is a placeholder the analyser shows the signal going
-> **in**, unchanged, because that is all there is — the reverb is not built
-> yet. It is reading the right point; there is just nothing happening at it.
+> Until the EQ is in the signal path the analyser shows the signal going
+> **in**, unchanged: it reads the point the EQ will act on, ahead of the
+> reflections, and nothing is happening at that point yet.
 
 ## EARLY — how the reflections are made
 
 | Control | What it does |
 |---|---|
-| **ER MODE** (the segments) | **Taps** places reflections where a room would. **Energy** replaces them with a shaped cloud. **Blend** is the two ideas at once — and it is the one setting nobody has listened to yet. |
+| **ER MODE** (the segments) | **Taps** places reflections where a room would. **Energy** replaces them with a shaped cloud. (There was a third, Blend; it was heard, sounded like a slightly worse Taps, and was cut before release.) |
 | **DENSITY** | From a handful of distinct reflections to a dense early wash, with no step in between and no level change across the sweep. |
 | **ER SPREAD** | How long the early cloud sustains for, 5 to 200 ms. |
 | **ER HI-CUT** | Takes the top off the reflections. **This is the boxiness control.** |

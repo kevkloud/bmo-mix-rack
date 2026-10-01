@@ -58,7 +58,7 @@ product list **and link line**, or the panel cannot be rendered; `scripts/build.
 **Permanence.** Parameter ids, their order in `specs()`, ranges, steps, defaults
 and every choice list *with its index order* freeze at first ship; append only.
 That binds 10 §1's type order — **Room · Chamber · Hall · Cavern · Plate ·
-Ambience** — and ER Mode's Taps/Energy/Blend.
+Ambience** — and ER Mode's Taps/Energy (Blend cut 2026-09-26).
 
 **The type list was settled by the owner on 2026-09-21 and index 3 changed.**
 *Large Hall was cut:* the late network scales with the taps under SIZE, so
@@ -274,18 +274,18 @@ knob position.
 | 14 | `eqhifreq` | EQ HIGH FREQ | 1000…20000 Hz | 6000 | Hz | L |
 | 15 | `eqhi` | EQ HIGH | −24…+12 dB | 0 | as `eqlo` | |
 | 16 | `eqhiq` | EQ HIGH Q | 0.1…2.0 | 0.71 | bare number | L |
-| 17 | `ermode` | ER MODE | Taps/Energy/Blend | Taps | name | S, X |
+| 17 | `ermode` | ER MODE | Taps/Energy | Taps | name | S, X |
 | 18 | `erdensity` | DENSITY | 0…100 % | *per type* (50) | `50 % (Diffuse)` | |
 | 19 | `erspread` | ER SPREAD | 5…200 ms | *per type* (80) | ms | L |
 | 20 | `erhicut` | ER HI-CUT | 1…20 kHz | 7 k | Hz/kHz | L |
-| 21 | `ervariation` | VARIATION | 0…6 | 2 | `Var 2`; `Var 6 (mono null)` | S, X |
+| 21 | `ervariation` | VARIATION | 0…6 | 4 (was 2 until 2026-09-26) | `Var 4`; `Var 6 (mono null)` | S, X |
 | 22 | `moddepth` | MOD DEPTH | 0.1…0.8 ms | *per type* (0.28) | `0.28 ms` | |
 | 23 | `modrate` | MOD RATE | 0.1…1.2 Hz | *per type* (0.50) | Hz | L |
 | 24 | `width` | WIDTH | 0…200 % | 100 | % | |
 | 25 | `inhicut` | IN HI-CUT | 2…20 kHz | *per type* (20 k) | Hz/kHz | L, **owner confirm** |
 | 26 | `erlevel` | ER | −40…0 dB | *per type* (−6) | dB, `Off` at −40 | |
 | 27 | `verblevel` | REVERB | −40…0 dB | *per type* (−6) | as `erlevel` | |
-| 28 | `mix` | MIX | 0…100 % | 100 | % | |
+| 28 | `mix` | MIX | 0…100 % | 50 | % | default 50 since 2026-09-24, Frosty: input unchanged, verb heard |
 | 29 | `output` | OUTPUT | −24…0 dB | 0 | dB | |
 
 **The EQ captions above are the host's, not the panel's.** A lane in a DAW says

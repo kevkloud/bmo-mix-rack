@@ -5,11 +5,13 @@
 // figure, and two 30.0s written down in two folders is how they come to differ.
 #include "core/dsp/ModuleDsp.h"
 #include "modules/reverb/dsp/EqNodes.h"
+#include "modules/reverb/dsp/ErGenerator.h"
 #include "modules/reverb/dsp/TapTables.h"
 #include "modules/reverb/params.h"
 
 #include <algorithm>
 #include <cmath>
+#include <vector>
 
 namespace bmo::reverb
 {
@@ -35,21 +37,27 @@ namespace bmo::reverb
     `kTypeNames`. */
 enum class Type { room = 0, chamber, hall, cavern, plate, ambience };
 
-/** How the early cluster is generated. See `kErModeNames` in params.h for what
-    Blend is: defined, reachable, and **not yet heard**. */
-enum class ErMode { taps = 0, energy, blend };
+/** How the early cluster is generated. See `kErModeNames` in params.h for why
+    there are two. */
+enum class ErMode { taps = 0, energy };
 
 //==============================================================================
-/** **Placeholder core. There is no reverb in this file yet.**
+/** **M2: the early reflections play; the tail is silent.**
 
-    Samples come out as they went in. Latency is zero -- which, unlike the
-    silence, is the *shipped* figure rather than a stand-in -- and no tail is
-    produced, so nothing downstream has to pretend one is there.
+    `ErGenerator.h` is the early-reflection generator -- image-source tables,
+    the Size law and its crossfade, four order-banded poles, the density
+    bridge and its feed-forward diffuser, seven VARIATION positions, the ER
+    hi-cut -- and this class feeds it the mid of the input, takes the ER bus
+    back at table level, and applies the two faders, the MIX law
+    and OUTPUT with 20 ms smoothing. The late network (M3) and the six type
+    blocks (M4) are still to come: REVERB's fader is smoothed and applied to a
+    bus that is all zeros, so it already behaves, and the Reverb EQ is not
+    yet in the signal path. Latency is zero, which is the *shipped* figure.
 
-    The spec is `docs/reverb/10-dsp-spec.md`; what the tests will ask of it is
-    `docs/reverb/11-integration-and-test-plan.md` section 6, which is the
-    longest test plan in the repository and worth reading before the first line
-    of engine is written. The DSP pass owns this folder and nothing outside it.
+    The spec is `docs/reverb/10-dsp-spec.md`; what the tests ask of it is
+    `docs/reverb/11-integration-and-test-plan.md` section 6, whose ER block is
+    `tests/dsp/ReverbDspTests.cpp`. The DSP pass owns this folder and nothing
+    outside it.
 
     **What must survive the real implementation** -- the contract the rest of
     the module is already built against:
@@ -142,7 +150,7 @@ public:
         float erShape       = roomDefaults::kErShape;             ///< per type, the rise exponent p
         float erSpreadMs    = roomDefaults::kErSpreadMs;          ///< 5..200, the envelope sigma
         float erHiCutHz     = 7000.0f;                            ///< 1000..20000, one post-ER shelf
-        int   erVariation   = 2;                                  ///< 0..6; 6 is the comb pair
+        int   erVariation   = 4;                                  ///< 0..6; 6 is the comb pair
 
         float modDepthMs    = roomDefaults::kModDepthMs;     ///< 0.1..0.8
         float modRateHz     = roomDefaults::kModRateHz;      ///< 0.1..1.2
@@ -164,7 +172,9 @@ public:
     // and not parameters is a schema decision -- there are only two spare host
     // lanes -- and it is this file's job to hold it.
     //
-    // The placeholder ignores every one of them.
+    // The ER generator reads its own copies of the ones it needs
+    // (`ErGenerator::kRampWidth`, `kCrossfadeMs`); the late network will read
+    // the rest.
 
     /** Eight FDN lines, Householder matrix. **10 section 4 is the live risk
         here**: the mode-density rule scales with decay, Sum(m_i) >= 0.15 * T60
@@ -234,14 +244,22 @@ public:
 
     void prepare (double newSampleRate, int maxBlockSize, int numChannels)
     {
-        // Recorded so the real engine has them, and so a test can see that
-        // prepare() was reached. The placeholder allocates nothing because it
-        // needs nothing; the real one allocates **here and only here**, sized
-        // for the largest type at this rate (~300 kB at 48 k, ~1.2 MB at
-        // 192 k), and `process()` allocates nothing ever.
-        sampleRate = newSampleRate;
-        blockSize  = maxBlockSize;
+        // Everything the engine owns is allocated **here and only here**,
+        // sized for the largest type at this rate; `process()` allocates
+        // nothing ever.
+        sampleRate = newSampleRate > 0.0 ? newSampleRate : 48000.0;
+        blockSize  = std::max (1, maxBlockSize);
         channels   = numChannels;
+
+        er.prepare (sampleRate, blockSize);
+        pushErConfig();
+
+        feed.assign ((size_t) blockSize, 0.0f);
+        erL.assign ((size_t) blockSize, 0.0f);
+        erR.assign ((size_t) blockSize, 0.0f);
+
+        smoothCoef = 1.0f - std::exp (-1.0f / (kSmoothingMs * 0.001f * (float) sampleRate));
+        snapGains();
 
         // The design grid the real EQ will build its three nodes on, built
         // once per rate change because 48 pow() and sin() calls is most of a
@@ -256,9 +274,41 @@ public:
         eqTap.prepare (1 << 13);
     }
 
-    void reset() {}
+    void reset()
+    {
+        er.reset();
+        snapGains();
+    }
 
-    void setParams (const Params& p) { params = p; }
+    void setParams (const Params& p)
+    {
+        params = p;
+        pushErConfig();
+    }
+
+    /** The early-reflection generator itself, for the tests and the
+        measurement tool. */
+    ErGenerator& earlyReflections() noexcept { return er; }
+    const ErGenerator& earlyReflections() const noexcept { return er; }
+
+    //== The level laws =========================================================
+
+    /** A fader in dB to a linear gain, with the bottom of the range being
+        **off** and not -40 dB (10 section 2). */
+    static float faderGain (float db) noexcept
+    {
+        return db <= -39.95f ? 0.0f : std::pow (10.0f, db * 0.05f);
+    }
+
+    /** **The MIX law, Frosty's on 2026-09-24.** dry = min(1, 2(1 - mix)),
+        wet = min(1, 2 mix): at 50 % the input is unchanged and the verb is
+        heard at its faders, below it the wet comes down alone, above it the
+        dry goes away alone, and 100 % is verb only, for use as a send. The
+        default is 50 %. `tests/dsp/ReverbDspTests.cpp` pins all five points
+        of it; 11 section 6's null at 50 % with the faders off follows from
+        dry being unity there. */
+    static float dryGainFor (float mix) noexcept { return std::min (1.0f, 2.0f * (1.0f - std::clamp (mix, 0.0f, 1.0f))); }
+    static float wetGainFor (float mix) noexcept { return std::min (1.0f, 2.0f * std::clamp (mix, 0.0f, 1.0f)); }
 
     const Params& getParams() const noexcept { return params; }
 
@@ -271,12 +321,12 @@ public:
         placeholder decision -- it is where the tap belongs once there is a
         reverb, and putting it on the output would have to be undone.
 
-        **Until the engine exists this shows the dry input, and that is
-        honest.** `process` below is a marked pass-through, so the module's
-        input, the point the EQ acts on and the module's output are the same
-        samples; there is no third thing the tap could be showing. A reader who
-        finds the spectrum "not reacting to the EQ knobs" has found the
-        placeholder, not a broken analyser. **Do not move the tap to fix it.**
+        **Until the Reverb EQ is in the path (M3) this shows the dry input,
+        and that is honest.** The EQ sits pre both generators, so the input
+        and the point the EQ acts on are still the same samples; the ER now
+        playing on the output is downstream of it. A reader who finds the
+        spectrum "not reacting to the EQ knobs" has found M3's absence, not a
+        broken analyser. **Do not move the tap to fix it.**
         See modules/reverb/AGENTS.md, "The analyser is real and the signal
         under it is not yet".
 
@@ -286,15 +336,62 @@ public:
         neither the sound nor the latency, and why. */
     AnalyserTap& eqAnalyser() noexcept { return eqTap; }
 
-    /** **Pass-through.** Marked, not forgotten: see the class comment.
+    /** M2: the early reflections play; the tail is silent.
 
-        The one thing it does do is write the analyser window, and only while a
-        panel has asked for it. That is a copy and a relaxed store on the way
-        past: nothing downstream reads it, no state survives a block boundary,
-        so block-size invariance and the zero latency are both untouched. */
+        The analyser window is written from the input, which is still the
+        point the Reverb EQ will act on -- the EQ lands in M3 ahead of both
+        generators, and until then the input and that point are the same
+        samples. The ER generator is fed the mid of the input (a mono bus
+        feeds it directly), returns the ER bus at table level, and the two
+        faders, the MIX law and OUTPUT are applied here with 20 ms
+        one-pole smoothing on every gain. `verbLevel` is smoothed and applied
+        to a bus that is all zeros, so its fader already behaves. */
     void process (float* const* channelData, int numChannels, int numSamples)
     {
         eqTap.write (channelData, numChannels, numSamples);
+
+        if (numChannels < 1 || numSamples < 1 || feed.empty())
+            return;
+
+        float* const left  = channelData[0];
+        float* const right = numChannels > 1 ? channelData[1] : channelData[0];
+
+        for (int start = 0; start < numSamples; start += blockSize)
+        {
+            const auto n = std::min (blockSize, numSamples - start);
+
+            if (numChannels > 1)
+                for (int i = 0; i < n; ++i)
+                    feed[(size_t) i] = 0.5f * (left[start + i] + right[start + i]);
+            else
+                for (int i = 0; i < n; ++i)
+                    feed[(size_t) i] = left[start + i];
+
+            er.process (feed.data(), erL.data(), erR.data(), n);
+
+            for (int i = 0; i < n; ++i)
+            {
+                gEr  += (tEr  - gEr)  * smoothCoef;
+                gDry += (tDry - gDry) * smoothCoef;
+                gWet += (tWet - gWet) * smoothCoef;
+                gOut += (tOut - gOut) * smoothCoef;
+
+                const auto wetL = erL[(size_t) i] * gEr;
+                const auto wetR = erR[(size_t) i] * gEr;
+
+                if (numChannels > 1)
+                {
+                    left[start + i]  = (left[start + i]  * gDry + wetL * gWet) * gOut;
+                    right[start + i] = (right[start + i] * gDry + wetR * gWet) * gOut;
+                }
+                else
+                {
+                    // A mono bus hears the mono sum, which the gamma >= 0 rule
+                    // keeps within 3 dB of either channel.
+                    left[start + i] = (left[start + i] * gDry + 0.5f * (wetL + wetR) * gWet) * gOut;
+                }
+            }
+        }
     }
 
     /** Zero, at every setting, always. Not computed from the values, because
@@ -325,10 +422,19 @@ public:
         eight maxed reverbs in one chain would otherwise report four minutes. */
     static float tailSecondsFor (const Params& p) noexcept
     {
+        // t_ER,max is the span of the ER mode in use. Taps plays the type's
+        // table, whose last tap scales with SIZE; Energy lays its pulses over
+        // its own window, up to 500 ms whatever the SIZE. Adding the Taps
+        // span in both modes, as this did until the 2026-09-30 review, told a
+        // host 231 ms at DECAY 0.1 s while an Energy cluster at ER SPREAD 200
+        // played for half a second.
+        const auto erMs = p.erMode == ErMode::energy ? ErGenerator::energyWindowMs (p.erSpreadMs)
+                                                     : erSpanMsAt ((int) p.type, p.sizeM);
+
         const auto longest = std::max (1.0f, std::max (p.dampLo, p.dampHi));
         const auto seconds = p.preDelayMs * 0.001f
                            + p.decaySeconds * longest
-                           + erSpanMsAt (p.sizeM) * 0.001f
+                           + erMs * 0.001f
                            + 0.05f;
 
         return std::min (seconds, kMaxTailSeconds);
@@ -336,6 +442,41 @@ public:
 
 private:
     Params params;
+
+    /** What the generator is told, from the parameter set: the fields that
+        decide the table, plus DENSITY and ER HI-CUT as smoothed targets. */
+    void pushErConfig()
+    {
+        ErConfig c;
+        c.type      = (int) params.type;
+        c.sizeM     = params.sizeM;
+        c.mode      = (int) params.erMode;
+        c.variation = params.erVariation;
+        c.spreadMs  = params.erSpreadMs;
+        c.shape     = params.erShape;
+        er.setConfig (c);
+        er.setDensity (params.erDensity);
+        er.setHiCut (params.erHiCutHz);
+
+        tEr  = faderGain (params.erLevelDb);
+        tDry = dryGainFor (params.mix);
+        tWet = wetGainFor (params.mix);
+        tOut = std::pow (10.0f, params.outputDb * 0.05f);
+    }
+
+    /** Gains jump to their targets: after prepare() and reset() there is no
+        history to smooth from. */
+    void snapGains() noexcept
+    {
+        gEr = tEr; gDry = tDry; gWet = tWet; gOut = tOut;
+    }
+
+    ErGenerator er;
+    std::vector<float> feed, erL, erR;
+
+    float smoothCoef = 0.0f;
+    float tEr = 0.0f, tDry = 1.0f, tWet = 1.0f, tOut = 1.0f;
+    float gEr = 0.0f, gDry = 1.0f, gWet = 1.0f, gOut = 1.0f;
 
     /** The grid the three EQ nodes are designed on, at the running rate.
         Unused by the placeholder; rebuilt in `prepare` so the engine has it.

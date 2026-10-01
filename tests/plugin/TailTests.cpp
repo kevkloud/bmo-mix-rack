@@ -21,7 +21,7 @@
 
     **The rack clamps its total at thirty seconds too**, as of 2026-09-21, so
     the product has one rule instead of two. The sum is still what a chain
-    under the ceiling reports -- the 8.6223 s two-slot figure is asserted after
+    under the ceiling reports -- the 8.5675 s two-slot figure is asserted after
     the clamp as well as before it -- and what the clamp stops is the case the
     slot limit does not: eight BMO Lingers, each honestly reporting its own
     thirty, rendering four minutes of silence onto the end of every offline
@@ -60,26 +60,29 @@ constexpr auto kRingingModule = "reverb";
 //
 // T_tail = preDelay + T_mid * max(1, r_lo, r_hi) + t_ER,max + 0.05 s, clamped
 // to 30 s (docs/reverb/10-dsp-spec.md 5). t_ER,max is the last reference tap,
-// 79.1 ms quoted at the 12 m reference size and scaling with SIZE, so
-// t_ER,max(S) = 79.1 * S / 12 ms.
+// 60.849 ms for Room -- the last row of its image-source table, quoted at the
+// 12 m reference size and scaling with SIZE -- so
+// t_ER,max(S) = 60.849 * S / 12 ms. (It was 79.1 ms while the table was a
+// placeholder; the figures below were rewritten on 2026-09-24 when the real
+// tables landed, on ICE QUEEN.)
 //
 // Each row is the arithmetic written out, then the answer. They are settings
 // and seconds, not expressions evaluated by the same code under test.
 
 /** The schema defaults: Room, 12 m, no pre-delay, 1.8 s decay, damping 1.20
     low and 0.40 high.
-    0 + 1.8 * 1.20 + 79.1 * 12 / 12 ms + 0.05 = 2.16 + 0.0791 + 0.05 */
-constexpr double kDefaultTail = 2.2891;
+    0 + 1.8 * 1.20 + 60.849 * 12 / 12 ms + 0.05 = 2.16 + 0.060849 + 0.05 */
+constexpr double kDefaultTail = 2.270849;
 
 /** A deliberately unround setting, so the test cannot pass on a coincidence:
     125 ms pre-delay, 4 s decay, damping 1.50 low and 0.50 high, 24 m.
-    0.125 + 4.0 * 1.50 + 79.1 * 24 / 12 ms + 0.05 = 0.125 + 6.0 + 0.1582 + 0.05 */
-constexpr double kLongTail = 6.3332;
+    0.125 + 4.0 * 1.50 + 60.849 * 24 / 12 ms + 0.05 = 0.125 + 6.0 + 0.121698 + 0.05 */
+constexpr double kLongTail = 6.296698;
 
 /** Both damping multipliers under unity. The formula floors the multiplier at
     1, so a dark room is not reported SHORTER than its own mid-band decay:
-    0 + 3.0 * 1.00 + 79.1 * 12 / 12 ms + 0.05 */
-constexpr double kDarkTail = 3.1291;
+    0 + 3.0 * 1.00 + 60.849 * 12 / 12 ms + 0.05 */
+constexpr double kDarkTail = 3.110849;
 
 /** The ceiling, and **it is now the rack's as well as the module's**. 250 ms +
     20 s decay at a 2.0 multiplier + 80 m of early reflections is 40.827 s of
@@ -90,9 +93,9 @@ constexpr double kDarkTail = 3.1291;
 constexpr double kClampedTail = 30.0;
 
 /** Two occupied slots, in series: the rack adds them.
-    A MAXIMUM would report 6.3332 here, so the two answers cannot be confused,
+    A MAXIMUM would report 6.296698 here, so the two answers cannot be confused,
     and it is **under the rack's ceiling**, so the clamp must leave it alone. */
-constexpr double kSummedTail = kDefaultTail + kLongTail;    // 8.6223
+constexpr double kSummedTail = kDefaultTail + kLongTail;    // 8.567547
 
 //== Building things ==========================================================
 std::unique_ptr<bmo::SingleModuleProcessor> makeProduct (const bmo::ModuleDef& def)
@@ -254,9 +257,33 @@ int main()
 
         // The clamp is a ceiling and not a fixed answer: a setting just under
         // it has to still be reported as itself.
-        //   0 + 20.0 * 1.00 + 79.1 * 12 / 12 ms + 0.05 = 20.1291
-        checkClose (tailAt ({ 0.0f, 20.0f, 1.00f, 1.00f, 12.0f }), 20.1291, 1.0e-4,
+        //   0 + 20.0 * 1.00 + 60.849 * 12 / 12 ms + 0.05 = 20.110849
+        checkClose (tailAt ({ 0.0f, 20.0f, 1.00f, 1.00f, 12.0f }), 20.110849, 1.0e-4,
                     "20.1 s is under the ceiling and is reported in full");
+
+        // **In Energy mode t_ER,max is Energy's own window**, 3.1 x ER SPREAD
+        // up to 500 ms, and not the Taps table's last tap: the cluster is laid
+        // over that window whatever the SIZE. Until the 2026-09-30 review both
+        // modes reported the Taps span, which is what every row above still
+        // is, so none of them moved; these two are new.
+        //   ER SPREAD 125: 0 + 1.8 * 1.20 + 3.1 * 125 ms + 0.05 = 2.16 + 0.3875 + 0.05
+        //   ER SPREAD 200: 0 + 1.8 * 1.20 + 500 ms (the cap; 620 uncapped) + 0.05
+        {
+            apply (params, kDefaults);
+            params.setReal (bmo::reverb::kErMode, 1.0f);
+            params.setReal (bmo::reverb::kErSpread, 125.0f);
+            proc->prepareToPlay (kRate, kBlock);
+            checkClose (proc->getTailLengthSeconds(), 2.5975, 1.0e-4,
+                        "Energy mode reports its own window, 3.1 x ER SPREAD, as t_ER,max");
+
+            params.setReal (bmo::reverb::kErSpread, 200.0f);
+            proc->prepareToPlay (kRate, kBlock);
+            checkClose (proc->getTailLengthSeconds(), 2.71, 1.0e-4,
+                        "Energy mode's window is capped at 500 ms in the tail it reports");
+
+            params.setReal (bmo::reverb::kErMode, 0.0f);
+            params.setReal (bmo::reverb::kErSpread, 80.0f);
+        }
 
         // Nothing outside the formula moves it. MIX at zero is a bypassed
         // reverb by ear and a ringing one by contract -- the host still has to
@@ -359,7 +386,7 @@ int main()
         apply (rack->getEngineAt (1)->params(), kLong);
         rack->prepareToPlay (kRate, kBlock);
         checkClose (rack->getTailLengthSeconds(), kSummedTail, 1.0e-4,
-                    "8.6223 s is under the ceiling and is still reported as the sum");
+                    "8.5675 s is under the ceiling and is still reported as the sum");
 
         // And the rack's ceiling is the module's ceiling, read from the one
         // place it is decided rather than from a second 30.0 written here.

@@ -46,7 +46,9 @@ namespace bmo::reverb
 // is true of the five floats and the one bool that were cut, and it is **not**
 // true of a choice: `juce::AudioParameterChoice` normalises as index/(n-1), so
 // changing the count of `type` or `ermode` remaps every automation point ever
-// written on that lane. Neither was touched, and neither may be.
+// written on that lane. Neither was touched by the trim, and once Linger ships
+// neither may be. `ermode` lost Blend on 2026-09-26, before ship, on Frosty's
+// listening verdict (kErModeNames).
 //
 //== The six that were cut, and where each one went ==========================
 //
@@ -204,8 +206,8 @@ inline constexpr auto kEqFilter  = "eqfilter";
     itself. The middle node is always a bell and keeps the full 0.1-40. */
 inline constexpr float kShelfMaxQ = 2.0f;
 
-// How the early cluster is generated. Taps / Energy / Blend, index order
-// frozen -- and see kErModeNames on what Blend is and is not.
+// How the early cluster is generated. Taps / Energy, index order and count
+// frozen at first ship -- and see kErModeNames on why there is no third.
 inline constexpr auto kErMode = "ermode";
 
 // The density bridge: discrete positional taps at the bottom, dense shaped
@@ -222,9 +224,10 @@ inline constexpr auto kErDensity = "erdensity";
 // SHAPE are. It was already a per-type constant; what changed is that it is no
 // longer also a knob.
 //
-// ER SPREAD is live in Taps mode too, since Blend reuses the Shape/Spread
-// envelope -- whether it greys out in Taps mode or sits inert is 11 section
-// 7's open owner-confirm question and is a panel decision, not a schema one.
+// ER SPREAD shapes Energy mode only. It was live in Taps mode while Blend
+// existed, because Blend reused the envelope; with Blend gone, whether it
+// greys out in Taps mode or sits inert is 11 section 7's open owner-confirm
+// question and is a panel decision, not a schema one.
 inline constexpr auto kErSpread = "erspread";
 
 // One post-ER shelf. The main anti-boxiness tool, and the fallback if the four
@@ -348,21 +351,20 @@ enum TypeChoice { room = 0, chamber, hall, cavern, plate, ambience, numTypes };
     not a cut: nothing an automation lane already holds moves. */
 inline const char* const kTypeNames[] { "Room", "Chamber", "Hall", "Cavern", "Plate", "Ambience" };
 
-enum ErModeChoice { taps = 0, energy, blend, numErModes };
+enum ErModeChoice { taps = 0, energy, numErModes };
 
 /** Taps is the image-source table; Energy replaces tap times with velvet noise
     enveloped by ER SHAPE and ER SPREAD.
 
-    **Blend is defined but unheard.** The proposal is: image-source tap *times
-    and pans* from Taps, with the Energy generator's Shape/Spread envelope
-    replacing the physical `(1/d) * beta^n` gain law, energy-renormalised so
-    the mode change is not also a level change. That is a coherent third
-    behaviour rather than a crossfade between two generators, and it is the one
-    of the three that nobody has listened to. It holds index 2 now because the
-    index order freezes at first ship and there is no way to insert it later --
-    not because the behaviour is settled. The listening pass (11 section 6) is
-    where it becomes real or becomes a synonym for one of its neighbours. */
-inline const char* const kErModeNames[] { "Taps", "Energy", "Blend" };
+    **Two, and the count is permanent at first ship.** There was a third,
+    Blend: Taps' times and pans with Energy's envelope in place of the physical
+    gain law. It held index 2 so it could be heard before the order froze. It
+    was heard on 2026-09-26 on ICE QUEEN (HEDD Type 20 MK2), wet, on a vocal
+    and a guitar, and Frosty's verdict was that it sounds like "a slightly
+    worse" Taps -- a synonym for its neighbour, not a third behaviour -- so it
+    was cut while cutting was free. Taps "sounds great, small room vibe";
+    Energy "sounds great, short verb vibe". */
+inline const char* const kErModeNames[] { "Taps", "Energy" };
 
 enum EqFilterChoice { eqFilterOff = 0, eqFilterLoCut, eqFilterHiCut, eqFilterBandpass, numEqFilters };
 
@@ -1061,11 +1063,10 @@ inline const ParamSpecs& specs()
         //== Early reflections =================================================
 
         // 17. ER MODE. Taps is the default and the one the module is argued
-        // from; Blend is defined-but-unheard (kErModeNames). **A choice, so
-        // the trim did not touch it**: three is what its normalisation
-        // depends on.
+        // from. **A choice, so its count is what normalisation depends on**:
+        // two since Blend was cut before ship (kErModeNames).
         S::choiceParam (kErMode, "ER Mode",
-                        { kErModeNames[taps], kErModeNames[energy], kErModeNames[blend] },
+                        { kErModeNames[taps], kErModeNames[energy] },
                         taps),
 
         // 18. DENSITY. Linear per cent: the activation thresholds it sweeps
@@ -1091,7 +1092,12 @@ inline const ParamSpecs& specs()
         // later position is ever added at the end, where a choice list's
         // index/(n-1) is not. Var 6 is a different construction all the same,
         // and the value string says so.
-        S::textParam (kErVariation, "Variation", 0.0f, 6.0f, 1.0f, 2.0f,
+        //
+        // **Defaults to 4** (Frosty, 2026-09-26, by ear on ICE QUEEN: "2 isnt
+        // enough to feel. 3 or 4 should be default"). Room's early L/R
+        // correlation is 0.57 at 2 and 0.21 at 4; a measured reference reverb's
+        // early reflections read -0.13 to +0.20 on every type.
+        S::textParam (kErVariation, "Variation", 0.0f, 6.0f, 1.0f, 4.0f,
                       &detail::variationText),
 
         //== Modulation, width, input bandwidth ================================
@@ -1125,12 +1131,14 @@ inline const ParamSpecs& specs()
         S::textParam (kVerbLevel, "Reverb", -40.0f, 0.0f, 0.1f,
                       roomDefaults::kVerbLevelDb, &detail::levelText),
 
-        // 28. MIX. Defaults to 100 %, because the two faders above are the
-        // wet balance and this is the dry/wet one -- a reverb used as a send,
-        // which is the normal case, wants the dry out of the way. **The MIX
-        // law itself is 11 section 7's open owner-confirm item**; what is
-        // frozen here is the range, the step and the default.
-        S::floatParam (kMix, "Mix", 0.0f, 100.0f, 0.1f, 100.0f, F::Percent),
+        // 28. MIX. **Defaults to 50 %, Frosty's call on 2026-09-24**: "input
+        // unchanged but verb heard". Under the law the engine runs
+        // (`DspCore::dryGainFor` / `wetGainFor`: dry = min(1, 2(1 - mix)),
+        // wet = min(1, 2 mix)) 50 % is dry at unity with the wet bus at its
+        // faders, 0 % is dry alone and 100 % is wet alone for send use. It
+        // defaulted to 100 % while the DSP was a wire. The range and the step
+        // are frozen; a default is not, since state stores plain values.
+        S::floatParam (kMix, "Mix", 0.0f, 100.0f, 0.1f, 50.0f, F::Percent),
 
         // 29. OUTPUT. Trim only, cut only.
         S::floatParam (kOutput, "Output", -24.0f, 0.0f, 0.1f, 0.0f, F::Decibels),

@@ -1836,8 +1836,12 @@ void checkReverbPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
                            where + " the segmented row at " + row->getBounds().toString()
                                  + " is outside the reserved row " + box.toString());
 
-                    checkEquals (row->numSegments(), 3,
-                                 where + " the segmented row should have three segments");
+                    // EARLY is ER MODE, two since Blend was cut on 2026-09-26;
+                    // EQ is LOW / MID / HIGH.
+                    const auto expected = p == R::Page::early ? 2 : 3;
+                    checkEquals (row->numSegments(), expected,
+                                 where + " the segmented row should have " + juce::String (expected)
+                                     + " segments");
 
                     // The segments tile the row, and every word fits its own
                     // segment. A segmented row is the other place on this panel
@@ -2261,11 +2265,13 @@ void checkReverbPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
             params.setReal (R::Index::ervariation,
                             R::specs()[(size_t) R::Index::ervariation].def);
 
-            const auto third  = screen.tapDot (2).centre.y;
-            const auto fourth = screen.tapDot (3).centre.y;
+            // Room's table since the image-source tables landed (2026-09-24):
+            // tap 4 bears +0.599 and tap 5 -0.854, the first right/left pair.
+            const auto third  = screen.tapDot (3).centre.y;
+            const auto fourth = screen.tapDot (4).centre.y;
 
             check (third > plot.getCentreY() && fourth < plot.getCentreY(),
-                   who + " tap 3 is panned right and tap 4 left, so one draws below the"
+                   who + " tap 4 is panned right and tap 5 left, so one draws below the"
                          " centre axis and the other above it");
 
             // The direct sound is the ringed dot at t = 0 on the centre line,

@@ -1,9 +1,12 @@
 # Handoff: BMO Linger's DSP
 
 For a fresh session. Written on AURORA, 2026-09-22; revised on AURORA,
-2026-09-23, after PR #25 merged. **The module exists and makes no sound.**
-Everything a host touches is built, tested and merged to `main` (PR #25,
-`68b1616`); what is left is the reverb itself.
+2026-09-23, after PR #25 merged; **revised on ICE QUEEN, 2026-09-24, with M2
+built.** The early reflections play and the tail is silent. Everything a host
+touches is built, tested and merged to `main` (PR #25, `68b1616`); the ER
+generator is on `frosty-linger-m2-er`, green in every suite on ICE QUEEN, and
+**waits at the listening checkpoint** — see "M2 is built" below before
+anything else.
 
 Read this, then `modules/reverb/AGENTS.md`, then `10-dsp-spec.md` in full, then
 `11-integration-and-test-plan.md` §6. `README.md` in this folder indexes the
@@ -27,14 +30,51 @@ the next session inherits.
 `11` §6 holds the exit test for every one of them. **M2 is the milestone that
 decides the module** — the spec says so, and it is where the thesis lives.
 
+### M2 is built, and stopped where it should
+
+On ICE QUEEN, 2026-09-24, branch `frosty-linger-m2-er` from `origin/main`
+`aa4416d`. `testing-notes/linger-m2-er-2026-09-24.md` is the record; read it
+before this section. In one paragraph: `modules/reverb/dsp/ErGenerator.h` is
+the runtime, `ImageSource.h` the offline image-source generator with the
+audit, `TapTables.h` holds six printed tables that the tests re-derive and
+pin, and `DspCore.h` feeds the generator and applies the faders. The whole
+of `11` §6's ER block is asserted in `tests/dsp/ReverbDspTests.cpp` and is
+green; `build-dsp` 18/18, `build-full` 16/16, both after builds that exited
+0. The CPU worst case was measured first: 0.87 % of one core at 48 kHz/128
+and 3.5 % at 192 kHz, against 1.5 % and 5 %.
+
+**What moved against this file and the spec, each recorded in the note:**
+
+- The ER flatness rule is now the owner's of 2026-09-24: octave-smoothed,
+  250 Hz–8 kHz, within 6 dB about the tilt at DENSITY 100 %, asserted and
+  green (4.6 dB). 11 §6's 1/3-octave ±3 dB is printed beside it for the record.
+- The early lateral fraction is asserted on the ER bus, not ISO's figure with
+  the direct sound: the −15.3 dB tap ceiling makes ISO's figure unreachable.
+- The two flamming rules are applied as **ceilings** in the generator, the
+  way 10 §3 applies Kuttruff's, on the energy heard through the band poles.
+- The MIX law is the owner's of 2026-09-24: dry = min(1, 2(1 − mix)),
+  wet = min(1, 2 mix), default 50 %, pinned at five points. The bus suite's
+  reverb rows were regenerated for the default.
+- VARIATION 6 is built to 05 §9.3 (mono-flat, not mono-empty); 10 §3's
+  "vanish in mono" sentence and the panel label it asks for are wrong.
+- The window clamp is not applied (the Size law stays linear, as the panel).
+- The 150 ms wet fade in `reset()` is not done.
+- The panel still draws Room's table for every type.
+
+**What the next session inherits.** The listening checkpoint below, which
+needs the references installed and source clips on the machine. Then the
+two remaining owner decisions (the 30 s tail ceiling and `inhicut`), then M3. Do not start M3 on this branch; branch again
+from `origin/main` once this one has merged.
+
 ### M2 opens with the CPU worst case
 
-`10` §8 says to measure the worst case **first**: DENSITY at 48 taps, three
-diffuser stages, 192 kHz. Build that path before tuning anything and run
-`measure_reverb bench` against `10` §6's budget (≤1.5% of a core at 48 kHz/128,
-≤5% at 192 kHz, Release, median of five, on AURORA). If it does not fit, the tap
-count or the stage count is the thing to argue about, and it is far cheaper to
-argue before the tables are tuned than after.
+*Done: 0.872 % at 48 kHz/128 and 3.508 % at 192 kHz/128, worst case, median
+of five, Release, on ICE QUEEN.* `10` §8 says to measure the worst case
+**first**: DENSITY at 48 taps, three diffuser stages, 192 kHz. Build that path
+before tuning anything and run `measure_reverb bench` against `10` §6's budget
+(≤1.5% of a core at 48 kHz/128, ≤5% at 192 kHz, Release, median of five). If
+it does not fit, the tap count or the stage count is the thing to argue about,
+and it is far cheaper to argue before the tables are tuned than after.
 
 ### M2 ends at a listening checkpoint, not at M3
 
@@ -48,18 +88,32 @@ and the mono sums at VARIATION 0 and 6. Write the set up in
 `testing-notes/`, naming AURORA, and hand it to Frosty. M3 starts after Frosty
 has listened, not before.
 
-**Blend is heard at this checkpoint too**, not at the end. It is an ER-generator
-mode, it exists by the end of M2, and its position count is permanent at first
-ship — so the last moment to drop it cheaply is the first moment it can be
-heard.
+~~**Blend is heard at this checkpoint too.**~~ **Heard and cut, 2026-09-26.**
+Frosty listened to the M2 set on ICE QUEEN (HEDD Type 20 MK2). Blend sounded
+like "a slightly worse" Taps, so ER MODE is Taps / Energy, and VARIATION
+defaults to 4 ("2 isnt enough to feel"). Verdicts on every item are in
+`testing-notes/linger-listening-set-2026-09-24.md`. **Ambience** failed the first
+set, whose ER levels were too low (the cluster sits 6.7 dB under the dry even
+at ER 0 dB). Heard again in stereo at ER 0 it **moves the voice back,
+subtly**, which passes `11` §6's M2 exit condition; how far it should go is
+M4's. ER HI-CUT is 12 dB/octave from the same day. (A 250 Hz shift noted that day was
+the analyser's window moving, not the sound; see the listening-set note.)
 
-### M3 does not start until three decisions are made
+### M3 does not start until two decisions are made
 
-These are Frosty's, they are open in `11` §7, and M3's tests depend on them:
+These are Frosty's, they are open in `11` §7, and M3's tests depend on them.
+*The first of the original three is made:*
 
-- **The MIX law and its default.** `11` §6's level-law test says "pin one MIX
-  law, test to ±0.1 dB". There is nothing to pin until it is chosen.
-- **The 30 s tail ceiling against a 40 s tail.** `decay` reaches 20 s and
+- ~~**The MIX law and its default.**~~ **Decided 2026-09-24:** dry =
+  min(1, 2(1 − mix)), wet = min(1, 2 mix), default 50 %, 100 % verb only for
+  a send. Pinned in `reverb_dsp_tests` at 0 / 25 / 50 / 75 / 100 %.
+  **The ER flatness rule was decided the same evening**: octave-smoothed,
+  250 Hz–8 kHz, within 6 dB about the tilt at DENSITY 100 %, asserted.
+- ~~**The 30 s tail ceiling against a 40 s tail.**~~ **Decided 2026-09-26:
+  raise the ceiling** (Frosty: "raise it"), so `kMaxTailSeconds` goes to 40 s
+  in M3 and "≥ measured" can hold at the corner. That is a `core/` change and
+  every module's tail report moves with it, so it lands with M3's tests, not
+  before. The original question: `decay` reaches 20 s and
   `damplo`/`damphi` reach 2.0×, so any setting with `decay` × the larger
   multiplier above about 30 s rings longer than `kMaxTailSeconds`
   (`core/dsp/ModuleDsp.h`), and `tailSecondsFor` clamps to 30. `11` §6 asks for
@@ -68,9 +122,10 @@ These are Frosty's, they are open in `11` §7, and M3's tests depend on them:
   (`decay` 20 s, `damphi` 2.0). Pick one: clamp the effective T60 in the engine
   at the ceiling; restrict "≥ measured" to settings under it; or accept an
   under-report at the corner and write it down. Then fix `11` §6 to match.
-- **`inhicut` as a parameter or a constant** (`11` §4d), and **whether ER
-  SPREAD greys out in Taps mode or sits inert**. Neither blocks the engine, but
-  both are cheaper to settle before the panel is wired to real sound.
+- ~~**`inhicut` as a parameter or a constant**~~ **Decided 2026-09-26: a
+  parameter, under a clearer name** (Frosty). The name is to be settled when
+  the panel is designed. **Whether ER SPREAD greys out in Taps mode or sits
+  inert** is still open, and with Blend gone it now shapes Energy only.
 
 ### M3 builds everything off `kNumLines`
 
@@ -119,11 +174,9 @@ not heard; nobody has listened to them either. Every other value in
 Chamber, Hall, Cavern, Plate and Ambience have names, a shape and no numbers.
 Fitting them is M4 and it is a listening job, not a desk job.
 
-**`ermode`'s Blend position is defined on paper and unheard** — image-source tap
-times and pans from Taps, with the Energy generator's Shape/Spread envelope
-replacing the physical gain law, energy-renormalised. If it does not survive
-contact with ears, say so before first ship; the position count cannot change
-after. It is heard at the M2 checkpoint above.
+**`ermode`'s Blend position was cut on 2026-09-26** after it was heard at the M2
+checkpoint: it sounded like a slightly worse Taps. ER MODE is two positions,
+and the count cannot change after first ship.
 
 Frosty's decisions still open are listed under "M3 does not start until
 three decisions are made" above — they are not yours to make, but they are
@@ -208,5 +261,4 @@ settled from a desk, and Frosty has said he will bring references:
 - **Whether 3 cents of modulation reads as wobble on a held note.** If it does,
   `04` §3's time-varying orthogonal matrix modulation is the escape hatch — and
   a user has no MOD DEPTH to escape with, because it is a per-type constant now.
-- **Blend**, before its position is frozen by shipping — at the M2
-  checkpoint, with the other ER-only items.
+- ~~**Blend**~~ — heard at the M2 checkpoint and cut, 2026-09-26.

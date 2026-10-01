@@ -17,11 +17,65 @@ and the schema says thirty, and they are not the same thirty** — the
 control-set trim below cut six and the Reverb EQ added six others, neither
 edited `docs/`, so read this file for what the schema is.
 
-**The DSP is a marked placeholder.** `dsp/DspCore.h` passes audio through
-untouched, produces no tail, and reports zero latency — which, unlike the
-silence, is the *shipped* figure and not a stand-in. What is real today is the
-schema, the panel, the display, the registration and the latency contract. The
-DSP pass owns `dsp/` and nothing outside it, with one exception named below.
+**The early reflections are real; the tail is not yet.** Milestone M2 landed
+on ICE QUEEN on 2026-09-24: `dsp/ErGenerator.h` plays the six image-source
+tables in `dsp/TapTables.h` through the Size law, four order-banded poles, the
+DENSITY bridge and its feed-forward diffuser, seven VARIATION positions and the
+ER hi-cut, and `dsp/DspCore.h` applies the faders, the MIX law (Frosty's, 2026-09-24: 50 % is input unchanged with the verb heard, 100 % is verb only for a send)
+and OUTPUT. `dsp/ImageSource.h` is the offline generator the tables were
+printed from. The late network (M3) and the type blocks (M4) are still to come,
+so REVERB's fader moves a silent bus and the Reverb EQ is not in the path.
+Latency is zero, which is the *shipped* figure and not a stand-in. **Nothing
+has been heard** — every figure in `testing-notes/linger-m2-er-2026-09-24.md`
+is rendered or measured. The DSP pass owns `dsp/` and nothing outside it, with
+one exception named below.
+
+**How the ER generator is put together**, in the order the signal meets it:
+
+- **One mono line**, fed the mid of the input, read by up to 48 taps per set:
+  the type's 21 table taps scaled by SIZE, plus 27 velvet infill pulses placed
+  one per cell of the window and kept 0.9 ms clear of every other pulse. Two
+  sets exist so that TYPE, SIZE (past 1 % accumulated), ER MODE, VARIATION and
+  ER SPREAD rebuild the spare set and crossfade to it over 30 ms; TYPE dips
+  the bus to silence and swaps at the minimum instead. Nothing allocates
+  outside `prepare()`.
+- **DENSITY** is `w = clamp((D − θ) / 0.08, 0, 1)` per tap with a
+  renormalisation that holds the cluster's energy **after the poles** at the
+  core's. Core taps sit at θ = −0.08 so they never switch off — at θ = 0 the
+  spec's own formula silences the whole cluster at DENSITY 0, which is the
+  first bug the tests caught.
+- **Four bands.** A tap inside 8 ms goes through a 1.4 kHz pole (10 §3's "one-
+  pole below 1.5 kHz"); otherwise its wall-bounce order picks a pole at
+  16 kHz · 0.8ⁿ · (1 m / d)^0.2, d taken at the band's mean path. Infill
+  inherits order 2. `ErGenerator::cutoffHzFor` and `onePoleEnergyGain` are
+  the one copy of that law, and the offline audit reads them too.
+- **The diffuser** runs per band, *before* its pole, so it mixes impulses and
+  not tails: three stages, each an orthogonal 2×4 mix of four reads, with
+  rulers `{1, 9, 2, 10}`, `{3, 13, 4, 14}` and `{5, 17, 6, 18}` units of
+  1/48 ms chosen so that a − c = b − d = −1: the two outputs' summed power is
+  then flat and the mono sum of a stage is a two-sample average, while the
+  long b, d pair carries the decorrelation. The whole cascade is under
+  0.9 ms so no copy of a tap lands on another. Stages fade in at DENSITY
+  0.6 / 0.75 / 0.9 over 0.1 each, with a per-band, per-stage normaliser
+  computed **exactly** for isolated panned taps by running the cascade's
+  short FIR through the band pole and the hi-cut pole whenever DENSITY or a
+  corner moves. Four naive normalisers were tried first; the sweep is flat
+  to 0.03 dB with this one.
+- **The infill pulses are signed**, a random ±1 per pulse from the seed, as
+  velvet noise is by definition. All-positive infill built up at low
+  frequencies and combed: 7.1 dB of octave-smoothed ripple at DENSITY 100 %
+  against 4.6 dB signed, which is what meets the owner's flatness rule.
+- **VARIATION 0..5** widens the bearings (0.12 → 1.0 of the table's pan) and
+  moves a growing fraction (0 → 0.92) of each tap's energy to channel-specific
+  times ±0.6–2 ms either side, which is "different tap sets per channel" and
+  not an offset. The first two taps stay centred and unsplit. **VARIATION 6**
+  is Schroeder's complementary pair, L = M + D, R = M − D, D the centred
+  cluster 8.7 ms late, and it bypasses the diffuser; its mono sum is exactly
+  flat and *not* empty — see the open points.
+- **ER HI-CUT** is one exact-corner pole per channel after everything.
+
+Every constant above is CALIBRATE and marked so in the header. The listening
+checkpoint decides all of it.
 
 ## What this reverb is
 
@@ -444,20 +498,23 @@ seven positions are an ordered amount of decorrelation rather than seven named
 behaviours, so it is a stepped float, and a stepped float normalises as
 (v − min)/(max − min), which an eighth position at the end would not disturb.
 
-## ER Mode's Blend is defined but unheard
+## ER Mode is two, and Blend was cut
 
 Taps is the image-source table. Energy replaces tap *times* with velvet noise
 enveloped by ER SHAPE and ER SPREAD.
 
-**Blend is a proposal awaiting a listening pass.** The behaviour: image-source
-tap times and pans from Taps, with the Energy generator's Shape/Spread envelope
-replacing the physical `(1/d)·β^n` gain law, energy-renormalised so the mode
-change is not also a level change. That is a coherent third behaviour rather
-than a crossfade between two generators — but nobody has listened to it. It
-holds index 2 now because the index order freezes at first ship and there is no
-way to insert it later, **not because it is settled**. The listening pass
-(`11` section 6) is where it becomes real or becomes a synonym for one of its
-neighbours.
+**There was a third, Blend, and it was cut on 2026-09-26, before ship.** It was
+image-source tap times and pans from Taps, with Energy's envelope replacing the
+physical `(1/d)·β^n` gain law. It held index 2 only so it could be heard before
+the order froze. Frosty heard it at the M2 listening checkpoint on ICE QUEEN
+(HEDD Type 20 MK2), wet, on a vocal and a guitar: "a slightly worse" Taps.
+That made it a synonym for a neighbour rather than a third behaviour, so it
+went while cutting was free. Do not bring it back as a choice position after
+ship: the count is what `ermode`'s normalisation depends on. The write-up is
+`testing-notes/linger-listening-set-2026-09-24.md`.
+
+VARIATION defaults to **4**, not 2, from the same pass ("2 isnt enough to
+feel"). Room's early L/R correlation is 0.21 at 4 and 0.57 at 2.
 
 Variation 6 is the other position that is not what it looks like: it is
 Schroeder's complementary-comb pair, the widest setting *and* the only provably
@@ -591,8 +648,8 @@ which would make a sub-selection the third tallest thing on the panel. A
 rectangle with a word in it is what every switch in the suite is, and a segmented
 row is a line of them that happen to be exclusive.
 
-- **EARLY** — `ermode`, a real three-position choice parameter (Taps / Energy /
-  Blend), replacing the dropdown that control used.
+- **EARLY** — `ermode`, a real two-position choice parameter (Taps / Energy;
+  Blend was cut on 2026-09-26), replacing the dropdown that control used.
 - **EQ** — LOW / MID / HIGH, choosing which node FREQ / GAIN / Q edit. **UI
   state**, `ui.node=low|mid|high`, refused rather than defaulted on an unknown
   value. `specs()` is thirty with two lanes spare and which node a panel is
@@ -967,11 +1024,11 @@ the Reverb EQ acts on** — pre both generators, which is where `10` section 2
 puts the EQ. That is where it belongs once there is an engine, so no rewiring
 is owed.
 
-**Until then it shows the dry input, and that is honest rather than broken.**
-`DspCore::process` is a marked pass-through, so the module's input, the point
-the EQ acts on and the module's output are the same samples; there is no third
-thing the tap could be showing. A reader who finds the spectrum "not reacting
-to the EQ knobs" has found the placeholder. **Do not move the tap to fix it.**
+**Until the Reverb EQ is in the path (M3) it shows the dry input, and that is
+honest rather than broken.** The EQ is pre both generators, so the input and
+the point the EQ acts on are the same samples; the early reflections M2 added
+are downstream of it. A reader who finds the spectrum "not reacting to the EQ
+knobs" has found M3's absence. **Do not move the tap to fix it.**
 
 Adding the override costs the other modules nothing — `ModuleDsp::analyser()`
 returns null by default and BMO DEQ was its only overrider — and
@@ -1000,10 +1057,21 @@ sketch's first tap time *is* the table's. That is the exception to "the DSP
 pass owns `dsp/`": whoever writes the image-source generator owns the numbers
 in that file, and owes the panel a header that still compiles without JUCE.
 
-The table's numbers today are **placeholder geometry** and are marked as such.
-None of `11` section 6's comb, spacing, level-ceiling or flamming rules is
-claimed of them. When the real tables land, a failing table is **re-seeded, not
-patched**, and the audits run *after* the jitter.
+**The tables are real, printed and pinned.** `dsp/ImageSource.h` runs the
+image-source method on the 1 : 1.4 : 1.9 shoebox with the listener near the
+back wall and the source nearly ahead of it, picks 21 images against a
+log-spaced grid over each type's window subject to the 0.9 ms separation and
+the 2 % gap-distinctness rules, jitters them ±3 % from a recorded seed, and
+applies 10 §3's ceilings — −15.3 dB on every tap, Kuttruff's −0.6 t − 8 dB in
+2–20 ms with the dichotic bonus, and the two flamming rules **as ceilings on
+the energy heard through the band poles**, not as exclusions — plus a ramp-out
+over the last 10 ms. `measure_reverb tables` prints the rows; `TapTables.h`
+holds them; `reverb_dsp_tests` re-derives every table and asserts the printed
+copy matches, so a row edited by hand fails the build. A failing table is
+**re-seeded, not patched**: change the seed in `imagesource::geometryFor`,
+reprint, paste. **The panel draws Room's table for every type** — it always
+did, and the engine now plays the type's own — which is the panel's to close
+and is on the open list.
 
 ## What is not here yet, and where it goes
 

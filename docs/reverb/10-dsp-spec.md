@@ -295,7 +295,7 @@ inherits their timing, colour and spacing. High density with *d* = 0 gives a
 continuous space with no articulated pattern. The two extremes are Reference A
 and Reference B, and everything between is available.
 
-**ER Mode** remains Taps / Energy / Blend for the envelope itself: Energy mode
+**ER Mode** remains Taps / Energy (Blend was cut after the M2 listening pass, 2026-09-26) for the envelope itself: Energy mode
 replaces image-source times with pure velvet noise enveloped by Shape and Spread
 after HW-2. The documented behaviour — Shape 0 builds explosively and decays
 quickly, higher Shape builds more slowly and sustains for the time Spread sets —

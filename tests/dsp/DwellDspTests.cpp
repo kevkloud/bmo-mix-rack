@@ -4368,6 +4368,62 @@ void testTheReportedTailIsNeverShorterThanTheDecay()
     checkTailRows (fxRows, "the tail is never short with FX in the loop");
 }
 
+/** **Block size cannot change the audio when DUCK is automated** (`11` §4k).
+
+    The ducker's key filter and follower ran only while ducking, and whether
+    it was ducking was decided once per chunk -- so a DUCK moved to 0 and back
+    left the follower frozen at a point that depended on where the chunks fell,
+    and the audio after it depended on the host's block size: up to 0.0125
+    apart between blocks of 64 and 1024, measured on AURORA, where DUCK held
+    still differed by exactly 0. `testBlockSizeInvariance` runs at DUCK 0.
+
+    DUCK 12 to 0 to 12, moved at positions every block size lands on, against
+    loud and quiet passages so the follower has somewhere to be. */
+void testDuckAutomationIsBlockSizeInvariant()
+{
+    constexpr auto rate = 48000.0;
+    const auto n = 3072 * 40;
+
+    for (const auto toggled : { false, true })
+    {
+        const auto render = [&] (int chunk)
+        {
+            P::DwellDsp dsp;
+            dsp.prepare (rate, 1024, 2);
+
+            auto v = defaults();
+            v[P::Index::feedback] = 60.0f;
+            v[P::Index::mix]      = 50.0f;
+            v[P::Index::time]     = 120.0f;
+
+            Block block { n };
+
+            for (int i = 0; i < n; ++i)
+                block.left[(size_t) i] = block.right[(size_t) i]
+                    = (float) (((i / 6000) % 2 ? 0.5 : 0.02) * std::sin (2.0 * P::kPiD * 700.0 * (double) i / rate));
+
+            renderAsHost (dsp, v, block, n, chunk, [&] (int offset)
+            {
+                const auto k = offset / 3072;
+                v[P::Index::duck] = (toggled && k >= 10 && k < 20) ? 0.0f : 12.0f;
+            });
+
+            return block.left;
+        };
+
+        const auto reference = render (64);
+
+        for (const auto chunk : { 1024, 3072 })
+        {
+            char buf[160];
+            const auto worst = worstDifference (reference, render (chunk));
+            std::snprintf (buf, sizeof (buf), "DUCK %s: blocks of %d against 64 differ by %.3g",
+                           toggled ? "12 to 0 to 12" : "held at 12", chunk, (double) worst);
+            check (worst == 0.0f, buf);
+        }
+    }
+}
+
 } // namespace
 
 //==============================================================================
@@ -4430,6 +4486,7 @@ int main()
     testTheFirstTempoLandsTheSyncedTime();
     testCrushInTheLoopDecaysToSilence();
     testTheReportedTailIsNeverShorterThanTheDecay();
+    testDuckAutomationIsBlockSizeInvariant();
 
     std::printf ("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

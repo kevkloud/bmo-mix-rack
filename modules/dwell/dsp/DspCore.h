@@ -615,6 +615,39 @@ private:
         laneLive = false;
     }
 
+    /** **The key is sanitised before it reaches any state.** A one-pole and a
+        log follower both keep a NaN or an infinity they are handed, for good:
+        the gain reduction became NaN, the output guard below turned every
+        sample into 0 -- the dry with it -- and only a `reset` recovered. The
+        engines already refuse a non-finite sample at their ring writes; this is
+        the same refusal at the ducker's door. Measured on AURORA 2026-10-01:
+        one NaN at DUCK 6 dB took the output to exact zeros for good. */
+    static double finiteOrZero (float x) noexcept
+    {
+        return std::isfinite (x) ? (double) x : 0.0;
+    }
+
+    /** 10 §6's detector, one sample: the key high-pass and the follower,
+        **run whether or not DUCK is up**.
+
+        They ran only while ducking until 2026-10-01, and whether it was
+        ducking is decided once a chunk -- so a DUCK taken to 0 and back froze
+        the follower at a point set by where the host's blocks fell, and the
+        audio after it changed with the block size (0.0125 between blocks of 64
+        and 1024, measured on AURORA). Run always, the detector's state is a
+        function of the input alone. It is two one-poles and a log a sample;
+        the gain itself is still only computed while ducking. */
+    double duckLevelFor (const float* const* dry, int i, int nch) noexcept
+    {
+        const auto keyL = duckKey[0].highPass (finiteOrZero (dry[0][i]));
+        const auto keyR = nch >= 2 ? duckKey[1].highPass (finiteOrZero (dry[1][i])) : 0.0;
+
+        const auto peak = nch >= 2 ? 0.5 * (std::abs (keyL) + std::abs (keyR))
+                                   : std::abs (keyL);
+
+        return duckFollower.tick (LevelDetectorDb::levelDb (peak));
+    }
+
     /** 10 §6, and the two things about it that are structural rather than
         careful.
 
@@ -629,29 +662,13 @@ private:
         position in the graph, and `11` §4g proves it by asserting the main
         engine's own tap is bit-identical at DUCK 0 and at 24 dB.
 
-        At DUCK 0 the whole stage is branched past rather than multiplying by
-        1.0 -- `11` §4g wants the null bit-exact -- and the lane never sees
-        this function at all (10 §11.3: the lane's whole job is to be heard). */
-    /** **The key is sanitised before it reaches any state.** A one-pole and a
-        log follower both keep a NaN or an infinity they are handed, for good:
-        the gain reduction became NaN, the output guard below turned every
-        sample into 0 -- the dry with it -- and only a `reset` recovered. The
-        engines already refuse a non-finite sample at their ring writes; this is
-        the same refusal at the ducker's door. Measured on AURORA 2026-10-01:
-        one NaN at DUCK 6 dB took the output to exact zeros for good. */
-    static double finiteOrZero (float x) noexcept
+        At DUCK 0 the gain is branched past rather than multiplying by 1.0 --
+        `11` §4g wants the null bit-exact -- and the lane never sees this
+        function at all (10 §11.3: the lane's whole job is to be heard). */
+    float duckGainFor (double levelDb) noexcept
     {
-        return std::isfinite (x) ? (double) x : 0.0;
-    }
-
-    float duckGainFor (double keyL, double keyR, int nch) noexcept
-    {
-        const auto peak = nch >= 2 ? 0.5 * (std::abs (keyL) + std::abs (keyR))
-                                   : std::abs (keyL);
-
         const auto amount = (double) duckAmount.tick();
-        const auto e = duckFollower.tick (LevelDetectorDb::levelDb (peak));
-        const auto over = std::clamp ((e - kDuckThresholdDb) / kDuckWidthDb, 0.0, 1.0);
+        const auto over = std::clamp ((levelDb - kDuckThresholdDb) / kDuckWidthDb, 0.0, 1.0);
 
         return (float) std::pow (10.0, -amount * over / 20.0);
     }
@@ -707,11 +724,11 @@ private:
             laneEngine.process (feed, lane, nch, count);
         }
 
-        // 10 §6: the ducker is skipped outright at DUCK 0 rather than
-        // multiplying by 1.0, so the null is bit-exact and the follower costs
-        // nothing at the default. The smoother is allowed to finish its travel
-        // to exactly zero before the branch takes effect, so releasing the
-        // control is a fade rather than a step.
+        // 10 §6: the ducker's gain is skipped outright at DUCK 0 rather than
+        // multiplying by 1.0, so the null is bit-exact; its detector runs
+        // regardless (see `duckLevelFor`). The smoother is allowed to finish
+        // its travel to exactly zero before the branch takes effect, so
+        // releasing the control is a fade rather than a step.
         const auto ducking = params.duckDb > 0.0f || duckAmount.value() > 0.0f;
 
         auto clearWhenDone = false;
@@ -728,14 +745,11 @@ private:
             const auto dryIsBitExact = d == 1.0f;
             const auto ll = laneLevel.tick();
 
+            const auto level = duckLevelFor (dry, i, nch);
             auto gr = 1.0f;
 
             if (ducking)
-            {
-                const auto keyL = duckKey[0].highPass (finiteOrZero (dry[0][i]));
-                const auto keyR = nch >= 2 ? duckKey[1].highPass (finiteOrZero (dry[1][i])) : 0.0;
-                gr = duckGainFor (keyL, keyR, nch);
-            }
+                gr = duckGainFor (level);
 
             // CHOP gates the lane's output only; the mute is the 1 ms that
             // precedes a HOLD-off clear. Both are on this side of the engine,

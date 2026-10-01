@@ -148,12 +148,14 @@ the arrow reached them in one click and 560 px.
   and its timer runs only on that page.
 - **The foot never changes**: TIME (or NOTE), FEEDBACK, MIX with their unity
   and dry-hinge strips, and SYNC on the DELAY rule.
-- **TONE**: CHARACTER, STEREO; LO CUT, HI CUT, DRIVE / RATE, DEPTH, DUCK.
+- **TONE**: CHARACTER, STEREO; LO CUT, HI CUT and DUCK as **faders** (`ui::Fader`)
+  down both grid rows (Frosty, 2026-10-01, "3 with sliders").
 - **LANE**: SEND, HOLD, CHOP; the lane's FX types; TAIL, TIME, LEVEL / the
   lane's FX gate, AMOUNT and LINK. **The lane's FX lives here**, not on FX.
-- **FX**: the main delay's FX types, gate and AMOUNT, **in the same cells** the
-  lane's occupy on LANE, so turning between the two pages moves nothing but
-  what the controls are bound to. That is why the FX page's top row is bare.
+- **FX**: the loop's colour -- DRIVE, RATE, DEPTH -- on the top row, then the
+  main delay's FX types, gate and AMOUNT **in the same cells** the lane's
+  occupy on LANE, so turning between the two pages moves nothing but what the
+  FX controls are bound to.
 
 **The page is view state** — `ModulePanel::setUiState ("page", ...)`, never a
 parameter, never in a preset. Nothing resizes and nothing turns a page when a

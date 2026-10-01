@@ -1107,6 +1107,13 @@ void checkDwellValues (bmo::ui::ModulePanel& panel, const juce::String& who)
             check (knob->isShowingValue(), who + " knob '" + knob->getName() + "' shows no value");
         }
 
+    // And the faders: LO CUT, HI CUT and DUCK on TONE are `ui::Fader`s from
+    // 2026-10-01, and a fader's ticks are deliberately unlabelled, so its
+    // printed value is the only number it has.
+    for (auto* child : panel.getChildren())
+        if (auto* fader = dynamic_cast<bmo::ui::Fader*> (child))
+            check (fader->isShowingValue(), who + " fader '" + fader->getName() + "' shows no value");
+
     check (shown > 0, who + " has no knobs to check");
 }
 
@@ -1147,13 +1154,13 @@ void checkDwellPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
     const char* const foot[] { "TIME", "FEEDBACK", "MIX", "SYNC" };
 
     const char* const tonePage[] { "CLEAN", "TAPE", "BUCKET", "STEREO", "PING-PONG", "DUAL",
-                                   "LO CUT", "HI CUT", "DRIVE", "RATE", "DEPTH", "DUCK" };
+                                   "LO CUT", "HI CUT", "DUCK" };
 
     const char* const lanePage[] { "SEND", "HOLD", "CHOP", "LANE.DIFFUSE", "LANE.PAN", "LANE.CRUSH",
                                    "LANE TAIL", "LANE TIME", "LANE LEVEL",
                                    "LANE FX", "LANE AMOUNT SMEAR", "FX LINK" };
 
-    const char* const fxPage[] { "DIFFUSE", "PAN", "CRUSH", "FX", "AMOUNT SMEAR" };
+    const char* const fxPage[] { "DIFFUSE", "PAN", "CRUSH", "DRIVE", "RATE", "DEPTH", "FX", "AMOUNT SMEAR" };
 
     /** **Every parameter has a control, and this is the sum that says so.**
         A choice row is one parameter for three cells, NOTE shares TIME's
@@ -1161,9 +1168,9 @@ void checkDwellPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
         parameter is left without a control while SYNC ships disabled. */
     {
         constexpr int kFootParams = 5;   // time, note, feedback, mix, sync
-        constexpr int kToneParams = 8;   // character, stereo, two cuts, drive, rate, depth, duck
+        constexpr int kToneParams = 5;   // character, stereo, two cuts, duck
         constexpr int kLaneParams = 11;  // send, hold, chop, lane fx type, tail, time, note, level, lane fx, amount, link
-        constexpr int kFxParams   = 3;   // fx type, fx, amount
+        constexpr int kFxParams   = 6;   // fx type, drive, rate, depth, fx, amount
 
         checkEquals (kFootParams + kToneParams + kLaneParams + kFxParams,
                      (int) D::Index::count,
@@ -1270,6 +1277,24 @@ void checkDwellPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
     for (int i = 0; i < params.size(); ++i)
         check (params.getReal (i) == before[(size_t) i],
                who + " turning pages moved parameter " + params.spec (i).id);
+
+    //== TONE's faders run the height of both grid rows =======================
+    //
+    // 2 x 108 = 216 px each, in three 120 px columns -- the whole grid, which
+    // is what filled the page when DRIVE, RATE and DEPTH moved to FX. A fader
+    // laid into one row would leave the gap this replaced.
+    {
+        panel.setUiState ("page", "tone");
+
+        for (const auto* name : { "LO CUT", "HI CUT", "DUCK" })
+        {
+            const auto* f = dynamic_cast<bmo::ui::Fader*> (findNamed (panel, name));
+            check (f != nullptr, who + " TONE's " + name + " is not a fader");
+
+            if (f != nullptr)
+                checkEquals (f->getHeight(), 216, who + " TONE's " + name + " fader height");
+        }
+    }
 
     //== The two FX stages share cells ========================================
     {

@@ -147,17 +147,18 @@ private:
 
     | page | segment rows | grid |
     |---|---|---|
-    | TONE | CHARACTER; STEREO | LO CUT, HI CUT, DRIVE / RATE, DEPTH, DUCK |
+    | TONE | CHARACTER; STEREO | LO CUT, HI CUT, DUCK as faders down both rows |
     | LANE | SEND, HOLD, CHOP; the lane's FX types | TAIL, TIME, LEVEL / FX ON, AMOUNT, LINK |
-    | FX   | --; the main delay's FX types | -- / FX, AMOUNT, -- |
+    | FX   | --; the main delay's FX types | DRIVE, RATE, DEPTH / FX, AMOUNT, -- |
 
     **The lane's FX is on the LANE page** (Frosty, 2026-10-01), and the FX page
     is the main delay's alone. The two FX stages sit in the **same cells** on
     their two pages -- types in the second segment row, gate, AMOUNT and link
     across the bottom row -- so flipping between LANE and FX moves nothing but
-    what the controls are bound to. That is also why the FX page's top row is
-    bare: the main stage has three controls and they are kept where the lane's
-    are, rather than moved up to fill the page.
+    what the controls are bound to. The FX page's top row is the loop's colour,
+    DRIVE, RATE and DEPTH, which moved there when TONE's cuts and DUCK became
+    faders (Frosty, 2026-10-01, "3 with sliders") -- everything done to the
+    repeats inside the loop is on one page.
 
     **Every page's controls are unparented when it is not showing**, not
     hidden: a hidden component still has bounds, and every walker in the
@@ -235,7 +236,11 @@ private:
 
     // TONE.
     std::unique_ptr<ChoiceRow> character, stereo;
-    ui::PlainKnob lowCut, highCut, drive, modRate, modDepth, duck;
+    // LO CUT, HI CUT and DUCK are faders, down both grid rows; the loop's
+    // colour -- DRIVE, RATE, DEPTH -- is on the FX page with the FX stage.
+    ui::Fader lowCut, highCut;
+    ui::PlainKnob drive, modRate, modDepth;
+    ui::Fader duck;
 
     // LANE. `laneGain` is captioned TAIL, and the lane's knobs repeat the main
     // delay's words; they are told apart by **component names** (LANE TAIL,

@@ -577,12 +577,12 @@ DwellPanel::DwellPanel (ui::ModuleContext ctx)
       feedback (context.params.param (Index::feedback), "FEEDBACK", ui::Knob::Style::character, kFootFace, context.def.accent),
       mix      (context.params.param (Index::mix),      "MIX",      ui::Knob::Style::character, kFootFace, context.def.accent),
       sync     (context.params.param (Index::sync),     "SYNC", ui::tokens().switchAlt),
-      lowCut   (context.params.param (Index::lowCut),   "LO CUT", ui::Knob::Style::character, kPageFace, context.def.accent),
-      highCut  (context.params.param (Index::highCut),  "HI CUT", ui::Knob::Style::character, kPageFace, context.def.accent),
+      lowCut   (context.params.param (Index::lowCut),   "LO CUT", context.def.accent),
+      highCut  (context.params.param (Index::highCut),  "HI CUT", context.def.accent),
       drive    (context.params.param (Index::drive),    "DRIVE",  ui::Knob::Style::character, kPageFace, context.def.accent),
       modRate  (context.params.param (Index::modRate),  "RATE",   ui::Knob::Style::character, kPageFace, context.def.accent),
       modDepth (context.params.param (Index::modDepth), "DEPTH",  ui::Knob::Style::character, kPageFace, context.def.accent),
-      duck     (context.params.param (Index::duck),     "DUCK",   ui::Knob::Style::character, kPageFace, context.def.accent),
+      duck     (context.params.param (Index::duck),     "DUCK",   context.def.accent),
       sendHeld (context.params.param (Index::send),     "SEND", juce::Colour (kGateColour)),
       hold     (context.params.param (Index::hold),     "HOLD", juce::Colour (kGateColour)),
       chop     (context.params.param (Index::chop),     "CHOP", juce::Colour (kGateColour)),
@@ -642,7 +642,7 @@ DwellPanel::DwellPanel (ui::ModuleContext ctx)
     // between one-piece and ringed, so the size rule would decide it by a
     // fraction of a pixel of relayout. They are the secondary step, which is
     // what one-piece means (Frosty, 2026-09-25), so the tag says it outright.
-    for (auto* k : { &lowCut, &highCut, &drive, &modRate, &modDepth, &duck,
+    for (auto* k : { &drive, &modRate, &modDepth,
                      &laneGain, &laneTime, &laneNote, &laneLevel })
     {
         k->setKnobSide (kPageKnob);
@@ -650,6 +650,11 @@ DwellPanel::DwellPanel (ui::ModuleContext ctx)
         k->setShowsValue (true);
         k->setTexturedForm (ui::Knob::TexturedForm::onePiece);
     }
+
+    // The three faders on TONE print their values by default (ui::Fader), and
+    // take the panel's caption size like every knob here.
+    for (auto* f : { &lowCut, &highCut, &duck })
+        f->setCaptionSize (kCaption);
 
     // **The catch at unity.** `lane_gain` is the one control on this panel
     // with a value that has to be hit exactly: 0 is the lane holding at unity.
@@ -964,18 +969,19 @@ void DwellPanel::resized()
     switch (getPage())
     {
         case Page::tone:
-            // How the repeats sound: what they are made of, where they sit,
-            // what is cut from them, what drives and moves them, and how far
-            // the dry pushes them down.
+            // What the repeats are made of and where they sit, then three
+            // faders down both grid rows: what is cut from them, and how far the
+            // dry pushes them down (Frosty, 2026-10-01, "3 with sliders").
+        {
             putRow (character.get(), segA);
             putRow (stereo.get(), segB);
-            put (&lowCut,   a[0]);
-            put (&highCut,  a[1]);
-            put (&drive,    a[2]);
-            put (&modRate,  b[0]);
-            put (&modDepth, b[1]);
-            put (&duck,     b[2]);
+
+            const auto tall = cellsOf (rowA.getUnion (rowB));
+            put (&lowCut,  tall[0]);
+            put (&highCut, tall[1]);
+            put (&duck,    tall[2]);
             break;
+        }
 
         case Page::lane:
         {
@@ -1000,10 +1006,13 @@ void DwellPanel::resized()
         }
 
         case Page::fx:
-            // The main delay's FX stage, in the lane's FX cells. The top row
-            // and the first segment row are left bare rather than filled by
-            // moving these up; see the class comment.
+            // Everything done to the repeats inside the loop: the loop's colour
+            // -- DRIVE, RATE, DEPTH -- on the top row, and the main delay's FX
+            // stage under it, in the cells the lane's FX takes on LANE.
             putRow (fxType.get(), segB);
+            put (&drive,    a[0]);
+            put (&modRate,  a[1]);
+            put (&modDepth, a[2]);
             putSwitch (fx, b[0]);
             put (fxAmount.get(), b[1]);
             break;

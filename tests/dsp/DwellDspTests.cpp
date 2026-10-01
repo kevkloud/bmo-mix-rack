@@ -421,15 +421,31 @@ void testSyncFollowsTheHostTempo()
 
     At P_c = 1 the main loop's gain is 1.05 fb^1.6 and the lane's, in THROW,
     (1 + L)^1.6. Laps to -60 are ceil(60 / -20 log10 g); the tail is the
-    engine's time times its laps, the larger engine wins, clamped [0.5, 30]. */
+    engine's laps times its lap, the larger engine wins, clamped [0.5, 30].
+
+    **A lap is TIME plus the loop filters' own delay** (`dsp/Timing.h`,
+    2026-10-01), which on clean at its rails is under 2 ms -- the high-passes'
+    group delay down near 50 Hz, where the loss per lap is still small enough
+    for the same number of laps. So each hand-worked figure is asserted as its
+    laps times TIME, lengthened by less than 2 ms a lap; the renders in
+    `testTheReportedTailIsNeverShorterThanTheDecay` are what hold the delay
+    itself to account. */
+void checkLaps (double tail, int laps, double timeSeconds, const std::string& what)
+{
+    char buf[96];
+    std::snprintf (buf, sizeof (buf), " (got %.6f, want %d x %.3f s + under %.3f s)",
+                   tail, laps, timeSeconds, laps * 0.002);
+    check (tail >= laps * timeSeconds && tail < laps * (timeSeconds + 0.002), what + buf);
+}
+
 void testTheTailIsTheLongerEngine()
 {
     const auto tailOf = [] (std::vector<float> v) { return P::tailSecondsFor (v.data(), (int) v.size()); };
 
     // Defaults: FEEDBACK 35 %, TIME 375 ms. g = 1.05 x 0.35^1.6 = 0.1957,
-    // -14.17 dB a lap, 4.23 laps to -60, so 5 laps: 1.875 s. HOLD is off, so
-    // the lane says nothing.
-    checkClose (tailOf (defaults()), 1.875, 1.0e-9, "at the defaults the tail is 5 laps of 375 ms");
+    // -14.17 dB a lap, 4.23 laps to -60, so 5 laps: 1.875 s and the loop's own
+    // delay. HOLD is off, so the lane says nothing.
+    checkLaps (tailOf (defaults()), 5, 0.375, "at the defaults the tail is 5 laps of 375 ms");
 
     auto v = defaults();
 
@@ -444,18 +460,18 @@ void testTheTailIsTheLongerEngine()
     // TIME 2000 at the default feedback: 5 laps of 2 s.
     v = defaults();
     v[P::Index::time] = 2000.0f;
-    checkClose (tailOf (v), 10.0, 1.0e-9, "TIME 2000 at FEEDBACK 35 is 10 s");
+    checkLaps (tailOf (v), 5, 2.0, "TIME 2000 at FEEDBACK 35 is 10 s");
 
     // The lane, HOLD on, TAIL -40 %: g = 0.6^1.6 = 0.4416, -7.10 dB a lap,
     // 9 laps of LANE TIME 250 ms is 2.25 s -- longer than the main's 1.875.
     v = defaults();
     v[P::Index::hold]     = 1.0f;
     v[P::Index::laneGain] = -40.0f;
-    checkClose (tailOf (v), 2.25, 1.0e-9, "a held THROW at -40 % rings 9 laps of 250 ms, past the main delay");
+    checkLaps (tailOf (v), 9, 0.25, "a held THROW at -40 % rings 9 laps of 250 ms, past the main delay");
 
     // HOLD off: the same lane setting contributes nothing.
     v[P::Index::hold] = 0.0f;
-    checkClose (tailOf (v), 1.875, 1.0e-9, "with HOLD off the lane adds nothing");
+    checkLaps (tailOf (v), 5, 0.375, "with HOLD off the lane adds nothing");
 
     // FREEZE and BUILD never decay.
     v[P::Index::hold] = 1.0f;
@@ -468,13 +484,13 @@ void testTheTailIsTheLongerEngine()
     // ring -- conservative, never short. 5 laps of 2 s.
     v = defaults();
     v[P::Index::sync] = 1.0f;
-    checkClose (tailOf (v), 10.0, 1.0e-9, "with SYNC on the tail assumes the longest division");
+    checkLaps (tailOf (v), 5, 2.0, "with SYNC on the tail assumes the longest division");
 
     // And the adapter reports exactly this.
     P::DwellDsp dsp;
     const auto d = defaults();
-    checkClose (dsp.tailSecondsForParams (d.data(), (int) d.size()), 1.875, 1.0e-9,
-                "the adapter reports the same tail");
+    check (dsp.tailSecondsForParams (d.data(), (int) d.size()) == tailOf (d),
+           "the adapter reports the same tail");
 }
 
 /** Zero, everywhere, including at the settings that tempt a delay to report
@@ -4205,12 +4221,24 @@ void testCrushInTheLoopDecaysToSilence()
     the burst; a render still above the line in its last 100 ms returns
     `seconds`, so a figure that ran out of render cannot pass for a short one.
 
-    Two bursts, both peaking at 0.5: 5 ms of 300 Hz under a Hann window, and
-    50 ms of windowed noise, which reaches every band the loop passes. */
-double measuredTailSeconds (std::vector<float> v, bool noise, double seconds)
+    Three inputs, all peaking at 0.5: one sample, which reaches every band the
+    loop passes; 5 ms of 300 Hz under a Hann window; 50 ms of windowed noise.
+
+    **The tail is the loop's own decay, so no input is longer than one lap**
+    (`checkTailRows` skips a burst that would be). A burst that overlaps its
+    own repeats builds a high-FEEDBACK loop up above the level it went in at,
+    and the -60 dB line, drawn from the input, then measures the build-up as
+    well as the decay: measured on AURORA, tape at TIME 1 ms and FEEDBACK
+    96.9 % rings 2.95 s after one sample and 4.57 s after 50 ms of noise. The
+    figure is §9's -- laps from the first repeat -- and is not that. */
+enum class TailInput { impulse, tone, noise };
+
+double measuredTailSeconds (std::vector<float> v, TailInput input, double seconds)
 {
     constexpr auto rate = 48000.0;
-    const auto burst = noise ? (int) (0.05 * rate) : (int) (0.005 * rate);
+    const auto burst = input == TailInput::noise ? (int) (0.05 * rate)
+                     : input == TailInput::tone  ? (int) (0.005 * rate)
+                                                 : 1;
     const auto n = burst + (int) std::ceil (seconds * rate);
 
     P::DwellDsp dsp;
@@ -4222,9 +4250,10 @@ double measuredTailSeconds (std::vector<float> v, bool noise, double seconds)
 
     for (int i = 0; i < burst; ++i)
     {
-        const auto w = 0.5 - 0.5 * std::cos (2.0 * P::kPiD * (double) i / (double) (burst - 1));
-        const auto s = noise ? (float) (0.5 * w * source.next())
-                             : (float) (0.5 * w * std::sin (2.0 * P::kPiD * 300.0 * (double) i / rate));
+        const auto w = burst > 1 ? 0.5 - 0.5 * std::cos (2.0 * P::kPiD * (double) i / (double) (burst - 1)) : 1.0;
+        const auto s = input == TailInput::noise ? (float) (0.5 * w * source.next())
+                     : input == TailInput::tone  ? (float) (0.5 * w * std::sin (2.0 * P::kPiD * 300.0 * (double) i / rate))
+                                                 : 0.5f;
         block.left[(size_t) i] = block.right[(size_t) i] = s;
         peak = std::max (peak, std::abs (s));
     }
@@ -4278,20 +4307,26 @@ void checkTailRows (const std::vector<TailRow>& rows, const char* what)
             continue;
         }
 
-        for (const auto noise : { false, true })
+        for (const auto input : { TailInput::impulse, TailInput::tone, TailInput::noise })
         {
+            const auto lengthMs = input == TailInput::noise ? 50.0f : (input == TailInput::tone ? 5.0f : 0.0f);
+
+            if (lengthMs > r.timeMs)
+                continue;
+
             const auto window = reported + (double) r.timeMs * 0.001 + 0.5;
-            const auto measured = measuredTailSeconds (v, noise, window);
+            const auto measured = measuredTailSeconds (v, input, window);
 
             char buf[240];
             std::snprintf (buf, sizeof (buf),
-                           "%s: %s, FEEDBACK %.1f, TIME %.0f ms%s, %s burst: reported %.3f s, "
+                           "%s: %s, FEEDBACK %.1f, TIME %.0f ms%s, %s: reported %.3f s, "
                            "measured %s%.3f s to -60 dB",
                            what, characterName (r.character), (double) r.feedback, (double) r.timeMs,
                            r.fx ? (std::string (", FX ") + fxTypeName (r.fxType) + " "
                                    + std::to_string ((int) r.fxAmount)).c_str() : "",
-                           noise ? "noise" : "300 Hz", reported,
-                           measured >= window ? "> " : "", measured);
+                           input == TailInput::noise ? "noise burst"
+                               : (input == TailInput::tone ? "300 Hz burst" : "one sample"),
+                           reported, measured >= window ? "> " : "", measured);
 
             check (measured <= reported, buf);
         }
@@ -4302,10 +4337,15 @@ void testTheReportedTailIsNeverShorterThanTheDecay()
 {
     std::vector<TailRow> rows;
 
+    // The review's rows, the defaults, and the corners where the loop's own
+    // filters delay each lap: bucket-brigade at long TIME, where its clock
+    // puts the two Butterworths at 800 Hz, and tape at the shortest TIME,
+    // where the head bump puts the loop's peak at 63 Hz among the high-passes.
     for (int c = 0; c < 3; ++c)
         for (const auto& [fb, t] : std::initializer_list<std::pair<float, float>> {
                  { 35.0f, 375.0f }, { 90.0f, 375.0f }, { 90.0f, 100.0f }, { 96.0f, 50.0f },
-                 { 96.0f, 100.0f }, { 96.9f, 20.0f }, { 96.9f, 100.0f }, { 96.0f, 5.0f } })
+                 { 96.0f, 100.0f }, { 96.9f, 20.0f }, { 96.9f, 100.0f }, { 96.0f, 5.0f },
+                 { 60.0f, 375.0f }, { 60.0f, 1000.0f }, { 96.9f, 1.0f } })
             rows.push_back ({ c, fb, t, false, 0, 0.0f });
 
     checkTailRows (rows, "the tail is never short");

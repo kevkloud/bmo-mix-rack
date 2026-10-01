@@ -1,5 +1,6 @@
 #pragma once
 
+#include "modules/dwell/dsp/DelayEngine.h"
 #include "modules/dwell/dsp/GainLaws.h"
 #include "modules/dwell/params.h"
 
@@ -73,19 +74,172 @@ inline double lapsToSixtyDb (double g) noexcept
     return std::ceil (60.0 / (-20.0 * std::log10 (g)));
 }
 
-/** How long Dwell rings on after its input stops, in seconds, for the
-    parameter values `v`.
+//==============================================================================
+/** One lap of the loop's filters at one frequency, as the tail sees them: how
+    much of the signal survives the lap, and how late the lap makes it.
 
-    **The larger of the two engines'** (§11.6). The main delay's is its time
-    times its laps to -60 at FEEDBACK's loop gain. The lane's counts only while
+    **A lap is not exactly TIME long.** Every filter in the loop delays what
+    passes through it, by its group delay, and the delay compounds per repeat
+    exactly as the loss does -- so the slowest-decaying frequency is the one
+    whose loss per *second* is least, not its loss per lap. On clean that is a
+    few microseconds and counts for nothing; on bucket-brigade at long TIME the
+    clock puts both Butterworths at 800 Hz, about 0.7 ms a lap, and the old
+    figure was a few milliseconds short (measured on AURORA 2026-10-01: 9.004 s
+    against 9.000 at FEEDBACK 60 % and TIME 1000 ms); on tape the head bump puts
+    the loop's peak at 63 Hz, where the two high-passes delay a lap by about a
+    millisecond.
+
+    The response is the **analog prototype** of each stage at its working
+    corner, in closed form. That is what makes the figure a function of the
+    parameters alone -- the sample rate is not one -- and it errs the safe way
+    where it errs: below a few kHz the digital filters' magnitudes and delays
+    sit within a fraction of a percent of these, and above that, where the
+    analog low-passes over-state the loss, they also state the least delay, so
+    it is never the slowest frequency. */
+struct LapResponse
+{
+    double magnitude = 1.0;   ///< |H(jw)| of the whole lap
+    double delay     = 0.0;   ///< its group delay, in seconds
+};
+
+namespace tail_detail
+{
+    inline constexpr double kTwoPi = 2.0 * kPiD;
+
+    inline void onePoleLowPass (LapResponse& r, double w, double hz) noexcept
+    {
+        const auto c = kTwoPi * hz;
+        r.magnitude *= c / std::sqrt (w * w + c * c);
+        r.delay     += c / (w * w + c * c);
+    }
+
+    inline void onePoleHighPass (LapResponse& r, double w, double hz) noexcept
+    {
+        const auto c = kTwoPi * hz;
+        r.magnitude *= w / std::sqrt (w * w + c * c);
+        r.delay     += c / (w * w + c * c);
+    }
+
+    /** `gain . LP + HP` with the corner at the pole -- `TptOnePole::lowShelf`
+        -- which is `(s + G wc) / (s + wc)`. */
+    inline void lowShelf (LapResponse& r, double w, double hz, double gain) noexcept
+    {
+        const auto c = kTwoPi * hz, z = gain * c;
+        r.magnitude *= std::sqrt ((w * w + z * z) / (w * w + c * c));
+        r.delay     += c / (w * w + c * c) - z / (w * w + z * z);
+    }
+
+    /** Second-order Butterworth low-pass, `wc^2 / (s^2 + sqrt(2) wc s + wc^2)`. */
+    inline void butterworthLowPass (LapResponse& r, double w, double hz) noexcept
+    {
+        const auto c = kTwoPi * hz, w2 = w * w, c2 = c * c;
+        r.magnitude *= 1.0 / std::sqrt (1.0 + (w2 / c2) * (w2 / c2));
+        r.delay     += std::sqrt (2.0) * c * (c2 + w2) / (c2 * c2 + w2 * w2);
+    }
+}
+
+/** One lap at angular frequency `w`: LOW CUT, HIGH CUT and the 10 Hz blocker,
+    then the character's own mode filters, with `DelayEngine`'s constants --
+    the same chain `DelayEngine::character` runs, in the same order. The
+    compander is unity by construction and the interpolator is a pure delay,
+    already counted in TIME; the shaper and the clip can only lose. */
+inline LapResponse lapResponseAt (double w, int character, double timeSeconds,
+                                  double lowCutHz, double highCutHz) noexcept
+{
+    using E = DelayEngine;
+    using namespace tail_detail;
+
+    LapResponse r;
+    onePoleHighPass (r, w, std::clamp (lowCutHz, 20.0, 1000.0));
+    onePoleLowPass  (r, w, std::clamp (highCutHz, 1000.0, 18000.0));
+    onePoleHighPass (r, w, 10.0);
+
+    if (character == kTape)
+    {
+        onePoleLowPass (r, w, E::kTapeLowPassHz);
+        lowShelf (r, w, E::kHeadBumpHz, std::pow (10.0, E::kHeadBumpDb / 20.0));
+    }
+    else if (character == kBucketBrigade)
+    {
+        const auto clockHz = E::kBbdStages / (2.0 * std::max (timeSeconds, 0.001));
+        const auto cornerHz = std::clamp (E::kBbdCutoffFactor * clockHz * 0.5,
+                                          E::kBbdCutoffMinHz, E::kBbdCutoffMaxHz);
+        butterworthLowPass (r, w, cornerHz);
+        butterworthLowPass (r, w, cornerHz);
+    }
+
+    return r;
+}
+
+/** One engine's tail: at each frequency, the laps its loop gain needs to fall
+    60 dB, times the lap that frequency actually takes; the longest wins.
+
+    - **The loss is the reference chain's** -- the cuts on their rails, as
+      §3 defines `P_c` -- and the gain law's `g` is the loop's gain at that
+      chain's peak, so the peak frequency decays at exactly `g` a lap and
+      every other one faster. The user's cuts are given **no credit** for the
+      loss they add: modelled in analog they over-state it, and a figure that
+      took that credit came out short when measured (a 1 kHz LOW CUT at
+      FEEDBACK 96.9 % rang 24 % longer than such a figure).
+    - **The delay is the larger of the two chains'**, the cuts as set and as
+      on their rails, because a cut adds delay even where it adds no loss.
+    - `extraDelay` is what an in-loop FX adds to every lap; see `fxLapDelay`.
+
+    Swept over 512 points, 10 Hz to 20 kHz, log-spaced; no allocation. */
+inline double engineTailSeconds (double seconds, double g, int character,
+                                 double lowCutHz, double highCutHz, double extraDelay) noexcept
+{
+    if (g >= 1.0)
+        return kTailCeilingSeconds;
+
+    if (g <= 0.0)
+        return seconds;
+
+    constexpr int kPoints = 512;
+    const auto omegaAt = [] (int i)
+    {
+        return tail_detail::kTwoPi * 10.0 * std::pow (2000.0, (double) i / (double) (kPoints - 1));
+    };
+
+    auto peak = 0.0;
+
+    for (int i = 0; i < kPoints; ++i)
+        peak = std::max (peak, lapResponseAt (omegaAt (i), character, seconds, 20.0, 18000.0).magnitude);
+
+    auto worst = 0.0;
+
+    for (int i = 0; i < kPoints; ++i)
+    {
+        const auto w = omegaAt (i);
+        const auto rails = lapResponseAt (w, character, seconds, 20.0, 18000.0);
+        const auto asSet = lapResponseAt (w, character, seconds, lowCutHz, highCutHz);
+        const auto laps  = lapsToSixtyDb (g * rails.magnitude / std::max (peak, 1.0e-12));
+
+        worst = std::max (worst, laps * (seconds + std::max (rails.delay, asSet.delay) + extraDelay));
+    }
+
+    return worst;
+}
+
+/** How long Dwell rings on after its input stops, in seconds, for the
+    parameter values `v`: the time from the last input sample to the last
+    output above -60 dB of the first repeat.
+
+    **The larger of the two engines'** (§11.6), each from `engineTailSeconds`.
+    The main delay's runs at FEEDBACK's loop gain. The lane's counts only while
     HOLD is on: a THROW decays like the main delay, at its own time and its
     tail's gain; a FREEZE or a BUILD never decays and reports the ceiling.
     Clamped to [0.5 s, 30 s]; a loop at or past unity reports 30.
 
-    **Loop gains are taken at `P_c` = 1**, which is each character's loop
-    magnitude at its own peak -- the slowest-decaying frequency, the last one
-    a listener hears -- so the figure is never shorter than the measured time
-    to -60 (`11` §4j).
+    **The figure is never shorter than the measured decay, up to the 30 s
+    ceiling** (`11` §4j), and `DwellDspTests::testTheReportedTailIsNeverShorter
+    ThanTheDecay` renders it to hold it there. Two things it does not cover,
+    both measured on AURORA 2026-10-01: a loop past 30 s rings past the
+    ceiling, which stands by decision; and the figure is the loop's own decay,
+    so an input longer than one lap that builds a high-FEEDBACK loop up above
+    the level it went in at takes longer to fall 60 dB below *that input* (tape,
+    TIME 1 ms, FEEDBACK 96.9 %: 2.95 s after one sample, 4.57 s after 50 ms of
+    noise).
 
     **With SYNC on, each engine's time is taken at the ring's full 2 s.** A
     tail comes from parameters alone, and the tempo is not a parameter; the
@@ -101,20 +255,19 @@ inline double tailSecondsFor (const float* v, int count) noexcept
     const auto mainT = (synced ? (double) kMaxTimeMs : (double) v[Index::time]) / 1000.0;
     const auto laneT = (synced ? (double) kMaxTimeMs : (double) v[Index::laneTime]) / 1000.0;
 
-    const auto engineTail = [] (double seconds, double g)
-    {
-        const auto laps = lapsToSixtyDb (g);
-        return laps < 0.0 ? kTailCeilingSeconds : seconds * laps;
-    };
+    const auto character = (int) v[Index::character];
+    const auto lowCut = (double) v[Index::lowCut], highCut = (double) v[Index::highCut];
 
-    auto tail = engineTail (mainT, (double) feedbackGainFor (v[Index::feedback], 1.0));
+    auto tail = engineTailSeconds (mainT, (double) feedbackGainFor (v[Index::feedback], 1.0),
+                                   character, lowCut, highCut, 0.0);
 
     if (v[Index::hold] > 0.5f)
     {
         // The detent is a literal: lane_gain at 0 is FREEZE (laneGainFor).
         const auto laneTail = v[Index::laneGain] >= 0.0f
                                 ? kTailCeilingSeconds
-                                : engineTail (laneT, (double) laneGainFor (v[Index::laneGain], 1.0));
+                                : engineTailSeconds (laneT, (double) laneGainFor (v[Index::laneGain], 1.0),
+                                                     character, lowCut, highCut, 0.0);
         tail = std::max (tail, laneTail);
     }
 

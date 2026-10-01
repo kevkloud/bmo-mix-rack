@@ -261,21 +261,30 @@ int main()
             return proc->getTailLengthSeconds();
         };
 
-        checkClose (tailAfter ({}), 1.875, 1.0e-9,
-                    "dwell tells the host 5 laps of 375 ms at its defaults");
-        checkClose (proc->getEngine().tailSeconds(), 1.875, 1.0e-9,
-                    "dwell's engine agrees with the host-facing figure");
+        // From 2026-10-01 a lap is TIME plus the loop filters' own group
+        // delay (modules/dwell/dsp/Timing.h), under 2 ms a lap at the rails,
+        // so each figure is its laps times TIME lengthened by less than that.
+        const auto laps = [] (double tail, int count, double seconds)
+        {
+            return tail >= count * seconds && tail < count * (seconds + 0.002);
+        };
+
+        const auto atDefaults = tailAfter ({});
+        check (laps (atDefaults, 5, 0.375),
+               "dwell tells the host 5 laps of 375 ms at its defaults, got " + juce::String (atDefaults, 6));
+        check (proc->getEngine().tailSeconds() == atDefaults,
+               "dwell's engine agrees with the host-facing figure");
 
         checkClose (tailAfter ({ { "feedback", 0.0f } }), 0.5, 1.0e-9,
                     "dwell with no feedback floors at 0.5 s");
         checkClose (tailAfter ({ { "feedback", 100.0f } }), 30.0, 1.0e-9,
                     "dwell self-oscillating reports the 30 s ceiling");
-        checkClose (tailAfter ({ { "hold", 1.0f }, { "lane_gain", -40.0f } }), 2.25, 1.0e-9,
-                    "dwell's held THROW at -40 % outlasts its main delay: 9 laps of 250 ms");
+        check (laps (tailAfter ({ { "hold", 1.0f }, { "lane_gain", -40.0f } }), 9, 0.25),
+               "dwell's held THROW at -40 % outlasts its main delay: 9 laps of 250 ms");
         checkClose (tailAfter ({ { "hold", 1.0f }, { "lane_gain", 0.0f } }), 30.0, 1.0e-9,
                     "dwell's held FREEZE reports the ceiling");
-        checkClose (tailAfter ({ { "sync", 1.0f } }), 10.0, 1.0e-9,
-                    "dwell synced assumes the longest division: 5 laps of 2 s");
+        check (laps (tailAfter ({ { "sync", 1.0f } }), 5, 2.0),
+               "dwell synced assumes the longest division: 5 laps of 2 s");
     }
 
     //== BMO Linger's own figures =============================================

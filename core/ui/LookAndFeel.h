@@ -28,6 +28,19 @@ public:
     void setStyle (Style s) noexcept   { style = s; }
     Style getStyle() const noexcept    { return style; }
 
+    /** The form this knob takes in the Textured surface. Simple ignores it:
+        every knob there is drawn exactly as it always has been.
+
+        `ringed` is a skirt with a turning grip and a cap on it; `onePiece` is
+        a single cap with a chamfered rim. `automatic`, the default, defers to
+        the panel's section tag (ModulePanel::tagTextured) and then to the
+        knob's drawn size -- see texturedFormFor for the order. Input, output
+        and volume are tagged one-piece; nothing else needs a tag. */
+    enum class TexturedForm { automatic, ringed, onePiece };
+
+    void setTexturedForm (TexturedForm f) noexcept { texturedForm = f; }
+    TexturedForm getTexturedForm() const noexcept  { return texturedForm; }
+
     /** The module's colour, for the character style. */
     void setAccent (juce::Colour c) noexcept { accent = c; }
     juce::Colour getAccent() const noexcept  { return accent; }
@@ -69,7 +82,11 @@ public:
 
         Off means no rest mark at any size. For a control whose default *is* an
         end of its range, the pointer already says so when the panel opens.
-        Frosty, 2026-09-16. */
+        Frosty, 2026-09-16.
+
+        **No knob draws a default mark at present** (Frosty, 2026-09-27; see
+        drawRotarySlider). The flag is kept so one can return without touching
+        every panel that has an opinion about it. */
     void setRestMark (bool b) noexcept { restMark = b; }
     bool hasRestMark() const noexcept  { return restMark; }
 
@@ -93,11 +110,27 @@ public:
         marks bare. An odd count with a stride of 2 numbers both ends, which is
         the arrangement worth having; nothing stops an even one, it just leaves
         the last mark unnumbered. */
-    void setStepMarks (int count, int labelEvery = 0) noexcept
+    void setStepMarks (int count, int labelEvery = 0, int firstLabel = 1) noexcept
     {
         stepMarks      = juce::jmax (0, count);
         stepLabelEvery = juce::jmax (0, labelEvery);
+        stepFirstLabel = firstLabel;
+
+        // **A stepped knob sweeps 270 degrees, from 7:30 to 4:30**, rather
+        // than JUCE's 288. Seven positions then fall every 45 degrees, so the
+        // second and the second-to-last sit flat -- dead on 9 and 3 o'clock --
+        // and the whole scale lands on the 45-degree grid a detented
+        // hardware dial is engraved on. Frosty, 2026-09-27. The pointer goes
+        // through the same angles, so it still lands on a mark at every
+        // position. A continuous knob keeps JUCE's sweep.
+        if (stepMarks > 1)
+            setRotaryParameters (juce::MathConstants<float>::pi * 1.25f,
+                                 juce::MathConstants<float>::pi * 2.75f, true);
     }
+
+    /** The number printed at the first mark: 1 for BMO FET's 1..7, 0 for BMO
+        Linger's VARIATION, whose positions are Var 0 to Var 6. */
+    int getStepFirstLabel() const noexcept { return stepFirstLabel; }
 
     int getStepMarks() const noexcept      { return stepMarks; }
     int getStepLabelEvery() const noexcept { return stepLabelEvery; }
@@ -131,6 +164,7 @@ public:
 
 private:
     Style style = Style::utility;
+    TexturedForm texturedForm = TexturedForm::automatic;
     juce::Colour accent { tokens().accent };
     juce::Colour utilityTint;
     bool  circularHit = false;
@@ -139,15 +173,60 @@ private:
     int   detents = 0;
     int   stepMarks = 0;        ///< see setStepMarks; 0 is the dotted arc
     int   stepLabelEvery = 0;   ///< number every nth mark; 0 draws them bare
+    int   stepFirstLabel = 1;   ///< what the first mark is numbered
     float faceScale = 1.0f;
     float trackRadius = 0.0f;
 };
+
+//==============================================================================
+/** The form a knob takes in the Textured surface, resolved: the knob's own
+    tag, else the nearest enclosing section's (ModulePanel::tagTextured), else
+    its size -- one-piece at `Tokens::onePieceMaxRadius` or smaller, ringed
+    above. Never `automatic`. */
+Knob::TexturedForm texturedFormFor (const Knob&);
+
+/** The radius a knob's cap is drawn at, in design pixels. */
+float capRadiusOf (const Knob&);
+
+/** Strokes a border wholly inside `area`: inset by half its weight, and with
+    its radius brought in by the same amount, so the stroke's outer edge is the
+    very curve a fill of `area` at `radius` has.
+
+    `drawRoundedRectangle (area.reduced (w / 2), radius, w)` -- the way every
+    border in the suite was drawn -- keeps the full radius on the inset
+    rectangle. Its outer edge is then a rounder curve than the fill's, and the
+    fill's corners show through outside the border: Frosty, 2026-09-25, "check
+    the corners on the borders, they sneak through". */
+inline void strokeInside (juce::Graphics& g, juce::Rectangle<float> area, float radius, float weight)
+{
+    const auto half = weight * 0.5f;
+    g.drawRoundedRectangle (area.reduced (half), juce::jmax (0.0f, radius - half), weight);
+}
 
 //==============================================================================
 class BmoLookAndFeel final : public juce::LookAndFeel_V4
 {
 public:
     BmoLookAndFeel() { refreshColours(); }
+
+    /** Whether the Textured surface is in force. See ui::surface. */
+    static bool textured();
+
+    /** A textured plate: its finish, a light from above and a machined
+        edge. Drawn over a plate already filled with its token. */
+    static void paintPlateFinish (juce::Graphics&, juce::Rectangle<int> area, PlateFinish);
+
+    /** Fills `marks` in `ink` -- flat in Simple, laser-engraved into the
+        plate in Textured. For the section rules and for the brackets and
+        buses a panel draws. */
+    static void fillEngraved (juce::Graphics&, const juce::RectangleList<float>& marks, juce::Colour ink);
+
+    /** Draws every knob in one form, ignoring the tags, for this process
+        only. `automatic` restores the tags. Tools only -- the snapshot's
+        `knobs=`, so both forms can be compared on the same panel. */
+    static void overrideKnobForm (Knob::TexturedForm);
+
+
 
     /** Re-reads the tokens. Call after a theme change. */
     void refreshColours();
@@ -216,10 +295,6 @@ public:
         circle is a path rather than a glyph, so its diameter is counted and
         whatever is set beside it is added. */
     static float toggleLabelOverflow (const juce::ToggleButton&);
-
-    /** A ring of dots, used for the track around a gain control. */
-    static void drawDottedArc (juce::Graphics&, juce::Point<float> centre, float radius,
-                               float startAngle, float endAngle, juce::Colour, float dotSize);
 
     /** The slashed O of a polarity switch. */
     static const juce::String& phaseGlyph();

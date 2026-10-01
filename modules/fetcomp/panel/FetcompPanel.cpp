@@ -359,6 +359,12 @@ FetcompPanel::FetcompPanel (ui::ModuleContext ctx)
              &inputKnob, &outputKnob, &attackKnob, &releaseKnob, &mixKnob, &meter })
         addAndMakeVisible (c);
 
+    // Input, output and volume are one-piece in the Textured surface whatever
+    // their size: they set a level rather than voice the module. Frosty,
+    // 2026-09-25. Everything else follows the size rule in texturedFormFor.
+    for (auto* k : { &inputKnob, &outputKnob })
+        k->setTexturedForm (ui::Knob::TexturedForm::onePiece);
+
     meterInButton .onClick = [this] { selectMeterMode (ui::DynamicsMeter::Mode::input); };
     meterGrButton .onClick = [this] { selectMeterMode (ui::DynamicsMeter::Mode::reduction); };
     meterOutButton.onClick = [this] { selectMeterMode (ui::DynamicsMeter::Mode::output); };
@@ -633,8 +639,7 @@ void FetcompPanel::paintPanel (juce::Graphics& g)
     // The bracket is the controls' colour at the 0.55 alpha the dotted tracks
     // use -- painted here rather than set on a component, so applyAccent
     // cannot reach it and it reads the voicing directly.
-    g.setColour (controlColourFor (lastVoicing, context.def.accent).withAlpha (0.55f));
-    g.fillRectList (bus);
+    ui::BmoLookAndFeel::fillEngraved (g, bus, controlColourFor (lastVoicing, context.def.accent).withAlpha (0.55f));
 }
 
 //==============================================================================

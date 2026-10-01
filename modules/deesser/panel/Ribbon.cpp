@@ -1,4 +1,5 @@
 #include "modules/deesser/panel/Ribbon.h"
+#include "modules/deesser/panel/Screen.h"
 
 #include "core/ui/Fonts.h"
 #include "core/ui/Tokens.h"
@@ -95,38 +96,46 @@ void Ribbon::paint (juce::Graphics& g)
     const auto captionArea = area.removeFromBottom ((float) kCaptionRow);
     const auto bounds = area;
 
-    // The same recess the sketch above sits in, so the two read as one
-    // instrument in two panes rather than as two components.
-    g.setColour (t.well);
-    g.fillRoundedRectangle (bounds, 3.0f);
-
-    const auto plot = bounds.reduced (1.0f);
+    // The same screen the sketch above sits in, so the two read as one
+    // instrument in two panes rather than as two components. See Screen.h.
+    const auto face = Screen::paint (g, *this, bounds);
+    const auto plot = face.reduced (1.0f);
     const auto centre = plot.getCentreY();
 
     // The line silence rests on, drawn whether or not there is a tap: an empty
     // ribbon should look like an instrument reading nothing, not like a hole.
-    g.setColour (ui::tokens().hairline);
+    g.setColour (Screen::baseline());
     g.fillRect (juce::Rectangle<float> (plot.getX(), centre, plot.getWidth(),
                                         ui::Tokens::hairlineWeight));
 
+    // The suggestion is set under the screen, on the plate, so its ink is
+    // derived against the ground it is actually printed on rather than the
+    // face's.
+    const auto captionInk = ui::accentInk (ui::tokens().utilGain, t.plate);
+
     if (source == nullptr || frames.empty())
+    {
+        Screen::paintEdge (g, face);
         return;
+    }
 
     const auto wanted = (int) (kSeconds * DspCore::kRibbonHz) * DspCore::ribbonFrame;
     const auto read = source->read (frames.data(), std::min (wanted, (int) frames.size()));
     const auto available = read / DspCore::ribbonFrame;
 
     if (available <= 0)
+    {
+        Screen::paintEdge (g, face);
         return;
+    }
 
     // The two inks the waveform is drawn between. The signal is the module's
     // own accent; what it is acting on is the utility azure, which sits about
     // 165 degrees away in hue and is the one colour in the suite guaranteed
     // clear of every module's accent (core/ui/Tokens.h). Both are resolved
-    // against the well rather than used raw, because the well is pale in one
-    // appearance and dark in the other.
-    const auto quiet  = ui::accentInk (accent, t.well);
-    const auto caught = ui::accentInk (ui::tokens().utilGain, t.well);
+    // against the screen's face they are drawn on rather than used raw.
+    const auto quiet  = Screen::ink (accent);
+    const auto caught = Screen::ink (ui::tokens().utilGain);
 
     // **A pixel column at a time, not three filled paths.**
     //
@@ -187,7 +196,8 @@ void Ribbon::paint (juce::Graphics& g)
                                             1.0f, height * 2.0f));
     }
 
-    drawSuggestion (g, captionArea, caught, available);
+    Screen::paintEdge (g, face);
+    drawSuggestion (g, captionArea, captionInk, available);
 }
 
 void Ribbon::drawSuggestion (juce::Graphics& g, juce::Rectangle<float> plot,

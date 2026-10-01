@@ -24,7 +24,7 @@ namespace bmo::deesser
 
     **The three layers.**
 
-    - The **envelope**, in the well's own ink: what the module was given. Drawn
+    - The **envelope**, in the screen's own ink: what the module was given. Drawn
       as a silhouette about the centre line rather than as a wave, because at
       six frames a pixel a wave is a smear and an envelope is a shape.
     - The **band**, in the accent, inside the envelope: how much of that was in

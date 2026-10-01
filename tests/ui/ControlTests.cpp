@@ -16,6 +16,9 @@
 // previous reading.
 
 #include "core/ui/Controls.h"
+#include "core/ui/Line.h"
+#include "core/ui/LookAndFeel.h"
+#include "core/ui/ModulePanel.h"
 
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -239,6 +242,83 @@ int main()
                    "at the bottom of the range the cap's bottom edge is the body's");
 
         param.setValueNotifyingHost (param.getDefaultValue());
+    }
+
+    //== The surface: Simple by default, the line's finish, the knob's form ===
+    //
+    // Frosty, 2026-09-25: the plugins as they are are "Simple" and the
+    // default. Textured takes the line's finish -- brushed on every line --
+    // unless the user picks one for everything. In Textured, each knob's form
+    // comes from its own tag, then its section's, then its drawn size.
+    {
+        using namespace bmo::ui;
+
+        check (surface() == Surface::simple, "a process that has read no preference is Simple");
+        check (! BmoLookAndFeel::textured(), "Simple draws no material");
+
+        overrideSurface (Surface::textured, FinishChoice::house);
+        check (finishFor (bmoLine()) == PlateFinish::brushed, "BMO's house finish is brushed");
+        check (finishFor (ltvLine()) == PlateFinish::brushed, "the collaborations' house finish is brushed too");
+
+        overrideSurface (Surface::textured, FinishChoice::powder);
+        check (finishFor (bmoLine()) == PlateFinish::powder,  "powder everywhere reaches BMO");
+
+        overrideSurface (Surface::textured, FinishChoice::brushed);
+        check (finishFor (ltvLine()) == PlateFinish::brushed, "brushed everywhere reaches the collaborations");
+
+        overrideSurface (Surface::simple, FinishChoice::house);
+
+        juce::Component section, inner;
+        section.addChildComponent (inner);
+
+        // By size: the cap radius is the knob's shorter side, halved, times
+        // its face scale. BMO Dimension's non-hero knobs are 19.84 and are
+        // one-piece; the line is Tokens::onePieceMaxRadius, 21.0, and the
+        // style plays no part -- a small character knob is one-piece, a large
+        // trim ringed.
+        checkNear ((double) Tokens::onePieceMaxRadius, 21.0, 1.0e-6, "the one-piece line is 21 px of cap radius");
+
+        Knob character, small, large;
+        character.setStyle (Knob::Style::character);
+        small.setStyle (Knob::Style::character);
+        large.setStyle (Knob::Style::utility);
+
+        character.setSize (100, 100);
+        character.setFaceScale (0.62f);            // 31.0, BMO FET's INPUT
+        small.setSize (46, 46);
+        small.setFaceScale (2.0f / 3.0f);          // 15.33, BMO FET's ATTACK
+        large.setSize (46, 46);
+        large.setFaceScale (1.0f);                 // 23.0
+
+        checkNear ((double) capRadiusOf (small), 15.333, 1.0e-3, "a 46 px knob at 2/3 has a 15.33 px cap");
+        check (texturedFormFor (character) == Knob::TexturedForm::ringed,   "a 31 px cap is ringed");
+        check (texturedFormFor (small)     == Knob::TexturedForm::onePiece, "a character knob at FET ATTACK's size is one-piece");
+        check (texturedFormFor (large)     == Knob::TexturedForm::ringed,   "a 23 px trim is ringed");
+
+        Knob edge;
+        edge.setSize (42, 42);                     // 21.0 exactly
+        check (texturedFormFor (edge) == Knob::TexturedForm::onePiece, "exactly on the line is one-piece: 'the same size or smaller'");
+
+        // A section tag reaches a knob however deep it sits in the section.
+        inner.addChildComponent (character);
+        section.getProperties().set (ModulePanel::kTexturedFormTag, (int) Knob::TexturedForm::onePiece);
+        check (texturedFormFor (character) == Knob::TexturedForm::onePiece, "a section tag beats the style");
+
+        // The nearest section wins over one further out.
+        inner.getProperties().set (ModulePanel::kTexturedFormTag, (int) Knob::TexturedForm::ringed);
+        check (texturedFormFor (character) == Knob::TexturedForm::ringed, "the nearest section tag wins");
+
+        // And the knob's own tag beats every section.
+        character.setTexturedForm (Knob::TexturedForm::onePiece);
+        check (texturedFormFor (character) == Knob::TexturedForm::onePiece, "a knob's own tag beats its sections");
+
+        // A tool's override beats everything, and `automatic` hands back.
+        BmoLookAndFeel::overrideKnobForm (Knob::TexturedForm::ringed);
+        check (texturedFormFor (character) == Knob::TexturedForm::ringed, "the override beats a knob's tag");
+        BmoLookAndFeel::overrideKnobForm (Knob::TexturedForm::automatic);
+        check (texturedFormFor (character) == Knob::TexturedForm::onePiece, "automatic restores the tags");
+
+        inner.removeChildComponent (&character);
     }
 
     if (failures == 0)

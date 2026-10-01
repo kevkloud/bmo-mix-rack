@@ -129,6 +129,14 @@ struct Line
     /** Empty for a line that takes the suite's ground, which is BMO. */
     std::optional<Ground> light {}, dark {};
 
+    /** The finish this line's plate takes in the Textured surface when the
+        user has left the choice to the line (`FinishChoice::house`). Every
+        line is brushed today: the collaborations were powder for an hour on
+        2026-09-25 and Frosty sent LTV Comp back to brushed on seeing it in a
+        rack. The field stays because a finish is ground, not ink, so it is a
+        line's to set if a later one wants its own. Simple ignores it. */
+    PlateFinish finish = PlateFinish::brushed;
+
     bool ownsGround() const noexcept { return light.has_value() && dark.has_value(); }
 };
 
@@ -148,6 +156,10 @@ const Line& ltvLine();
     both change under a running editor, and the 1 Hz poll repaints rather
     than rebuilding anything. */
 Tokens groundFor (const Line& line);
+
+/** The finish a textured plate of this line takes: the user's, unless they
+    left it to the line. Meaningless in Simple, which draws no finish. */
+PlateFinish finishFor (const Line& line);
 
 /** The knob cap this line fixes for the appearance in force, or nothing if it
     leaves caps to `faceOf` and the module's accent. */

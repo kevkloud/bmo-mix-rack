@@ -2,6 +2,7 @@
 
 #include "ModuleDef.h"
 #include "core/dsp/Meter.h"
+#include "core/product/HostTempo.h"
 #include "core/state/ParamSet.h"
 #include <atomic>
 
@@ -80,10 +81,21 @@ public:
         grMeter.reset();
     }
 
-    void process (float* const* channels, int numChannels, int numSamples)
+    /** One block. `tempo` is the host's for this block, read by the processor
+        that owns the engine; a default-constructed `HostTempo` says there is
+        none.
+
+        **An argument and not a member or a setter**, and not defaulted: a
+        tempo belongs to one block, so there is nothing to keep between calls,
+        and a caller that forgot to read the host should fail to compile rather
+        than quietly hand every module "no tempo". It goes to the DSP right
+        after the parameters and before the audio, which is the order
+        `ModuleDsp::setTempo` promises. */
+    void process (float* const* channels, int numChannels, int numSamples, const HostTempo& tempo)
     {
         read();
         dsp->setParams (values.data(), (int) values.size());
+        dsp->setTempo (tempo.bpm, tempo.valid, tempo.playing);
         inMeter.measure (channels, numChannels, numSamples);
         dsp->process (channels, numChannels, numSamples);
         outputMeter.measure (channels, numChannels, numSamples);

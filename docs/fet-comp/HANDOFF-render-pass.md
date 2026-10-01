@@ -131,9 +131,10 @@ building in both `build/` and `build-dsp/`. Until it reports back:
   full alpha. Only the bezel changes; the hot zone keeps the accent.
 - The VU is the shared `ui::DynamicsMeter`. Its GR range stays 24 dB and pins.
   The bezel alpha is an opt-in setter that defaults to 0.7. **BMO Opto's three
-  hashes must not move:** `ab3ff3b77116b7a5` (dark), `878cca7b1a80a551`
-  (light), `88a7653a82c19ae0` (GR dark). Re-prove them after any change to
-  `core/ui`.
+  hashes must not move:** `59d85c014da98432` (dark), `313df8cc740e9aa3`
+  (light), `393f13e24fbf96c3` (GR dark). Re-prove them after any change to
+  `core/ui` (`appearance=` and `surface=simple` named; see
+  testing-notes/opto-reference-hashes-2026-10-01.md).
 - Attack and release are knob positions 1-7, 7 fastest; the value string shows
   the position and the time, in ASCII ("us", not the micro sign).
 - No hardware or third-party brand names in code, docs or UI strings.

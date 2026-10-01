@@ -294,8 +294,9 @@ makes it materially slower, say so with the number.
 - **The schema is permanent.** No id, order, range, default or choice-order
   change in `modules/fetcomp/params.h`, ever.
 - **`core/ui` is not yours**, and if you somehow end up there: BMO Opto
-  `ab3ff3b77116b7a5` / `878cca7b1a80a551` / `88a7653a82c19ae0` and BMO Saturator
-  `d42e23747e1ea2fc` must not move. Re-render and prove it.
+  `59d85c014da98432` / `313df8cc740e9aa3` / `393f13e24fbf96c3` and BMO Saturator
+  `34d76168b5ad5fae` must not move. Re-render and prove it (`appearance=` and
+  `surface=simple` named; see testing-notes/opto-reference-hashes-2026-10-01.md).
 - **Never build or install the rack plugin target.** The installed 0.2.5 rack is
   mid Ableton pass on AURORA.
 - **`opto_measurements/` is not properly gitignored.** Running `measure_opto`

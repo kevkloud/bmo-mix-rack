@@ -483,7 +483,7 @@ juce::Colour accentInk (juce::Colour accent, juce::Colour ground) noexcept;
     ink does not suit.
 
     `accentInk` steps an accent toward black until it reads on a pale plate,
-    and for a yellow that lands on olive -- BMO Dwell's Pikachu yellow came out
+    and for a yellow that lands on olive -- BMO Dwell's bright yellow came out
     olive-brown and Frosty did not want it (2026-10-01). A module that declares
     an ink here gets it **instead of** the derived one, on any light ground,
     for everything `accentInk` colours: knob captions, the dotted track and its

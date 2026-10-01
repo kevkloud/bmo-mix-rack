@@ -72,7 +72,7 @@ by dispatched agents on AURORA, 2026-09-20, under `HANDOFF-groundwork.md`.
 16. **The accent is the orchid `#f094e6`** (2026-09-21), measured 6.49:1 dark
     and 1.81:1 pale off a render. It spends the last wide hue arc in the rack.
     **Superseded 2026-10-01: jade `#46c988`**, after BMO Linger merged 2.1
-    degrees from the orchid (and a same-day detour through Pikachu yellow).
+    degrees from the orchid (and a same-day detour through a bright yellow).
     `products/AGENTS.md` has the row.
 
 ## Decided (Frosty, 2026-09-21, second pass) — the table is settled

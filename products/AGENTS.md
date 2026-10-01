@@ -166,7 +166,7 @@ alternative below.
 
 **How it got here, so it is not walked again.** The orchid `#f094e6`
 (2026-09-21) until BMO Linger merged at `#e694e0`, 2.1 degrees away. Then, the
-same day, **Pikachu yellow `#f8d030`** -- 9.05 / 1.30, out of band at both ends
+same day, **a bright yellow `#f8d030`** -- 9.05 / 1.30, out of band at both ends
 -- with a declared charcoal light-mode ink and cheek-red buttons, built,
 committed and reverted for jade on a side-by-side render. Indigo `#baa8f8` read
 as Dimension's lavender, violet `#e198f4` as Linger's family, and an in-band

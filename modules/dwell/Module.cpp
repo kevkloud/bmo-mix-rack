@@ -17,7 +17,7 @@ namespace bmo::dwell
 
     The road here, so it is not walked again: the orchid `#f094e6`
     (2026-09-21) until BMO Linger merged at `#e694e0`, 2.1 degrees away; then,
-    the same day, Pikachu yellow `#f8d030` with a charcoal light-mode ink and
+    the same day, a bright yellow `#f8d030` with a charcoal light-mode ink and
     cheek-red buttons, built and committed and then reverted for this on a
     side-by-side render. The machinery that made the yellow possible stays in
     core -- `ui::declareLightInk` -- for themes. */

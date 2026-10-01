@@ -1137,7 +1137,7 @@ void checkDwellPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
     //== Suite inks: Dwell declares no light-ground ink of its own ===========
     //
     // Jade, on the inks the suite derives (Frosty, 2026-10-01). Dwell carried
-    // a declared charcoal for a few hours under Pikachu yellow; the mechanism
+    // a declared charcoal for a few hours under a bright yellow; the mechanism
     // stays in core for themes, and this says Dwell is not using it.
     check (bmo::ui::declaredLightInk (panel.getContext().def.accent).isTransparent(),
            who + " declares a light-ground ink; jade is meant to run on the derived one");

@@ -203,7 +203,7 @@ did not.
 ink, lit buttons in the accent, choice rows in the utility azure.
 `products/AGENTS.md` carries the row, the neighbours (21.1 degrees from Util's
 green, 22.0 from DEQ's teal -- known, and chosen on a side-by-side render) and
-the road through the orchid and Pikachu yellow that led here.
+the road through the orchid and a bright yellow that led here.
 
 `Module.cpp` carries it as `kAccent`, and **nothing in the panel names a hex**.
 `Module.h` carries one style constant, `kFollowAlpha`: the lane's FX row and

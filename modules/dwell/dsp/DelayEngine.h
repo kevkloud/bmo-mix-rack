@@ -632,6 +632,14 @@ private:
         AMOUNT 100, 0.1 dB at AMOUNT 60 -- and a signal under one step is gone
         on its first crushed lap.
 
+        **One cycle survives truncation, and it is the lap's rather than the
+        quantiser's**: at FEEDBACK 95 % and above with AMOUNT 100, a held
+        +-0.25 step comes back through the lap's filters with a few per cent of
+        overshoot and re-crosses the step it left, so a one-step square wave
+        circulates for good (measured on AURORA at 44.1 and 96 kHz, not at 48).
+        A dead zone of half a step would end it at a further cost in level;
+        that is Frosty's call and is not built.
+
         The clamp to +-1 stays: a loud lap can still hand this stage more than
         full scale, and the shaper and clip come after it. */
     double crush (size_t ch, double x, double amount) noexcept

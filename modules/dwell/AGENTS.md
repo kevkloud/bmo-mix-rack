@@ -88,18 +88,36 @@ hold after it.
   the engines the knob's time then the note's, re-sweeping the loop peak every
   block. Before the first tempo the knobs stand; a lost tempo is held; a
   stopped transport changes nothing; a division longer than the 2 s ring is
-  halved until it fits (`docs/delay/10` §7, `dsp/Timing.h`). The panel names
+  halved until it fits (`docs/delay/10` §7, `dsp/Timing.h`). **The first
+  valid tempo after `prepare` or `reset` lands** -- both reads jump straight to
+  the synced times while the ring is still empty -- because as an ordinary
+  move tape and bucket-brigade glided three seconds in from the TIME knob on
+  every fresh instance and every rack chain edit (2026-10-01). Every later
+  tempo change moves under §2's law, as before. The panel names
   the division on the screen rather than printing a millisecond figure it
   cannot know. `tests/plugin/TempoTests.cpp` carves Dwell out of its
   byte-identity walk by name, and still asserts it is identical with SYNC off
-  and different with SYNC on.
+  and different with SYNC on, standalone and in a rack slot.
 - **Dwell reports a tail** (`tailSecondsForParams`, `dsp/Timing.h`): the
-  longer of the two engines', each its time times its laps to -60 at its loop
-  gain at `P_c` = 1, clamped [0.5 s, 30 s]. The lane counts only with HOLD on,
-  and a FREEZE or BUILD reports 30 s. **With SYNC on each time is taken at the
-  2 s ring**, because a tail comes from parameters alone and the tempo is not
-  one -- conservative, never short. `tests/plugin/TailTests.cpp` lists Dwell
-  beside Linger as the two modules that ring, with hand-worked figures.
+  longer of the two engines', clamped [0.5 s, 30 s]. Each engine's is swept
+  over frequency (2026-10-01): the laps the loop gain at `P_c` = 1 needs to
+  fall 60 dB there, times **TIME plus that frequency's filter group delay plus
+  what an in-loop FX adds to a lap** -- Diffuse's peak allpass delay, which is
+  conservative by design (renders ran 8-88 % of it), and Crush's hold. The
+  lane counts only with HOLD on, and a FREEZE or BUILD reports 30 s. **With
+  SYNC on each time is taken at the 2 s ring**, because a tail comes from
+  parameters alone and the tempo is not one. `DwellDspTests` renders the
+  figure against the real decay; the exceptions it does not cover are written
+  at `tailSecondsFor`. `tests/plugin/TailTests.cpp` lists Dwell beside Linger
+  as the two modules that ring.
+- **Crush truncates toward zero** (2026-10-01, Frosty to confirm): rounding
+  expanded and held a limit cycle above about 60 % FEEDBACK. A one-step cycle
+  through the lap's filter overshoot still survives at FEEDBACK 95 % and up,
+  AMOUNT 100, at 44.1 and 96 kHz; `docs/delay/10` §11a has the numbers and the
+  option that would end it.
+- **MIX is smoothed across its 50 % hinge**, and the dry *lands* on exactly 1.0
+  below it (`Smoother::tickLanding`), which is when the bit-exact null returns.
+  A float one-pole on its own stalls about 3e-5 short of 1.0.
 - **There is one SYNC and it governs both engines.** `note` (2) is the main
   delay's division, **`lane_note` (22) is the lane's**, off the same sixteen
   values; there is deliberately **no `lane_sync`** (`docs/delay/10` §11.7).
@@ -176,8 +194,8 @@ nothing left to guard and is gone with the column.
 
 **SYNC swaps both engines' time for their note, together.** With SYNC on,
 NOTE takes TIME's cell in the foot and LANE NOTE (`lane_note`, id 22) takes LANE
-TIME's on the LANE page, because one switch governs both engines. SYNC ships
-disabled, but a preset or host can still write it, so the panel shows whichever
+TIME's on the LANE page, because one switch governs both engines. A preset or
+host can write SYNC as well as the switch can, so the panel shows whichever
 knob is live; `resized` reads SYNC itself so any layout matches the parameter.
 Every parameter has a control, and `tests/ui/LayoutTests.cpp` sums them.
 
@@ -226,8 +244,8 @@ the same fixed maximum as the main's — `lane_time` shares TIME's range — and
 **compander's control ring is as long as the audio ring**, per channel per
 engine, allocated whichever character is selected (`docs/delay/10` §4, §10). So
 an instance is **16 MB at 192 kHz**, 4.0 MB at 44.1 kHz; the 8.0 MB an earlier
-pass quoted counted the audio rings alone. **`params.h`'s `kMaxTimeMs` comment
-still quotes a one-engine figure and wants correcting in a code pass.** Every
+pass quoted counted the audio rings alone; `params.h`'s `kMaxTimeMs` comment
+carries the 16 MB figure and names the two wrong ones. Every
 invariant in `11` §4 — sample-rate and block-size invariance, denormal, NaN and
 silence robustness, the bit-exact dry null, the alias floor — has to hold for
 **both** engines, so expect roughly double the work the handoff estimates.

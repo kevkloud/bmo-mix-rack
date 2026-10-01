@@ -287,13 +287,23 @@ inline double engineTailSeconds (double seconds, double g, int character,
 
     **The figure is never shorter than the measured decay, up to the 30 s
     ceiling** (`11` §4j), and `DwellDspTests::testTheReportedTailIsNeverShorter
-    ThanTheDecay` renders it to hold it there. Two things it does not cover,
-    both measured on AURORA 2026-10-01: a loop past 30 s rings past the
-    ceiling, which stands by decision; and the figure is the loop's own decay,
-    so an input longer than one lap that builds a high-FEEDBACK loop up above
-    the level it went in at takes longer to fall 60 dB below *that input* (tape,
-    TIME 1 ms, FEEDBACK 96.9 %: 2.95 s after one sample, 4.57 s after 50 ms of
-    noise).
+    ThanTheDecay` renders it to hold it there. What it does not cover, all
+    measured on AURORA 2026-10-01 and recorded in
+    `testing-notes/dwell-review-fixes-2026-10-01.md`:
+
+    - a loop past 30 s rings past the ceiling, which stands by decision;
+    - the figure is the loop's own decay, so an input longer than one lap that
+      builds a high-FEEDBACK loop up above the level it went in at takes longer
+      to fall 60 dB below *that input* (tape, TIME 1 ms, FEEDBACK 96.9 %: 2.95 s
+      after one sample, 4.57 s after 50 ms of noise);
+    - bucket-brigade at a fractional-sample delay, driven by a one-sample
+      impulse, rings up to 17 % past it (44.1 kHz), because the compander's two
+      rings are interpolated separately and a one-sample transient does not
+      hold the gain constant across the taps; bursts of 5 and 50 ms stay inside;
+    - Crush at AMOUNT 100 and FEEDBACK 95 % and above can hold a one-step
+      limit cycle through the lap's filter overshoot (bucket-brigade and clean
+      at 44.1 kHz, bucket-brigade at 96 kHz; none at 48 kHz), which no finite
+      figure covers. See `FxStage::crush`.
 
     **With SYNC on, each engine's time is taken at the ring's full 2 s.** A
     tail comes from parameters alone, and the tempo is not a parameter; the

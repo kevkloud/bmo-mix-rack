@@ -205,6 +205,20 @@ did.
   re-detecting pair benched at **+3.67 dB on a 20 dB step, 0.184 dB per dB**,
   landing on the modelled value. It may be quoted as a measurement from here on.
 
+  **The expander outlives the character by one ring** (2026-10-01, the review of
+  PR #35). A CHARACTER move off bucket-brigade leaves companded samples in the
+  ring, up to +30 dB on a quiet line, and the read keeps dividing by the stored
+  gain until a whole ring has been written since the last companded sample;
+  writes made without companding store exactly 1.0. Before this, the move
+  replayed a 0.05 repeat at a 0.558 peak (+15 dB), measured on AURORA.
+
+  **"Unity at every instant" holds at a whole-sample delay.** At a fractional
+  one the two rings are interpolated separately, and a one-sample transient does
+  not hold the gain constant across the interpolator's taps: measured on AURORA
+  at 44.1 kHz (TIME 375 ms is 16 537.5 samples), a one-sample impulse into a
+  FEEDBACK 60 % loop rang 3.778 s where the reported tail is 3.393 s. Bursts of
+  5 ms and 50 ms stayed inside it. Recorded, not changed.
+
   **The control ring costs as much memory as the audio ring**, one per channel
   per engine, because it has to be read at the same fractional position as the
   audio it belongs to — §10 carries the arithmetic, and it is why the
@@ -280,6 +294,14 @@ and both host processors declare stereo in/out with no sidechain bus. That is th
 stated limit of this control: what it buys over a compressor on a return is that it
 travels in presets and rack state, which routing does not.
 
+**The detector runs every sample, at every DUCK; only the gain is skipped at 0**
+(2026-10-01, the review of PR #35). Run only while ducking, the follower froze at a
+point set by where the host's blocks fell whenever DUCK went to 0 and back, and the
+audio after it changed with the block size (0.0125 between 64 and 1024, on AURORA).
+**Its key is sanitised first**: a one-pole and a log follower keep a NaN or an
+infinity for good, and one NaN at DUCK 6 dB took the whole output, dry included,
+to exact zeros until a reset.
+
 ## 7. Tempo sync
 
 00 §2: no host tempo reaches `ModuleDsp` today. The DSP needs one new call,
@@ -294,6 +316,13 @@ thirty-second; **dotted ×1.5**, **triplet ×2/3**. BPM clamped [20, 999].
   TIME control.
 - Tempo change or jump: re-target `Dtgt`, let §2's law run — tape glides, clean
   crossfades. No special case for jumps.
+- **The first valid tempo after `prepare` or `reset` lands** (2026-10-01): both
+  engines' reads go straight to the synced times, with no glide and no
+  crossfade, while the ring is still empty. The first block's parameters have
+  already primed the engines at the TIME knob, and as an ordinary move a 1/4 at
+  60 bpm took three seconds to glide in from the 375 ms default on tape and
+  bucket-brigade — on every fresh instance, and in a rack after every chain
+  edit. A first tempo that arrives after audio has flowed moves like any other.
 - Transport stopped: freeze BPM; audio flows, the loop decays, never mute or flush.
 - Mapped time over the §10 maximum: halve until it fits.
 
@@ -682,11 +711,15 @@ here.
 
 **Tail reporting.** §9's `tail` figure becomes **the larger of the two
 engines'**, from parameters only as `latencyForParams` is: the main's per §9;
-the lane's as `T_lane·ceil(60 / −20·log10(min(g_lane, 0.97)))` when
-`lane_gain < 0` **and HOLD is on**; and **the 30 s clamp whenever HOLD is on and
-`lane_gain ≥ 0`**, because a hold or a build does not decay. With HOLD off the
-lane contributes nothing. `11` §4j's assertion — the reported tail is never
-below the measured time to −60 dBFS — then still holds (DECISION, derived here).
+the lane's by the same formula at `T_lane` and `g_lane`, with its own FX trio
+(the main's when `fx_link` is on), when `lane_gain < 0` **and HOLD is on**; and
+**the 30 s clamp whenever HOLD is on and `lane_gain ≥ 0`**, because a hold or a
+build does not decay. With HOLD off the lane contributes nothing. `11` §4j's
+assertion — the reported tail is never below the measured time to −60 dB — is
+rendered by `DwellDspTests::testTheReportedTailIsNeverShorterThanTheDecay`, and
+holds up to the 30 s ceiling, with the exceptions §9 and §4 record (an input
+longer than a lap at high FEEDBACK; bucket-brigade's compander at a fractional
+delay on a one-sample transient) and the one §11a records for Crush.
 
 ### 11.7 The lane and tempo: one SYNC, two divisions
 
@@ -794,6 +827,25 @@ Candidates — list and order free until ship (11 §3):
   **exempt from the −60 dBFS alias floor** (§4), which is measured FX-off; its own
   acceptance is only that the non-harmonic floor stops growing by repeat 10.
   Negligible cost and memory.
+
+  **The quantiser truncates toward zero** (2026-10-01, the review of PR #35;
+  Frosty to confirm). "Quantise" read as round-to-nearest is *expanding* — at 3
+  bits a 0.13 becomes 0.25 — and above about 60 % FEEDBACK the loop held a limit
+  cycle: measured on AURORA, still −7.1 dB under the first repeat forty seconds
+  after a burst at AMOUNT 100 and FEEDBACK 80, and −81 dB for good at AMOUNT 0.
+  Truncation keeps `|q| ≤ |x|`, and those tails now end in exact zeros. It costs
+  level: up to one step a pass rather than half of one either way (−3.98 dB on a
+  0.5 sine at AMOUNT 100, where rounding gave 0.00).
+
+  **One cycle survives truncation, and it is the lap's, not the quantiser's.** At
+  FEEDBACK 95 % and above, AMOUNT 100, a held ±0.25 step comes back through the
+  lap's filters with a few per cent of overshoot — bucket-brigade's Butterworth
+  pair, or clean's high-passes — and re-crosses the step it left, so a one-step
+  square wave circulates for good. Measured on AURORA at 44.1 kHz (bucket-brigade
+  from FEEDBACK 95 %, clean at 96.9 %, peak about 0.24) and at 96 kHz
+  (bucket-brigade, 96.9 %, AMOUNT 60); none at 48 kHz. A dead zone of half a step
+  (`|q| ≤ |x| − step/2`) ends every one of them below unity, at a further cost
+  (−6.99 dB a pass at AMOUNT 100 on a 0.5 sine). Not built: Frosty decides.
 > **Octave up, Octave down and Reverse were CUT on 2026-09-21** (Frosty; see
 > `15`). The octaves compound in a feedback loop — pitch moves ±12k semitones, so
 > three repeats is three octaves and the content leaves the band — and Reverse was
@@ -861,7 +913,7 @@ unexplained — 11 §4k flags it, and it must not be quoted as "Crush is free".
 | FX stage position | after mode filters, before DC blocker; skipped when off; **one stage per engine**, no shared state | DECISION |
 | FX loop bound | `\|F\| ≤ 1` for every candidate, normalised in closed form | DECISION |
 | Diffuse | 6-stage allpass, 7–37 ms × AMOUNT | CALIBRATE; 00 §1 |
-| Crush | 16→3 bits, hold ÷1–32; exempt from the alias floor | CALIBRATE / DECISION |
+| Crush | 16→3 bits **truncated toward zero**, hold ÷1–32; exempt from the alias floor | CALIBRATE / DECISION (truncation: Frosty to confirm) |
 | Pan / Tremolo | stepped once per repeat; AMOUNT is depth | CALIBRATE |
 | FX types | Diffuse, Pan/Tremolo, Crush — **three**; Sweep cut because VOICE was | DECIDED (Frosty, 2026-09-22) |
 | Voicing | **Shared**: `character`, `stereo`, the cuts, the modulation and `drive` govern both engines; DUCK is main-only | DECIDED (Frosty, 2026-09-23) |

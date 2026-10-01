@@ -3970,6 +3970,84 @@ void testACharacterMoveReplaysTheRingAtItsOwnLevel()
     }
 }
 
+/** **MIX crossing 50 % inside one block is smoothed like the rest of its
+    travel** (10 §9).
+
+    Below the hinge the dry is unity and the wet rides `sin(pi m)`; above it
+    the wet is unity and the dry rides `cos(pi (m - 0.5))`. Each side was
+    smoothed, but the crossing was not: going down the dry gain was snapped to
+    1 and going up the smoothed wet gain was dropped, so a jump across the
+    hinge stepped the output by most of the signal -- 0.433 on a 0.5 sine
+    whose own largest step is 0.0033, measured on AURORA.
+
+    A 50 Hz sine at 0.5, the jump at a block edge, and the largest
+    sample-to-sample step around it held to the programme's own plus 0.002.
+    The control is a jump that does not cross. And after the downward crossing
+    has settled, the dry is bit-exact again -- the null §9 asks for below the
+    hinge has to come back, not merely get close. */
+void testMixAcrossTheHingeIsSmoothed()
+{
+    constexpr auto rate = 48000.0;
+    constexpr int n = 48000;
+    constexpr int at = 512 * 40;
+    const auto ownStep = 0.5 * 2.0 * P::kPiD * 50.0 / rate;
+
+    struct Jump { float from, to, timeMs, feedback; const char* name; };
+
+    const Jump jumps[]
+    {
+        { 100.0f, 35.0f, 2000.0f, 35.0f, "MIX 100 to 35 (down across the hinge)" },
+        {   0.0f, 100.0f,  10.0f,  0.0f, "MIX 0 to 100 (up across the hinge, a repeat sounding)" },
+        { 100.0f, 60.0f, 2000.0f, 35.0f, "MIX 100 to 60 (the control: no crossing)" },
+    };
+
+    for (const auto& j : jumps)
+    {
+        P::DwellDsp dsp;
+        dsp.prepare (rate, 512, 2);
+
+        auto v = defaults();
+        v[P::Index::time]     = j.timeMs;
+        v[P::Index::feedback] = j.feedback;
+
+        Block block { n };
+
+        for (int i = 0; i < n; ++i)
+            block.left[(size_t) i] = block.right[(size_t) i]
+                = (float) (0.5 * std::sin (2.0 * P::kPiD * 50.0 * (double) i / rate));
+
+        const auto input = block.left;
+
+        renderAsHost (dsp, v, block, n, 512, [&] (int offset)
+        {
+            v[P::Index::mix] = offset >= at ? j.to : j.from;
+        });
+
+        auto worst = 0.0;
+
+        for (int i = at - 2048; i < at + 2048; ++i)
+            worst = std::max (worst, (double) std::abs (block.left[(size_t) i] - block.left[(size_t) (i - 1)]));
+
+        char buf[200];
+        std::snprintf (buf, sizeof (buf), "%s: largest step %.4f against the programme's own %.4f",
+                       j.name, worst, ownStep);
+
+        check (worst <= ownStep + 0.002, buf);
+
+        // TIME 2000 puts the first repeat past the render, so below the hinge
+        // the output is the input itself once the gains have landed.
+        if (j.to <= 50.0f && j.timeMs >= 2000.0f)
+        {
+            auto exact = true;
+
+            for (int i = n - 4096; i < n; ++i)
+                exact = exact && block.left[(size_t) i] == input[(size_t) i];
+
+            check (exact, std::string (j.name) + ": once settled the dry is bit-exact again");
+        }
+    }
+}
+
 } // namespace
 
 //==============================================================================
@@ -4028,6 +4106,7 @@ int main()
     // The review's fixes, 2026-10-01.
     testANonFiniteInputWithDuckUpRecovers();
     testACharacterMoveReplaysTheRingAtItsOwnLevel();
+    testMixAcrossTheHingeIsSmoothed();
 
     std::printf ("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

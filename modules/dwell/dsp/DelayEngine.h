@@ -87,6 +87,28 @@ public:
         return current;
     }
 
+    /** `tick`, landing exactly on the target once a step no longer moves the
+        value.
+
+        A float one-pole stalls short of its target: once `coeff . (target -
+        current)` is under half an ulp the sum rounds back to where it was, and
+        the epsilon above is far smaller than an ulp near 1.0. At 20 ms that
+        stall sits about 3e-5 below 1.0 at 48 kHz and 1e-4 at 192 kHz -- so a
+        gain whose whole point is to arrive at **exactly** 1.0, like the dry
+        below MIX's hinge, would never get there. Detecting the stall itself
+        rather than picking a wider epsilon lands it at every rate, with a
+        final step no larger than the stall: about 1e-4 of the gain at worst. */
+    float tickLanding() noexcept
+    {
+        const auto before = current;
+        tick();
+
+        if (current == before)
+            current = target;
+
+        return current;
+    }
+
     float value() const noexcept { return current; }
 
 private:

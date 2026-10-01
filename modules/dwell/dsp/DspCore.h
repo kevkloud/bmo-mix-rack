@@ -261,8 +261,9 @@ public:
             laneFeed[(size_t) ch].assign ((size_t) maxBlockSize, 0.0f);
         }
 
-        // 20 ms on the wet and dry gains and on DUCK (10 §9). The dry is only
-        // ever smoothed above the hinge; below it, it is not a gain at all.
+        // 20 ms on the wet and dry gains and on DUCK (10 §9). The dry moves
+        // only above the hinge or on its way across it; settled below it, it
+        // is not a gain at all.
         wetGain.prepare (sampleRate, 20.0);
         dryGain.prepare (sampleRate, 20.0);
         laneLevel.prepare (sampleRate, 20.0);
@@ -506,10 +507,10 @@ private:
             duckAmount.snap (std::clamp (params.duckDb, 0.0f, 24.0f));
 
         const auto m = std::clamp ((double) params.mixPct * 0.01, 0.0, 1.0);
-        dryIsBitExact = m <= 0.5;
+        const auto belowHinge = m <= 0.5;
 
-        const auto wetTarget = dryIsBitExact ? std::sin (kPiD * m) : 1.0;
-        const auto dryTarget = dryIsBitExact ? 1.0 : std::cos (kPiD * (m - 0.5));
+        const auto wetTarget = belowHinge ? std::sin (kPiD * m) : 1.0;
+        const auto dryTarget = belowHinge ? 1.0 : std::cos (kPiD * (m - 0.5));
         const auto laneTarget = std::pow (10.0, (double) params.laneLevelDb / 20.0);
 
         if (! gainsPrimed || snapNow)
@@ -521,17 +522,17 @@ private:
             return;
         }
 
+        // **Both gains are smoothed on both sides of the hinge, and across
+        // it.** Until 2026-10-01 the dry was snapped to 1 on the way down and
+        // the smoothed wet was dropped on the way up, so a host jump across
+        // 50 % inside one block stepped the output by most of the signal
+        // (0.433 on a 0.5 sine, measured on AURORA). Now each gain just moves
+        // to its target over 20 ms, wherever the target is, and below the
+        // hinge the dry *lands* on exactly 1.0 (`Smoother::tickLanding`) --
+        // which is when `processChunk` goes back to not multiplying it at all.
         wetGain.setTarget ((float) wetTarget);
+        dryGain.setTarget ((float) dryTarget);
         laneLevel.setTarget ((float) laneTarget);
-
-        // Below the hinge the dry is not multiplied at all, so there is
-        // nothing to smooth and nothing that can zipper; the smoother is
-        // snapped so that crossing back up starts from the right place. At the
-        // hinge itself cos(0) is 1, so the two branches meet without a step.
-        if (dryIsBitExact)
-            dryGain.snap (1.0f);
-        else
-            dryGain.setTarget ((float) dryTarget);
     }
 
     //==========================================================================
@@ -704,8 +705,14 @@ private:
 
         for (int i = 0; i < count; ++i)
         {
-            const auto w  = wetGain.tick();
-            const auto d  = dryGain.tick();
+            const auto w  = wetGain.tickLanding();
+            const auto d  = dryGain.tickLanding();
+
+            // §9: the dry is multiplied by **nothing**, not by 1.0f, whenever
+            // its gain is exactly 1 -- every MIX at or below 50 % once the
+            // gain has landed. Above the hinge the wet's gain lands on exactly
+            // 1.0 too, so the wet is then carried unscaled to the bit.
+            const auto dryIsBitExact = d == 1.0f;
             const auto ll = laneLevel.tick();
 
             auto gr = 1.0f;
@@ -745,7 +752,7 @@ private:
                 // merely -120 dB, and it is why this is a branch and not a
                 // gain of 1.
                 const auto out = dryIsBitExact ? (*slot + w * wet)
-                                               : (d * *slot + wet);
+                                               : (d * *slot + w * wet);
 
                 *slot = std::isfinite (out) ? out : 0.0f;
             }
@@ -767,7 +774,7 @@ private:
     std::array<std::vector<float>, DelayEngine::kMaxChannels> wetMain, wetLane, laneFeed;
 
     Smoother wetGain, dryGain, laneLevel, duckAmount;
-    bool dryIsBitExact = true, gainsPrimed = false, parametersSeen = false;
+    bool gainsPrimed = false, parametersSeen = false;
 
     /** The lane's three gates (10 §11.4). **All three live out here rather
         than in `DelayEngine`**, which is 10 §11.1's requirement written as a

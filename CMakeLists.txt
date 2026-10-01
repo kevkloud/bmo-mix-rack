@@ -27,13 +27,16 @@ option(BMO_BUILD_TUNE "Build BMO Tune RT" ON)
 # by hand or by a release tag is exactly what it was. It is a switch because
 # the Windows CI job spent 36 to 49 minutes in its Build step with 97 % of
 # compiles already served from the compiler cache (measured 2026-10-01), and
-# the suspect is the 24 plugin links -- twelve products, VST3 and Standalone
-# each -- every one of which regenerates the whole plugin's code at link time
-# where no cache can help. Turning it off for pull-request builds is the
-# experiment; `.github/workflows/build.yml` says what it measured.
+# the cause was the 24 plugin links -- twelve products, VST3 and Standalone
+# each -- every one of which regenerates the plugin's own code at link time
+# where no cache can help: with it off the same step took 14.4 minutes. CI
+# turns it off for pull requests and main and leaves it on for release tags;
+# `.github/workflows/build.yml` has the rule and the measurements.
 #
-# It reaches the plugin binaries only. The tests are separate executables
-# that were never link-time optimised, so what `ctest` proves is unaffected.
+# It reaches the plugin targets' own files only: the wrapper, the product
+# sources and JUCE. The module libraries, the tests and the tools were never
+# link-time optimised, so what `ctest` proves is unaffected, and
+# `tools/fingerprint` is how the two kinds of plugin build are compared.
 option(BMO_LTO "Link-time optimisation on the plugin targets" ON)
 
 if(NOT BMO_BUILD_RACK AND NOT BMO_BUILD_TUNE)

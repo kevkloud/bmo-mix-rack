@@ -41,3 +41,13 @@ endif()
 if(BMO_BUILD_TUNE)
     add_subdirectory(tune)
 endif()
+
+# Hashes the audio every built VST3 makes from one fixed input, so two builds
+# of one commit -- with and without link-time optimisation, say -- can be
+# compared by number. It links none of the modules: it loads the plugins as a
+# host does, which is the point, and so it belongs to neither side of the
+# rack/Tune split above. See tools/fingerprint/main.cpp.
+if(NOT BMO_DSP_ONLY)
+    bmo_add_tool(audio_fingerprint ${CMAKE_CURRENT_SOURCE_DIR}/fingerprint/main.cpp)
+    target_compile_definitions(audio_fingerprint PRIVATE JUCE_PLUGINHOST_VST3=1 JUCE_MODAL_LOOPS_PERMITTED=1)
+endif()

@@ -223,13 +223,13 @@ inline constexpr int kDefaultLaneNote = 6;
     change. */
 inline constexpr float kMaxTimeMs = 2000.0f;
 
-/** **SYNC ships disabled.** Its slot, NOTE's slot and NOTE's index order are
-    permanent from this release (DECIDED, Frosty 2026-09-20), but no host tempo
-    reaches a `ModuleDsp` yet -- that is docs/delay/12's plumbing, its own
-    workflow and its own pull request. Until it lands the DSP ignores both
-    parameters and the panel shows the pair disabled. Flip this to true in the
-    change that lands the plumbing; nothing about the schema moves with it. */
-inline constexpr bool kSyncIsEnabled = false;
+/** **SYNC is live** (2026-10-01), now that PR #31 hands every module the
+    host's tempo (`ModuleDsp::setTempo`). It shipped disabled until then, with
+    its slot, NOTE's, LANE NOTE's and NOTE's index order already permanent
+    (DECIDED, Frosty 2026-09-20 and 2026-09-23). One switch governs both
+    engines; `dsp/DwellDsp.h` maps the divisions and `dsp/Timing.h` holds the
+    arithmetic. Left as a flag so the panel and the adapter read one fact. */
+inline constexpr bool kSyncIsEnabled = true;
 
 //==============================================================================
 inline const ParamSpecs& specs()

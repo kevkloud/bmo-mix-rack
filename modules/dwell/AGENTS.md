@@ -79,15 +79,27 @@ delay is a whole number of samples and is subtracted from `D`. The figure stays
 0 and the delay time stays exact; the assertion in `11` §4 (k) still has to
 hold after it.
 
-## What ships disabled, and what does not
+## Tempo, tail, and what does not exist
 
-- **SYNC, NOTE and LANE NOTE ship disabled.** The slots and NOTE's order are
-  permanent from this release (DECIDED, Frosty 2026-09-20 and 2026-09-23), but
-  no host tempo reaches a `ModuleDsp` today. That plumbing is `docs/delay/12` —
-  processor → `ModuleEngine` → `ModuleDsp::setTempo` — and it is **its own
-  workflow and its own pull request**, not part of adding this module.
-  `kSyncIsEnabled` in `params.h` is the one switch: the DSP ignores all three
-  parameters while it is false and the panel shows them disabled.
+- **SYNC is live** (2026-10-01), on PR #31's `ModuleDsp::setTempo`. The adapter
+  (`dsp/DwellDsp.h`) holds the last valid host tempo and maps NOTE and LANE
+  NOTE to milliseconds **in `setParams`, at the held tempo** -- not in
+  `setTempo`, which arrives after the parameters each block and would hand
+  the engines the knob's time then the note's, re-sweeping the loop peak every
+  block. Before the first tempo the knobs stand; a lost tempo is held; a
+  stopped transport changes nothing; a division longer than the 2 s ring is
+  halved until it fits (`docs/delay/10` §7, `dsp/Timing.h`). The panel names
+  the division on the screen rather than printing a millisecond figure it
+  cannot know. `tests/plugin/TempoTests.cpp` carves Dwell out of its
+  byte-identity walk by name, and still asserts it is identical with SYNC off
+  and different with SYNC on.
+- **Dwell reports a tail** (`tailSecondsForParams`, `dsp/Timing.h`): the
+  longer of the two engines', each its time times its laps to -60 at its loop
+  gain at `P_c` = 1, clamped [0.5 s, 30 s]. The lane counts only with HOLD on,
+  and a FREEZE or BUILD reports 30 s. **With SYNC on each time is taken at the
+  2 s ring**, because a tail comes from parameters alone and the tempo is not
+  one -- conservative, never short. `tests/plugin/TailTests.cpp` lists Dwell
+  beside Linger as the two modules that ring, with hand-worked figures.
 - **There is one SYNC and it governs both engines.** `note` (2) is the main
   delay's division, **`lane_note` (22) is the lane's**, off the same sixteen
   values; there is deliberately **no `lane_sync`** (`docs/delay/10` §11.7).

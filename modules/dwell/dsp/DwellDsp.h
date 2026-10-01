@@ -2,6 +2,7 @@
 
 #include "core/dsp/ModuleDsp.h"
 #include "modules/dwell/dsp/DspCore.h"
+#include "modules/dwell/dsp/Timing.h"
 #include "modules/dwell/params.h"
 
 namespace bmo::dwell
@@ -65,8 +66,44 @@ public:
         // here is a value the lane could not go back to.
         p.fxLink                = v[Index::fxLink] > 0.5f;
 
-        core.setParams (p);
+        laneNoteChoice = (int) v[Index::laneNote];
+        params = p;
+        apply();
     }
+
+    /** The host's tempo for this block, after `setParams` and before `process`
+        (core/dsp/ModuleDsp.h). docs/delay/10 §7's policy:
+
+        - **No valid tempo: hold the last one**, and if none has ever arrived
+          the engines stay on their own millisecond times. `heldBpm` is 0
+          until the first, and a chain edit that rebuilds this DSP starts it
+          at 0 again -- which the contract says to expect.
+        - **A stopped transport changes nothing.** The tempo is still valid,
+          audio flows and the loop decays; nothing is muted or flushed.
+        - **Only a changed tempo re-applies.** `setParams` already mapped the
+          divisions at the held tempo, so re-applying every block would hand
+          the engines the same time twice for nothing. */
+    void setTempo (double bpm, bool valid, bool playing) noexcept override
+    {
+        (void) playing;
+
+        if (! valid || bpm == heldBpm)
+            return;
+
+        heldBpm = bpm;
+
+        if (params.sync)
+            apply();
+    }
+
+    /** §9 and §11.6's tail, from parameters only. See `tailSecondsFor`. */
+    double tailSecondsForParams (const float* values, int count) const override
+    {
+        return tailSecondsFor (values, count);
+    }
+
+    /** The tempo the divisions are mapped at, or 0 before the first. For tests. */
+    double getHeldBpm() const noexcept { return heldBpm; }
 
     void process (float* const* channels, int numChannels, int numSamples) override
     {
@@ -95,7 +132,29 @@ public:
     DspCore& getCore() noexcept { return core; }
 
 private:
+    /** Hands the engines the parameters, with SYNC's divisions mapped to
+        milliseconds at the held tempo. **Mapped here, in `setParams`, not in
+        `setTempo`**: the tempo arrives after the parameters each block, and
+        mapping it there would hand the engines the knob's time and then the
+        note's, every block -- and a TIME move re-sweeps the 1024-point loop
+        peak. Before the first tempo, the knobs stand. */
+    void apply() noexcept
+    {
+        auto p = params;
+
+        if (p.sync && heldBpm > 0.0)
+        {
+            p.timeMs     = (float) syncedMs (p.noteChoice, heldBpm);
+            p.laneTimeMs = (float) syncedMs (laneNoteChoice, heldBpm);
+        }
+
+        core.setParams (p);
+    }
+
     DspCore core;
+    DspCore::Params params;
+    int laneNoteChoice = kDefaultLaneNote;
+    double heldBpm = 0.0;
 };
 
 inline std::unique_ptr<ModuleDsp> createDsp() { return std::make_unique<DwellDsp>(); }

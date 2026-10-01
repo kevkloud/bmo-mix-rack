@@ -90,6 +90,15 @@ void check (bool condition, const std::string& what)
     }
 }
 
+/** A figure against a stated one, with the actual value in the message so a
+    failure says by how much. */
+void checkClose (double actual, double expected, double tolerance, const std::string& what)
+{
+    char buf[96];
+    std::snprintf (buf, sizeof (buf), " (got %.6f, want %.6f)", actual, expected);
+    check (std::abs (actual - expected) <= tolerance, what + buf);
+}
+
 /** Every parameter at its default, in real units, as the host would hand them
     over. */
 std::vector<float> defaults()
@@ -347,26 +356,125 @@ void testEveryParameterIsWiredToItsOwnValue()
     check (p.fxTypeChoice != p.laneFxTypeChoice, "FX TYPE and LANE FX TYPE are not the same lane");
 }
 
-/** SYNC is in the schema and switched off at the source.
+/** SYNC follows the host's tempo, docs/delay/10 §7, through the adapter.
 
-    The slot and NOTE's order are permanent from this release, but no host
-    tempo reaches a ModuleDsp yet -- that is docs/delay/12's plumbing and its
-    own pull request. Until it lands the DSP must not act on SYNC, whatever a
-    session, a preset or an automation lane says. The flag is the only thing
-    the change that enables it has to touch. */
-void testSyncShipsDisabled()
+    Absolutes, worked out by hand from §7's table: 1/8D at 120 bpm is
+    0.75 x 500 = 375 ms, 1/8 is 250, a quarter at 90 is 666.67, and a whole
+    note at 60 is 4000 ms -- over the 2000 ms ring, so it plays halved, at 2000.
+    A whole note at 10 bpm is 24 s, halved four times to 1500. */
+void testSyncFollowsTheHostTempo()
 {
-    check (! P::kSyncIsEnabled, "SYNC ships disabled until the tempo plumbing lands");
+    check (P::kSyncIsEnabled, "SYNC is live now that the tempo plumbing has landed");
+
+    // The arithmetic on its own.
+    checkClose (P::syncedMs (8, 120.0), 375.0, 1.0e-9, "1/8D at 120 bpm is 375 ms");
+    checkClose (P::syncedMs (6, 120.0), 250.0, 1.0e-9, "1/8 at 120 bpm is 250 ms");
+    checkClose (P::syncedMs (9, 90.0), 60000.0 / 90.0, 1.0e-9, "1/4 at 90 bpm is 666.67 ms");
+    checkClose (P::syncedMs (15, 60.0), 2000.0, 1.0e-9, "a whole note at 60 bpm halves to the 2 s ring");
+    checkClose (P::syncedMs (15, 10.0), 1500.0, 1.0e-9, "a whole note at 10 bpm halves four times, to 1500 ms");
 
     P::DwellDsp dsp;
     dsp.prepare (48000.0, 512, 2);
 
     auto v = defaults();
-    v[P::Index::sync] = 1.0f;
-    dsp.setParams (v.data(), (int) v.size());
+    v[P::Index::sync]     = 1.0f;
+    v[P::Index::time]     = 500.0f;
+    v[P::Index::laneTime] = 700.0f;
 
-    check (! dsp.getCore().getParams().sync,
-           "a session asking for SYNC does not switch it on while it is disabled");
+    // Before any tempo has arrived the knobs stand: the contract says the
+    // first setTempo comes with the first block, not with prepare.
+    dsp.setParams (v.data(), (int) v.size());
+    checkClose (dsp.getCore().getParams().timeMs, 500.0, 1.0e-6, "no tempo yet: the main delay runs on TIME");
+    checkClose (dsp.getCore().getParams().laneTimeMs, 700.0, 1.0e-6, "no tempo yet: the lane runs on LANE TIME");
+
+    // A valid tempo maps both engines' divisions, each its own.
+    dsp.setTempo (120.0, true, true);
+    checkClose (dsp.getCore().getParams().timeMs, 375.0, 1.0e-3, "120 bpm: the main delay plays NOTE's 1/8D");
+    checkClose (dsp.getCore().getParams().laneTimeMs, 250.0, 1.0e-3, "120 bpm: the lane plays LANE NOTE's 1/8");
+
+    // And the next block's setParams keeps the mapping rather than handing
+    // the knob back for one block.
+    dsp.setParams (v.data(), (int) v.size());
+    checkClose (dsp.getCore().getParams().timeMs, 375.0, 1.0e-3, "the next block's parameters keep the synced time");
+
+    // The host loses the tempo: hold the last one.
+    dsp.setTempo (0.0, false, false);
+    dsp.setParams (v.data(), (int) v.size());
+    checkClose (dsp.getCore().getParams().timeMs, 375.0, 1.0e-3, "no valid tempo: the last one is held");
+
+    // A stopped transport is still a valid tempo; nothing changes, nothing flushes.
+    dsp.setTempo (120.0, true, false);
+    checkClose (dsp.getCore().getParams().timeMs, 375.0, 1.0e-3, "a stopped transport keeps the tempo");
+
+    // A new tempo re-targets.
+    dsp.setTempo (90.0, true, true);
+    checkClose (dsp.getCore().getParams().timeMs, 500.0, 1.0e-3, "90 bpm: 1/8D is 500 ms");
+
+    // SYNC off: back on the knobs, whatever the held tempo.
+    v[P::Index::sync] = 0.0f;
+    dsp.setParams (v.data(), (int) v.size());
+    checkClose (dsp.getCore().getParams().timeMs, 500.0, 1.0e-6, "SYNC off: TIME again");
+    checkClose (dsp.getCore().getParams().laneTimeMs, 700.0, 1.0e-6, "SYNC off: LANE TIME again");
+}
+
+/** The tail Dwell reports, docs/delay/10 §9 and §11.6, worked by hand.
+
+    At P_c = 1 the main loop's gain is 1.05 fb^1.6 and the lane's, in THROW,
+    (1 + L)^1.6. Laps to -60 are ceil(60 / -20 log10 g); the tail is the
+    engine's time times its laps, the larger engine wins, clamped [0.5, 30]. */
+void testTheTailIsTheLongerEngine()
+{
+    const auto tailOf = [] (std::vector<float> v) { return P::tailSecondsFor (v.data(), (int) v.size()); };
+
+    // Defaults: FEEDBACK 35 %, TIME 375 ms. g = 1.05 x 0.35^1.6 = 0.1957,
+    // -14.17 dB a lap, 4.23 laps to -60, so 5 laps: 1.875 s. HOLD is off, so
+    // the lane says nothing.
+    checkClose (tailOf (defaults()), 1.875, 1.0e-9, "at the defaults the tail is 5 laps of 375 ms");
+
+    auto v = defaults();
+
+    // FEEDBACK 0: one repeat of 375 ms, under the 0.5 s floor.
+    v[P::Index::feedback] = 0.0f;
+    checkClose (tailOf (v), 0.5, 1.0e-9, "no feedback: one repeat, floored at 0.5 s");
+
+    // FEEDBACK 100: g = 1.05, past unity, never decays.
+    v[P::Index::feedback] = 100.0f;
+    checkClose (tailOf (v), 30.0, 1.0e-9, "FEEDBACK 100 self-oscillates and reports the 30 s ceiling");
+
+    // TIME 2000 at the default feedback: 5 laps of 2 s.
+    v = defaults();
+    v[P::Index::time] = 2000.0f;
+    checkClose (tailOf (v), 10.0, 1.0e-9, "TIME 2000 at FEEDBACK 35 is 10 s");
+
+    // The lane, HOLD on, TAIL -40 %: g = 0.6^1.6 = 0.4416, -7.10 dB a lap,
+    // 9 laps of LANE TIME 250 ms is 2.25 s -- longer than the main's 1.875.
+    v = defaults();
+    v[P::Index::hold]     = 1.0f;
+    v[P::Index::laneGain] = -40.0f;
+    checkClose (tailOf (v), 2.25, 1.0e-9, "a held THROW at -40 % rings 9 laps of 250 ms, past the main delay");
+
+    // HOLD off: the same lane setting contributes nothing.
+    v[P::Index::hold] = 0.0f;
+    checkClose (tailOf (v), 1.875, 1.0e-9, "with HOLD off the lane adds nothing");
+
+    // FREEZE and BUILD never decay.
+    v[P::Index::hold] = 1.0f;
+    v[P::Index::laneGain] = 0.0f;
+    checkClose (tailOf (v), 30.0, 1.0e-9, "a held FREEZE reports the ceiling");
+    v[P::Index::laneGain] = 60.0f;
+    checkClose (tailOf (v), 30.0, 1.0e-9, "a held BUILD reports the ceiling");
+
+    // SYNC on: no tempo in the parameters, so each time is taken at the 2 s
+    // ring -- conservative, never short. 5 laps of 2 s.
+    v = defaults();
+    v[P::Index::sync] = 1.0f;
+    checkClose (tailOf (v), 10.0, 1.0e-9, "with SYNC on the tail assumes the longest division");
+
+    // And the adapter reports exactly this.
+    P::DwellDsp dsp;
+    const auto d = defaults();
+    checkClose (dsp.tailSecondsForParams (d.data(), (int) d.size()), 1.875, 1.0e-9,
+                "the adapter reports the same tail");
 }
 
 /** Zero, everywhere, including at the settings that tempt a delay to report
@@ -3709,7 +3817,8 @@ int main()
     testSchemaIsWhatItWillAlwaysBe();
     testChoiceListsKeepTheirOrder();
     testEveryParameterIsWiredToItsOwnValue();
-    testSyncShipsDisabled();
+    testSyncFollowsTheHostTempo();
+    testTheTailIsTheLongerEngine();
     testLatencyIsAlwaysZero();
     testStageOneIsBitExact();
     testTheRingIsSizedFromTheFixedMaximum();

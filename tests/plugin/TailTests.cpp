@@ -50,11 +50,21 @@ namespace
 constexpr double kRate  = 48000.0;
 constexpr int    kBlock = 512;
 
-/** The only module in the suite that reports a tail. Everything else in the
-    registry takes `ModuleDsp`'s zero default, and the walk below asserts that
-    this list is exactly one long -- so a module added later is checked for a
-    zero, or its author has to come here and say why not. */
-constexpr auto kRingingModule = "reverb";
+/** The modules in the suite that report a tail: BMO Linger, and BMO Dwell
+    from 2026-10-01. Everything else in the registry takes `ModuleDsp`'s zero
+    default, and the walk below asserts this list is exactly two long -- so a
+    module added later is checked for a zero, or its author has to come here
+    and say why not. */
+constexpr const char* kRingingModules[] { "reverb", "dwell" };
+
+bool rings (const char* id)
+{
+    for (const auto* r : kRingingModules)
+        if (juce::String (r) == id)
+            return true;
+
+    return false;
+}
 
 //== BMO Linger's stated figures ==============================================
 //
@@ -155,7 +165,7 @@ int main()
 
         for (const auto* def : bmo::products::registry())
         {
-            if (juce::String (def->id) == kRingingModule)
+            if (rings (def->id))
             {
                 ++ringing;
                 continue;
@@ -217,23 +227,55 @@ int main()
             }
         }
 
-        // The exception list is one long, and it is the reverb. A module added
-        // to the registry later is walked by the loop above whether or not
-        // anybody remembers this file exists.
-        check (ringing == 1,
-               "exactly one registered module is exempt from the zero, got "
+        // The exception list is two long: the reverb and the delay. A module
+        // added to the registry later is walked by the loop above whether or
+        // not anybody remembers this file exists.
+        check (ringing == 2,
+               "exactly two registered modules are exempt from the zero, got "
                    + juce::String (ringing));
-        //
-        // **BMO Dwell passes the zero and should not.** It merged beside this
-        // file on 2026-10-01 without overriding `tailLengthSeconds`, so it
-        // tells a host it has no tail -- wrong for a delay, whose repeats ring
-        // for TIME x laps after the input stops, and the thing a host's
-        // offline bounce trusts. `docs/delay/12` specifies the formula and
-        // predates this plumbing. OWED: Dwell joins the exception list, with
-        // figures of its own below, in the commit that implements it.
         check (bmo::products::registry().size() == 11,
                "the registry still holds eleven modules, got "
                    + juce::String ((int) bmo::products::registry().size()));
+    }
+
+    //== BMO Dwell's own figures ==============================================
+    //
+    // docs/delay/10 §9 and §11.6, worked by hand -- the derivations are beside
+    // the same figures in tests/dsp/DwellDspTests.cpp. Asserted here through
+    // the real product, its engine and the host-facing getter, which is a
+    // cache and has to have been refreshed by prepareToPlay.
+    {
+        auto proc = makeProduct (moduleNamed ("dwell"));
+        auto& params = proc->getEngine().params();
+        proc->setPlayConfigDetails (2, 2, kRate, kBlock);
+
+        const auto tailAfter = [&] (std::initializer_list<std::pair<const char*, float>> settings)
+        {
+            for (int i = 0; i < params.size(); ++i)
+                params.setReal (i, params.spec (i).def);
+
+            for (const auto& [id, value] : settings)
+                params.setReal (id, value);
+
+            proc->prepareToPlay (kRate, kBlock);
+            return proc->getTailLengthSeconds();
+        };
+
+        checkClose (tailAfter ({}), 1.875, 1.0e-9,
+                    "dwell tells the host 5 laps of 375 ms at its defaults");
+        checkClose (proc->getEngine().tailSeconds(), 1.875, 1.0e-9,
+                    "dwell's engine agrees with the host-facing figure");
+
+        checkClose (tailAfter ({ { "feedback", 0.0f } }), 0.5, 1.0e-9,
+                    "dwell with no feedback floors at 0.5 s");
+        checkClose (tailAfter ({ { "feedback", 100.0f } }), 30.0, 1.0e-9,
+                    "dwell self-oscillating reports the 30 s ceiling");
+        checkClose (tailAfter ({ { "hold", 1.0f }, { "lane_gain", -40.0f } }), 2.25, 1.0e-9,
+                    "dwell's held THROW at -40 % outlasts its main delay: 9 laps of 250 ms");
+        checkClose (tailAfter ({ { "hold", 1.0f }, { "lane_gain", 0.0f } }), 30.0, 1.0e-9,
+                    "dwell's held FREEZE reports the ceiling");
+        checkClose (tailAfter ({ { "sync", 1.0f } }), 10.0, 1.0e-9,
+                    "dwell synced assumes the longest division: 5 laps of 2 s");
     }
 
     //== BMO Linger's own figures =============================================

@@ -682,9 +682,10 @@ int main()
     // file for a reason that has nothing to do with the tempo.
     {
         // Ids of modules that consume the tempo, and so are exempt from the
-        // byte-identity below. Empty until BMO Dwell; add "delay" (or whatever
-        // id it ships under) here in the same change that overrides setTempo.
-        const std::vector<juce::String> tempoConsumers {};
+        // byte-identity below. BMO Dwell, from 2026-10-01: SYNC maps its two
+        // NOTE divisions at the host's tempo (modules/dwell/dsp/DwellDsp.h),
+        // and its own suite, tests/dsp/DwellDspTests.cpp, carries the figures.
+        const std::vector<juce::String> tempoConsumers { "dwell" };
 
         const auto& registry = bmo::products::registry();
 
@@ -742,6 +743,43 @@ int main()
 
         expect (compared + (int) tempoConsumers.size() == (int) registry.size(),
                 "every registered module was compared or carved out by name");
+
+        // **The carve-out is not a free pass.** A consumer that hears the
+        // tempo only when it is asked to -- Dwell, only with SYNC on -- must
+        // still be byte-identical at its defaults, where SYNC is off; and it
+        // must actually differ when synced, or the carve-out is exempting a
+        // module that does not listen. Dwell's own suite has the figures; this
+        // is the host's-eye view of the same two facts.
+        for (const auto* def : registry)
+        {
+            if (! consumesTempo (*def) || juce::String (def->id) != "dwell")
+                continue;
+
+            const auto run = [&] (Host host, bool synced)
+            {
+                auto proc = makeProduct (*def);
+
+                if (synced)
+                {
+                    auto& params = proc->getEngine().params();
+                    params.setReal ("sync", 1.0f);
+                    params.setReal ("note", 3.0f);       // 1/16: short enough to land in the render
+                    params.setReal ("feedback", 60.0f);
+                    params.setReal ("mix", 50.0f);
+                }
+
+                return render (*proc, host);
+            };
+
+            const auto quiet = run (Host::none, false);
+            expect (identical (quiet, run (Host::steady, false)),
+                    "dwell with SYNC off is byte-identical with a playhead at 120 bpm");
+            expect (identical (quiet, run (Host::moving, false)),
+                    "dwell with SYNC off is byte-identical with a moving playhead");
+
+            expect (! identical (run (Host::none, true), run (Host::steady, true)),
+                    "dwell with SYNC on hears the playhead's tempo");
+        }
 
        #if BMO_TEMPO_TESTS_TUNE
         // BMO Tune RT runs on the same SingleModuleProcessor but is not in the

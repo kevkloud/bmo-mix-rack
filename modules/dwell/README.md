@@ -30,7 +30,8 @@ full in `docs/delay/10-dsp-spec.md`.
 params.h                 ids 0-26, permanent; the four choice lists
 dsp/
   DspCore.h/.cpp           parameters in real units; one engine, held twice
-  DwellDsp.h               the ModuleDsp adapter, and the zero-latency rule
+  DwellDsp.h               the ModuleDsp adapter: zero latency, the held tempo, the tail
+  Timing.h                 NOTE to ms at a tempo, halved to fit; the tail formula
 presets/FactoryPresets.h Init only, until the module has a sound to preset
 Module.h/.cpp            the ModuleDef: accent #46c988 (jade); one width, 380
 panel/                   BMO Linger's paged handheld: a screen with TONE / LANE /

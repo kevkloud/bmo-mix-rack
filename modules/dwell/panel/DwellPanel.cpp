@@ -298,7 +298,8 @@ double DwellScreen::inputsHash() const
     double h = 0.0;
     double w = 1.0;
 
-    for (const auto i : { Index::time, Index::feedback, Index::laneTime, Index::laneGain,
+    for (const auto i : { Index::sync, Index::note, Index::laneNote,
+                          Index::time, Index::feedback, Index::laneTime, Index::laneGain,
                           Index::fx, Index::fxType, Index::fxAmount, Index::fxLink,
                           Index::laneFx, Index::laneFxType, Index::laneFxAmount })
     {
@@ -351,7 +352,15 @@ int DwellScreen::repeatsToFloor() const
 
 juce::String DwellScreen::readout() const
 {
-    const auto ms = juce::String (juce::roundToInt (delayMs())) + " MS";
+    // With SYNC on the panel has the division but not the host's tempo -- that
+    // reaches the DSP alone -- so the readout names the note rather than
+    // printing a millisecond figure the engines are not running at.
+    const auto synced = kSyncIsEnabled && params.getReal (Index::sync) > 0.5f;
+    const auto noteIndex = juce::jlimit (0, (int) std::size (kNoteNames) - 1,
+                                         juce::roundToInt (params.getReal (page == Page::lane ? Index::laneNote
+                                                                                              : Index::note)));
+    const auto ms = synced ? juce::String (kNoteNames[noteIndex])
+                           : juce::String (juce::roundToInt (delayMs())) + " MS";
     const auto g = loopGain();
 
     if (page == Page::fx)
@@ -366,6 +375,9 @@ juce::String DwellScreen::readout() const
 
     if (g > 1.0 + 1.0e-6)
     {
+        if (synced)
+            return ms + "    BUILDS";   // the rate needs the real time, which is the DSP's
+
         // How fast it climbs, in the units 10 §11.2 argues g_max in.
         const auto dbPerSecond = 20.0 * std::log10 (g) * 1000.0 / juce::jmax (1.0, delayMs());
         return ms + "    BUILDS " + juce::String (dbPerSecond, 1) + " DB/S";
@@ -660,8 +672,8 @@ DwellPanel::DwellPanel (ui::ModuleContext ctx)
     // with a value that has to be hit exactly: 0 is the lane holding at unity.
     laneGain.setCatch (0.0, kLaneGainCatch);
 
-    // SYNC ships disabled: its slot and NOTE's order are permanent, but no host
-    // tempo reaches a ModuleDsp until docs/delay/12's plumbing lands.
+    // SYNC is live from 2026-10-01 (params.h, kSyncIsEnabled): one switch, both
+    // engines, each on its own division.
     sync.setSwitchEnabled (dwell::kSyncIsEnabled);
     sync.setLabelSize (11.0f);
 

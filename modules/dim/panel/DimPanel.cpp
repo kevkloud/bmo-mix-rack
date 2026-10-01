@@ -186,9 +186,12 @@ void DimPanel::paintPanel (juce::Graphics& g)
     // lavender on the pale well is 1.37:1 against 1.73 on the plate -- and a
     // bracket sits under no caption at all.
     //
-    // The raw accent at the 0.55 the dotted tracks use, so the bracket is the
-    // knobs' own mark rather than a rule: a rule divides, and this joins.
-    g.setColour (context.def.accent.withAlpha (0.55f));
+    // In the captions' colour, so the bracket is the knobs' own mark rather
+    // than a rule: a rule divides, and this joins. Stepped for the plate in
+    // light and raw in dark, as the captions are (Frosty, 2026-09-30).
+    const auto bracketInk = (ui::isDarkMode() ? context.def.accent
+                                              : ui::accentInk (context.def.accent)).withAlpha (0.55f);
+    std::vector<juce::Rectangle<float>> pieces;
 
     for (const auto& box : pairBoxes)
     {
@@ -199,9 +202,28 @@ void DimPanel::paintPanel (juce::Graphics& g)
         const auto x0 = (float) box.getX() + kBracketInset;
         const auto x1 = (float) box.getRight() - kBracketInset;
 
-        g.fillRect (juce::Rectangle<float> (x0, y - kBracketWeight * 0.5f, x1 - x0, kBracketWeight));
-        g.fillRect (juce::Rectangle<float> (x0, y - kBracketEnd, kBracketWeight, kBracketEnd));
-        g.fillRect (juce::Rectangle<float> (x1 - kBracketWeight, y - kBracketEnd, kBracketWeight, kBracketEnd));
+        pieces.push_back (juce::Rectangle<float> (x0, y - kBracketWeight * 0.5f, x1 - x0, kBracketWeight));
+        pieces.push_back (juce::Rectangle<float> (x0, y - kBracketEnd, kBracketWeight, kBracketEnd));
+        pieces.push_back (juce::Rectangle<float> (x1 - kBracketWeight, y - kBracketEnd, kBracketWeight, kBracketEnd));
+    }
+
+    // Engraved in the Textured surface. In Simple the three pieces
+    // are filled one by one exactly as before, so the shipped look -- corners
+    // and all -- does not move.
+    if (ui::BmoLookAndFeel::textured())
+    {
+        juce::RectangleList<float> brackets;
+        for (const auto& r : pieces)
+            brackets.add (r);
+
+        ui::BmoLookAndFeel::fillEngraved (g, brackets, bracketInk);
+    }
+    else
+    {
+        g.setColour (bracketInk);
+
+        for (const auto& r : pieces)
+            g.fillRect (r);
     }
 }
 

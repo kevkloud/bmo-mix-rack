@@ -121,7 +121,11 @@ public:
     bool acceptsMidi() const override                        { return false; }
     bool producesMidi() const override                       { return false; }
     bool isMidiEffect() const override                       { return false; }
-    double getTailLengthSeconds() const override             { return 0.0; }
+
+    /** The chain's tail: the **sum** over the occupied slots, cached. See
+        `totalTail()` for why a sum and not a maximum. Lock-free, because a
+        host polls it from wherever it likes. */
+    double getTailLengthSeconds() const override             { return reportedTail.load (std::memory_order_relaxed); }
 
     int getNumPrograms() override                            { return 1; }
     int getCurrentProgram() override                         { return 0; }
@@ -158,6 +162,28 @@ private:
 
     int totalLatency() const;
 
+    /** The tail of the whole chain: every occupied slot's, **added together**.
+
+        Not the maximum, which is the tempting answer and the wrong one. The
+        slots are in series, so a four-second reverb feeding a two-second one
+        is still being fed after four seconds and rings for six; taking the
+        larger would cut the last two off. Erring the other way only costs a
+        host some idle pulling, so the sum is the safe direction as well as
+        the correct one (docs/reverb/11-integration-and-test-plan.md 2a).
+
+        **Then clamped at `bmo::kMaxTailSeconds`, the same ceiling a module
+        clamps its own figure at**, so the whole product has one rule: no BMO
+        Mix Rack instance ever reports more than thirty seconds. `addModule`
+        checks the slot count and not for duplicates, so eight reverbs is a
+        legal chain and the honest sum of eight maxed ones is four minutes --
+        free at transport stop, where over-reporting only idles the host, and
+        not free for an offline bounce, where the figure is rendered onto the
+        end of every export. Frosty approved it on 2026-09-21.
+
+        The clamp is a ceiling and not an answer: a chain under it, including
+        the two-reverb 8.6223 s sum the tail suite pins, is reported in full. */
+    double totalTail() const;
+
     std::vector<FactoryEntry> factoryEntries (std::vector<RackPreset>);
     void applyPreset (const RackPreset&);
 
@@ -181,6 +207,11 @@ private:
     PresetManager presets;
 
     std::atomic<int> reportedLatency { -1 };
+
+    // The summed tail, cached for the getter. Refreshed wherever the latency
+    // is -- on a parameter change and in prepareToPlay -- and a chain edit
+    // reaches both through the triggerAsyncUpdate() at the end of rebuild().
+    std::atomic<double> reportedTail { 0.0 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (RackProcessor)
 };

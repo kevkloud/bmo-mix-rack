@@ -54,6 +54,41 @@ rack/     SlotParameter (one generic host parameter, remapped live),
 - `ConcentricBand::setLegend` puts words on a stepped dial in place of the
   spec's choices (DEQ's BELL / LS / HS / LC / HC). `legendOverflow` measures
   them against the 38 px legend box, and `ui_layout_tests` checks every dial.
+- A **choice parameter whose positions are names rather than amounts** gets
+  `ui::ChoiceBox`, a dropdown with its caption underneath: a knob says less and
+  more, and Chamber is not more than Room. BMO Linger's TYPE and ER MODE are
+  the two. `BmoLookAndFeel` already themes `juce::ComboBox` and
+  `juce::PopupMenu` against the tokens, so the wrapper sets only the arrow,
+  which the shared scheme leaves in the utility azure. `captionOverflow`
+  measures the caption *and the widest item*, and `ui_layout_tests` checks
+  every dropdown. A choice whose positions are an ordered amount stays a knob
+  — and is better off a stepped float, which normalises without the
+  index/(n−1) trap.
+- A module whose **parameters write each other** supplies a
+  `ModuleDef::createParamLink` (`state/ParamLink.h`), and `ModuleEngine` builds
+  one per running module — so it works in the standalone plugin and in every
+  rack slot, with or without an editor open. **BMO Linger's TYPE is the only
+  one**: selecting a type re-applies that type's ten constants, so a type is a
+  voicing rather than a table lookup. The writes go through `ParamSet::apply`,
+  the path a preset recall already uses, and reach the parameters on the
+  message thread through a `juce::ParameterAttachment` — never from the audio
+  thread, which is where automation delivers the change that triggers them. A
+  state restore goes through `ModuleEngine::restoreState`, which tells the link
+  once the last value has landed (`ParamLink::stateRestored`): off the message
+  thread the attachment only queues the TYPE write, and the late call used to
+  stamp the type's block over the levels the session had just restored. The
+  field is null for every module but BMO Linger. A second one has
+  to argue for itself the way `modules/reverb/AGENTS.md` argues for the first.
+- **Mono in, stereo out is opt-in per module** (`ModuleDef::acceptsMonoInput`,
+  Frosty's decision on 2026-09-23). The bus contract is one function,
+  `product/BusLayouts.h`, which both processors answer from: mono to mono and
+  stereo to stereo for everyone, stereo to mono for no one, and mono to stereo
+  only for a module that sets the flag -- **BMO Linger alone** -- or for the
+  rack when any module it can host does, because a host fixes the layout
+  before there is a chain. Where the layout is in use the input is duplicated
+  into both channels, never cleared. The flag is the last field in
+  `ModuleDef` and false for every other module, which keeps each of them on
+  exactly the layouts it had before; `bus_tests` holds the table per product.
 - `SlotParameter::assign` keeps a pointer into the module's static
   `specs()` vector. Never hand it a temporary.
 - A slot's `SlotOverflow` is an `AudioProcessor` only so that its
@@ -68,5 +103,24 @@ rack/     SlotParameter (one generic host parameter, remapped live),
 - `processBlock` in the rack takes a `ScopedTryLock` and passes audio
   through if the message thread is mid-rebuild. Never block the audio
   thread on the chain lock.
+- **Two surfaces: Simple and Textured** (Frosty, 2026-09-25). Simple is the
+  default and is the suite's flat look -- though not pixel-for-pixel what it
+  drew before this pass: the dotted knob tracks, the 270-degree stepped
+  sweep, the inked captions and the inside borders changed it on purpose
+  (`docs/ui-material-proposal.md` lists them); Textured shades the
+  same tokens -- a brushed or powder plate, knobs with form, switches that
+  press in, rules, brackets and buses engraved. It is a machine-wide
+  preference in `UI.json` beside the appearance (`ui::surface`), never a
+  parameter. It may change **no colour, size or position**: anything that
+  would is not a surface. A line's house finish is `Line::finish` (brushed
+  on every line). A knob's textured form comes from its tag
+  (`setTexturedForm`), then its section's (`ModulePanel::tagTextured`), then
+  its drawn size: one-piece at `Tokens::onePieceMaxRadius` or smaller, ringed
+  above. **Tag every input, output and volume knob one-piece**; leave the
+  rest to size. `ui_layout_tests` fails a trim without its tag and a knob
+  that sits on the line or changes form between a module's widths. A line
+  a panel draws into the plate goes through `BmoLookAndFeel::fillEngraved`.
+  `docs/ui-material-proposal.md` has the design, the costs and the knob
+  allocation table.
 - Tokens are the only place colours live. A panel that needs a colour
   takes it from `ui::tokens()` or from its module's `accent`.

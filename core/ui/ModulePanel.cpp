@@ -1,5 +1,6 @@
 #include "ModulePanel.h"
 #include "Line.h"
+#include "LookAndFeel.h"
 #include "core/product/ModuleDef.h"
 
 namespace bmo::ui
@@ -17,13 +18,15 @@ void ModulePanel::paintRules (juce::Graphics& g) const
     for (const auto& r : rules)
     {
         if (r.text.isEmpty())
-            drawRule (g, r.row);
+            drawRule (g, r.row, r.span);
         else
             drawRuleLegend (g, r.row, r.text,
                             inkFor (context.def.lineOf()).value_or (context.def.accent),
-                            t.plate);
+                            t.plate, r.span);
     }
 }
+
+bool ModulePanel::materialPlate() { return BmoLookAndFeel::textured(); }
 
 Tokens ModulePanel::panelTokens() const
 {
@@ -32,7 +35,40 @@ Tokens ModulePanel::panelTokens() const
 
 void ModulePanel::paint (juce::Graphics& g)
 {
-    g.fillAll (panelTokens().plate);
+    const auto plate = panelTokens().plate;
+
+    if (! BmoLookAndFeel::textured())
+    {
+        g.fillAll (plate);
+    }
+    else
+    {
+        // The pixel scale the graphics context really renders at: the
+        // editor's own scale transform times the display's. Caching at design
+        // size and letting the transform stretch it would blur the grain.
+        const auto scale = g.getInternalContext().getPhysicalPixelScaleFactor();
+        const auto finish = finishFor (context.def.lineOf());
+        const auto w = juce::roundToInt ((float) getWidth()  * scale);
+        const auto h = juce::roundToInt ((float) getHeight() * scale);
+
+        if (plateCache.isNull() || plateCache.getWidth() != w || plateCache.getHeight() != h
+            || ! juce::approximatelyEqual (plateCacheScale, scale) || plateCacheColour != plate
+            || plateCacheFinish != finish)
+        {
+            plateCache = juce::Image (juce::Image::RGB, juce::jmax (1, w), juce::jmax (1, h), false);
+            juce::Graphics cg (plateCache);
+            cg.addTransform (juce::AffineTransform::scale (scale));
+            cg.fillAll (plate);
+            BmoLookAndFeel::paintPlateFinish (cg, getLocalBounds(), finish);
+            plateCacheScale = scale;
+            plateCacheFinish = finish;
+            plateCacheColour = plate;
+        }
+
+        g.setImageResamplingQuality (juce::Graphics::lowResamplingQuality);
+        g.drawImage (plateCache, getLocalBounds().toFloat());
+    }
+
     paintRules (g);
     paintPanel (g);
 }

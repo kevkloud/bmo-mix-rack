@@ -48,12 +48,23 @@ own tests could not see. What belongs *here* is anything every module shares.
   why the accent and the switch colours are both documented exceptions, why the
   GR meter is not widened for a 30 dB design target, and what the placeholder
   DSP owes the real one.
-- [`dwell/AGENTS.md`](dwell/AGENTS.md) -- BMO Dwell, the delay. Schema and
-  plumbing so far; the loop is stage 2. What is frozen in the permanent schema
-  and why NOTE's index order is not "least to most" like the other three lists;
-  why latency is 0 and why reporting the delay time as latency is the trap;
-  what ships disabled (SYNC) and what does not (FREEZE); and why `fx` the
-  parameter and the expanded view are tied but not the same.
+- [`dwell/AGENTS.md`](dwell/AGENTS.md) -- BMO Dwell, the delay: a main delay
+  and a parallel throw lane (SEND / HOLD / CHOP), one engine type instanced
+  twice. DSP complete, unheard in a host. What is frozen in the permanent
+  schema and why NOTE's index order is not "least to most" like the other
+  lists; why latency is 0 and why reporting the delay time as latency is the
+  trap; what ships disabled (SYNC); and why `fx` the parameter and the
+  revealed view are tied but not the same.
+- [`reverb/AGENTS.md`](reverb/AGENTS.md) -- BMO Linger, the reverb. Panel and
+  schema so far; the DSP is a marked placeholder. **Thirty parameters against a
+  slot's thirty-two lanes**, so a thirty-first has to be argued rather than
+  added; why eight of the defaults are Room's per-type constants *by
+  definition* rather than merely the values the knobs open at; why appending a
+  type is safe for sessions and lossy for recorded automation; why ER Mode's
+  Blend holds an index it has not yet earned; and why the ER/tail display's
+  time axis is logarithmic over 1 ms to 30 s rather than the fixed window the
+  pack proposed. Also the one header in a `dsp/` folder that a panel is allowed
+  to include, and why it has to stay JUCE-free.
 - [`tune/AGENTS.md`](tune/AGENTS.md) -- BMO Tune RT. **A product of this
   repository, not a rack module**: nothing of it is in the rack's registry or
   on its link line, and `-DBMO_BUILD_TUNE=OFF` / `-DBMO_BUILD_RACK=OFF` keep

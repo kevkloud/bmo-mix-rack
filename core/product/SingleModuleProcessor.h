@@ -38,7 +38,12 @@ public:
     bool acceptsMidi() const override                        { return false; }
     bool producesMidi() const override                       { return false; }
     bool isMidiEffect() const override                       { return false; }
-    double getTailLengthSeconds() const override             { return 0.0; }
+
+    /** A cached read, never the arithmetic: a host polls this from wherever it
+        likes, including the audio thread, so it has to be lock-free. The value
+        behind it is `ModuleDsp::tailSecondsForParams` and is refreshed where
+        the latency figure is -- on a parameter change and in prepareToPlay. */
+    double getTailLengthSeconds() const override             { return reportedTail.load (std::memory_order_relaxed); }
 
     int getNumPrograms() override                            { return 1; }
     int getCurrentProgram() override                         { return 0; }
@@ -86,6 +91,16 @@ private:
     // the oversampling otherwise floods the host with setLatencySamples on
     // every move, which is enough to destabilise it.
     std::atomic<int> reportedLatency { -1 };
+
+    // The tail, in seconds, as last computed from the parameters. Unlike the
+    // latency there is nothing to push -- the host pulls it -- so this is a
+    // cache and not a change-detector, and it starts at zero because that is
+    // the truthful answer for a module whose parameters have not been read
+    // yet as well as for the eight modules that never have a tail.
+    //
+    // `std::atomic<double>` is lock-free on every target the suite builds for;
+    // the static_assert in the .cpp is there so that stops being an assumption.
+    std::atomic<double> reportedTail { 0.0 };
 
     std::atomic<bool> expanded { def.isExpandable() };
 

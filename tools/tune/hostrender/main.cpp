@@ -8,7 +8,7 @@
 //   bmo-tune-hostrender <plugin.vst3> [--type <name part>] in.wav out.wav
 //                       [--set "<parameter name>=<text>"] ...
 //                       [--setn "<parameter name>=<0..1>"] ... [--block N]
-//                       [--preroll seconds]
+//                       [--preroll seconds] [--stereo]
 //
 // --type picks one plugin out of a shell (WaveShell holds hundreds). --set
 // goes through the plugin's own text parsing, so values are typed as its UI
@@ -78,7 +78,7 @@ int main (int argc, char** argv)
 
     juce::String typePart, inPath, outPath;
     juce::StringArray sets;
-    bool listTypes = false, listParams = false;
+    bool listTypes = false, listParams = false, stereo = false;
     int block = 128;
     double preroll = 0.0;
 
@@ -87,6 +87,7 @@ int main (int argc, char** argv)
         const juce::String a { juce::CharPointer_UTF8 (argv[i]) };
         if (a == "--types")                       listTypes = true;
         else if (a == "--params")                 listParams = true;
+        else if (a == "--stereo")                 stereo = true;
         else if (a == "--type" && i + 1 < argc)   typePart = juce::CharPointer_UTF8 (argv[++i]);
         else if (a == "--set" && i + 1 < argc)    sets.add (juce::CharPointer_UTF8 (argv[++i]));
         else if (a == "--setn" && i + 1 < argc)   sets.add ("#" + juce::String (juce::CharPointer_UTF8 (argv[++i])));
@@ -167,7 +168,7 @@ int main (int argc, char** argv)
         plugin->processBlock (buffer, midi);
     }
 
-    std::vector<float> out (x.size(), 0.0f);
+    std::vector<float> out (x.size(), 0.0f), outR (x.size(), 0.0f);
     for (size_t at = 0; at < x.size(); at += (size_t) block)
     {
         const auto n = (int) std::min<size_t> ((size_t) block, x.size() - at);
@@ -176,6 +177,7 @@ int main (int argc, char** argv)
             std::copy (x.begin() + (long) at, x.begin() + (long) at + n, buffer.getWritePointer (ch));
         plugin->processBlock (buffer, midi);
         std::copy (buffer.getReadPointer (0), buffer.getReadPointer (0) + n, out.begin() + (long) at);
+        std::copy (buffer.getReadPointer (1), buffer.getReadPointer (1) + n, outR.begin() + (long) at);
     }
 
     const auto reported = plugin->getLatencySamples();
@@ -188,5 +190,12 @@ int main (int argc, char** argv)
     std::cout << "output peak: " << (peak > 0.0 ? 20.0 * std::log10 (peak) : -999.0) << " dBFS\n";
 
     plugin->releaseResources();
+
+    // --stereo keeps both channels, for a reverb whose L/R relationship is
+    // the thing being measured (BMO Linger's reference renders). The default
+    // stays the left channel alone, which is what Tune's scoring reads.
+    if (stereo)
+        return wav::write (outPath.toStdString(), wav::Channels { out, outR }, fs) ? 0 : 1;
+
     return wav::writeMono (outPath.toStdString(), out, fs) ? 0 : 1;
 }

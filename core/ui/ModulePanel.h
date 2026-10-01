@@ -2,6 +2,7 @@
 
 #include "Controls.h"
 #include "Line.h"
+#include "LookAndFeel.h"
 #include "core/dsp/AnalyserTap.h"
 #include "core/state/ParamSet.h"
 
@@ -226,6 +227,21 @@ public:
     {
         juce::Rectangle<int> row;
         juce::String text;          ///< empty for a bare rule
+
+        /** How far across the panel the hairline runs, in panel pixels.
+
+            **Empty means edge to edge**, which is what every rule in the suite
+            was and all but one still are: a section device that reached
+            different distances on different panels would stop being one
+            device. The exception is a rule that legends *some* of the row
+            under it -- BMO Linger's LEVEL, which names three faders in a strip
+            whose fourth column is TYPE over DECAY. A full-width rule there
+            claims the column it does not name, and the module owned that as a
+            wrinkle in a comment for a release rather than drawing the truth.
+
+            It is a span rather than a second kind of rule: same hairline, same
+            knocked-out legend, same `addRule`. Only the ends move. */
+        juce::Range<int> span;
     };
 
     /** The rules this panel laid out, in the order `resized` added them. */
@@ -276,10 +292,14 @@ protected:
     /** Call at the top of `resized`, before laying any rule out again. */
     void clearRules() { rules.clear(); }
 
-    /** Records a rule so the panel paints it and a test can see it. */
-    void addRule (juce::Rectangle<int> row, juce::String text = {})
+    /** Records a rule so the panel paints it and a test can see it.
+
+        `span` is the horizontal reach; empty is edge to edge, which is what
+        every call site but one passes. See `Rule::span`. */
+    void addRule (juce::Rectangle<int> row, juce::String text = {},
+                  juce::Range<int> span = {})
     {
-        rules.push_back ({ row, std::move (text) });
+        rules.push_back ({ row, std::move (text), span });
     }
 
 private:
@@ -288,31 +308,50 @@ private:
     void paintRules (juce::Graphics&) const;
 
     std::vector<Rule> rules;
-    bool columnScopedRules = false;
+
+    /** The textured plate, drawn once at the device's pixel scale
+        and blitted on every paint after. Rebuilt when the size, the scale or
+        the plate colour changes -- a resize or a theme change. */
+    juce::Image plateCache;
+    float plateCacheScale = 0.0f;
+    juce::Colour plateCacheColour;
+    PlateFinish plateCacheFinish = PlateFinish::brushed;
 
 protected:
 
-    /** Draws every rule across the row it was handed rather than across the
-        whole panel.
-
-        For a panel laid out in **columns**. BMO Dwell's wide view puts a DELAY
-        rule in one column and a LOOP rule in the other, and a hairline drawn
-        the full width runs each of them straight through the other column's
-        contents. Off by default and opted into by that one panel, so every
-        single-column panel in the suite -- all of which hand `addRule` a row
-        that already spans the content area -- is unaffected. */
-    void setColumnScopedRules (bool shouldBe) noexcept { columnScopedRules = shouldBe; }
-
     /** A hairline through the middle of a row, inset by the padding -- or
-        across the row's own width, for a panel that asked for that. */
-    void drawRule (juce::Graphics& g, juce::Rectangle<int> row) const
-    {
-        const auto x = columnScopedRules ? (float) row.getX() : (float) kPad;
-        const auto w = columnScopedRules ? (float) row.getWidth()
-                                         : (float) (getWidth() - kPad * 2);
+        across `span` when one is given. See `Rule::span`. */
+    /** Whether the Textured surface is drawing the plate. */
+    static bool materialPlate();
 
-        g.setColour (tokens().hairline);
-        g.fillRect (juce::Rectangle<float> (x, (float) row.getCentreY(), w, Tokens::hairlineWeight));
+public:
+    /** The property a section tag is stored under; see tagTextured. */
+    inline static const juce::Identifier kTexturedFormTag { "bmoTexturedForm" };
+
+    /** Tags a section: every knob inside these components takes `form` in
+        the Textured surface unless it carries a tag of its own. Pass a
+        PlainKnob, a ConcentricBand, a container holding several -- or `this`,
+        which makes it the panel's default. Simple ignores it.
+
+        The resolution order is texturedFormFor's: knob, then the nearest
+        tagged section above it, then the knob's style. */
+    void tagTextured (std::initializer_list<juce::Component*> controls, Knob::TexturedForm form)
+    {
+        for (auto* c : controls)
+            c->getProperties().set (kTexturedFormTag, (int) form);
+    }
+
+protected:
+
+    void drawRule (juce::Graphics& g, juce::Rectangle<int> row,
+                   juce::Range<int> span = {}) const
+    {
+        const auto reach = span.isEmpty() ? juce::Range<int> (kPad, getWidth() - kPad) : span;
+
+        juce::RectangleList<float> rule;
+        rule.add ({ (float) reach.getStart(), (float) row.getCentreY(),
+                    (float) reach.getLength(), Tokens::hairlineWeight });
+        BmoLookAndFeel::fillEngraved (g, rule, tokens().hairline);
     }
 
     /** A section name drawn on a rule, in the module's own colour.
@@ -323,7 +362,7 @@ protected:
         readable thing on it. */
     void drawRuleLegend (juce::Graphics& g, juce::Rectangle<int> row,
                          const juce::String& text, juce::Colour accent,
-                         juce::Colour plate) const
+                         juce::Colour plate, juce::Range<int> span = {}) const
     {
         // The module's accent stepped until it is legible. A section legend is
         // the smaller of the two labels on a panel -- 13 pt against a knob
@@ -336,18 +375,36 @@ protected:
         // survive being set in the raw accent at 2.00:1. It keeps the size:
         // the two labels want to be different sizes whichever way the colours
         // fall, and this is the one a panel is navigated by.
-        drawRule (g, row);
-
         const auto font = labelFont (kLegendSize, true);
         const auto width = juce::GlyphArrangement::getStringWidth (font, text) + 14.0f;
+
+        // Centred on the hairline it knocks a hole in, which for a spanning
+        // rule is the span rather than the row: a legend centred on the panel
+        // while its rule stopped two thirds of the way across would sit off
+        // the end of its own line.
+        const auto centreX = span.isEmpty() ? (float) row.getCentreX()
+                                            : (float) span.getStart() + (float) span.getLength() * 0.5f;
+
         const auto box = juce::Rectangle<float> (width, (float) row.getHeight())
-                             .withCentre (row.toFloat().getCentre());
+                             .withCentre ({ centreX, (float) row.getCentreY() });
 
         // The panel's plate, passed in rather than read from tokens(): a
         // legend knocks a hole in the rule it sits on, and on an LTV panel
         // that hole has to be silver or the rule shows through it.
-        g.setColour (plate);
-        g.fillRect (box);
+        // On a textured plate a flat knockout shows as a patch, so
+        // the rule is drawn in two pieces that stop at the legend instead.
+        if (materialPlate())
+        {
+            const auto reach = span.isEmpty() ? juce::Range<int> (kPad, getWidth() - kPad) : span;
+            drawRule (g, row, { reach.getStart(), juce::roundToInt (box.getX()) });
+            drawRule (g, row, { juce::roundToInt (box.getRight()), reach.getEnd() });
+        }
+        else
+        {
+            drawRule (g, row, span);
+            g.setColour (plate);
+            g.fillRect (box);
+        }
         drawLabel (g, text, box, juce::Justification::centred, font, accentInk (accent, plate));
     }
 

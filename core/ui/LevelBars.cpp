@@ -263,7 +263,7 @@ void LevelBar::paint (juce::Graphics& g)
     }
 
     g.setColour (t.outline.withAlpha (0.6f));
-    g.drawRoundedRectangle (well.reduced (0.5f), 2.0f, 1.0f);
+    strokeInside (g, well, 2.0f, 1.0f);
 
     // The printed scale, in the strip wellBounds reserves under the well.
     //

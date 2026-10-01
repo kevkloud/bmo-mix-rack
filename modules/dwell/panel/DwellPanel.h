@@ -216,6 +216,9 @@ private:
     void placeFxBand    (juce::Rectangle<int> row);
     void placeFoot      (juce::Rectangle<int> row);
 
+    /** A rule across its own column only. See the definition.  */
+    void addColumnRule  (juce::Rectangle<int> row, const juce::String& legend);
+
     /** A rule with one or two switches at its right-hand end: the lane's FX
         rule, carrying its own gate *and* FX LINK. The rule is struck across
         what is left, so a switch reads as belonging to the section rather than

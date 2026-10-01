@@ -676,10 +676,17 @@ DwellPanel::DwellPanel (ui::ModuleContext ctx)
     // every one of them is in Hertz, decibels or a percent that means
     // something, and none of those is found by eye. See kValueKnob for where
     // the 14 px came from.
+    //
+    // **And they are tagged one-piece for the Textured surface.** At 72 px the
+    // cap is 20.88 px, 0.12 under the 21 px line texturedFormFor draws between
+    // one-piece and ringed, so the size rule would decide it by a fraction of
+    // a pixel of relayout. They are the secondary step, which is what
+    // one-piece means (Frosty, 2026-09-25), so the tag says it outright.
     for (auto* k : { &lowCut, &highCut, &drive, &modRate, &modDepth, &duck })
     {
         k->setKnobSide (kValueKnob);
         k->setShowsValue (true);
+        k->setTexturedForm (ui::Knob::TexturedForm::onePiece);
     }
 
     //== The lane gain knob ====================================================
@@ -855,6 +862,7 @@ void DwellPanel::buildFxAmount (bool lane, int type)
     slot->setKnobSide (kValueKnob);
     slot->setCaptionSize (kCaption);
     slot->setShowsValue (true);
+    slot->setTexturedForm (ui::Knob::TexturedForm::onePiece);   // see the secondary knobs' tag
     held = type;
 
     if (lane)
@@ -1134,7 +1142,7 @@ void DwellPanel::placeRuledSwitch (juce::Rectangle<int> band, const juce::String
     if (inner != nullptr)
         inner->setBounds (cell (band));
 
-    addRule (band.withSizeKeepingCentre (band.getWidth(), kRule), legend);
+    addColumnRule (band.withSizeKeepingCentre (band.getWidth(), kRule), legend);
 }
 
 void DwellPanel::placeDuckBand (juce::Rectangle<int> row)
@@ -1166,6 +1174,16 @@ void DwellPanel::placeFxBand (juce::Rectangle<int> row)
     // foot with the arrow -- which was the one control on the face hung off to
     // one side.
     fx.setBounds (row.withSizeKeepingCentre (kFxSwitchWidth, row.getHeight()));
+}
+
+void DwellPanel::addColumnRule (juce::Rectangle<int> row, const juce::String& legend)
+{
+    // A rule belongs to its column: a hairline drawn the full width of a
+    // three-column panel runs each column's rule straight through the other
+    // two columns' contents. `Rule::span` (core/ui/ModulePanel.h) is how a
+    // rule is told its reach; Dwell's own column-scoped flag predated it and
+    // was retired at the merge that brought it in.
+    addRule (row, legend, { row.getX(), row.getRight() });
 }
 
 void DwellPanel::placeFoot (juce::Rectangle<int> row)
@@ -1205,11 +1223,6 @@ void DwellPanel::resized()
     area.removeFromBottom (kFootMargin);
 
     showRevealed (expanded);
-
-    // A rule belongs to its column: a hairline drawn the full width of a
-    // three-column panel runs each column's rule straight through the other
-    // two columns' contents. See ui::ModulePanel::setColumnScopedRules.
-    setColumnScopedRules (true);
 
     auto faceColumn = expanded ? area.removeFromLeft (kColumn) : area;
 
@@ -1264,7 +1277,7 @@ void DwellPanel::layOutFace (juce::Rectangle<int> column, int& delayRuleTop, int
     face.breakAir();
 
     delayRuleTop = face.area.getY();
-    addRule (face.take (kRule), "DELAY");
+    addColumnRule (face.take (kRule), "DELAY");
 
     face.air();
     placeHero (face.take (kHeroRow));
@@ -1281,7 +1294,7 @@ void DwellPanel::layOutFace (juce::Rectangle<int> column, int& delayRuleTop, int
 
     face.breakAir();
     toneRuleTop = face.area.getY();
-    addRule (face.take (kRule), "TONE");
+    addColumnRule (face.take (kRule), "TONE");
     face.air();
     placePair (lowCut, highCut, face.take (kPairRow), kValueKnob);
 
@@ -1305,7 +1318,7 @@ void DwellPanel::layOutDepth (juce::Rectangle<int> column, int toneRuleTop)
     Column top { column.withBottom (toneRuleTop) };
     top.spend (kDepthTopRows, kDepthTopAir);
 
-    addRule (top.take (kRule), "LOOP");
+    addColumnRule (top.take (kRule), "LOOP");
     top.air();
     placeSingle (drive, top.take (kPairRow), kValueKnob);
     top.air();
@@ -1326,7 +1339,7 @@ void DwellPanel::layOutDepth (juce::Rectangle<int> column, int toneRuleTop)
 
     bottom.spend (kDepthBotRows, kDepthBotAir);
 
-    addRule (bottom.take (kRule), "FX");
+    addColumnRule (bottom.take (kRule), "FX");
     bottom.air();
     placeSwitchRow (*fxType, bottom.take (kFxRow));
     // No second helping: what is left of the segment *is* the gap above the
@@ -1359,7 +1372,7 @@ void DwellPanel::layOutLane (juce::Rectangle<int> column, juce::Rectangle<int> t
     Column top { column.withBottom (toneRuleTop) };
     top.spend (kLaneTopRows, kLaneTopAir);
 
-    addRule (top.take (kRule), "LANE");
+    addColumnRule (top.take (kRule), "LANE");
     top.air();
 
     // **The tail alone on its row.** It is the lane's hero and it draws 116 px;

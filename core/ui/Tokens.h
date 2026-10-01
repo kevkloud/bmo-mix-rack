@@ -398,6 +398,20 @@ struct Tokens
     static constexpr float knobStroke   = 2.2f;
     static constexpr float trackGap     = 10.0f;   ///< face edge to the dotted track
 
+    /** In the Textured surface, an untagged knob whose cap is this radius or
+        smaller is drawn one-piece; a larger one is ringed. Design pixels, so
+        it does not move with the window's scale.
+
+        Frosty, 2026-09-25: the cut-off is BMO Dimension's non-hero knobs --
+        DETUNE, DRIFT, BLOOM, BELOW, TURN, TILT, 19.84 -- and anything that
+        size or smaller is one-piece. The line sits a pixel past them, because
+        the next untagged knob up is BMO Defang's at 26.04 and a line drawn
+        exactly on 19.84 would leave those six a rounding error from flipping.
+        `ui_layout_tests` keeps every untagged knob a quarter pixel clear of
+        it and fails any knob that changes form between a module's two
+        widths -- which is why BMO DEQ's FREQ, GAIN and Q carry a tag. */
+    static constexpr float onePieceMaxRadius = 21.0f;
+
     /** Ring edge to the dotted track, for a gain that sits inside a selector.
 
         Tighter than `trackGap` because the space is not the same space. A
@@ -507,6 +521,39 @@ void setDarkMode (bool);
     that says to check both every time. See `tools/snapshot`'s
     `appearance=dark|light`. */
 void overrideAppearance (bool shouldBeDark);
+
+//== Surface ===================================================================
+//
+// **Simple** is the suite as it has always been drawn, and the default.
+// **Textured** is the material pass: a finished plate, knobs with form and
+// light, switches that sit up and press in, and rules, brackets and buses
+// laser-engraved into the plate. Frosty, 2026-09-25.
+//
+// Like the appearance it is a machine-wide preference in UI.json, never a
+// parameter: a parameter would touch specs(), be automatable, and save a look
+// into every session. It changes no colour, no size and no position -- only
+// how the same tokens are shaded -- so every contrast and layout rule holds in
+// both. docs/ui-material-proposal.md has the design and the measurements.
+
+enum class Surface { simple, textured };
+
+/** The finish a textured plate is given. */
+enum class PlateFinish { brushed, powder };
+
+/** What the user chose for the finish: the line's own (`house`; see
+    Line::finish -- brushed on every line today) or one for every plugin. */
+enum class FinishChoice { house, brushed, powder };
+
+Surface surface() noexcept;
+FinishChoice finishChoice() noexcept;
+
+/** Writes the preference and applies it here immediately; other open editors
+    pick it up on their next poll, exactly as `setDarkMode` does. */
+void setSurface (Surface, FinishChoice = FinishChoice::house);
+
+/** For this process only, like `overrideAppearance`: neither written nor read
+    again. Tools only -- `tools/snapshot`'s `surface=` and `finish=`. */
+void overrideSurface (Surface, FinishChoice = FinishChoice::house);
 
 /** A character knob's cap -- and see `accentInk`, which is the other half of
     this and trades places with it between the appearances.

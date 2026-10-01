@@ -5,7 +5,9 @@
 //   bmo-tune-snapshot out.png [width height] [param=value ...]
 //
 // Parameters by their ids, choices by name or index: key=Bb, scale=Minor,
-// note_d=0; Retune Speed by its milliseconds, retune_ms=12. "appearance=dark|light" renders the other palette
+// note_d=0; Retune Speed by its milliseconds, retune_ms=12. "surface=simple|textured" and
+// "finish=house|brushed|powder" pick the surface, as the rack's snapshot does.
+// "appearance=dark|light" renders the other palette
 // for this process only -- it neither writes nor reads the machine-wide
 // preference, so it cannot flip the look of plugins that happen to be open.
 //
@@ -91,6 +93,10 @@ int main (int argc, char** argv)
     // change made afterwards.
     auto& params = processor->getEngine().params();
 
+    auto wantSurface = bmo::ui::Surface::simple;
+    auto wantFinish  = bmo::ui::FinishChoice::house;
+    bmo::ui::overrideSurface (wantSurface, wantFinish);
+
     for (int i = first; i < argc; ++i)
     {
         const juce::String arg { argv[i] };
@@ -104,6 +110,37 @@ int main (int argc, char** argv)
 
         const auto key = arg.substring (0, split);
         const auto value = arg.substring (split + 1);
+
+        // The surface, as the rack's snapshot takes it: "surface=simple|textured"
+        // and "finish=house|brushed|powder", for this process only. Pinned to
+        // Simple before the loop, so a render never reads this machine's UI.json.
+        if (key == "surface" || key == "finish")
+        {
+            if (key == "surface")
+            {
+                if (value.equalsIgnoreCase ("textured"))    wantSurface = bmo::ui::Surface::textured;
+                else if (value.equalsIgnoreCase ("simple")) wantSurface = bmo::ui::Surface::simple;
+                else
+                {
+                    std::cerr << "surface is simple or textured, got " << value << '\n';
+                    return 2;
+                }
+            }
+            else
+            {
+                if (value.equalsIgnoreCase ("brushed"))     wantFinish = bmo::ui::FinishChoice::brushed;
+                else if (value.equalsIgnoreCase ("powder")) wantFinish = bmo::ui::FinishChoice::powder;
+                else if (value.equalsIgnoreCase ("house"))  wantFinish = bmo::ui::FinishChoice::house;
+                else
+                {
+                    std::cerr << "finish is house, brushed or powder, got " << value << '\n';
+                    return 2;
+                }
+            }
+
+            bmo::ui::overrideSurface (wantSurface, wantFinish);
+            continue;
+        }
 
         if (key == "appearance")
         {

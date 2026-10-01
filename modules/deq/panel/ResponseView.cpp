@@ -220,7 +220,29 @@ void ResponseView::paint (juce::Graphics& g)
     const auto& t = ui::tokens();
     const auto r = plot();
 
-    g.setColour (t.well);
+    // **A screen, as BMO Linger's is** -- Frosty, 2026-09-25: "the screen of
+    // DEQ should follow the screen of Linger". A bezel cut into the plate in
+    // `well`, and inside it a dark face in `meterFace`: a value rather than a
+    // hue, the same in both appearances and both surfaces, because a screen
+    // that went pale with the plate would stop reading as a screen. Everything
+    // drawn on it below takes Linger's inks. See LingerScreen::paint and
+    // ReverbPanel::paintPanel, which this follows.
+    const auto face = t.meterFace;
+    const auto ink  = ui::accentInk (accent, face);
+
+    // The bezel's corners are the screen's, grown by the pad, so the band of
+    // well between them is the same width all the way round -- at a 3 px pad
+    // a bezel on the screen's own radius pinched in at every corner.
+    {
+        const auto bezel = r.expanded (kBezelPad);
+        const auto bezelRadius = ui::Tokens::corner + kBezelPad;
+        g.setColour (t.well);
+        g.fillRoundedRectangle (bezel, bezelRadius);
+        g.setColour (t.outline);
+        ui::strokeInside (g, bezel, bezelRadius, ui::Tokens::hairlineWeight);
+    }
+
+    g.setColour (face);
     g.fillRoundedRectangle (r, ui::Tokens::corner);
 
     // The spectrum goes in first, under the grid and well under the curve.
@@ -242,26 +264,42 @@ void ResponseView::paint (juce::Graphics& g)
 
     // Grid: quiet, under everything. The full panel has decades and their
     // halves and every 6 dB; the compact one only the decades and +-12, as
-    // mockup C drew it -- at 300 px any more is texture, not a scale.
-    g.setColour (t.plateEdge);
+    // mockup C drew it -- at 300 px any more is texture, not a scale. In
+    // Linger's weights: the dot matrix that makes the box read as a display,
+    // grid lines in the hairline at half strength, and the line a flat
+    // response sits on at 0.8. Drawn from the plot's own origin so the dots do
+    // not crawl when the panel is laid out again.
+    g.setColour (t.hairline.withMultipliedAlpha (0.22f));
+    for (auto y = r.getY() + 3.0f; y < r.getBottom(); y += 8.0f)
+        for (auto x = r.getX() + 3.0f; x < r.getRight(); x += 8.0f)
+            g.fillRect (juce::Rectangle<float> (x, y, 1.0f, 1.0f));
+
+    g.setColour (t.hairline.withMultipliedAlpha (0.5f));
     const auto gridHz = compact ? std::vector<double> { 100.0, 1000.0, 10000.0 }
                                 : std::vector<double> { 50.0, 100.0, 200.0, 500.0, 1000.0, 2000.0, 5000.0, 10000.0 };
     const auto gridDb = compact ? std::vector<double> { -12.0, 12.0 }
                                 : std::vector<double> { -18.0, -12.0, -6.0, 6.0, 12.0, 18.0 };
     for (auto hz : gridHz)
-        g.fillRect (juce::Rectangle<float> (xFor (hz), r.getY(), 1.0f, r.getHeight()));
+        g.fillRect (juce::Rectangle<float> (xFor (hz), r.getY(), ui::Tokens::hairlineWeight, r.getHeight()));
     for (auto db : gridDb)
-        g.fillRect (juce::Rectangle<float> (r.getX(), yFor (db), r.getWidth(), 1.0f));
-    g.setColour (t.hairline);
-    g.fillRect (juce::Rectangle<float> (r.getX(), yFor (0.0), r.getWidth(), 1.0f));
+        g.fillRect (juce::Rectangle<float> (r.getX(), yFor (db), r.getWidth(), ui::Tokens::hairlineWeight));
+    g.setColour (t.hairline.withMultipliedAlpha (0.8f));
+    g.fillRect (juce::Rectangle<float> (r.getX(), yFor (0.0), r.getWidth(), ui::Tokens::hairlineWeight));
 
     const auto axis = ui::captionFont (10.0f);
 
-    // The gain scale, on the full panel only, inside the well at its left edge.
+    // The gain scale, on the full panel only, inside the screen at its left
+    // edge: Linger's tick labels -- the screen ink at 0.6, on a punch-out of
+    // the face so a curve running through a number cannot take it.
     if (! compact)
         for (const auto& [db, text] : std::vector<std::pair<double, const char*>> { { 12.0, "+12" }, { 0.0, "0" }, { -12.0, "-12" } })
-            ui::drawLabel (g, text, { r.getX() + 4.0f, yFor (db) - 13.0f, 40.0f, 12.0f },
-                           juce::Justification::bottomLeft, axis, t.text2);
+        {
+            const auto box = juce::Rectangle<float> (r.getX() + 4.0f, yFor (db) - 13.0f, 40.0f, 12.0f);
+            const auto width = juce::GlyphArrangement::getStringWidth (axis, text) + 2.0f;
+            g.setColour (face.withAlpha (0.65f));
+            g.fillRect (box.withTrimmedTop (1.0f).withWidth (width));
+            ui::drawLabel (g, text, box, juce::Justification::bottomLeft, axis, ink.withAlpha (0.6f));
+        }
 
     const auto labels = compact ? std::vector<std::pair<double, const char*>> { { 100.0, "100" }, { 1000.0, "1k" }, { 10000.0, "10k" } }
                                 : std::vector<std::pair<double, const char*>> { { 50.0, "50" }, { 100.0, "100" }, { 200.0, "200" }, { 500.0, "500" },
@@ -272,10 +310,10 @@ void ResponseView::paint (juce::Graphics& g)
     g.saveState();
     g.reduceClipRegion (r.toNearestInt());
 
-    g.setColour (accent.withAlpha (0.16f));
+    g.setColour (ink.withAlpha (0.16f));
     g.fillPath (selectedFill);
 
-    g.setColour (accent);
+    g.setColour (ink);
     g.strokePath (curve, juce::PathStrokeType (compact ? 1.6f : 2.0f, juce::PathStrokeType::curved));
 
     // Dynamic ranges first, so the nodes sit on top of their whiskers.
@@ -292,6 +330,12 @@ void ResponseView::paint (juce::Graphics& g)
     // Nodes over the well's edge rather than cut by it: band 12's default
     // 18 kHz sits 7 px from the right-hand side, and a node is 8 px across.
     g.restoreState();
+
+    // The screen's own edge, as Linger's has: over the grid and the curve, so
+    // nothing drawn on the face can run to its rim, and under the nodes, which
+    // ride over it.
+    g.setColour (t.outline);
+    ui::strokeInside (g, r, ui::Tokens::corner, ui::Tokens::hairlineWeight);
 
     const auto sel = selected ? selected() : -1;
     const auto numberFont = ui::labelFont (9.0f, true);
@@ -319,7 +363,9 @@ void ResponseView::paint (juce::Graphics& g)
         const auto mine = placementColour ((int) b.placement, accent);
         const auto radius = compact ? kNodeRadiusCompact : kNodeRadius;
         const auto node = juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (at);
-
+        // Flat in both surfaces -- Frosty, 2026-09-25, from a render of them
+        // as shaded pucks. The ring in the band's colour on an active node
+        // that is not selected is what carries it.
         if (isSel)
         {
             const auto big = node.expanded (compact ? 1.5f : 2.0f);
@@ -328,13 +374,13 @@ void ResponseView::paint (juce::Graphics& g)
             {
                 g.setColour (mine);
                 g.fillEllipse (big);
-                g.setColour (ui::accentInk (mine));
+                g.setColour (ui::accentInk (mine, face));
                 g.drawEllipse (big, 1.6f);
             }
             else
             {
                 // Selected and off: there, and obviously inert.
-                g.setColour (t.well);
+                g.setColour (face);
                 g.fillEllipse (big);
                 g.setColour (mine.withAlpha (0.45f));
                 g.drawEllipse (big, 1.6f);
@@ -342,16 +388,19 @@ void ResponseView::paint (juce::Graphics& g)
         }
         else
         {
-            g.setColour (t.well);
+            // The face punched out under the node, as Linger's are, and the
+            // ring in the band's own colour.
+            g.setColour (face);
             g.fillEllipse (node);
-            g.setColour (b.on ? mine : t.hairline);
+            g.setColour (b.on ? mine : t.hairline.withMultipliedAlpha (0.8f));
             g.drawEllipse (node, compact ? 1.4f : 1.6f);
         }
 
         if (! compact)
             ui::drawLabel (g, juce::String (i + 1), node.expanded (2.0f), juce::Justification::centred,
                            isSel ? ui::labelFont (10.0f, true) : numberFont,
-                           isSel && b.on ? ui::onAccentOf (mine) : (b.on ? t.text1 : t.text2));
+                           isSel && b.on ? ui::onAccentOf (mine)
+                                         : t.meterInk.withAlpha (b.on ? 1.0f : 0.55f));
     }
 
     // The frequency scale goes on last, over any node that has hung down into
@@ -367,7 +416,7 @@ void ResponseView::paint (juce::Graphics& g)
     for (const auto& [hz, text] : labels)
         // 48 px boxes: the caption face is wide, and a 32 px box cut "100" to
         // "10" on the first render.
-        ui::drawLabel (g, text, { xFor (hz) - 24.0f, r.getBottom() + 2.0f, 48.0f, 13.0f },
+        ui::drawLabel (g, text, { xFor (hz) - 24.0f, r.getBottom() + kBezelPad + 1.0f, 48.0f, 12.0f },
                        juce::Justification::centred, axis, t.text2);
 
     // No readout over the curve: the knobs carry their own numbers now

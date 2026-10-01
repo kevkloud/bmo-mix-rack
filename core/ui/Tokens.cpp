@@ -62,6 +62,46 @@ namespace
     // being touched or read.
     bool appearanceOverridden = false;
 
+    // The surface, read from the same file as the appearance and on the same
+    // poll. Its own override flag, because a tool may pin one and not the
+    // other: `appearance=dark` alone must still leave the surface Simple
+    // rather than reading whatever this machine happens to prefer.
+    Surface currentSurface = Surface::simple;
+    FinishChoice currentFinish = FinishChoice::house;
+    bool surfaceOverridden = false;
+
+    Surface surfaceFrom (const juce::var& prefs)
+    {
+        return prefs.getProperty ("surface", "simple").toString().equalsIgnoreCase ("textured")
+                   ? Surface::textured : Surface::simple;
+    }
+
+    FinishChoice finishFrom (const juce::var& prefs)
+    {
+        const auto f = prefs.getProperty ("finish", "house").toString();
+        return f.equalsIgnoreCase ("brushed") ? FinishChoice::brushed
+             : f.equalsIgnoreCase ("powder")  ? FinishChoice::powder
+                                              : FinishChoice::house;
+    }
+
+    /** Every preference in one write, so choosing dark mode does not throw
+        away the surface and choosing a surface does not throw away dark mode.
+        Until the surface existed the file had one key, and setDarkMode wrote
+        it whole. */
+    void writePreferences()
+    {
+        const auto file = uiPreferenceFile();
+        file.getParentDirectory().createDirectory();
+
+        auto* object = new juce::DynamicObject();
+        object->setProperty ("appearance", dark ? "dark" : "light");
+        object->setProperty ("surface", currentSurface == Surface::textured ? "textured" : "simple");
+        object->setProperty ("finish", currentFinish == FinishChoice::brushed ? "brushed"
+                                     : currentFinish == FinishChoice::powder  ? "powder"
+                                                                              : "house");
+        file.replaceWithText (juce::JSON::toString (juce::var (object)));
+    }
+
     // Set by overrideThemeFile, and the same idea one level along: a tool can
     // render a candidate palette without writing over the machine-wide theme,
     // which is a file the user owns and which every open plugin is watching.
@@ -349,13 +389,7 @@ void overrideAppearance (bool shouldBeDark)
 void setDarkMode (bool shouldBeDark)
 {
     dark = shouldBeDark;
-
-    const auto file = uiPreferenceFile();
-    file.getParentDirectory().createDirectory();
-
-    auto* object = new juce::DynamicObject();
-    object->setProperty ("appearance", shouldBeDark ? "dark" : "light");
-    file.replaceWithText (juce::JSON::toString (juce::var (object)));
+    writePreferences();
 
     // Apply here rather than waiting for a poll, so the panel the click landed
     // on repaints at once; everyone else follows within a second.
@@ -378,6 +412,27 @@ void setDarkMode (bool shouldBeDark)
         recordThemedKeys (parsedTheme);
         current = tokensFromJson (parsedTheme, current);
     }
+}
+
+Surface surface() noexcept           { return currentSurface; }
+FinishChoice finishChoice() noexcept { return currentFinish; }
+
+void setSurface (Surface s, FinishChoice f)
+{
+    currentSurface = s;
+    currentFinish = f;
+    writePreferences();
+
+    // Left looking unread, as setDarkMode leaves it, so this editor's next
+    // poll reports the change and repaints.
+    preferenceRead = false;
+}
+
+void overrideSurface (Surface s, FinishChoice f)
+{
+    surfaceOverridden = true;
+    currentSurface = s;
+    currentFinish = f;
 }
 
 juce::StringArray tokenNames()
@@ -415,13 +470,23 @@ bool pollTheme()
 
         if (! preferenceRead || modified != lastPreferenceModified)
         {
-            const auto wanted = exists
-                && juce::JSON::parse (file.loadFileAsString())
-                       .getProperty ("appearance", "light").toString()
-                       .equalsIgnoreCase ("dark");
+            const auto prefs = exists ? juce::JSON::parse (file.loadFileAsString()) : juce::var();
+            const auto wanted = prefs.getProperty ("appearance", "light").toString()
+                                     .equalsIgnoreCase ("dark");
 
             changed = (! preferenceRead) || wanted != dark;
             dark = wanted;
+
+            if (! surfaceOverridden)
+            {
+                const auto s = surfaceFrom (prefs);
+                const auto f = finishFrom (prefs);
+
+                changed = changed || s != currentSurface || f != currentFinish;
+                currentSurface = s;
+                currentFinish = f;
+            }
+
             preferenceRead = true;
             lastPreferenceModified = modified;
         }

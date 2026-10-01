@@ -26,6 +26,20 @@ juce::String compactFrequency (const juce::String& text)
     return text;
 }
 
+// A control's caption: in the light appearance, the colour system stepped to
+// be legible on the plate -- the ink its dotted track and plus and minus are
+// drawn in -- and in the dark one, the colour system as it stands.
+//
+// Light was the raw colour from 0.2.3 (1.72-2.00:1 on the pale plate), which
+// left every knob in two colours once its marks moved to the stepped ink.
+// Frosty, 2026-09-30, from before-and-after renders of every panel: stepped
+// in light, raw in dark, where the stepped ink turned the captions pale and
+// took the module's colour out of them.
+static juce::Colour captionInk (juce::Colour system, const juce::Component& c)
+{
+    return isDarkMode() ? system : accentInk (system, panelTokensFor (c).plate);
+}
+
 //==============================================================================
 PlainKnob::PlainKnob (juce::RangedAudioParameter& param, const juce::String& captionText,
                       Knob::Style style, float faceScale, juce::Colour accent, juce::Colour captionColourIn)
@@ -120,17 +134,9 @@ void PlainKnob::paint (juce::Graphics& g)
                             : (knob.getUtilityTint().isTransparent() ? tokens().track
                                                                      : knob.getUtilityTint());
 
-    // The colour system as it stands, not stepped for contrast. A caption is
-    // the larger of a panel's two labels -- 15 pt against a section legend's
-    // 13 -- and it names a knob you are already looking at, where the legend
-    // is what you navigate by. So the raw colour goes here and the legible
-    // step goes on the legend; see ModulePanel::drawRuleLegend.
-    //
-    // The two swapped in 0.2.3 and the swap costs contrast here: on the pale
-    // plate a caption goes from 4.57-4.69:1 to 1.72-2.00:1, and on the dark
-    // one from 9.07 to 5.87. Frosty's call, taken on a render with those
-    // numbers in front of him. Do not "fix" it.
-    const auto ink = captionColour.isTransparent() ? system : captionColour;
+    // Stepped in light, raw in dark -- see captionInk, and do not undo either
+    // half without Frosty: both were his call, on renders.
+    const auto ink = captionColour.isTransparent() ? captionInk (system, knob) : captionColour;
 
 
     // Hung off the knob's own bottom edge, not the component's. The two are
@@ -216,9 +222,236 @@ void PlainKnob::setEndMarks (Knob::EndMarks m)
     repaint();
 }
 
-void PlainKnob::setStepMarks (int count, int labelEvery)
+void PlainKnob::setStepMarks (int count, int labelEvery, int firstLabel)
 {
-    knob.setStepMarks (count, labelEvery);
+    knob.setStepMarks (count, labelEvery, firstLabel);
+    repaint();
+}
+
+//==============================================================================
+Fader::Fader (juce::RangedAudioParameter& param, const juce::String& captionText,
+              juce::Colour accent, juce::Colour captionColourIn)
+    : caption (captionText), captionColour (captionColourIn), accentColour (accent), parameter (param)
+{
+    // A component name, so a layout test can find this fader by the caption a
+    // reader sees. PlainKnob's constructor, same reason.
+    setName (captionText);
+
+    // The slider draws through this rather than through the look and feel --
+    // see FaderSlider. Set before the slider is visible, so it never paints an
+    // empty frame.
+    slider.painter = [this] (juce::Graphics& g) { paintFader (g); };
+    addAndMakeVisible (slider);
+
+    attachment = std::make_unique<juce::SliderParameterAttachment> (parameter, slider);
+
+    // The cap is the slider's to repaint and the number under the caption is
+    // this component's, so a move has to reach both.
+    slider.onValueChange = [this] { if (showsValue) repaint (valueBox()); };
+}
+
+juce::Rectangle<int> Fader::bodyBox() const
+{
+    return getLocalBounds().withTrimmedBottom (captionRow());
+}
+
+float Fader::travel() const
+{
+    return juce::jmax (0.0f, (float) bodyBox().getHeight() - kCapHeight);
+}
+
+float Fader::proportion() const
+{
+    return juce::jlimit (0.0f, 1.0f, parameter.getValue());
+}
+
+juce::Rectangle<float> Fader::capBounds() const
+{
+    const auto body = bodyBox();
+
+    // Down from the top by however much of the travel is unused. The cap sits
+    // at the top of its slot at the top of the range, and a cap cannot leave
+    // its slot -- which is why the travel is the body less the cap rather than
+    // the body.
+    const auto centreY = (float) body.getY() + kCapHeight * 0.5f
+                           + (1.0f - proportion()) * travel();
+
+    return juce::Rectangle<float> (kCapWidth, kCapHeight)
+             .withCentre ({ (float) body.getCentreX(), centreY });
+}
+
+juce::Rectangle<int> Fader::captionBox() const
+{
+    return { 0, bodyBox().getBottom(), getWidth(),
+             captionRow() - 4 - (showsValue ? valueRow() : 0) };
+}
+
+juce::Rectangle<int> Fader::valueBox() const
+{
+    if (! showsValue)
+        return {};
+
+    const auto name = captionBox();
+    return { 0, name.getBottom(), getWidth(), valueRow() };
+}
+
+juce::String Fader::valueText() const
+{
+    const auto host = parameter.getCurrentValueAsText();
+    return valueFormat ? valueFormat (host) : host;
+}
+
+void Fader::resized()
+{
+    slider.setBounds (bodyBox());
+}
+
+void Fader::paintFader (juce::Graphics& g)
+{
+    // `g` is the slider's, and the slider's bounds are `bodyBox()` in this
+    // component's coordinates. One transform here, and every figure below --
+    // including `capBounds()`, which a test also reads -- is in the
+    // component's own frame. Two frames is how a cap and a test drift apart.
+    const auto body = bodyBox();
+    g.addTransform (juce::AffineTransform::translation ((float) -body.getX(), (float) -body.getY()));
+
+    const auto t      = panelTokensFor (*this);
+    const auto accent = panelAccentFor (*this, accentColour);
+
+    // Disabled draws at the alpha the knobs use, so a greyed fader and a
+    // greyed knob in one row fade together.
+    const auto dim = [this] (juce::Colour c)
+    {
+        return slider.isEnabled() ? c : c.withMultipliedAlpha (0.4f);
+    };
+
+    const auto cap    = capBounds();
+    const auto top    = (float) body.getY() + kCapHeight * 0.5f;
+    const auto radius = kTrackWidth * 0.5f;
+
+    // The slot: a ground cut into the faceplate, so `well` through
+    // `panelTokensFor` -- the call every other recess in the suite makes, so
+    // an LTV plate would move it -- with a darker edge on top.
+    const auto track = juce::Rectangle<float> (kTrackWidth, travel() + kCapHeight)
+                         .withCentre ({ (float) body.getCentreX(), top + travel() * 0.5f });
+
+    g.setColour (dim (t.well));
+    g.fillRoundedRectangle (track, radius);
+    g.setColour (dim (tokens().outline));
+    strokeInside (g, track, radius, Tokens::hairlineWeight);
+
+    // What has been travelled, from the foot of the slot up to the cap, in the
+    // accent at `kFillAlpha`. This is the part that lets a row of faders be
+    // read at a glance without finding three caps first.
+    const auto travelled = track.withTop (cap.getCentreY()).reduced (1.0f, 0.0f);
+
+    if (travelled.getHeight() > 2.0f)
+    {
+        g.setColour (dim (accent.withAlpha (kFillAlpha)));
+        g.fillRoundedRectangle (travelled.withTrimmedBottom (1.0f), radius);
+    }
+
+    // Five short ticks down the left, and no numbers beside them: the value
+    // line under the caption is the number. See the class comment.
+    g.setColour (dim (tokens().outline));
+
+    for (int i = 0; i < kTicks; ++i)
+    {
+        const auto y = top + travel() * (float) i / (float) (kTicks - 1);
+        const auto x = track.getX() - kTickGap;
+
+        g.fillRect (juce::Rectangle<float> (x - kTickLength, y - 0.5f, kTickLength, 1.0f));
+    }
+
+    // The cap: `faceOf` the accent, which is what a character knob's cap is --
+    // the accent washed toward `knobTint` on the pale plate and the accent
+    // itself on the dark one -- so a fader and a knob in one row read as the
+    // same colour of control rather than as two.
+    g.setColour (dim (faceOf (accent)));
+    g.fillRoundedRectangle (cap, Tokens::corner);
+    g.setColour (dim (tokens().knobEdge));
+    strokeInside (g, cap, Tokens::corner, Tokens::hairlineWeight);
+
+    // The centre line, which is what says where on the travel the cap is
+    // reading from. `onAccentOf` rather than a literal dark: it is dark on
+    // every cap on the pale plate, and on the dark one -- where the cap is the
+    // accent at full strength -- it steps the other way instead of
+    // disappearing into it.
+    g.setColour (dim (onAccentOf (faceOf (accent))));
+    g.fillRect (juce::Rectangle<float> (cap.getWidth() - 8.0f, 1.4f).withCentre (cap.getCentre()));
+}
+
+void Fader::paint (juce::Graphics& g)
+{
+    // Derived here rather than cached in the constructor, so editing the theme
+    // file recolours an open panel. PlainKnob::paint carries the argument, and
+    // the ink is the same: a fader is a character control, so its caption is
+    // the module's colour, stepped in light and raw in dark (captionInk).
+    const auto system = panelAccentFor (*this, accentColour);
+    const auto ink = captionColour.isTransparent() ? captionInk (system, *this) : captionColour;
+
+    drawLabel (g, caption, captionBox().toFloat(),
+               juce::Justification::centred, captionFont (captionSize),
+               slider.isEnabled() ? ink : ink.withAlpha (0.4f));
+
+    // The value in the caption face, a step down and in the secondary ink --
+    // it is read after the name, so it should not compete with it.
+    if (showsValue)
+        drawLabel (g, valueText(), valueBox().toFloat(),
+                   juce::Justification::centredTop, captionFont (kValueSize),
+                   slider.isEnabled() ? tokens().text2 : tokens().text2.withAlpha (0.4f));
+}
+
+float Fader::captionOverflow() const
+{
+    auto overflow = juce::GlyphArrangement::getStringWidth (captionFont (captionSize), caption)
+                      - (float) captionBox().getWidth();
+
+    // The value at the widest it can be rather than at whatever it reads now:
+    // both ends of the range and the default. PlainKnob::captionOverflow.
+    if (showsValue)
+        for (const auto n : { 0.0f, 1.0f, parameter.getDefaultValue() })
+        {
+            const auto host = parameter.getText (n, 0);
+            const auto text = valueFormat ? valueFormat (host) : host;
+
+            overflow = juce::jmax (overflow,
+                                   juce::GlyphArrangement::getStringWidth (captionFont (kValueSize), text)
+                                     - (float) valueBox().getWidth());
+        }
+
+    return overflow;
+}
+
+void Fader::setShowsValue (bool shouldShow)
+{
+    showsValue = shouldShow;
+    resized();
+    repaint();
+}
+
+void Fader::setValueFormat (std::function<juce::String (const juce::String&)> format)
+{
+    valueFormat = std::move (format);
+    repaint();
+}
+
+void Fader::setCaptionSize (float points)
+{
+    captionSize = points;
+    resized();
+    repaint();
+}
+
+void Fader::setFaderEnabled (bool shouldBeEnabled)
+{
+    slider.setEnabled (shouldBeEnabled);
+    repaint();
+}
+
+void Fader::setAccent (juce::Colour accent)
+{
+    accentColour = accent;
     repaint();
 }
 
@@ -490,6 +723,15 @@ int ConcentricBand::inkHalfWidth() const
     return juce::roundToInt (geometry().maxRadius + kLegendBoxWidth * 0.5f);
 }
 
+float ConcentricBand::capDiameter() const noexcept
+{
+    // `geometry().ringRadius` doubled, and written out rather than called so
+    // that the arithmetic a panel has to size for is visible in one line: the
+    // cell's **smaller** side times the ring's face scale. A band handed a
+    // whole cell draws whatever that cell happened to be.
+    return (float) juce::jmin (getWidth(), getHeight()) * ring.getFaceScale();
+}
+
 void ConcentricBand::setDialOffset (int dx)
 {
     if (dialOffset == dx)
@@ -588,6 +830,147 @@ void ConcentricBand::resized()
     const auto ringRadius = juce::jmin (area.getWidth(), area.getHeight()) * 0.5f * ring.getFaceScale();
 
     centre.setTrackRadius (ringRadius + Tokens::concentricTrackGap);
+}
+
+//==============================================================================
+ChoiceBox::ChoiceBox (juce::RangedAudioParameter& parameter, const ParamSpec& spec,
+                      const juce::String& captionText, juce::Colour accent,
+                      juce::Colour captionColourIn)
+    : caption (captionText), captionColour (captionColourIn), accentColour (accent)
+{
+    // A component name, so a layout test can find this control by the caption
+    // a reader sees -- PlainKnob's constructor, same reason.
+    setName (captionText);
+
+    // Item IDs are 1-based because 0 means "nothing selected" to a ComboBox,
+    // so item N holds detent N-1. That is also what ComboBoxParameterAttachment
+    // assumes, and it maps by *index* rather than by id -- which is why the
+    // items have to be in the spec's own order and have to all be here before
+    // the attachment is made.
+    for (int i = 0; i < spec.numChoices(); ++i)
+        box.addItem (spec.choices[(size_t) i], i + 1);
+
+    // Centred in the text box the look and feel leaves, which stops 30 px short
+    // of the right edge for the arrow -- so centred text sits a little left of
+    // the box's own middle and the arrow is what balances it.
+    box.setJustificationType (juce::Justification::centred);
+
+    // The one colour the shared scheme cannot know. See the class comment: the
+    // scheme's arrow is `track`, the utility azure, and utility azure on a
+    // module's own control is the failure BMO Linger's groups already had.
+    box.setColour (juce::ComboBox::arrowColourId, accentColour);
+
+    addAndMakeVisible (box);
+
+    attachment = std::make_unique<juce::ComboBoxParameterAttachment> (parameter, box);
+
+    // The box prints the value, so it has to redraw when the host moves the
+    // parameter -- the attachment does that. The caption does not change, so
+    // nothing else here listens.
+}
+
+juce::Rectangle<int> ChoiceBox::captionBox() const
+{
+    // Hard against the box on whichever side it is set, so the 4 px of air in
+    // `captionRow` falls at the outside edge of the component either way --
+    // which is what makes a caption above and a caption below read as the same
+    // distance from the control they name. See setCaptionAbove.
+    if (captionAbove)
+        return { 0, box.getY() - (captionRow() - 4), getWidth(), captionRow() - 4 };
+
+    return { 0, box.getBottom(), getWidth(), captionRow() - 4 };
+}
+
+void ChoiceBox::resized()
+{
+    // The square a knob of `controlSide` would be drawn in, worked out exactly
+    // as PlainKnob::resized works it out -- the area clear of the caption row,
+    // squared and centred, capped at the side. The box then hangs at the foot
+    // of it, which is where that knob's own bottom edge is, so the two
+    // captions land on one line. See setControlSide.
+    //
+    // With the caption above, the whole arrangement is the other way up: the
+    // row is trimmed off the top and the box hangs at the square's own top, so
+    // the name still sits hard against the control rather than floating.
+    const auto area = captionAbove ? getLocalBounds().withTrimmedTop (captionRow())
+                                   : getLocalBounds().withTrimmedBottom (captionRow());
+    const auto side = juce::jmin (area.getWidth(), area.getHeight(), controlSide);
+    const auto square = area.withSizeKeepingCentre (side, side);
+
+    const auto width = juce::jmin (getWidth() - kBoxMargin * 2, boxWidth);
+    const auto centreY = captionAbove ? square.getY() + kBoxHeight / 2
+                                      : square.getBottom() - kBoxHeight / 2;
+
+    box.setBounds (juce::Rectangle<int> (width, kBoxHeight)
+                       .withCentre ({ getWidth() / 2, centreY }));
+}
+
+void ChoiceBox::paint (juce::Graphics& g)
+{
+    // Derived here rather than cached in the constructor so that editing the
+    // theme file recolours an open panel: the editors repaint on a theme change
+    // but do not rebuild their controls. PlainKnob::paint, same reason.
+    const auto system = panelAccentFor (box, accentColour);
+    const auto ink = captionColour.isTransparent() ? captionInk (system, box) : captionColour;
+
+    drawLabel (g, caption, captionBox().toFloat(),
+               juce::Justification::centred, captionFont (captionSize),
+               box.isEnabled() ? ink : ink.withAlpha (0.4f));
+}
+
+float ChoiceBox::captionOverflow() const
+{
+    const auto name = juce::GlyphArrangement::getStringWidth (captionFont (captionSize), caption)
+                        - (float) captionBox().getWidth();
+
+    return juce::jmax (name, BmoLookAndFeel::comboTextOverflow (box));
+}
+
+juce::String ChoiceBox::getSelectedText() const
+{
+    return box.getText();
+}
+
+void ChoiceBox::setBoxEnabled (bool shouldBeEnabled)
+{
+    box.setEnabled (shouldBeEnabled);
+    repaint();
+}
+
+void ChoiceBox::setAccent (juce::Colour colour)
+{
+    accentColour = colour;
+    box.setColour (juce::ComboBox::arrowColourId, accentColour);
+    repaint();
+}
+
+void ChoiceBox::setCaptionSize (float points)
+{
+    captionSize = points;
+    resized();
+    repaint();
+}
+
+void ChoiceBox::setControlSide (int side)
+{
+    controlSide = side;
+    resized();
+}
+
+void ChoiceBox::setBoxWidth (int maxWidth)
+{
+    boxWidth = maxWidth;
+    resized();
+}
+
+void ChoiceBox::setCaptionAbove (bool shouldBeAbove)
+{
+    if (captionAbove == shouldBeAbove)
+        return;
+
+    captionAbove = shouldBeAbove;
+    resized();
+    repaint();
 }
 
 //==============================================================================
@@ -713,7 +1096,7 @@ void OutputMeter::paint (juce::Graphics& g)
     }
 
     g.setColour (t.outline.withAlpha (0.6f));
-    g.drawRoundedRectangle (well.reduced (0.5f), 2.0f, 1.0f);
+    strokeInside (g, well, 2.0f, 1.0f);
 
     drawLabel (g, vuMode ? "VU" : "dBFS", labelArea.toFloat(), juce::Justification::centred,
                labelFont (9.0f), t.text2);
@@ -1025,25 +1408,17 @@ void DynamicsMeter::paint (juce::Graphics& g)
     //
     // The bezel is stroked on a path inset by half its own width, so its outer
     // edge lands on `bounds` with a corner radius of kFaceRadius + half the
-    // width. The face is filled to `bounds` too -- and a *smaller* corner
-    // radius is a squarer corner, which reaches further into the corner than a
-    // rounder one. Fill at a flat 4 and the face pokes out past the frame at
-    // all four corners.
+    // width. The face is filled to `bounds` at exactly that radius, so the two
+    // outer edges are one curve and no corner of the face shows outside the
+    // frame at any weight.
     //
-    // At the suite's 1.5 px the overhang is a fifth of a pixel and has never
-    // been seen. At BMO FET's 4 px it is a visible grey speck at each corner,
-    // outside a black frame and against a dark plate, which is what this
-    // corrects.
-    //
-    // **Derived from the change in thickness, not from the thickness.** The
-    // geometrically exact fill radius is kFaceRadius + half the stroke width,
-    // which at the default works out at 4.75 against the 4.0 this has always
-    // filled -- correct, and it moves every shipped meter's corners. Taking
-    // the *difference* from the default instead leaves 1.5 px filling exactly
-    // 4.0 as before, and carries the same fifth-of-a-pixel overhang up to any
-    // weight rather than letting it grow with the frame. BMO Opto's three
-    // hashes hold, which is the constraint this class works under.
-    const auto faceRadius = kFaceRadius + (bezelThickness - kDefaultBezelThickness) * 0.5f;
+    // Until 2026-09-26 the face took the *change* in thickness from the
+    // default instead, which left the default 1.5 px frame filling a flat 4.0
+    // -- a fifth of a pixel of face outside the frame at every corner, kept so
+    // that BMO Opto's three golden hashes would hold. Frosty had it made exact
+    // (2026-09-26: "fix the rest", with the hashes named), so those hashes
+    // move with this and are re-baselined; see testing-notes.
+    const auto faceRadius = kFaceRadius + bezelThickness * 0.5f;
 
     g.setColour (t.meterFace);
     g.fillRoundedRectangle (bounds, faceRadius);

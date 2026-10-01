@@ -6,6 +6,7 @@
 #include "modules/eq/Module.h"
 #include "modules/fetcomp/Module.h"
 #include "modules/opto/Module.h"
+#include "modules/reverb/Module.h"
 #include "modules/sat/Module.h"
 #include "modules/util/Module.h"
 #include "modules/vcomp/Module.h"
@@ -26,6 +27,7 @@ const std::vector<const ModuleDef*>& registry()
         &deesser::module(),
         &fetcomp::module(),
         &dwell::module(),
+        &reverb::module(),
     };
 
     return defs;

@@ -1,20 +1,25 @@
 // Renders a product's editor to a PNG without a display, so a layout change
 // can be reviewed in a pull request rather than described in one.
 //
-//   snapshot <eq|sat|util|opto|dim|deq|ltvcomp|deesser|fetcomp|rack> out.png [width height] [param=value ...]
-//   snapshot <eq|sat|util|opto|dim|deq|ltvcomp|deesser|rack> out.png [width height] [param=value ...]
-//   snapshot <eq|sat|util|opto|dim|deq|ltvcomp|dwell|rack> out.png [width height] [param=value ...]
+//   snapshot <eq|sat|util|opto|dim|deq|ltvcomp|deesser|fetcomp|dwell|reverb|rack> out.png [width height] [param=value ...]
 //
 // For the rack, "chain=util,eq,sat,opto" sets the modules and "N.id=value"
 // sets a parameter of the module in slot N (1-based), e.g. 2.mid_gain=4.
 //
 // "view=compact|expanded" picks the width of a module that has two (BMO DEQ,
-// BMO Dwell), standalone; "N.view=..." does the same for rack slot N.
+// BMO Dwell and BMO Linger), standalone; "N.view=..." does the same for rack slot N.
 // Standalone opens expanded and a rack compact, so these render the other one.
 //
 // "appearance=dark|light" renders the other palette. Set for this process
 // only: it neither writes nor reads the machine-wide preference, so it cannot
 // flip the look of plugins that happen to be open.
+//
+// "surface=simple|textured" picks the surface, "finish=house|brushed|powder"
+// the textured plate's finish, and "knobs=tagged|ringed|onepiece" draws every
+// knob in one textured form (tagged, the default, follows each knob's tag).
+// All three for this process only, like "appearance": the machine-wide UI.json
+// is neither read nor written. Without "surface=" a render is Simple whatever
+// this machine prefers, so a render never depends on whose machine made it.
 //
 // "theme=<file.json>" overlays a palette, the same flat token -> hex file an
 // editor watches, so a candidate colour can be rendered without writing the
@@ -50,14 +55,17 @@
 #include "products/eq/Product.h"
 #include "products/fetcomp/Product.h"
 #include "products/opto/Product.h"
+#include "products/reverb/Product.h"
 #include "products/vcomp/Product.h"
 #include "products/sat/Product.h"
 #include "products/util/Product.h"
 #include "products/rack/Product.h"
 
 #include "core/ui/ModulePanel.h"
+#include "tools/snapshot/PngOut.h"
 
 #include <juce_gui_basics/juce_gui_basics.h>
+#include <functional>
 #include <iostream>
 #include <optional>
 #include <utility>
@@ -76,9 +84,13 @@ namespace
         if (product == "dim")  return createDim();
         if (product == "deq")  return createDeq();
         if (product == "ltvcomp") return createVcomp();
+        // By the module's id rather than its display name, as every row here
+        // is: BMO Defang is `deesser`, BMO FET is `fetcomp` and BMO Linger is
+        // `reverb`.
         if (product == "deesser") return createDeesser();
         if (product == "fetcomp") return createFetcomp();
         if (product == "dwell") return createDwell();
+        if (product == "reverb") return createReverb();
         if (product == "rack") return createRack();
         return nullptr;
     }
@@ -237,9 +249,7 @@ int main (int argc, char** argv)
 
     if (argc < 3)
     {
-        std::cerr << "usage: snapshot <eq|sat|util|opto|dim|deq|ltvcomp|deesser|fetcomp|rack> out.png [width height] [param=value ...]\n";
-        std::cerr << "usage: snapshot <eq|sat|util|opto|dim|deq|ltvcomp|deesser|rack> out.png [width height] [param=value ...]\n";
-        std::cerr << "usage: snapshot <eq|sat|util|opto|dim|deq|ltvcomp|dwell|rack> out.png [width height] [param=value ...]\n";
+        std::cerr << "usage: snapshot <eq|sat|util|opto|dim|deq|ltvcomp|deesser|fetcomp|dwell|reverb|rack> out.png [width height] [param=value ...]\n";
         return 2;
     }
 
@@ -332,6 +342,53 @@ int main (int argc, char** argv)
         bmo::ui::overrideThemeFile (file);
     }
 
+    // The surface, pinned for this process before anything paints. Simple
+    // unless asked, whatever UI.json on this machine says.
+    {
+        auto wantSurface = bmo::ui::Surface::simple;
+        auto wantFinish  = bmo::ui::FinishChoice::house;
+        auto wantForm    = bmo::ui::Knob::TexturedForm::automatic;
+
+        for (int i = first; i < argc; ++i)
+        {
+            const juce::String arg { argv[i] };
+            const auto value = arg.fromFirstOccurrenceOf ("=", false, false);
+
+            if (arg.startsWith ("surface="))
+            {
+                if (value.equalsIgnoreCase ("textured"))    wantSurface = bmo::ui::Surface::textured;
+                else if (! value.equalsIgnoreCase ("simple"))
+                {
+                    std::cerr << "surface is simple or textured, got " << value << '\n';
+                    return 2;
+                }
+            }
+            else if (arg.startsWith ("finish="))
+            {
+                if (value.equalsIgnoreCase ("brushed"))     wantFinish = bmo::ui::FinishChoice::brushed;
+                else if (value.equalsIgnoreCase ("powder")) wantFinish = bmo::ui::FinishChoice::powder;
+                else if (! value.equalsIgnoreCase ("house"))
+                {
+                    std::cerr << "finish is house, brushed or powder, got " << value << '\n';
+                    return 2;
+                }
+            }
+            else if (arg.startsWith ("knobs="))
+            {
+                if (value.equalsIgnoreCase ("ringed"))        wantForm = bmo::ui::Knob::TexturedForm::ringed;
+                else if (value.equalsIgnoreCase ("onepiece")) wantForm = bmo::ui::Knob::TexturedForm::onePiece;
+                else if (! value.equalsIgnoreCase ("tagged"))
+                {
+                    std::cerr << "knobs is tagged, ringed or onepiece, got " << value << '\n';
+                    return 2;
+                }
+            }
+        }
+
+        bmo::ui::overrideSurface (wantSurface, wantFinish);
+        bmo::ui::BmoLookAndFeel::overrideKnobForm (wantForm);
+    }
+
     for (int i = first; i < argc; ++i)
     {
         const juce::String arg { argv[i] };
@@ -359,6 +416,9 @@ int main (int argc, char** argv)
 
             continue;
         }
+
+        if (key == "surface" || key == "finish" || key == "knobs")
+            continue;               // taken in the pass below
 
         if (key == "theme")
             continue;               // taken in the pass above
@@ -679,45 +739,112 @@ int main (int argc, char** argv)
         juce::Timer::callPendingTimersSynchronously();
     }
 
-    const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), false, 2.0f);
-
-    juce::PNGImageFormat png;
-
-    // Truncate first. `createOutputStream` opens an existing file **at the
-    // end**, so re-rendering over a snapshot appended a second PNG instead of
-    // replacing the first -- and every viewer reads the leading image and
-    // ignores the trailing bytes, so the tool reported "wrote" and the file
-    // still showed the previous render. A panel change then looked like it had
-    // done nothing. Found on AURORA, 2026-09-21, when three renders of the
-    // same path came to exactly the sum of their three sizes.
-    //
-    // This bit every module, not just BMO FET, and it bit hardest exactly when
-    // someone was iterating: first render correct, every one after it stale.
-    // Any recorded hash taken from a re-rendered file is suspect.
-    out.deleteFile();
-
-    // **Truncate first.** `File::createOutputStream` hands back a stream
-    // positioned at the *end* of an existing file, so rendering twice to one
-    // name appended a second PNG after the first rather than replacing it --
-    // and every reader, from an image viewer to `tools/inspect`, stops at the
-    // first image in the file. The render loop this repo is built on
-    // ("Looking at a panel without a 20-minute build", WORKFLOWS.md) therefore
-    // showed the *first* build's panel every time `out.png` already existed,
-    // while the file quietly grew by one image a render.
-    //
-    // Found on AURORA, 2026-09-21, during BMO Dwell's panel redesign, after
-    // three rebuilds chasing a fix that had been in the binary all along. It
-    // is the same trap as the stale ctest binary: the tool does not fail, it
-    // succeeds at answering a question that was asked several builds ago.
-    std::unique_ptr<juce::FileOutputStream> stream (out.createOutputStream());
-
-    if (stream != nullptr)
+    // BMO_LIST_KNOBS=1 prints every knob on the editor and the form it takes
+    // in the Textured surface, with where that form came from: its own tag,
+    // a section tag, or the style fallback. The allocation table in
+    // docs/ui-material-proposal.md is this output.
+    if (juce::SystemStats::getEnvironmentVariable ("BMO_LIST_KNOBS", {}).isNotEmpty())
     {
-        stream->setPosition (0);
-        stream->truncate();
+        std::function<void (juce::Component&)> walk = [&] (juce::Component& c)
+        {
+            if (auto* k = dynamic_cast<bmo::ui::Knob*> (&c); k != nullptr
+                && k->getStyle() != bmo::ui::Knob::Style::ring)
+            {
+                juce::String module = "-", label;
+                for (auto* p = c.getParentComponent(); p != nullptr; p = p->getParentComponent())
+                {
+                    if (label.isEmpty() && p->getName().isNotEmpty())
+                        label = p->getName();
+                    if (auto* panel = dynamic_cast<bmo::ui::ModulePanel*> (p))
+                    {
+                        module = panel->getContext().def.name;
+                        break;
+                    }
+                }
+
+                juce::String source = "style";
+                if (k->getTexturedForm() != bmo::ui::Knob::TexturedForm::automatic)
+                    source = "knob";
+                else
+                    for (auto* p = c.getParentComponent(); p != nullptr; p = p->getParentComponent())
+                        if ((int) p->getProperties().getWithDefault (bmo::ui::ModulePanel::kTexturedFormTag, 0) != 0)
+                        {
+                            source = "section";
+                            break;
+                        }
+
+                const auto style = k->getStyle() == bmo::ui::Knob::Style::character ? "character"
+                                 : k->getStyle() == bmo::ui::Knob::Style::filter    ? "filter"
+                                                                                    : "utility";
+                const auto form = bmo::ui::texturedFormFor (*k) == bmo::ui::Knob::TexturedForm::ringed
+                                      ? "ringed" : "one-piece";
+
+                const auto radius = (float) juce::jmin (k->getWidth(), k->getHeight()) * 0.5f * k->getFaceScale();
+
+                // Where the default sits on the sweep, 0..1, as the track
+                // draws it, and whether this knob draws a default mark at all
+                // (a dotted track: not a ring, not a filter, not stepped, and
+                // not opted out with setRestMark (false)).
+                const auto range = k->getRange();
+                const auto restPos = range.getLength() > 0.0 && k->isDoubleClickReturnEnabled()
+                                       ? juce::jlimit (0.0, 1.0, k->valueToProportionOfLength (k->getDoubleClickReturnValue()))
+                                       : -1.0;
+                const auto tracked = (k->getStyle() == bmo::ui::Knob::Style::utility
+                                      || k->getStyle() == bmo::ui::Knob::Style::character)
+                                     && k->getStepMarks() <= 1 && k->hasRestMark();
+
+                std::cout << "knob\t" << module << "\t" << (label.isEmpty() ? juce::String ("?") : label)
+                          << "\t" << style << "\t" << form << "\t" << source
+                          << "\t" << juce::String (radius, 2)
+                          << "\t" << juce::String (restPos, 4) << "\t" << (tracked ? "tracked" : "untracked")
+                          << "\t" << editor->getLocalArea (k, k->getLocalBounds()).toString()
+                          << "\t" << (k->getInterval() > 0.0
+                                          ? juce::String (juce::roundToInt (range.getLength() / k->getInterval()) + 1)
+                                          : juce::String ("continuous"))
+                          << "\t" << k->getTextFromValue (range.getStart()) << " .. " << k->getTextFromValue (range.getEnd())
+                          << "\t" << k->getStepMarks() << "\n";
+            }
+
+            for (auto* child : c.getChildren())
+                walk (*child);
+        };
+
+        walk (*editor);
     }
 
-    if (stream == nullptr || ! png.writeImageToStream (image, *stream))
+    // BMO_PAINT_BENCH=N repaints the whole editor N more times and
+    // prints the mean, so the Textured surface can be costed against Simple
+    // on the same machine. A full-editor paint is the worst case: a
+    // running plugin repaints only what changed.
+    if (const auto runs = juce::SystemStats::getEnvironmentVariable ("BMO_PAINT_BENCH", "0").getIntValue(); runs > 0)
+    {
+        const auto start = juce::Time::getMillisecondCounterHiRes();
+
+        for (int i = 0; i < runs; ++i)
+            editor->createComponentSnapshot (editor->getLocalBounds(), false, 2.0f);
+
+        std::cout << "paint: " << (juce::Time::getMillisecondCounterHiRes() - start) / runs
+                  << " ms per full editor at 2x\n";
+    }
+
+    const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), false, 2.0f);
+
+    // PngOut.h, not an inline createOutputStream: writing over an existing
+    // render used to append rather than replace, and tests/tools/SnapshotIoTests
+    // now holds that line. See the header for what it cost.
+    //
+    // The same fault was fixed twice, independently -- inline here on `main` for
+    // BMO FET, and behind this seam on BMO Linger's branch. One survives, and it
+    // is the seam, because it is the one a test can call: the inline version was
+    // `deleteFile()` alone, this one keeps the truncate behind it as well, and
+    // `snapshot_io` is the only regression test the bug has.
+    //
+    // Carried over from the inline fix, because it is the part that is easy to
+    // forget: this bit every module, not just BMO FET, and it bit hardest
+    // exactly when someone was iterating -- first render correct, every one
+    // after it stale. **Any recorded hash taken from a re-rendered file before
+    // this landed is suspect.**
+    if (! bmo::snapshot::writePng (out, image))
     {
         std::cerr << "could not write " << out.getFullPathName() << '\n';
         return 1;

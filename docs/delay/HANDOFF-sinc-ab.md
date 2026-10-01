@@ -1,7 +1,7 @@
 # Handoff: run the BMO Dwell sinc A/B with Frosty
 
 Paste everything under the line into a **fresh session opened on the Dwell
-worktree**, `C:\Users\thesp\OneDrive\Documents\REPO\bmo-mix-rack-333-dwell`.
+worktree**, `bmo-mix-rack-333-dwell`, a sibling of the main working copy.
 Written on AURORA, 2026-09-23. Everything is already prepared; this session
 runs the test and records the answer.
 
@@ -14,9 +14,10 @@ them. Machine is **AURORA**; name it in anything you write.
 ## Do these three things first, before anything else
 
 **1. Give Frosty the folder, formatted to paste straight into Explorer.**
-Print it on its own line, with backslashes, nothing else on the line:
+Print its full path on its own line, with backslashes, nothing else on the
+line. It is beside the working copies, not inside one:
 
-    C:\Users\thesp\OneDrive\Documents\REPO\bmo-listening\dwell-sinc-ab-2026-09-23\blind
+    ..\bmo-listening\dwell-sinc-ab-2026-09-23\blind
 
 Twenty files, 44 MB, outside every git tree. `KEY.txt` and `HOW-TO-LISTEN.txt`
 are one level up, in `...\dwell-sinc-ab-2026-09-23\`. The labelled set is in

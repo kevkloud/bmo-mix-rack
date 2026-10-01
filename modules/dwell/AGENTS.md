@@ -160,10 +160,12 @@ parameter, never in a preset. Nothing resizes and nothing turns a page when a
 parameter moves, so the old "`fx` opens the column once, by a click" rule has
 nothing left to guard and is gone with the column.
 
-`lane_note` (id 22) has **no control** on any page. It is SYNC's lane division
-and SYNC ships disabled; when the tempo plumbing lands, LANE TIME takes
-`lane_note`'s place exactly as TIME takes NOTE's, and `tests/ui/LayoutTests.cpp`'s
-every-parameter-has-a-control sum has to change with it.
+**SYNC swaps both engines' time for their note, together.** With SYNC on,
+NOTE takes TIME's cell in the foot and LANE NOTE (`lane_note`, id 22) takes LANE
+TIME's on the LANE page, because one switch governs both engines. SYNC ships
+disabled, but a preset or host can still write it, so the panel shows whichever
+knob is live; `resized` reads SYNC itself so any layout matches the parameter.
+Every parameter has a control, and `tests/ui/LayoutTests.cpp` sums them.
 
 **`fx_link` (id 26) is the one tie left, and it has no gesture.** It makes the
 lane's FX trio (23–25) follow the main's (17–19), default on, and while it is on

@@ -242,7 +242,7 @@ private:
     // LANE TIME, ...), which is what `findNamed` in tests/ui/LayoutTests.cpp
     // walks.
     ui::SwitchButton sendHeld, hold, chop, laneFx, fxLink;
-    ui::PlainKnob laneGain, laneTime, laneLevel;
+    ui::PlainKnob laneGain, laneTime, laneNote, laneLevel;
     std::unique_ptr<ChoiceRow> laneFxType;
     std::unique_ptr<ui::PlainKnob> laneFxAmount;
 

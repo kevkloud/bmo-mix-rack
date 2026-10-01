@@ -1140,21 +1140,44 @@ void checkDwellPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
     const char* const fxPage[] { "DIFFUSE", "PAN", "CRUSH", "FX", "AMOUNT SMEAR" };
 
     /** **Every parameter has a control, and this is the sum that says so.**
-        A choice row is one parameter for three cells, and NOTE shares TIME's
-        cell. `lane_note` is the one parameter with no control: it is SYNC's
-        lane division, and SYNC ships disabled until docs/delay/12's tempo
-        plumbing lands -- at which point LANE TIME takes NOTE's place exactly
-        as TIME does, and this line has to change. */
+        A choice row is one parameter for three cells, NOTE shares TIME's
+        cell, and LANE NOTE shares LANE TIME's -- wired 2026-10-01 so that no
+        parameter is left without a control while SYNC ships disabled. */
     {
         constexpr int kFootParams = 5;   // time, note, feedback, mix, sync
         constexpr int kToneParams = 8;   // character, stereo, two cuts, drive, rate, depth, duck
-        constexpr int kLaneParams = 10;  // send, hold, chop, lane fx type, tail, time, level, lane fx, amount, link
+        constexpr int kLaneParams = 11;  // send, hold, chop, lane fx type, tail, time, note, level, lane fx, amount, link
         constexpr int kFxParams   = 3;   // fx type, fx, amount
-        constexpr int kNoControl  = 1;   // lane_note
 
-        checkEquals (kFootParams + kToneParams + kLaneParams + kFxParams + kNoControl,
+        checkEquals (kFootParams + kToneParams + kLaneParams + kFxParams,
                      (int) D::Index::count,
-                     who + " every parameter has a control on some page, or is named as having none");
+                     who + " every parameter has a control on some page");
+    }
+
+    //== SYNC swaps both engines' time for their note, together ===============
+    //
+    // One switch governs both engines (params.h), so the foot's TIME and the
+    // lane's TIME give way to their NOTEs at once. SYNC ships disabled, but
+    // the parameter can still be written -- by a preset or a host -- and the
+    // panel has to show the knob that is live.
+    {
+        const auto syncWas = params.getReal (D::Index::sync);
+
+        params.setReal (D::Index::sync, 1.0f);
+        panel.setUiState ("page", "lane");   // lays the panel out again
+
+        check (findNamed (panel, "NOTE") != nullptr, who + " SYNC on: the foot shows no NOTE");
+        check (findNamed (panel, "LANE NOTE") != nullptr, who + " SYNC on: the lane shows no NOTE");
+        check (findNamed (panel, "LANE TIME") == nullptr, who + " SYNC on: the lane still shows TIME");
+        checkDwellValues (panel, who + " sync on");
+
+        params.setReal (D::Index::sync, syncWas);
+        panel.setUiState ("page", "lane");
+
+        check (findNamed (panel, "LANE TIME") != nullptr, who + " SYNC off: the lane's TIME did not come back");
+        check (findNamed (panel, "LANE NOTE") == nullptr, who + " SYNC off: the lane still shows NOTE");
+
+        panel.setUiState ("page", "tone");
     }
 
     struct PageSpec { D::Page page; const char* name; const char* const* names; size_t count; };

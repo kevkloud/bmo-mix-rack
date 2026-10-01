@@ -592,6 +592,10 @@ DwellPanel::DwellPanel (ui::ModuleContext ctx)
       fxLink   (context.params.param (Index::fxLink),   "LINK", context.def.accent),
       laneGain  (context.params.param (Index::laneGain),  "TAIL",  ui::Knob::Style::character, kPageFace, context.def.accent),
       laneTime  (context.params.param (Index::laneTime),  "TIME",  ui::Knob::Style::character, kPageFace, context.def.accent),
+      // The lane's sync division, in LANE TIME's cell while SYNC is on, exactly
+      // as NOTE takes TIME's in the foot. One switch governs both engines
+      // (params.h), so the two swap together.
+      laneNote  (context.params.param (Index::laneNote),  "NOTE",  ui::Knob::Style::character, kPageFace, context.def.accent),
       laneLevel (context.params.param (Index::laneLevel), "LEVEL", ui::Knob::Style::character, kPageFace, context.def.accent),
       fx       (context.params.param (Index::fx),       "FX",   context.def.accent),
       screen   (context.params, context.def.accent, context.gainReductionDb)
@@ -616,6 +620,7 @@ DwellPanel::DwellPanel (ui::ModuleContext ctx)
 
     laneGain.setName  ("LANE TAIL");
     laneTime.setName  ("LANE TIME");
+    laneNote.setName  ("LANE NOTE");
     laneLevel.setName ("LANE LEVEL");
     laneFx.setName    ("LANE FX");
     fxLink.setName    ("FX LINK");
@@ -637,7 +642,7 @@ DwellPanel::DwellPanel (ui::ModuleContext ctx)
     // fraction of a pixel of relayout. They are the secondary step, which is
     // what one-piece means (Frosty, 2026-09-25), so the tag says it outright.
     for (auto* k : { &lowCut, &highCut, &drive, &modRate, &modDepth, &duck,
-                     &laneGain, &laneTime, &laneLevel })
+                     &laneGain, &laneTime, &laneNote, &laneLevel })
     {
         k->setKnobSide (kPageKnob);
         k->setCaptionSize (kCaption);
@@ -722,6 +727,10 @@ void DwellPanel::showNote (bool syncOn)
     addAndMakeVisible (live);
 
     live.setKnobEnabled (dwell::kSyncIsEnabled || ! syncOn);
+
+    // The lane's pair follows the same switch. Both are page controls, so
+    // `resized` parents whichever is live; only its enablement is set here.
+    (syncOn ? laneNote : laneTime).setKnobEnabled (dwell::kSyncIsEnabled || ! syncOn);
 }
 
 void DwellPanel::buildFxAmount (bool lane, int type)
@@ -806,7 +815,7 @@ std::vector<juce::Component*> DwellPanel::allPageControls()
 {
     std::vector<juce::Component*> all {
         character.get(), stereo.get(), &lowCut, &highCut, &drive, &modRate, &modDepth, &duck,
-        &sendHeld, &hold, &chop, laneFxType.get(), &laneGain, &laneTime, &laneLevel,
+        &sendHeld, &hold, &chop, laneFxType.get(), &laneGain, &laneTime, &laneNote, &laneLevel,
         &laneFx, laneFxAmount.get(), &fxLink,
         fxType.get(), &fx, fxAmount.get() };
 
@@ -857,6 +866,14 @@ void DwellPanel::timerCallback()
 void DwellPanel::resized()
 {
     clearRules();
+
+    // SYNC read here as well as by the timer, so a layout always shows the
+    // knobs the parameter says are live -- whoever asked for the layout.
+    if (const auto syncOn = context.params.getReal (Index::sync) > 0.5f; syncOn != lastSyncWasOn)
+    {
+        lastSyncWasOn = syncOn;
+        showNote (syncOn);
+    }
 
     mixNoteBand = feedbackNoteBand = {};
 
@@ -971,7 +988,7 @@ void DwellPanel::resized()
             putRow (laneFxType.get(), segB);
 
             put (&laneGain,  a[0]);
-            put (&laneTime,  a[1]);
+            put (lastSyncWasOn ? &laneNote : &laneTime, a[1]);
             put (&laneLevel, a[2]);
 
             putSwitch (laneFx, b[0]);

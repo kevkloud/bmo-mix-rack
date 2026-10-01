@@ -1,8 +1,8 @@
 # Repo conventions delta for a new delay module
 
 Recon done on AURORA, 2026-09-20. No files modified. General conventions are
-in `docs/1176-comp/00-repo-conventions.md` (branch `frosty-fetcomp-groundwork`,
-read via `git show`) — reference it, not repeated here. This covers only the
+in `docs/fet-comp/00-repo-conventions.md` (on `main` since PR #22; read from
+its own branch at the time) — reference it, not repeated here. This covers only the
 delay-specific delta.
 
 ## 1. Reusable DSP already in the repo

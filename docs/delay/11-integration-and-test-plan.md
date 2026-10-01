@@ -2,7 +2,7 @@
 
 Written on AURORA, 2026-09-20. No code here; this says what the devs build. DSP
 meaning and constants come **per `docs/delay/10-dsp-spec.md`** (cited as 10);
-conventions per `docs/1176-comp/00-repo-conventions.md` and this folder's `00`.
+conventions per `docs/fet-comp/00-repo-conventions.md` and this folder's `00`.
 
 ## 1. Conventions
 
@@ -241,7 +241,7 @@ intervention. 10 owns their meaning; its names win, not its order.
 `tests/dsp/DwellDspTests.cpp` (JUCE-free, CI `dsp`), `tests/plugin/DwellTests.cpp`
 (golden schema, presets, XML round-trip, slot fit), `tools/measure/dwell/`.
 Golden **state**, never audio; results name the machine. **Panel checks:
-`docs/1176-comp/11-integration-and-test-plan.md` §4d.**
+`docs/fet-comp/11-integration-and-test-plan.md` §4d.**
 
 **a. Time accuracy and interpolation.** Impulse, `feedback` 0; sub-sample peak
 by parabolic fit and cross-correlation; phases 0.0–0.9, 1–2000 ms, 44.1–192 kHz;

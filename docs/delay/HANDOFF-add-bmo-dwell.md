@@ -96,7 +96,7 @@ Each step: build exits 0, tests green, sample-rate (44.1–192 kHz) and
 block-size invariance, denormal / NaN / silence robustness, one local commit.
 
 STAGE 3 — visual pass
-Render, snapshot and inspect per `docs/1176-comp/11-integration-and-test-plan.md`.
+Render, snapshot and inspect per `docs/fet-comp/11-integration-and-test-plan.md`.
 Look at the render before measuring it. Record in `testing-notes/` with the
 machine name.
 

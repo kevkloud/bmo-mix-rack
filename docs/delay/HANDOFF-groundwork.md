@@ -1,7 +1,7 @@
 # Handoff: delay module groundwork
 
 Paste everything under the line into a new session opened on this repo. It is
-the same ruleset that produced `docs/1176-comp/` (PR #19) and is producing
+the same ruleset that produced `docs/fet-comp/` (PR #19) and is producing
 `docs/deesser/`, adapted for a delay. Written on AURORA, 2026-09-20.
 
 Before starting, the new session should work in **its own git worktree** on a
@@ -39,9 +39,9 @@ HARD RULES
 
 WAVE 1 — launch all three in a single message (Sonnet)
 A1 "repo recon (delta)": a general conventions document already exists at
-   docs/1176-comp/00-repo-conventions.md on branch `frosty-fetcomp-groundwork`
-   (PR #19; read it with `git show origin/frosty-fetcomp-groundwork:docs/1176-comp/00-repo-conventions.md`
-   if it is not on main yet). Reference it, do not repeat it. Document only the
+   docs/fet-comp/00-repo-conventions.md (on `main` since PR #22; when this
+   was written it was still on its own branch, PR #19, and was read from
+   there). Reference it, do not repeat it. Document only the
    delay-specific delta: reusable DSP already in the repo (delay lines or
    fractional-delay/interpolation code anywhere — Dimension, Tune, Util, the
    dry-path delay matching in modules/eq and modules/sat, core/dsp/Oversampler.h,
@@ -100,7 +100,7 @@ B2 "integration + test direction": how the module drops into the conventions in
    timing, tempo-sync accuracy across tempo changes, mix/null tests, bypass
    tail, sample-rate and block-size invariance, denormal/NaN/silence
    robustness, CPU, memory and latency acceptance criteria. Panel and visual
-   verification: reference docs/1176-comp/11-integration-and-test-plan.md for
+   verification: reference docs/fet-comp/11-integration-and-test-plan.md for
    the render/snapshot/inspect tools rather than re-deriving them.
    -> 11-integration-and-test-plan.md, <=1200 words.
 

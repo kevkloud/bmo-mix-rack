@@ -61,6 +61,13 @@ inline const std::vector<FactoryPreset>& factory()
         // held back behind the ER, and a pre-delay long enough to keep the
         // consonants clear of it. ER HI-CUT down from the default, because
         // what clouds a vocal is the top of the early cluster.
+        //
+        // **MIX 50, as is the vocal-depth preset below** (Frosty, 2026-09-30).
+        // Both were written at 100 before the MIX law of 2026-09-24, under
+        // which 100 is verb only, for a send: on an insert, which is where a
+        // preset is loaded, it left no dry vocal at all. 50 is the input
+        // unchanged with the verb at its faders. Written out although it is
+        // the default, so the choice reads as one.
         { "Vocal Chamber", { { kType, (float) chamber },
                              { kSize, 18.0f },
                              { kPreDelay, 40.0f },
@@ -68,7 +75,7 @@ inline const std::vector<FactoryPreset>& factory()
                              { kErHiCut, 5500.0f },
                              { kErLevel, -12.0f },
                              { kVerbLevel, -9.0f },
-                             { kMix, 100.0f } } },
+                             { kMix, 50.0f } } },
 
         // **The hardest case, and the one the module is partly for.** A rap
         // vocal wants depth and not reverb: the tail is off outright, and the
@@ -86,7 +93,7 @@ inline const std::vector<FactoryPreset>& factory()
                                     { kErVariation, 2.0f },
                                     { kErLevel, -10.0f },
                                     { kVerbLevel, -40.0f },   // Off, and it means it
-                                    { kMix, 100.0f } } },
+                                    { kMix, 50.0f } } },
 
         // A dry close snare. Short, bright and dense, with the pre-delay short
         // enough that the reverb is part of the hit rather than after it --

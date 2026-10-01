@@ -964,6 +964,9 @@ public:
         fadeCounter = -1;
         delayCurrent = delayNext = delayTarget;
 
+        // The gain ring is all 1.0 again, so there is nothing to expand.
+        samplesSinceCompanding = ringSize();
+
         wowPhase = flutterPhase = 0.0;
         noiseA = noiseB = 0.0;
         noiseState = kNoiseSeed;
@@ -1096,6 +1099,19 @@ public:
         const auto glide = usesGlide();
         const auto compand = usesCompander();
 
+        // **The expander outlives the compressor by one ring.** A CHARACTER
+        // move off bucket-brigade leaves companded samples in the ring -- up
+        // to +30 dB on a quiet line -- and they still have to be divided back
+        // when they are read, or the repeat in flight comes back that much
+        // too loud (measured on AURORA 2026-10-01: a 0.05 tone replayed at a
+        // 0.558 peak). Writes made without companding store a gain of exactly
+        // 1.0, so dividing across the boundary is the identity on the new
+        // side; once a whole ring has been written since the last companded
+        // sample there is nothing left to undo and the branch goes quiet, so
+        // clean and tape are bit-identical to before whenever no
+        // bucket-brigade content is left to read.
+        const auto expand = compand || samplesSinceCompanding < ringSize();
+
         // 10 §8's mono bus rule: with one line there is no second output to
         // alternate into, so ping-pong collapses to plain stereo. Dual offset
         // collapses too -- `lineRatio` only ever moves line 1.
@@ -1156,7 +1172,7 @@ public:
                 if (fading)
                     y = fadeOld * y + fadeNew * readAt (line, readNext);
 
-                if (compand)
+                if (expand)
                 {
                     // **The exact reciprocal at the same fractional position**
                     // (10 §4). The same kernel reads both rings, so at a whole
@@ -1238,6 +1254,11 @@ public:
                 output[ch][n] = 0.0f;
 
             writeIdx = (writeIdx + 1) & mask;
+
+            if (compand)
+                samplesSinceCompanding = 0;
+            else if (samplesSinceCompanding < ringSize())
+                ++samplesSinceCompanding;
 
             if (fading && ++fadeCounter >= fadeLength)
             {
@@ -1888,6 +1909,11 @@ private:
 
     double delayCurrent = 0.0, delayNext = 0.0, delayTarget = 0.0;
     int fadeCounter = -1, fadeLength = 1;
+
+    /** Writes since the last companded one, capped at the ring's length: below
+        it the gain ring may still hold a compressor gain the read has to
+        divide out (see `process`). */
+    int samplesSinceCompanding = 1 << 30;
     double glideAlpha = 1.0;
 
     double headBumpGain = 1.0, bbdCutoffHz = 0.0;

@@ -3898,6 +3898,78 @@ void testANonFiniteInputWithDuckUpRecovers()
     }
 }
 
+/** **CHARACTER moved while a repeat is in flight replays it at its own level.**
+
+    Bucket-brigade's compressor writes its gain into a ring beside the audio,
+    and the expander divides the read by it. The expander ran only while the
+    character *was* bucket-brigade, so a move to Clean or Tape left the ring's
+    companded samples -- up to +30 dB on a quiet line -- with nothing dividing
+    them back: measured on AURORA, a repeat of a 0.05 tone came back at a 0.558
+    peak, -14.1 dBFS against -29.0.
+
+    FEEDBACK 0 so the repeat is the raw read and nothing else: the switched
+    render's repeat must match the render that never switched. The reverse move
+    is the control -- a ring written without companding holds gains of exactly
+    1.0, so the expander arriving has nothing to undo. */
+void testACharacterMoveReplaysTheRingAtItsOwnLevel()
+{
+    constexpr auto rate = 48000.0;
+    const auto n = (int) rate;
+    const auto switchAt = (int) (0.25 * rate) / 512 * 512;
+    const auto from = (int) (0.31 * rate), count = (int) (0.08 * rate);
+
+    const auto render = [&] (int start, int moveTo)
+    {
+        P::DwellDsp dsp;
+        dsp.prepare (rate, 512, 2);
+
+        auto v = defaults();
+        v[P::Index::character] = (float) start;
+        v[P::Index::time]      = 300.0f;
+        v[P::Index::feedback]  = 0.0f;
+        v[P::Index::mix]       = 100.0f;
+
+        Block block { n };
+
+        for (int i = 0; i < (int) (0.1 * rate); ++i)
+        {
+            const auto s = (float) (0.05 * std::sin (2.0 * P::kPiD * 440.0 * (double) i / rate));
+            block.left[(size_t) i] = block.right[(size_t) i] = s;
+        }
+
+        renderAsHost (dsp, v, block, n, 512, [&] (int offset)
+        {
+            if (offset >= switchAt)
+                v[P::Index::character] = (float) moveTo;
+        });
+
+        return block.left;
+    };
+
+    const std::pair<int, int> moves[] { { 2, 0 }, { 2, 1 }, { 0, 2 } };
+
+    for (const auto& [start, moveTo] : moves)
+    {
+        const auto stayed = render (start, start);
+        const auto moved  = render (start, moveTo);
+
+        const auto want = rms (stayed, from, count);
+        const auto got  = rms (moved, from, count);
+        const auto db   = 20.0 * std::log10 (std::max (got, 1.0e-30) / std::max (want, 1.0e-30));
+
+        char buf[200];
+        std::snprintf (buf, sizeof (buf),
+                       "%s to %s with a repeat in flight: the repeat comes back at its own level "
+                       "(%+.2f dB against the render that stayed, peak %.4f)",
+                       characterName (start), characterName (moveTo), db,
+                       (double) peakOf (moved, from, count));
+
+        check (want > 0.01 && std::abs (db) < 0.1
+                   && peakOf (moved, from, count) < 1.02f * peakOf (stayed, from, count),
+               buf);
+    }
+}
+
 } // namespace
 
 //==============================================================================
@@ -3955,6 +4027,7 @@ int main()
 
     // The review's fixes, 2026-10-01.
     testANonFiniteInputWithDuckUpRecovers();
+    testACharacterMoveReplaysTheRingAtItsOwnLevel();
 
     std::printf ("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

@@ -1095,8 +1095,8 @@ inline const ParamSpecs& specs()
         //
         // **Defaults to 4** (Frosty, 2026-09-26, by ear on ICE QUEEN: "2 isnt
         // enough to feel. 3 or 4 should be default"). Room's early L/R
-        // correlation is 0.57 at 2 and 0.21 at 4; Renaissance Reverb's early
-        // reflections measure -0.13 to +0.20 on every type.
+        // correlation is 0.57 at 2 and 0.21 at 4; a measured reference reverb's
+        // early reflections read -0.13 to +0.20 on every type.
         S::textParam (kErVariation, "Variation", 0.0f, 6.0f, 1.0f, 4.0f,
                       &detail::variationText),
 

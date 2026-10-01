@@ -1127,6 +1127,22 @@ void checkDwellPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
     check (! panel.getContext().def.isExpandable(), who + " a paged module has nothing to expand into");
     checkEquals (panel.getContext().def.expandedWidth, 0, who + " declares no second width");
 
+    //== The light-ground ink is declared, and legible ========================
+    //
+    // Charcoal, in place of the olive `accentInk` derives from Pikachu yellow
+    // (modules/dwell/Module.h, kLightInk). Declared from module(), so it exists
+    // by the time a panel does; and it has to clear the 4.5:1 every derived
+    // ink is held to on the light plate.
+    {
+        const auto ink = bmo::ui::declaredLightInk (panel.getContext().def.accent);
+
+        check (! ink.isTransparent(), who + " declares no light-ground ink");
+        check (bmo::ui::contrastRatio (ink, juce::Colour (0xffefefef)) >= 4.5f,
+               who + " the light-ground ink reads at "
+                   + juce::String (bmo::ui::contrastRatio (ink, juce::Colour (0xffefefef)), 2)
+                   + ":1 on the light plate, under 4.5");
+    }
+
     //== The captions, page by page, written out ==============================
     const char* const foot[] { "TIME", "FEEDBACK", "MIX", "SYNC" };
 

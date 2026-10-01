@@ -479,6 +479,27 @@ juce::Colour accentInk (juce::Colour accent) noexcept;
     reader is not looking at. */
 juce::Colour accentInk (juce::Colour accent, juce::Colour ground) noexcept;
 
+/** **An accent's own ink on a light ground**, for the one accent the derived
+    ink does not suit.
+
+    `accentInk` steps an accent toward black until it reads on a pale plate,
+    and for a yellow that lands on olive -- BMO Dwell's Pikachu yellow came out
+    olive-brown and Frosty did not want it (2026-10-01). A module that declares
+    an ink here gets it **instead of** the derived one, on any light ground,
+    for everything `accentInk` colours: knob captions, the dotted track and its
+    marks, and section legends. Dark grounds are untouched, and so is every
+    accent that declares nothing.
+
+    Keyed by the accent rather than by the module, so no call site has to know
+    which module it is drawing for; accents are unique in the rack by policy
+    (products/AGENTS.md). Declared once, from a module's `module()`, before any
+    panel paints. The ink must clear 4.5:1 on the light plate -- a
+    test asserts it for every declared pair. */
+void declareLightInk (juce::Colour accent, juce::Colour ink);
+
+/** The declared light-ground ink for `accent`, or transparent if none. */
+juce::Colour declaredLightInk (juce::Colour accent) noexcept;
+
 /** The current tokens: the built-in set for whichever appearance is chosen,
     with whatever the user's theme file overrides on top. */
 const Tokens& tokens() noexcept;

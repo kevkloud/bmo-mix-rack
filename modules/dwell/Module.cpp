@@ -7,50 +7,22 @@
 namespace bmo::dwell
 {
 
-/** **The accent is NOT yet decided -- Frosty picks it from a render.** This is
-    the recommended candidate, left set so the tree renders the recommendation.
+/** **Pikachu yellow** (DECIDED, Frosty 2026-10-01), an owner-approved exception
+    to the contrast band: measured off a rendered knob face at 9.05:1 on the
+    dark plate `#2e2e32` and 1.30:1 on the pale `#efefef`, against a shipped
+    5.87-7.19 and 1.64-2.00. `products/AGENTS.md` carries the row and the
+    argument.
 
-    **The olive-gold that used to stand here is rejected** -- "i hate this
-    color", Frosty 2026-09-21 -- and so is the pale gold `#e6e278`, which
-    measured out of band at both ends. Neither comes back.
+    It replaced the orchid `#f094e6` (2026-09-21), which BMO Linger's
+    `#e694e0` landed 2.1 degrees from when it merged -- in a rack the two read
+    as one pink, and Dwell was the unshipped one. Jade, indigo, violet, BMO
+    Opto's neutral and an in-band mustard were rendered beside it first.
 
-    Magenta is where the arithmetic points, and it was checked rather than
-    assumed. Taking every allocated accent in `products/AGENTS.md` plus the two
-    in flight -- BMO FET's `#5489d4` at 215.2 degrees and the de-esser's rose
-    `#ea9f9a` at 3.8 -- and the utility azure `#4fb8e8` at 198.8, which is not
-    an accent but is engaged-switch colour on this very panel, the free arc
-    between BMO Dimension's lavender (271.6) and BMO EQ's pink (336.0) is
-    **64.4 degrees wide, half again as wide as any other**. Its centre is 32
-    degrees from both neighbours; nothing else free reaches 25.
-
-    The indigo slot people reach for next is **not** second. It looks like one
-    gap from FET's blue to Dimension's lavender, but LTV Comp's periwinkle
-    (236.1) sits inside it and splits it into 20.9 and 35.5 degrees; the best
-    an indigo can do is 17.8, fifth behind chartreuse and jade.
-
-    Three magentas were rendered and measured before this one, off the pixels
-    with `Inspect.exe ratio` rather than from the formula: `#ee85f5` (296.3 deg,
-    5.99 dark / 1.96 pale), `#f288eb` (304.0, 6.12 / 1.92) and `#f587df` (312.0,
-    6.06 / 1.94). Frosty chose the orchid `13` section 6 had proposed instead,
-    which sits between the first two.
-
-    **Measured on the render, not computed**: **6.49:1** on the dark plate
-    `#2e2e32` and **1.81:1** on the pale `#efefef`, read off the knob face of a
-    rendered panel in both appearances. Both are mid-band -- the shipped
-    accents run 5.87 to 7.19 dark and 1.72 to 2.00 pale. Section 6 of `13`
-    predicted 6.5 and 1.84 from the formula and was right.
-
-    Its nearest neighbour is BMO EQ's pink at 29.5 degrees, with BMO Dimension's
-    lavender 34.9 the other way. `13` section 6 flagged an orchid as something
-    that "may read as EQ in a rack", and that objection is real and was put to
-    Frosty with renders before he chose it; 29.5 still clears the 26.8 the
-    shipped teal and the utility azure already live with.
-
-    It is one literal, here, so changing it is a one-line edit. Nothing else in
-    the module names a colour: a panel asks for `ui::accentInk`,
-    `ui::onAccentOf` or `ui::accentTextOn` and gets this derived against the
-    current appearance (modules/AGENTS.md, "Do not write a hex in a panel"). */
-inline constexpr juce::uint32 kAccent = 0xfff094e6;
+    Two colours go with it, in `Module.h`: `kLightInk`, the charcoal every ink
+    on a light ground takes instead of the olive `ui::accentInk` would derive
+    from a yellow (declared below, in `module()`), and `kGateColour`, the
+    cheek red of the lit buttons. Nothing in the panel names a hex. */
+inline constexpr juce::uint32 kAccent = 0xfff8d030;
 
 const ModuleDef& module()
 {
@@ -74,6 +46,17 @@ const ModuleDef& module()
     // FEEDBACK is the one caption that does not fit one at 15 pt -- it
     // measures about 125 -- so the foot's trio takes uneven cells. See
     // `DwellPanel`.
+    // The light-ground ink, declared before anything can paint. See kLightInk
+    // in Module.h and ui::declareLightInk.
+    // Twice: the accent, and the accent dimmed for the lane's linked FX
+    // (kFollowAlpha), which is a different colour to the lookup.
+    static const bool inkDeclared = [] {
+        ui::declareLightInk (juce::Colour (kAccent), juce::Colour (kLightInk));
+        ui::declareLightInk (juce::Colour (kAccent).withAlpha (kFollowAlpha), juce::Colour (kLightInk));
+        return true;
+    }();
+    juce::ignoreUnused (inkDeclared);
+
     static const ModuleDef def {
         kModuleId, kModuleName, kSchemaVersion,
         380, juce::Colour (kAccent),

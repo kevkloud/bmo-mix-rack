@@ -184,17 +184,26 @@ did not.
 
 ## The accent is decided
 
-**The accent is the orchid `#f094e6`** (DECIDED, Frosty 2026-09-21; `15`,
-`docs/delay/README.md` item 16), measured off a render at 6.49:1 on the dark
-plate and 1.81:1 on the pale, with `products/AGENTS.md` carrying the allocation
-row. It was chosen from renders after the olive-gold `docs/delay/13` §6
-recommends was rejected outright ("i hate this color", Frosty 2026-09-21) and a
-pale gold measured out of band; the de-esser has taken the rose near 4°.
+**The accent is Pikachu yellow `#f8d030`** (DECIDED, Frosty 2026-10-01), an
+owner-approved exception to the contrast band at 9.05:1 dark and 1.30:1 pale.
+It replaced the orchid `#f094e6` (2026-09-21) when BMO Linger merged at
+`#e694e0`, 2.1 degrees away. `products/AGENTS.md` carries the allocation row and
+the full argument.
 
-`Module.cpp` carries it as `kAccent = 0xfff094e6`, and **nothing else in the
-module names a colour** — the earlier magenta placeholder `0xfff288eb` is gone.
-Changing it would be a one-line edit, but it is decided, not a placeholder any
-more.
+Three colours, all in `Module.h`/`Module.cpp`, and **nothing in the panel names
+a hex**:
+
+- `kAccent` — the yellow: knob faces, the screen's ink, and the lit cell of
+  STEREO and the lane's FX types (not the utility azure — Frosty's call),
+  dimmed by `kFollowAlpha` while FX LINK is on.
+- `kLightInk` — charcoal `#3a3a3e`, declared through `ui::declareLightInk`, so
+  every caption, track, mark and legend on a light ground is charcoal rather
+  than the olive `accentInk` would derive. The dark plate keeps the yellow.
+- `kGateColour` — cheek red `#b3261e` for SEND, HOLD, CHOP, FX, ON and LINK and
+  their glow, and for the top button row of every page (CHARACTER, the gates,
+  the main FX types), in both appearances.
+
+The olive-gold `#b2bb54` and the pale gold `#e6e278` stay rejected.
 
 ## What stage 1 is not
 

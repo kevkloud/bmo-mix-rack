@@ -75,15 +75,25 @@ jobs:
     # BMO-Windows package for that commit. A timeout is there to stop a hung
     # job, not to race a healthy one, so it sits well clear of the longest
     # honest run. macOS finishes in 10 to 17 minutes and is unaffected.
-    timeout-minutes: 90
+    #
+    # 150 for a link-time-optimised run. Those are now rare and start with the
+    # plugin targets' own files cold (see the cache step), and how long that
+    # takes has NOT been measured: the longest measured Windows Build step with
+    # link-time optimisation is 55 minutes, at 90 % cache hits or better. A
+    # release that times out is worse than a slow one, so the margin is wide.
+    # Bring it down once a tag has been built and timed.
+    timeout-minutes: ${{ (startsWith(github.ref, 'refs/tags/') || inputs.lto) && 150 || 90 }}
     # Link-time optimisation is for what someone downloads, so release tags
     # only -- and a run started by hand that asks for it. Measured on
-    # 2026-10-01: the Windows Build step took 36 to 55 minutes with it, at up
-    # to 97 % compiler-cache hits, because every plugin link regenerates that
-    # plugin's code where no cache can help; without it the same step took
-    # 14.4 minutes, and macOS 1.5. So pull requests and main skip it. What they
+    # 2026-10-01, one commit built both ways at the same 90.6 % compiler-cache
+    # hit rate: the Windows Build step took 53.4 minutes with it and 22.3
+    # without, because every plugin link regenerates that plugin's code where
+    # no cache can help. With a warm cache and without it, the step took 14.4
+    # minutes, and macOS 1.5. So pull requests and main skip it. What they
     # package is therefore not bit-for-bit the release build, and the Audio
-    # fingerprint step below is how the two are shown to make the same samples.
+    # fingerprint step below is how the two are shown to make the same samples:
+    # on that commit they did, on both platforms
+    # (testing-notes/lto-null-2026-10-01.md).
     # See the BMO_LTO option in CMakeLists.txt and tools/fingerprint/README.md.
     env:
       BMO_LTO: ${{ (startsWith(github.ref, 'refs/tags/') || inputs.lto) && 'ON' || 'OFF' }}

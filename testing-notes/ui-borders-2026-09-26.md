@@ -49,6 +49,8 @@ three hashes guard shared UI code and are re-proven when `core/ui` changes:
 | `opto appearance=light signal=-18` | `878cca7b1a80a551` |
 | `opto signal=-18 ui.meter=GR` | `88a7653a82c19ae0` |
 
+*The re-baseline this left open was taken on AURORA on 2026-10-01: see `testing-notes/opto-reference-hashes-2026-10-01.md`.*
+
 **These will not reproduce after this change**, and that is expected: the
 needle meter's face used to fill a flat 4.0 at the default 1.5 px frame
 precisely so that they would hold, leaving a fifth of a pixel of face outside

@@ -217,7 +217,9 @@ fails with "transport 'file' not allowed". Use
   that, so the count is stale. Build the test targets, check the exit code, and
   record the count and the machine in your first note.
 - **Re-prove BMO Opto's hashes if anything under `core/ui` changes** —
-  `ab3ff3b77116b7a5` dark, `878cca7b1a80a551` light, `88a7653a82c19ae0` GR dark.
+  `59d85c014da98432` dark, `313df8cc740e9aa3` light, `393f13e24fbf96c3` GR dark
+  (`appearance=` and `surface=simple` named; see
+  testing-notes/opto-reference-hashes-2026-10-01.md).
   They need three separate render commands, `signal=-18` throughout and
   `ui.meter=GR` for the third; a bare render reproduces none of them. Build the
   harness with

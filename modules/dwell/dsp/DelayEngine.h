@@ -1037,6 +1037,17 @@ public:
         applyTime (p.timeMs, modeMoved);
     }
 
+    /** Puts the read on the target delay now: no glide, no crossfade. `P_c`
+        is already the target's -- `setParams` sweeps at the target, not at the
+        read -- so nothing else has to move. On a ring with content this would
+        jump the read, which is why the caller uses it only where the ring is
+        empty (`DwellDsp::setTempo`). */
+    void landTime() noexcept
+    {
+        delayCurrent = delayNext = delayTarget;
+        fadeCounter = -1;
+    }
+
     /** The loop gain the caller's law arrived at. Smoothed at 30 ms (10 §9),
         snapped on the first call after `prepare` so a freshly placed instance
         is not ramping up from zero. */

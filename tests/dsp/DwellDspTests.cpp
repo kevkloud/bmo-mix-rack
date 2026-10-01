@@ -4048,6 +4048,91 @@ void testMixAcrossTheHingeIsSmoothed()
     }
 }
 
+/** **With SYNC on, the first tempo after `prepare` or `reset` lands the synced
+    time; it does not glide there from the TIME knob.**
+
+    The first block's `setParams` primes the engines at the knob's time, and
+    the tempo arrives after it in the same block. Handed over as an ordinary
+    move, the knob-to-note distance then went through tape's and
+    bucket-brigade's rate-limited glide: measured on AURORA, a 1/4 at 60 bpm
+    from the 375 ms default took three seconds to arrive, on every fresh
+    instance -- a session load, an offline bounce, and in a rack every chain
+    edit, since a rebuild makes a new DSP. `testSyncFollowsTheHostTempo` reads
+    the parameters handed to the core and could not see the engines' delay.
+
+    Asserted on the engines' own read delay, after the first block, for both
+    engines on every character, and again after a `reset`. A tempo change
+    *later* is a move like any other and glides on tape (as designed); that is
+    pinned too, so the landing cannot spread to every tempo change. */
+void testTheFirstTempoLandsTheSyncedTime()
+{
+    constexpr auto rate = 48000.0;
+
+    for (int c = 0; c < 3; ++c)
+    {
+        P::DwellDsp dsp;
+        dsp.prepare (rate, 512, 2);
+
+        auto v = defaults();
+        v[P::Index::character] = (float) c;
+        v[P::Index::sync]      = 1.0f;
+        v[P::Index::note]      = 9.0f;    // 1/4: 1000 ms at 60 bpm
+        // LANE NOTE stays at its default 1/8: 500 ms at 60 bpm.
+
+        Block block { 512 * 4 };
+        renderAsHost (dsp, v, block, 512, 512, [] (int) {}, 60.0, true);
+
+        const auto main = dsp.getCore().getMainEngine().currentDelaySamples();
+        const auto lane = dsp.getCore().getLaneEngine().currentDelaySamples();
+
+        checkClose (main, 48000.0, 1.0e-6,
+                    std::string ("the first tempo lands the main delay on 1/4 at 60 bpm after one block, on ")
+                        + characterName (c));
+        checkClose (lane, 24000.0, 1.0e-6,
+                    std::string ("the first tempo lands the lane on 1/8 at 60 bpm after one block, on ")
+                        + characterName (c));
+
+        // A reset is a fresh start as far as the ring is concerned, so the
+        // first tempo after it lands too.
+        dsp.reset();
+        renderAsHost (dsp, v, block, 512, 512, [] (int) {}, 120.0, true);
+
+        checkClose (dsp.getCore().getMainEngine().currentDelaySamples(), 24000.0, 1.0e-6,
+                    std::string ("the first tempo after a reset lands as well, on ") + characterName (c));
+
+        // And a later change is a move: on the gliding characters it is still
+        // on its way one block later.
+        renderAsHost (dsp, v, block, 512, 512, [] (int) {}, 60.0, true);
+
+        const auto later = dsp.getCore().getMainEngine().currentDelaySamples();
+
+        if (c == 0)
+            check (later == 24000.0 || later == 48000.0,
+                   "a later tempo change on clean crossfades between the two times");
+        else
+            check (later > 24000.0 && later < 48000.0,
+                   std::string ("a later tempo change still glides on ") + characterName (c)
+                       + " (" + std::to_string (later) + " samples after one block)");
+
+        // The landing is only taken while the ring is empty: a host that sends
+        // no tempo until audio has flowed gets an ordinary move, not a jump.
+        if (c != 0)
+        {
+            P::DwellDsp late;
+            late.prepare (rate, 512, 2);
+
+            renderAsHost (late, v, block, 512, 512, [] (int) {}, 0.0, false);
+            renderAsHost (late, v, block, 512, 512, [] (int) {}, 60.0, true);
+
+            const auto moved = late.getCore().getMainEngine().currentDelaySamples();
+
+            check (moved > 18000.0 && moved < 48000.0,
+                   std::string ("a first tempo that arrives after audio has flowed glides on ")
+                       + characterName (c) + " (" + std::to_string (moved) + " samples)");
+        }
+    }
+}
+
 } // namespace
 
 //==============================================================================
@@ -4107,6 +4192,7 @@ int main()
     testANonFiniteInputWithDuckUpRecovers();
     testACharacterMoveReplaysTheRingAtItsOwnLevel();
     testMixAcrossTheHingeIsSmoothed();
+    testTheFirstTempoLandsTheSyncedTime();
 
     std::printf ("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

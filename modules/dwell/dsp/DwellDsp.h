@@ -20,9 +20,14 @@ public:
     void prepare (double sampleRate, int maxBlockSize, int numChannels) override
     {
         core.prepare (sampleRate, maxBlockSize, numChannels);
+        landNextTempo = true;
     }
 
-    void reset() override { core.reset(); }
+    void reset() override
+    {
+        core.reset();
+        landNextTempo = true;
+    }
 
     void setParams (const float* v, int count) override
     {
@@ -82,18 +87,37 @@ public:
           audio flows and the loop decays; nothing is muted or flushed.
         - **Only a changed tempo re-applies.** `setParams` already mapped the
           divisions at the held tempo, so re-applying every block would hand
-          the engines the same time twice for nothing. */
+          the engines the same time twice for nothing.
+        - **The first valid tempo after `prepare` or `reset` lands; every
+          later one moves** under §2's law. The first block's `setParams` has
+          already primed the engines at the TIME knob, and handing the note's
+          time over as an ordinary move sent the difference through tape's and
+          bucket-brigade's rate-limited glide: three seconds from the 375 ms
+          default to a 1/4 at 60 bpm, measured on AURORA 2026-10-01, on every
+          fresh instance and, in a rack, after every chain edit. It is the
+          same rule `DspCore::setParams` already follows for the first
+          parameter set, for the same reason, and it is silent because it is
+          **only taken while the ring is still empty**: the contract has the
+          first tempo arrive with the first block, before its `process`, and if
+          a host sends none until audio has already flowed, that first tempo
+          moves like any other rather than jumping a read with content in it. */
     void setTempo (double bpm, bool valid, bool playing) noexcept override
     {
         (void) playing;
 
-        if (! valid || bpm == heldBpm)
+        if (! valid)
+            return;
+
+        const auto land = landNextTempo;
+        landNextTempo = false;
+
+        if (bpm == heldBpm && ! land)
             return;
 
         heldBpm = bpm;
 
         if (params.sync)
-            apply();
+            apply (land);
     }
 
     /** §9 and §11.6's tail, from parameters only. See `tailSecondsFor`. */
@@ -108,6 +132,10 @@ public:
     void process (float* const* channels, int numChannels, int numSamples) override
     {
         core.process (channels, numChannels, numSamples);
+
+        // Audio has reached the rings, so a time that lands from here on
+        // would jump a read with content in it (see `setTempo`).
+        landNextTempo = false;
     }
 
     /** **Zero, at every setting, permanently.**
@@ -137,8 +165,12 @@ private:
         `setTempo`**: the tempo arrives after the parameters each block, and
         mapping it there would hand the engines the knob's time and then the
         note's, every block -- and a TIME move re-sweeps the 1024-point loop
-        peak. Before the first tempo, the knobs stand. */
-    void apply() noexcept
+        peak. Before the first tempo, the knobs stand.
+
+        `landTime` puts both engines' reads on the new times at once rather
+        than gliding or crossfading there; see `setTempo` for the one case
+        that asks for it. */
+    void apply (bool landTime = false) noexcept
     {
         auto p = params;
 
@@ -148,13 +180,14 @@ private:
             p.laneTimeMs = (float) syncedMs (laneNoteChoice, heldBpm);
         }
 
-        core.setParams (p);
+        core.setParams (p, landTime);
     }
 
     DspCore core;
     DspCore::Params params;
     int laneNoteChoice = kDefaultLaneNote;
     double heldBpm = 0.0;
+    bool landNextTempo = true;
 };
 
 inline std::unique_ptr<ModuleDsp> createDsp() { return std::make_unique<DwellDsp>(); }

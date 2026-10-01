@@ -320,12 +320,25 @@ public:
         handed the defaults, so the host's opening push is the one that says
         what the instance actually is, and an instance arriving at the setting
         it was saved at is the same rule `setFeedbackGain` and DRIVE already
-        follow. */
-    void setParams (const Params& p) noexcept
+        follow.
+
+        `landTime` is the narrower form of the same rule for TIME alone: both
+        engines' reads go straight to their new times, with no glide and no
+        crossfade, and nothing else snaps. `DwellDsp` asks for it once, for the
+        first valid host tempo after a `prepare` or `reset`, when the ring is
+        empty and a move would only be the knob's time sliding into the
+        note's. */
+    void setParams (const Params& p, bool landTime = false) noexcept
     {
         params = p;
         applyParams (! parametersSeen);
         parametersSeen = true;
+
+        if (landTime)
+        {
+            mainEngine.landTime();
+            laneEngine.landTime();
+        }
     }
 
     const Params& getParams() const noexcept { return params; }

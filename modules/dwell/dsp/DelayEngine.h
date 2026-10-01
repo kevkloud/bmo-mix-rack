@@ -356,7 +356,8 @@ enum FxType
     §3's `|g| < 1` bound is untouched and `P_c` does not have to be re-swept
     when FX moves. Diffuse is an allpass, so it is exactly unity at every omega;
     Pan/Tremolo is peak-normalised in closed form (see `panGain`); Crush's
-    quantiser is clamped to the same +-1 the safety clip uses and a
+    quantiser truncates toward zero, so it can never make a sample larger
+    (see `crush` -- it rounded, and expanded, until 2026-10-01), and a
     zero-order hold can never exceed its own input.
 
     **AMOUNT zero is a wire on Diffuse and Pan/Tremolo** -- the allpass lengths
@@ -616,9 +617,23 @@ private:
         measured FX-off, and why its own acceptance is only that the
         non-harmonic floor **stops growing by repeat 10** (`11` §4l).
 
-        The quantiser is clamped to +-1: rounding can carry a sample half a step
-        past its input, and `|F| <= 1` is a bound this stage is asked to keep
-        rather than to leave to the clip two stages later. */
+        **The quantiser truncates toward zero, so `|q| <= |x|` for every
+        sample** (2026-10-01; Frosty to confirm, see
+        `testing-notes/dwell-review-fixes-2026-10-01.md`). It rounded to the
+        nearest step until then, and rounding is *expanding*: at 3 bits a 0.13
+        becomes 0.25, nearly twice its input, so above about 60 % FEEDBACK the
+        loop held a limit cycle rather than decaying -- measured on AURORA, still
+        -7.1 dB under the first repeat forty seconds after a burst at AMOUNT 100
+        and FEEDBACK 80, and a -81 dB residue for good even at AMOUNT 0.
+        Truncation is the closest quantiser on the same grid that can never
+        make a sample larger, so the stage keeps 10 §11a's `|F| <= 1` itself and
+        the tail ends in exact zeros. What it costs is level: a pass loses up to
+        one step rather than half of one either way -- 4.0 dB on a 0.5 sine at
+        AMOUNT 100, 0.1 dB at AMOUNT 60 -- and a signal under one step is gone
+        on its first crushed lap.
+
+        The clamp to +-1 stays: a loud lap can still hand this stage more than
+        full scale, and the shaper and clip come after it. */
     double crush (size_t ch, double x, double amount) noexcept
     {
         const auto divisor = (int) std::ceil (1.0 + amount * kCrushHoldSpan);
@@ -633,7 +648,7 @@ private:
 
         const auto bits = kCrushBitsAtZero - amount * kCrushBitsSpan;
         const auto step = std::exp2 (1.0 - bits);
-        const auto q = std::round (held[ch] / step) * step;
+        const auto q = std::trunc (held[ch] / step) * step;
 
         return std::clamp (q, -1.0, 1.0);
     }

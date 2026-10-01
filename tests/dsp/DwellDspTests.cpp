@@ -4133,6 +4133,71 @@ void testTheFirstTempoLandsTheSyncedTime()
     }
 }
 
+/** **Crush in the loop decays to silence** (10 §11a: every in-loop FX is
+    non-expanding, `|F| <= 1`).
+
+    Rounding to the nearest step can make a value larger -- at 3 bits a 0.13
+    becomes 0.25 -- so with FEEDBACK above about 60 % the loop settled into a
+    limit cycle instead of decaying: measured on AURORA at AMOUNT 100 and
+    FEEDBACK 80 the repeats were still -7.1 dB under the first one forty
+    seconds later, and even AMOUNT 0's 16-bit quantiser held a -81 dB residue
+    for good. `testCrushFloorStopsGrowing` measures the floor *relative to the
+    tone* and so could not see the tone failing to leave.
+
+    A 50 ms burst, then twenty seconds of silence, on every character: the last
+    second must be exact zeros. */
+void testCrushInTheLoopDecaysToSilence()
+{
+    constexpr auto rate = 48000.0;
+    const auto n = (int) (rate * 20.0);
+    const auto burst = (int) (0.05 * rate);
+
+    for (int c = 0; c < 3; ++c)
+    {
+        for (const auto feedback : { 80.0f, 90.0f })
+        {
+            for (const auto amount : { 0.0f, 35.0f, 60.0f, 100.0f })
+            {
+                P::DwellDsp dsp;
+                dsp.prepare (rate, 512, 2);
+
+                auto v = settings (c, 100.0f, feedback, 100.0f);
+                v[P::Index::fx]       = 1.0f;
+                v[P::Index::fxType]   = 2.0f;   // Crush
+                v[P::Index::fxAmount] = amount;
+
+                Block block { n };
+
+                for (int i = 0; i < burst; ++i)
+                {
+                    const auto w = 0.5 - 0.5 * std::cos (2.0 * P::kPiD * (double) i / (double) burst);
+                    block.left[(size_t) i] = block.right[(size_t) i]
+                        = (float) (0.5 * w * std::sin (2.0 * P::kPiD * 300.0 * (double) i / rate));
+                }
+
+                renderAsHost (dsp, v, block, n, 512, [] (int) {});
+
+                auto zeros = true;
+
+                for (int i = n - (int) rate; i < n; ++i)
+                    zeros = zeros && block.left[(size_t) i] == 0.0f && block.right[(size_t) i] == 0.0f;
+
+                const auto lastSecond = rms (block.left, n - (int) rate, (int) rate);
+                const auto firstRepeat = rms (block.left, (int) (0.1 * rate), burst);
+
+                char buf[200];
+                std::snprintf (buf, sizeof (buf),
+                               "Crush at AMOUNT %.0f, FEEDBACK %.0f on %s decays to exact zeros "
+                               "(last second %.1f dB under the first repeat)",
+                               (double) amount, (double) feedback, characterName (c),
+                               -20.0 * std::log10 (std::max (lastSecond, 1.0e-30) / std::max (firstRepeat, 1.0e-30)));
+
+                check (zeros, buf);
+            }
+        }
+    }
+}
+
 } // namespace
 
 //==============================================================================
@@ -4193,6 +4258,7 @@ int main()
     testACharacterMoveReplaysTheRingAtItsOwnLevel();
     testMixAcrossTheHingeIsSmoothed();
     testTheFirstTempoLandsTheSyncedTime();
+    testCrushInTheLoopDecaysToSilence();
 
     std::printf ("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

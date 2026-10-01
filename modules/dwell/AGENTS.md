@@ -130,23 +130,40 @@ hold after it.
   topology decision the whole CPU budget rests on. Adding a rate later would
   be a schema event, not a feature.
 
-## `fx` and the expanded view are tied, not the same
+## The panel: BMO Linger's paged handheld, one width
 
-DECIDED, Frosty 2026-09-20. `fx` (id 17) is **the sound**: a parameter, on the
-compact panel, automatable, in presets. The expanded column that shows FX TYPE
-and FX AMOUNT is **the view**: `ModuleDef::expandedWidth` plus a session-only
-`view` attribute, never a parameter and never in a preset.
+DECIDED, Frosty 2026-10-01 ("go with option one and bring Lane's fx to its
+tab"), chosen on renders over the old face kept with a tabbed box under it.
+**380 px, one width, `expandedWidth` 0** — the 280 compact / 840 expanded pair
+and the panel's own expand arrow are gone, for Linger's reason: three pages
+never need to be on screen at once, and a tab reaches each in one click where
+the arrow reached them in one click and 560 px.
 
-So: automation, preset load and session recall **never resize the module**. A
-user clicking `fx` on while compact opens the view once, as a convenience; the
-panel's own arrow then closes it while `fx` stays on; turning `fx` off never
-closes it. Rack defaults compact, standalone defaults expanded — DEQ's
-behaviour.
+- **The screen** carries the page menu, TONE / LANE / FX, as its top band, and
+  draws the loop under it: a train of stems from the first repeat at 0 dB to
+  -60, computed with `dsp/GainLaws.h` — **the same two functions `DspCore`
+  runs**, at `P_c` = 1. Do not draw it any other way; the layout test checks
+  the count against the law written out independently. On LANE it letters
+  THROW / FREEZE / BUILD with the live one lit; on TONE it carries the GR bar,
+  and its timer runs only on that page.
+- **The foot never changes**: TIME (or NOTE), FEEDBACK, MIX with their unity
+  and dry-hinge strips, and SYNC on the DELAY rule.
+- **TONE**: CHARACTER, STEREO; LO CUT, HI CUT, DRIVE / RATE, DEPTH, DUCK.
+- **LANE**: SEND, HOLD, CHOP; the lane's FX types; TAIL, TIME, LEVEL / the
+  lane's FX gate, AMOUNT and LINK. **The lane's FX lives here**, not on FX.
+- **FX**: the main delay's FX types, gate and AMOUNT, **in the same cells** the
+  lane's occupy on LANE, so turning between the two pages moves nothing but
+  what the controls are bound to. That is why the FX page's top row is bare.
 
-The arrow is the one new touch point beyond DEQ, which switches only from the
-host bar (`ui::ExpandButton`): Dwell's panel has to be able to ask its host to
-flip the session-only flag. That is panel work, in `panel/`, not in
-`Module.cpp`.
+**The page is view state** — `ModulePanel::setUiState ("page", ...)`, never a
+parameter, never in a preset. Nothing resizes and nothing turns a page when a
+parameter moves, so the old "`fx` opens the column once, by a click" rule has
+nothing left to guard and is gone with the column.
+
+`lane_note` (id 22) has **no control** on any page. It is SYNC's lane division
+and SYNC ships disabled; when the tempo plumbing lands, LANE TIME takes
+`lane_note`'s place exactly as TIME takes NOTE's, and `tests/ui/LayoutTests.cpp`'s
+every-parameter-has-a-control sum has to change with it.
 
 **`fx_link` (id 26) is the one tie left, and it has no gesture.** It makes the
 lane's FX trio (23–25) follow the main's (17–19), default on, and while it is on
@@ -162,31 +179,6 @@ zero.
 word can be crushed against a clean main delay. A second set of cuts and
 modulation could not earn its rows the same way, which is why they went and this
 did not.
-
-`Module.cpp` and `modules/CMakeLists.txt` already name what the panel has to
-be: `bmo::dwell::DwellPanel`, a `ui::ModulePanel` constructed from a
-`ui::ModuleContext`, declared in `panel/DwellPanel.h` and defined in
-`panel/DwellPanel.cpp`. The panel chooses its layout from the width it is
-given and needs no other signal — **which width is in flux**: 280 compact is
-settled, the second width has been 460, 560 and 980 in turn, and the
-2026-09-23 pullback removed seven controls from what the reveal has to hold.
-`Module.cpp` is the record; this file is not.
-
-**The face is nine controls** (DECIDED, Frosty 2026-09-21; `docs/delay/15`):
-CHARACTER, TIME with SYNC, FEEDBACK, MIX, STEREO, LO CUT, HI CUT and FX. That
-figure is the whole diagnosis of why the first three panels were rejected — 20
-parameters in a 280 px column is 7.1 controls per 100 px, the densest panel in
-the rack; nine is 3.2. Everything else is **revealed**, and it is a
-**visibility** split only: every parameter stays live and is read at all times,
-there is no DSP gate, and `params.h` is untouched.
-
-**The expanded inventory and its width are not settled, and the 2026-09-23
-pullback made the problem smaller rather than solving it.** What the reveal has
-to hold is now **one** voicing, the main delay's depth, and the lane's own
-controls — SEND, HOLD, CHOP, LANE GAIN, LEVEL, TIME and its FX trio. The second
-mirrored voicing and LINK are gone, so the 980 px three-column layout is
-oversized for what remains. That is a panel decision in `panel/`, taken against
-a render, not something to settle from this file.
 
 ## The accent is decided
 

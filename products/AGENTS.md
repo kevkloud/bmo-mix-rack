@@ -146,12 +146,10 @@ the slot's state, off the host grid -- see `modules/AGENTS.md`, step 2. Which
 It was the first module with **two widths**: 320 compact and 600 full. A
 rack opens it compact and standalone opens it full; the switch between them
 is on the host's bar, not on the panel (`ModuleDef::expandedWidth`,
-`ui::ExpandButton`). See `modules/deq/AGENTS.md`. **BMO Dwell is the second**,
-at 280 compact and **840 expanded** -- three even columns, the delay, its depth,
-and the throw lane -- and it adds one thing DEQ does not have: an
-arrow on the panel itself that opens and closes the column. The view is still
-session-only and still not a parameter, so automating or preset-loading `fx`
-never resizes the module -- see `modules/dwell/AGENTS.md`.
+`ui::ExpandButton`). See `modules/deq/AGENTS.md`. BMO Dwell was the second, at 280
+and 840 with an arrow on its own panel, until 2026-10-01; it is now BMO
+Linger's paged handheld at one width, 380, like Linger itself -- see
+`modules/dwell/AGENTS.md`. **DEQ is the only module with two widths.**
 
 **BMO Dwell has the orchid `#f094e6` (Frosty, 2026-09-21), and two golds are
 out.** The olive-gold `#b2bb54` that first stood in `modules/dwell/Module.cpp`

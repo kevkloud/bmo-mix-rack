@@ -32,10 +32,10 @@ dsp/
   DspCore.h/.cpp           parameters in real units; one engine, held twice
   DwellDsp.h               the ModuleDsp adapter, and the zero-latency rule
 presets/FactoryPresets.h Init only, until the module has a sound to preset
-Module.h/.cpp            the ModuleDef: accent #f094e6, 280 compact / a second
-                         width still in flux (the 2026-09-23 pullback took
-                         seven controls out of the reveal)
-panel/                   the nine-control face and what is revealed behind it
+Module.h/.cpp            the ModuleDef: accent #f094e6, one width, 380
+panel/                   BMO Linger's paged handheld: a screen with TONE / LANE /
+                         FX tabs, the page's controls, and a foot that never changes
+dsp/GainLaws.h           the two loop-gain laws, shared by the engine and the screen
 ```
 
 The specification lives in `docs/delay/`, not here. **`15-lane-redesign.md` is

@@ -1,138 +1,190 @@
 #pragma once
 
 #include "core/product/ModuleDef.h"
-#include "core/ui/ExpandButton.h"
+
+#include <functional>
+#include <vector>
 
 namespace bmo::dwell
 {
 
 class ChoiceRow;
 
-/** BMO Dwell's panel: a nine-control face, and a reveal that carries the main
-    delay's depth and the throw lane beside it.
+//==============================================================================
+/** Which page the screen is showing.
 
-    ## The face -- nine controls, and nothing else
+    **UI state, not a parameter**, for BMO Linger's reasons (modules/reverb/
+    panel/ReverbPanel.h): which page somebody is looking at is not something a
+    session should carry, a host should automate or a preset should recall. It
+    reaches the panel through `ModulePanel::setUiState` ("ui.page=tone|lane|fx"
+    in tools/snapshot), which is also what makes every page renderable
+    headlessly. */
+enum class Page { tone = 0, lane, fx };
 
-    CHARACTER above the DELAY rule; TIME with SYNC beside it; FEEDBACK and MIX;
-    STEREO; LO CUT and HI CUT under the TONE rule; and FX at the foot.
+//==============================================================================
+/** The screen: a dark display inside the bezel, carrying its own page menu and
+    drawing a picture of the page under it. BMO Linger's handheld, on purpose
+    (Frosty, 2026-10-01: "mimic linger's tab/page layout").
 
-    **SEND and HOLD came off it** (Frosty, 2026-09-21): "send does nothing if
-    no hold is applied, and hold is a complex control". They are the lane's
-    gates, they only mean anything once there is a lane, and a pair of
-    accent-lit buttons on the face made the plain delay look like a
-    performance instrument. The face is the plain delay now: put it in, set a
-    time, set a feedback, set a mix. Nine controls in 280 px is 3.2 per 100 px,
-    a shade calmer than the eleven-control face's 3.9 and than BMO Saturator's
-    3.5, and the row the pair used to take goes to **FX**, which is a band of
-    its own now rather than a switch hung off the foot beside the arrow.
+    **The top band is the menu**, TONE / LANE / FX in the screen's own ink with
+    the page you are on in inverted video. It takes clicks -- `onPageChosen` --
+    and nothing under it does.
 
-    **The face did not change when the lane was cut back**, and that is worth
-    saying rather than assuming: CHARACTER, STEREO, LO CUT and HI CUT govern
-    both engines from 2026-09-22, so these nine controls are now nine controls
-    over a delay *and* a lane. Not one of them moved.
+    **What it draws is the loop, from the engine's own law.** TONE and FX draw
+    the main delay's repeats and LANE draws the lane's, as a train of stems:
+    one per lap at the delay time, each `g` times the last, from the first
+    repeat at the 0 dB line down to -60. `g` comes from `GainLaws.h`, the same
+    two functions `DspCore` runs, at `P_c` = 1 -- which is exactly the loop's
+    magnitude at its own peak, because that normalisation is what makes the
+    law character-independent (docs/delay/10 §3). So the picture is the
+    slowest-decaying frequency's decay, which is the one a listener hears last.
 
-    ## The reveal -- three even columns, 840 px
+    A loop at or above unity -- FEEDBACK past 97 %, or the lane at FREEZE or in
+    BUILD -- is drawn as what it is: level stems for a hold, rising ones for a
+    build, stopping at the +12 dB ceiling the axis carries. The safety clip is
+    what really bounds it, and the readout says HOLDS or BUILDS rather than a
+    count that would be infinite.
 
-    280 opens to 840: the 260 px face column, a 260 px column for the main
-    delay's depth, and a 260 px column for the lane, with 20 px gutters.
-    `modules/dwell/Module.cpp` carries the arithmetic, why the lane no longer
-    needs the 400 px it had, and why a two-column reveal cannot hold the
-    sixteen controls behind the arrow.
+    On LANE the three regions of the tail knob are lettered across the top of
+    the picture, the live one lit -- the THROW / FREEZE / BUILD caption that
+    stood under the knob in the column layout, moved to where the picture of
+    what each one does is.
 
-    - **The depth column** is the main delay below the surface: DRIVE, then MOD
-      RATE and MOD DEPTH, then DUCK with its GR bar, then the FX stage -- the
-      three type cells across a row and AMOUNT, whose caption names what the
-      percent moves.
-    - **The lane column** is what a throw needs and nothing else: its gates
-      (SEND, HOLD, CHOP) above the rule, its tail with the region caption under
-      it, its own TIME and LEVEL, then its own FX stage. It is a section now
-      rather than a second instrument, because the lane runs the main delay's
-      voicing -- and a column with no voicing block in it is a column the width
-      of every other one.
+    **The GR bar lives here now**, along the foot of the TONE page, because
+    DUCK is on that page and a 120 px cell has nowhere beside a knob to put a
+    bar. It is the only thing on the screen that moves on its own, so the
+    screen's timer runs **only while TONE is showing**, BMO Linger's analyser
+    rule: the other two pages cost nothing while nobody is touching them. */
+class DwellScreen final : public juce::Component,
+                          private juce::Timer
+{
+public:
+    DwellScreen (ParamSet& params, juce::Colour accent, std::function<float()> gainReductionDb);
+    ~DwellScreen() override;
 
-    **Two reveals are impossible**, whatever a composition might prefer:
-    `ModuleDef` carries one `expandedWidth` and the session flag behind it is
-    one bool. The depth and the lane open together or not at all.
+    void setPage (Page);
+    Page getPage() const noexcept { return page; }
 
-    ## What the rules do across three columns
+    /** Called when the menu band is clicked. The panel answers it with its own
+        `setPage`, so the controls under the screen follow the picture. */
+    std::function<void (Page)> onPageChosen;
 
-    All three columns strike their first rule on **one line** -- DELAY, LOOP
-    and LANE at row 77 -- and their second on **another** -- TONE, the depth
-    column's FX and the lane's FX at 460. That is the whole grid, and it is
-    exact by construction rather than by arithmetic: the depth column and the
-    lane are each laid out in two segments cut on the face's TONE line, so a
-    row height changing anywhere cannot move a rule a few pixels off its
-    neighbours.
+    /** Repaints if anything the picture is drawn from has moved. Polled by the
+        panel's timer, because a lane, a preset and a knob all move these. */
+    void refresh();
 
-    A few pixels off is the failure worth designing against. The lane ran its
-    own rhythm, on lines deliberately *clear* of the shared one, while it was a
-    second engine whose nine bands would not sit on that grid; with the voicing
-    gone its content does sit on it, and sharing the line is what says the
-    three columns are three parts of one instrument.
+    void paint (juce::Graphics&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+
+    //== The numbers the picture is built from ================================
+    //
+    // Public so a test can read them without rendering anything, the way BMO
+    // Linger's screen exposes its tap times.
+
+    /** The loop gain the current page draws: FEEDBACK's on TONE and FX, the
+        lane's on LANE, both at `P_c` = 1. */
+    double loopGain() const;
+
+    /** How many repeats are at or above -60 dB relative to the first, or -1
+        when the loop holds or builds and the answer is "all of them". */
+    int repeatsToFloor() const;
+
+    /** The delay time the current page draws, in ms. */
+    double delayMs() const;
+
+    /** The line printed along the foot of the picture. */
+    juce::String readout() const;
+
+    juce::Rectangle<float> menuBand() const;
+    juce::Rectangle<float> menuSegment (Page) const;
+    juce::Rectangle<float> plotBounds() const;
+
+    static juce::String pageName (Page);
+
+    /** The +12 dB the axis tops out at, and the -60 it floors at. */
+    static constexpr double kTopDb   = 12.0;
+    static constexpr double kFloorDb = -60.0;
+
+    /** The most stems drawn. A loop at 99 % feedback decays for thousands of
+        laps; past this the train is drawn as far as it goes and the readout
+        carries the count. */
+    static constexpr int kMaxStems = 48;
+
+private:
+    void timerCallback() override;
+
+    void paintMenu   (juce::Graphics&, juce::Colour ink) const;
+    void paintTrain  (juce::Graphics&, juce::Rectangle<float> plot, juce::Colour ink) const;
+    void paintRegion (juce::Graphics&, juce::Rectangle<float> band, juce::Colour ink) const;
+    void paintGr     (juce::Graphics&, juce::Rectangle<float> band, juce::Colour ink) const;
+
+    /** Everything `paint` reads, folded into one number, so `refresh` can tell
+        whether anything moved without keeping a copy of each. */
+    double inputsHash() const;
+
+    ParamSet& params;
+    juce::Colour accent;
+    std::function<float()> reduction;
+    Page page = Page::tone;
+    double lastHash = 0.0;
+    float shownGr = 0.0f;
+
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DwellScreen)
+};
+
+//==============================================================================
+/** BMO Dwell's panel: BMO Linger's paged handheld, one width, 380.
+
+    Top to bottom:
+
+    - **The bezel and the screen**, whose top band is the page menu. See
+      `DwellScreen`.
+    - **Two segment rows**, which each page fills or leaves bare.
+    - **A 3 x 2 grid of the page's controls**, in 120 px cells.
+    - **The foot**, which never changes: the DELAY rule with SYNC on it, then
+      TIME, FEEDBACK and MIX, and the two strips that mark FEEDBACK's unity and
+      MIX's dry hinge.
+
+    | page | segment rows | grid |
+    |---|---|---|
+    | TONE | CHARACTER; STEREO | LO CUT, HI CUT, DRIVE / RATE, DEPTH, DUCK |
+    | LANE | SEND, HOLD, CHOP; the lane's FX types | TAIL, TIME, LEVEL / FX ON, AMOUNT, LINK |
+    | FX   | --; the main delay's FX types | -- / FX, AMOUNT, -- |
+
+    **The lane's FX is on the LANE page** (Frosty, 2026-10-01), and the FX page
+    is the main delay's alone. The two FX stages sit in the **same cells** on
+    their two pages -- types in the second segment row, gate, AMOUNT and link
+    across the bottom row -- so flipping between LANE and FX moves nothing but
+    what the controls are bound to. That is also why the FX page's top row is
+    bare: the main stage has three controls and they are kept where the lane's
+    are, rather than moved up to fill the page.
+
+    **Every page's controls are unparented when it is not showing**, not
+    hidden: a hidden component still has bounds, and every walker in the
+    layout suite reads them. BMO Linger's rule.
 
     ## The lane gain knob
 
     `lane_gain` is bipolar, -100..+100, and **0 is exact unity**: below it the
     caught word decays, at it the word holds, above it the word builds. One
     loop gain with three regions rather than three modes, which is why the
-    parameter is a float and this is a knob.
+    parameter is a float and this is a knob. It carries a **catch at the
+    centre** (`ui::Knob::setCatch`), drag-only and opt-in, so unity is findable
+    by hand; the region it is in is lettered on the screen above it.
 
-    It is alone on its row now, with the lane's own TIME and LEVEL paired under
-    it. Three across a 260 px column would cut the hero's cell to 86 px and it
-    draws 116, and the lane has height to spare -- so the composition says what
-    is true, which is that the tail is the lane's one hero and the two knobs
-    under it are its supporting pair.
+    ## FX LINK
 
-    It carries two things nothing else on the panel has:
-
-    - **A catch at the centre** (`ui::Knob::setCatch`), so unity is findable by
-      hand. Dragging only, and opt-in -- typed entry, the mouse wheel, the
-      arrow keys, automation and preset recall are all untouched, and so is
-      every other control in the suite.
-    - **A region caption** under it, naming THROW, FREEZE and BUILD with the
-      one the knob is in lit and the other two dim. It says where the control
-      *is*, and -- before you touch it -- that there are three places to be.
-
-    ## FX LINK, and what it looks like when it is on
-
-    FX LINK ties the lane's FX trio to the main delay's, and it **defaults on**:
-    a fresh instance is one delay with one set of controls. It is the only link
-    left -- the voicing LINK went with the six parameters it tied -- and it is
-    drawn at the right-hand end of the lane's FX rule, which is the row the
-    three controls it governs hang under.
-
-    While it is on, those three are drawn **following rather than dead**: they
-    keep their positions, their captions and their full size, and what changes
-    is the colour -- the module accent stepped back toward the hairline, so
-    they read as quieter than the lane's own controls without taking the
+    FX LINK ties the lane's FX stage to the main delay's and **defaults on**.
+    While it is on, the lane's type row and AMOUNT are drawn **following rather
+    than dead**: the module accent stepped back toward the hairline, never the
     disabled dim, which in this suite means "this stage is off" and would be a
-    lie. The rule's legend says so in words, and an accent hairline brackets
-    the band and runs left toward the column it is following. Nothing is
-    disabled and nothing is hidden.
-
-    **Nothing is seeded when it is switched off.** The voicing link had a
-    `seedLaneOnUnlink` hook, because unlinking six controls that had been
-    following had to leave them where the main delay had them or the sound
-    would jump. A plain tie over three controls the user is reaching for anyway
-    has nothing to seed, so the hook and its mouse-up touch point went with it.
-
-    ## The closed affordance says whether anything is hidden
-
-    The arrow carries a **state dot**: a filled disc in the module's accent,
-    drawn beside the chevrons while the panel is compact and any parameter the
-    reveal carries is away from its default. It reads **all sixteen** of them --
-    the depth column's six and the lane's ten. It is painted by `paintPanel`,
-    it is not a parameter, it is not saved and it is not automatable.
+    lie. Nothing is seeded when it is switched off.
 
     ## What is not touched here
 
-    The accent is `0xfff094e6` in `Module.cpp`; the lit glow behind SEND, HOLD,
-    CHOP, FX LINK and the two FX gates is what it was. Captions are 15 pt, the
-    suite default (`core/ui/Controls.h`). Nothing in this file names a colour.
-
-    No control is labelled DWELL, and nothing on the panel names a piece of
-    hardware.
-*/
+    The accent is the one literal in `Module.cpp`. Captions are 15 pt, the
+    suite default. No control is labelled DWELL, and nothing on the panel names
+    a piece of hardware. */
 class DwellPanel final : public ui::ModulePanel,
                          private juce::Timer
 {
@@ -142,140 +194,71 @@ public:
 
     void resized() override;
 
-    /** True when the host has given this panel its wide width. The same test
-        BMO DEQ's panel makes, and the only signal either needs. */
-    bool isShowingExpanded() const noexcept;
+    /** "page" = "tone" | "lane" | "fx". */
+    bool setUiState (const juce::String& key, const juce::String& value) override;
 
-    /** A click anywhere on the panel, heard through a mouse listener on every
-        child: the FX switch's own click is what opens the columns the first
-        time, and a mouse event is the one place a *user* action can be told
-        apart from a parameter arriving from the host. */
-    void mouseUp (const juce::MouseEvent&) override;
+    void setPage (Page);
+    Page getPage() const noexcept { return screen.getPage(); }
+
+    juce::Rectangle<int> getBezelBox() const noexcept  { return bezelBox; }
+    juce::Rectangle<int> getScreenBox() const noexcept { return screenBox; }
+    DwellScreen& getScreen() noexcept                  { return screen; }
 
 private:
     void paintPanel (juce::Graphics&) override;
     void timerCallback() override;
 
-    /** TIME and NOTE share one position, so only one of them is ever a child:
-        the other is removed rather than hidden, because a knob with no bounds
-        still fails the caption-fit assertion in tests/ui/LayoutTests.cpp. */
+    /** TIME and NOTE share one cell, so only one of them is ever a child. */
     void showNote (bool sync);
 
-    /** Adds or removes both revealed columns as a whole, for the same reason:
-        a control left parented with no bounds passes every overlap check and
-        fails no caption check while being invisible. */
-    void showRevealed (bool);
-
     /** An FX AMOUNT knob is rebuilt when its type changes, because its caption
-        names what the percent moves -- `AMOUNT (SMEAR)`, `(BITS)`, `(SEAM)` --
-        and a PlainKnob's caption is fixed at construction. BMO DEQ rebuilds a
-        band's knobs the same way. There are two FX stages, so this takes which
-        one it is building for. */
+        names what the percent moves and a PlainKnob's caption is fixed at
+        construction. */
     void buildFxAmount (bool lane, int type);
 
     void refreshFxEnablement();
 
-    /** Draws the lane's FX trio as following the main delay's, or as the
-        lane's own. See the class comment; called from the timer when FX LINK
-        moves, and once from the constructor. */
+    /** Draws the lane's FX type row and AMOUNT as following the main delay's,
+        or as the lane's own. */
     void refreshFxLinkFollowing();
 
-    /** Whether any parameter the reveal carries is away from its spec default.
-        What the arrow's state dot reads; see the class comment. It reads
-        parameters and holds none of its own. */
-    bool revealedSectionIsMoved() const;
+    /** Every control a page can carry, so `resized` can unparent the ones the
+        current page does not. */
+    std::vector<juce::Component*> allPageControls();
 
-    /** Which of THROW / FREEZE / BUILD the lane gain knob is in: -1, 0 or +1.
-        One definition, read by the paint that letters the region caption and
-        by the timer that decides whether it has to be redrawn. */
-    int laneRegion() const;
-
-    /** Asks the host for the other width. Never called from a parameter
-        callback -- see core/ui/ModulePanel.h's view rule. */
-    void requestExpanded (bool expanded);
-
-    //== The three compositions, one each =====================================
-    //
-    // The face reports back the two lines its rules are struck on, and the
-    // other two columns are laid out *between* them -- LOOP and LANE share the
-    // first, both FX rules share the second. Two segments apiece rather than
-    // one run, so the grid is exact by construction. See the class comment.
-    void layOutFace  (juce::Rectangle<int> column, int& delayRuleTop, int& toneRuleTop);
-    void layOutDepth (juce::Rectangle<int> column, int toneRuleTop);
-    void layOutLane  (juce::Rectangle<int> column, juce::Rectangle<int> topBand, int toneRuleTop);
-
-    //== The bands they are built from ========================================
-    void placeHero      (juce::Rectangle<int> row);
-    void placePair      (ui::PlainKnob& left, ui::PlainKnob& right,
-                         juce::Rectangle<int> row, int knobSide);
-    /** One knob alone on its row, centred on the column. */
-    void placeSingle    (ui::PlainKnob& knob, juce::Rectangle<int> row, int knobSide);
-    void placeGates     (juce::Rectangle<int> row);
-    void placeSwitchRow (ChoiceRow&, juce::Rectangle<int> row);
-    void placeDuckBand  (juce::Rectangle<int> row);
-    void placeFxBand    (juce::Rectangle<int> row);
-    void placeFoot      (juce::Rectangle<int> row);
-
-    /** A rule across its own column only. See the definition.  */
-    void addColumnRule  (juce::Rectangle<int> row, const juce::String& legend);
-
-    /** A rule with one or two switches at its right-hand end: the lane's FX
-        rule, carrying its own gate *and* FX LINK. The rule is struck across
-        what is left, so a switch reads as belonging to the section rather than
-        to the first row under it.
-
-        **`rightmost` is the link.** `inner` sits to its left, so the last
-        thing on the rule is the tie rather than the gate, and the row reads
-        left to right as "this section, this stage, tied to the other one". */
-    void placeRuledSwitch (juce::Rectangle<int> band, const juce::String& legend,
-                           ui::SwitchButton& rightmost,
-                           ui::SwitchButton* inner = nullptr);
-
-    // Bands `resized` works out and `paintPanel` draws in. A rule and a knob
-    // caption are the only text the shared controls place for themselves;
-    // everything else is the panel's own and has to be measured where the
-    // layout is, not where the paint is.
+    juce::Rectangle<int> bezelBox, screenBox;
     juce::Rectangle<int> mixNoteBand, feedbackNoteBand;
-    juce::Rectangle<int> duckMeterCaption;
-    juce::Rectangle<int> laneRegionBand;    ///< THROW / FREEZE / BUILD
-    juce::Rectangle<int> fxLinkTieBand;     ///< the bracket drawn while FX LINK is on
-    juce::Rectangle<int> stateDotSpot;      ///< where the arrow's dot goes
 
-    // The face.
-    ui::PlainKnob time, note, feedback, mix, lowCut, highCut;
-    ui::SwitchButton sync, fx;
+    // The foot.
+    ui::PlainKnob time, note, feedback, mix;
+    ui::SwitchButton sync;
+
+    // TONE.
     std::unique_ptr<ChoiceRow> character, stereo;
-    ui::ExpandButton arrow;
+    ui::PlainKnob lowCut, highCut, drive, modRate, modDepth, duck;
 
-    // The depth column: the main delay below the surface.
-    ui::PlainKnob drive, modRate, modDepth, duck;
-    std::unique_ptr<ChoiceRow> fxType;
-    std::unique_ptr<ui::PlainKnob> fxAmount;
-
-    // The lane column. `laneGain` is captioned TAIL -- the parameter names
-    // what it is in a host's list, the caption names what it does under a LANE
-    // rule, and a panel's words are not its schema. The two knobs under it
-    // take the main delay's own words and are told apart by their **component
-    // names**, which is what `findNamed` in tests/ui/LayoutTests.cpp walks:
-    // two children called TIME would resolve by child order, and child order
-    // here changes every time the reveal opens.
+    // LANE. `laneGain` is captioned TAIL, and the lane's knobs repeat the main
+    // delay's words; they are told apart by **component names** (LANE TAIL,
+    // LANE TIME, ...), which is what `findNamed` in tests/ui/LayoutTests.cpp
+    // walks.
     ui::SwitchButton sendHeld, hold, chop, laneFx, fxLink;
     ui::PlainKnob laneGain, laneTime, laneLevel;
     std::unique_ptr<ChoiceRow> laneFxType;
     std::unique_ptr<ui::PlainKnob> laneFxAmount;
 
-    class DuckMeter;
-    std::unique_ptr<DuckMeter> duckMeter;
+    // FX, the main delay's stage.
+    ui::SwitchButton fx;
+    std::unique_ptr<ChoiceRow> fxType;
+    std::unique_ptr<ui::PlainKnob> fxAmount;
+
+    DwellScreen screen;
 
     int  fxAmountType = -1;
     int  laneFxAmountType = -1;
-    int  lastLaneRegion = 0;
     bool lastSyncWasOn = false;
     bool lastFxWasOn = false;
     bool lastLaneFxWasOn = false;
     bool lastFxLinkWasOn = false;
-    bool lastMovedWasSet = false;
-    bool revealedShown = false;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DwellPanel)
 };

@@ -1037,10 +1037,18 @@ private:
             s.spanMs = std::max (s.spanMs, in.timeMs);
         }
 
-        // The weights are stale until the next block's weigh(); mark them so
-        // that a set read before then is silent rather than un-normalised.
-        for (int i = 0; i < count; ++i)
-            s.taps[(size_t) i].weight = 0.0f;
+        // **A set leaves here weighed, at the density in force now.** The
+        // build used to zero every weight and leave the weighing to the next
+        // block's `updateDensity()` -- which skips when DENSITY has not
+        // moved, so a second prepare(), a first block longer than the TYPE
+        // dip, or a TYPE change at a 4096 block left the table built and
+        // silent for good, and at small blocks every TYPE change dropped out
+        // until the block ended (the review of PR #27, 2026-09-30). Weighing
+        // here is what makes that impossible from any caller: a built table
+        // is a playing table. It is 48 taps of arithmetic, cheap enough for
+        // the dip's midpoint, and the TYPE dip then brings up a set that is
+        // already at its level.
+        weigh (s);
     }
 
     //==========================================================================

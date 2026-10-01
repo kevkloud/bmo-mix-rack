@@ -29,6 +29,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <functional>
 #include <iostream>
 #include <string>
@@ -231,6 +232,97 @@ namespace
         }
 
         return before > 0.0f ? after / before : 0.0f;
+    }
+
+    //== Steady noise through the module ======================================
+    //
+    // The review of PR #27 (2026-09-30) found the ER going permanently silent
+    // on paths the impulse renders above never take: a second prepare(), a
+    // first block longer than the TYPE dip, a TYPE change at a large block. An
+    // impulse can land in a silent stretch and say nothing, so these run a
+    // fixed white noise instead -- every tap is busy on every sample, and an
+    // exact zero on the output means a silent table, not a quiet input.
+
+    /** The setting the review reproduced every silence in: Taps, DENSITY 50,
+        VARIATION 4, ER at 0 dB, REVERB off, MIX 100 %. */
+    std::vector<float> erOnly (int type)
+    {
+        auto v = defaults();
+        v[Index::type]        = (float) type;
+        v[Index::ermode]      = (float) taps;
+        v[Index::erdensity]   = 50.0f;
+        v[Index::ervariation] = 4.0f;
+        v[Index::erlevel]     = 0.0f;
+        v[Index::verblevel]   = -40.0f;
+        v[Index::mix]         = 100.0f;
+        return v;
+    }
+
+    /** Sample `n` of a fixed white noise in -0.5..0.5, hashed from its index
+        so that two instances fed "the same samples" really are, whatever
+        block size or start point each one ran with. */
+    float noiseAt (int n)
+    {
+        auto x = (std::uint32_t) n * 2654435761u + 0x9e3779b9u;
+        x ^= x >> 15; x *= 0x2c1b3c6du;
+        x ^= x >> 12; x *= 0x297a2d39u;
+        x ^= x >> 15;
+        return (float) ((double) x / 4294967296.0 - 0.5);
+    }
+
+    struct Stereo { std::vector<float> l, r; };
+
+    /** Runs samples [from, to) of the noise through `dsp` in blocks of
+        `block`, calling `before (at)` ahead of each block -- where a test
+        moves a parameter -- and appends what comes out to `out`. `silent`
+        feeds zeros over the same span instead. */
+    void runNoise (ReverbDsp& dsp, Stereo& out, int from, int to, int block,
+                   const std::function<void (int)>& before = {}, bool silent = false)
+    {
+        std::vector<float> l ((size_t) block), r ((size_t) block);
+
+        for (int at = from; at < to; at += block)
+        {
+            const auto n = std::min (block, to - at);
+
+            if (before)
+                before (at);
+
+            for (int i = 0; i < n; ++i)
+                l[(size_t) i] = r[(size_t) i] = silent ? 0.0f : noiseAt (at + i);
+
+            float* chans[] { l.data(), r.data() };
+            dsp.process (chans, 2, n);
+
+            out.l.insert (out.l.end(), l.begin(), l.begin() + n);
+            out.r.insert (out.r.end(), r.begin(), r.begin() + n);
+        }
+    }
+
+    /** Mean power of both channels over [from, to), in dB; -300 for silence. */
+    double powerDb (const Stereo& s, int from, int to)
+    {
+        double p = 0.0;
+        for (int i = from; i < to; ++i)
+            p += (double) s.l[(size_t) i] * s.l[(size_t) i] + (double) s.r[(size_t) i] * s.r[(size_t) i];
+        p /= 2.0 * (double) std::max (1, to - from);
+        return p > 0.0 ? 10.0 * std::log10 (p) : -300.0;
+    }
+
+    /** The longest run of samples at or under `floor` in magnitude, in
+        either channel, over [from, to). A floor of zero counts exact zeros;
+        a small one counts near-silence too, which is what a silent table
+        behind still-ringing band poles looks like. */
+    int longestRunUnder (const Stereo& s, int from, int to, float floor)
+    {
+        int longest = 0, runL = 0, runR = 0;
+        for (int i = from; i < std::min (to, (int) s.l.size()); ++i)
+        {
+            runL = std::abs (s.l[(size_t) i]) <= floor ? runL + 1 : 0;
+            runR = std::abs (s.r[(size_t) i]) <= floor ? runR + 1 : 0;
+            longest = std::max (longest, std::max (runL, runR));
+        }
+        return longest;
     }
 }
 
@@ -1118,6 +1210,175 @@ int main()
         check (size <= 1.5f, "a SIZE jump crossfades without a click");
         check (mode <= 1.5f, "an ER MODE change crossfades without a click");
         check (var  <= 1.5f, "a VARIATION change crossfades without a click");
+    }
+
+    //== A built table is never left unweighted ===================================
+    //
+    // The review of PR #27, 2026-09-30, measured exact-zero output for good on
+    // three paths with one cause: `rebuild()` zeroed every tap's weight and
+    // left the weighing to the next block's density update, which skips when
+    // DENSITY has not moved. A second prepare() with nothing changed, a fresh
+    // instance whose first block is longer than the TYPE dip, and a TYPE
+    // change at a 4096 block all ended silent; at small blocks the same defect
+    // was a dropout inside every TYPE change. Each path is asserted here, in
+    // the ER-only setting the review used.
+    {
+        // (a) A second prepare() plays exactly what a fresh instance does, at
+        // every type -- straight after the first at 48 kHz / 512, and after a
+        // reset() at 44.1 kHz / 256.
+        struct Case { double rate; int block; bool resetFirst; };
+        for (const auto c : { Case { 48000.0, 512, false }, Case { 44100.0, 256, true } })
+        {
+            bool same = true;
+            const auto n = (int) (0.5 * c.rate);
+
+            for (int t = 0; t < numTypes; ++t)
+            {
+                const auto v = erOnly (t);
+
+                ReverbDsp fresh;
+                fresh.prepare (c.rate, c.block, 2);
+                fresh.setParams (v.data(), (int) v.size());
+                Stereo a;
+                runNoise (fresh, a, 0, n, c.block);
+
+                ReverbDsp again;
+                again.prepare (c.rate, c.block, 2);
+                again.setParams (v.data(), (int) v.size());
+                Stereo warm;
+                runNoise (again, warm, 0, n / 2, c.block);
+                if (c.resetFirst)
+                    again.reset();
+                again.prepare (c.rate, c.block, 2);
+                again.setParams (v.data(), (int) v.size());
+                Stereo b;
+                runNoise (again, b, 0, n, c.block);
+
+                const auto pa = powerDb (a, n / 2, n), pb = powerDb (b, n / 2, n);
+                if (! (pa > -100.0 && std::abs (pa - pb) <= 0.01))
+                {
+                    same = false;
+                    std::cerr << "  " << kTypeNames[t] << " at " << c.rate << " / " << c.block << (c.resetFirst ? " after reset()" : "")
+                              << ": fresh " << pa << " dB, prepared twice " << pb << " dB\n";
+                }
+            }
+
+            check (same, c.resetFirst ? "reset() then prepare() plays what a fresh instance does, within 0.01 dB, at every type"
+                                      : "a second prepare() plays what a fresh instance does, within 0.01 dB, at every type");
+        }
+
+        // (b) A fresh instance plays at every block size, and plays the same
+        // thing: the TYPE dip of a first block that is not Room must not
+        // finish inside a block that also built the table.
+        {
+            bool playing = true, invariant = true;
+            const auto n = 48000;
+
+            for (int t = 0; t < numTypes; ++t)
+            {
+                double reference = 0.0;
+
+                for (const auto block : { 64, 512, 2048, 3000, 4096, 8192 })
+                {
+                    const auto v = erOnly (t);
+                    ReverbDsp dsp;
+                    dsp.prepare (48000.0, block, 2);
+                    dsp.setParams (v.data(), (int) v.size());
+                    Stereo s;
+                    runNoise (dsp, s, 0, n, block);
+
+                    const auto p = powerDb (s, n / 2, n);
+                    if (block == 64)
+                        reference = p;
+
+                    if (! (p > -100.0))
+                        playing = false;
+                    if (! (std::abs (p - reference) <= 0.01))
+                        invariant = false;
+
+                    if (! (p > -100.0) || ! (std::abs (p - reference) <= 0.01))
+                        std::cerr << "  fresh " << kTypeNames[t] << " at block " << block << ": " << p
+                                  << " dB against " << reference << " dB at block 64\n";
+                }
+            }
+
+            check (playing, "a fresh instance is not silent at any type or block size, 64 to 8192");
+            check (invariant, "a fresh instance's level is the same at every block size, within 0.01 dB");
+        }
+
+        // (c) A running Room switched to Hall at a 4096 block boundary
+        // settles at Hall's own level -- against a fresh Hall fed the same
+        // noise, so the two match sample for sample once the line has turned
+        // over.
+        {
+            const auto block = 4096, n = 72000;
+            const auto roomV = erOnly (room), hallV = erOnly (hall);
+
+            ReverbDsp dsp;
+            dsp.prepare (48000.0, block, 2);
+            dsp.setParams (roomV.data(), (int) roomV.size());
+            Stereo s;
+            runNoise (dsp, s, 0, n, block, [&] (int at) {
+                if (at >= 24000)
+                    dsp.setParams (hallV.data(), (int) hallV.size());
+            });
+
+            ReverbDsp ref;
+            ref.prepare (48000.0, 64, 2);
+            ref.setParams (hallV.data(), (int) hallV.size());
+            Stereo h;
+            runNoise (ref, h, 0, n, 64);
+
+            const auto p = powerDb (s, 48000, n), ph = powerDb (h, 48000, n);
+            std::cout << "  Room -> Hall at block 4096: " << p << " dB one second on, a fresh Hall " << ph << " dB\n";
+            check (p > -100.0 && std::abs (p - ph) <= 0.01,
+                   "a TYPE change at a 4096 block recovers to the new type's steady level, within 0.01 dB");
+        }
+
+        // (d) And inside the change, the only exact zero is the designed
+        // one: the dip's raised cosine touches zero at its midpoint, one
+        // sample, and the new table plays from the next. The review measured
+        // 546 samples of exact zero at block 2048 and 34 at 256 and 512, with
+        // the switch landing elsewhere in the block than it does here.
+        //
+        // **Exact zero alone undercounts the dropout**: the old set's band
+        // poles and the hi-cut go on ringing out after its weights are gone,
+        // so a silent table reads as tiny non-zero samples for the first
+        // fifty or so. The near-silence run under -100 dBFS is asserted too,
+        // against what the designed dip alone gives: its gain is under 2e-4
+        // -- a -25 dBFS noise under -100 dBFS -- for about 13 samples either
+        // side of the midpoint, so 48 samples (1 ms) is the dip with room to
+        // spare and not a dropout.
+        {
+            bool short_ = true, quiet = true;
+
+            for (const auto block : { 256, 512, 2048 })
+            {
+                const auto roomV = erOnly (room), hallV = erOnly (hall);
+                ReverbDsp dsp;
+                dsp.prepare (48000.0, block, 2);
+                dsp.setParams (roomV.data(), (int) roomV.size());
+                Stereo s;
+                int switchedAt = -1;
+                runNoise (dsp, s, 0, 48000, block, [&] (int at) {
+                    if (at >= 24000 && switchedAt < 0)
+                    {
+                        switchedAt = at;
+                        dsp.setParams (hallV.data(), (int) hallV.size());
+                    }
+                });
+
+                const auto run  = longestRunUnder (s, switchedAt, switchedAt + 9600, 0.0f);
+                const auto hush = longestRunUnder (s, switchedAt, switchedAt + 9600, 1.0e-5f);
+                std::cout << "  Room -> Hall at block " << block << ": longest exact-zero run " << run
+                          << " samples, longest under -100 dBFS " << hush << " samples\n";
+                short_ = short_ && run <= 1;
+                quiet  = quiet && hush <= 48;
+            }
+
+            check (short_, "a TYPE change outputs exact zero for at most the dip's one midpoint sample, at blocks 256, 512 and 2048");
+            check (quiet, "a TYPE change is under -100 dBFS for no longer than the dip itself (48 samples), at blocks 256, 512 and 2048");
+        }
     }
 
     //== Energy: finite, and energy-renormalised to the room =====================

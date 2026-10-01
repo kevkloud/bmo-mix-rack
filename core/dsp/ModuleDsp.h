@@ -131,14 +131,19 @@ public:
 
         `valid` is false whenever the host gave no playhead, no position or no
         usable tempo, and then `bpm` is 0.0 -- never a figure a module could
-        mistake for a tempo -- and `playing` is false. The three cases are
-        deliberately one, down to the last value: a module has nothing
-        different to do about any of them, so it is not made, or able, to
-        tell them apart. A tempo the host does send but which is not a tempo
-        (zero, negative, not finite) is the third case. A stopped transport is not one of them: it is
-        `playing == false` with `valid` still true and `bpm` intact whenever the
-        host knows a tempo, because a delay synced to 120 bpm is still synced to
-        120 bpm while the transport is parked.
+        mistake for a tempo -- and `playing` is false. A tempo the host does
+        send but which is not one (zero, negative, not finite) is the third
+        case. **The three are indistinguishable by design**, down to the last
+        value: a module has nothing different to do about any of them, so it
+        is neither made nor able to tell them apart. That includes a host that
+        reports its transport running without a tempo -- `playing` is false
+        whenever `valid` is -- so a later module that wants the transport on
+        its own needs its own hook, not this one.
+
+        A stopped transport is not one of those cases: it is `playing ==
+        false` with `valid` still true and `bpm` intact whenever the host knows
+        a tempo, because a delay synced to 120 bpm is still synced to 120 bpm
+        while the transport is parked.
 
         **What to do when the tempo is missing or the transport stops is the
         module's own policy, not the plumbing's.** The expected one is to hold
@@ -146,6 +151,25 @@ public:
         never seen one, and never flush its state on stop -- but only the
         module knows what holding means for it, which is why `bpm` arrives as
         0.0 rather than as a remembered value somebody else chose.
+
+        **Three things a module must not assume**, each of which the first
+        consumer would otherwise find in a host:
+
+        - **That what it remembers survives a rack chain edit.** Adding,
+          removing or moving any module rebuilds the whole chain
+          (`RackProcessor::rebuild`), and every slot gets a new engine and a
+          new DSP -- so a held last-valid tempo is gone, even in a slot the
+          edit did not touch. The new DSP is handed the tempo again before its
+          first `process`, so this only matters while the host's tempo is
+          invalid, when the module is back to its never-seen-one fallback.
+        - **That `prepare` comes with a tempo.** It does not: the engine sets
+          the parameters and prepares, and the first `setTempo` arrives with
+          the first block. A module has to be correct, and allocate whatever
+          its synced time could need, between the two.
+        - **That a valid tempo is a sane one.** Valid means finite and
+          positive and nothing more; the plumbing does not bound it. A module
+          clamps it to its own range before it divides by it or turns it into
+          a length in samples.
 
         **Deliberately not carried:** PPQ position, time signature, sample or
         second position, loop points and record state. Nothing in the suite

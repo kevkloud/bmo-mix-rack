@@ -155,6 +155,13 @@ add_test(NAME tail COMMAND tail_tests)
 # Linked like tail_tests because it walks the registry.
 bmo_add_tool(tempo_tests plugin/TempoTests.cpp ${BMO_ROOT}/products/rack/Registry.cpp)
 target_link_libraries(tempo_tests PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp bmo_deesser bmo_fetcomp bmo_reverb)
+# BMO Tune RT runs on the same SingleModuleProcessor but is not in the rack's
+# registry, so it is linked in by hand -- and only when the build has it, so
+# the rack-alone configuration (BMO_BUILD_TUNE=OFF) still builds this suite.
+if(BMO_BUILD_TUNE)
+    target_link_libraries(tempo_tests PRIVATE bmo_tune)
+    target_compile_definitions(tempo_tests PRIVATE BMO_TEMPO_TESTS_TUNE=1)
+endif()
 add_test(NAME tempo COMMAND tempo_tests)
 
 # Layout assertions on the real panels. JUCE, not bmo_add_dsp_tool: no

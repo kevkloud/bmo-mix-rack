@@ -19,7 +19,9 @@
       not one of them: it keeps its tempo and says it is stopped.
 
     - **The rack.** Every slot is handed the same three values in the same
-      block, read once from the host, so two synced modules cannot disagree.
+      block, read once from the host, so two synced modules cannot disagree;
+      and after a chain edit, which rebuilds every slot's DSP, each new DSP
+      is handed the tempo before its first process.
 
     - **Nothing else moved.** Every registered module, and a rack holding all
       of them, is rendered with no playhead and again with a playhead at
@@ -40,9 +42,14 @@
 #include "products/rack/Product.h"
 #include "products/rack/Registry.h"
 
+#if BMO_TEMPO_TESTS_TUNE
+ #include "modules/tune/Module.h"
+#endif
+
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <functional>
 #include <limits>
 
 using namespace test;
@@ -493,21 +500,164 @@ int main()
 
             rack->setPlayHead (nullptr);
         }
+
+        // A chain edit mid-session. `rebuild` gives EVERY slot a new engine
+        // and a new DSP, the slots the edit did not touch included, so
+        // whatever an old DSP remembered is gone -- which ModuleDsp::setTempo
+        // warns a module about. What the plumbing owes it is that the new DSP
+        // is handed the tempo before its first process, not one block later.
+        {
+            const auto& util = [&]() -> const bmo::ModuleDef&
+            {
+                for (const auto* def : bmo::products::registry())
+                    if (juce::String (def->id) == "util")
+                        return *def;
+
+                jassertfalse;
+                return *bmo::products::registry().front();
+            }();
+
+            auto rack = bmo::products::createRack();
+            rack->addModule (probe);
+            rack->addModule (probe);
+            rack->setPlayHead (&playHead);
+            rack->setPlayConfigDetails (2, 2, kRate, kBlock);
+            rack->prepareToPlay (kRate, kBlock);
+
+            playHead.set (120.0, true);
+            oneBlock (*rack);
+
+            /** After an edit, every probe that was alive before it is silent,
+                and every probe made by it -- `expected` of them -- was handed
+                exactly one tempo, with these values, before its first
+                process. The log is cleared BEFORE the edit, so the new DSPs'
+                whole lives are in it, prepare's setParams included. */
+            const auto expectFreshAndHanded = [&] (const std::function<void()>& edit, int expected,
+                                                   double bpm, bool valid, bool playing,
+                                                   const juce::String& where)
+            {
+                const auto firstNew = probesMade;
+
+                events.clear();
+                edit();
+
+                juce::AudioBuffer<float> buffer (2, kBlock);
+                buffer.clear();
+                juce::MidiBuffer midi;
+                rack->processBlock (buffer, midi);
+
+                expect (probesMade - firstNew == expected,
+                        where + ": the edit made " + juce::String (expected) + " new probe DSPs, made "
+                            + juce::String (probesMade - firstNew));
+
+                for (const auto& e : events)
+                    expect (e.probe >= firstNew,
+                            where + ": no call reaches probe " + juce::String (e.probe)
+                                + ", which the rebuild destroyed");
+
+                for (int id = firstNew; id < probesMade; ++id)
+                {
+                    int tempos = 0;
+                    bool processedBeforeTempo = false;
+                    bool processed = false;
+
+                    for (const auto& e : events)
+                    {
+                        if (e.probe != id)
+                            continue;
+
+                        if (e.call == Call::process)
+                        {
+                            processedBeforeTempo = processedBeforeTempo || tempos == 0;
+                            processed = true;
+                        }
+
+                        if (e.call == Call::tempo)
+                        {
+                            ++tempos;
+                            expect (e.bpm == bpm && e.valid == valid && e.playing == playing,
+                                    where + ": new probe " + juce::String (id) + " was handed bpm "
+                                        + juce::String (bpm) + (valid ? ", valid" : ", invalid")
+                                        + (playing ? ", playing" : ", stopped"));
+                        }
+                    }
+
+                    expect (processed, where + ": new probe " + juce::String (id) + " processed the block");
+                    expect (tempos == 1, where + ": new probe " + juce::String (id)
+                                             + " was handed one tempo, got " + juce::String (tempos));
+                    expect (! processedBeforeTempo,
+                            where + ": new probe " + juce::String (id) + " had its tempo before its first process");
+                }
+            };
+
+            // Add a third probe: all three slots are new engines, the two the
+            // edit did not touch as well as the one it added.
+            expectFreshAndHanded ([&] { rack->addModule (probe); }, 3,
+                                  120.0, true, true, "adding a module");
+
+            // Swap the middle one for BMO Util, at a new tempo: the probes
+            // either side of it are rebuilt again and hear the new figure.
+            playHead.set (97.5, false);
+            expectFreshAndHanded ([&] { rack->setModule (1, util); }, 2,
+                                  97.5, true, false, "swapping a module");
+
+            // Move one, with the host's tempo gone: the new DSPs are handed
+            // "no tempo" before they process, never nothing and never the
+            // figure the destroyed DSPs last heard.
+            playHead.set ({}, true);
+            expectFreshAndHanded ([&] { rack->moveModule (0, 2); }, 2,
+                                  0.0, false, false, "moving a module, tempo invalid");
+
+            rack->setPlayHead (nullptr);
+        }
     }
 
     //== Nothing else moved: byte for byte, with and without a playhead =======
+    //
+    // **Today this is true by construction**: no module overrides `setTempo`,
+    // so every one of them inherits the no-op and cannot hear the playhead.
+    // The check is here for the day that stops being true. BMO Dwell will be
+    // the first module that syncs to the tempo, and its output SHOULD change
+    // with one -- so it, and every consumer after it, is carved out of this
+    // comparison deliberately, by id, in `tempoConsumers` below, and carries
+    // its own tempo tests in its own suite. A module that starts hearing the
+    // tempo without being added there fails here, which is the point: the
+    // list is the record of which modules are allowed to.
+    //
+    // The walk is over the registry as it stands, never a count written down
+    // here, so adding a module is checked automatically and never breaks this
+    // file for a reason that has nothing to do with the tempo.
     {
-        int compared = 0;
+        // Ids of modules that consume the tempo, and so are exempt from the
+        // byte-identity below. Empty until BMO Dwell; add "delay" (or whatever
+        // id it ships under) here in the same change that overrides setTempo.
+        const std::vector<juce::String> tempoConsumers {};
 
-        for (const auto* def : bmo::products::registry())
+        const auto& registry = bmo::products::registry();
+
+        const auto consumesTempo = [&] (const bmo::ModuleDef& def)
+        {
+            return std::find (tempoConsumers.begin(), tempoConsumers.end(), juce::String (def.id))
+                       != tempoConsumers.end();
+        };
+
+        // A name on the carve-out list that is not a registered module is a
+        // typo or a leftover, and would exempt nothing while looking as if it
+        // did.
+        for (const auto& id : tempoConsumers)
+            expect (std::any_of (registry.begin(), registry.end(),
+                                 [&] (const bmo::ModuleDef* d) { return id == d->id; }),
+                    "the tempo carve-out names a registered module: " + id);
+
+        const auto compareStandalone = [&] (const bmo::ModuleDef& def)
         {
             for (const auto swept : { false, true })
             {
-                const juce::String who { juce::String (def->id) + (swept ? " (swept)" : " (defaults)") };
+                const juce::String who { juce::String (def.id) + (swept ? " (swept)" : " (defaults)") };
 
                 const auto run = [&] (Host host)
                 {
-                    auto proc = makeProduct (*def);
+                    auto proc = makeProduct (def);
 
                     if (swept)
                         sweep (proc->getEngine().params());
@@ -523,23 +673,43 @@ int main()
                 expect (identical (quiet, again), who + " renders the same twice with no playhead");
                 expect (identical (quiet, steady), who + " is byte-identical with a playhead at 120 bpm playing");
                 expect (identical (quiet, moving), who + " is byte-identical with a playhead that changes every block");
-                ++compared;
             }
+        };
+
+        int compared = 0;
+
+        for (const auto* def : registry)
+        {
+            if (consumesTempo (*def))
+                continue;
+
+            compareStandalone (*def);
+            ++compared;
         }
 
-        expect (compared == 2 * (int) bmo::products::registry().size(),
-                "every registered module was compared at both settings");
-        expect (bmo::products::registry().size() == 10,
-                "the registry still holds ten modules, got "
-                    + juce::String ((int) bmo::products::registry().size()));
+        expect (compared + (int) tempoConsumers.size() == (int) registry.size(),
+                "every registered module was compared or carved out by name");
+
+       #if BMO_TEMPO_TESTS_TUNE
+        // BMO Tune RT runs on the same SingleModuleProcessor but is not in the
+        // rack's registry, so the walk above never reaches it. It is linked in
+        // here only when the build has it (BMO_BUILD_TUNE), as the other Tune
+        // suites are.
+        compareStandalone (bmo::tune::module());
+       #endif
 
         // And in racks, in registry order, eight slots at a time -- the
         // registry holds more modules than a rack has slots, so it takes two
         // racks to put every module in one.
-        const auto& registry = bmo::products::registry();
+        std::vector<const bmo::ModuleDef*> rackable;
+
+        for (const auto* def : registry)
+            if (! consumesTempo (*def))
+                rackable.push_back (def);
+
         int racked = 0;
 
-        for (size_t first = 0; first < registry.size(); first += (size_t) RackProcessor::kSlots)
+        for (size_t first = 0; first < rackable.size(); first += (size_t) RackProcessor::kSlots)
         {
             for (const auto swept : { false, true })
             {
@@ -549,7 +719,7 @@ int main()
                 {
                     auto rack = bmo::products::createRack();
 
-                    for (auto i = first; i < registry.size() && rack->addModule (*registry[i]); ++i) {}
+                    for (auto i = first; i < rackable.size() && rack->addModule (*rackable[i]); ++i) {}
 
                     loaded = rack->getNumModules();
 
@@ -573,8 +743,8 @@ int main()
             }
         }
 
-        expect (racked == (int) registry.size(),
-                "every registered module was run in a rack, got " + juce::String (racked));
+        expect (racked == (int) rackable.size(),
+                "every module not carved out was run in a rack, got " + juce::String (racked));
     }
 
     std::cout << checksMade << " checks made.\n";

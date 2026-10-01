@@ -309,6 +309,22 @@ namespace
         return p > 0.0 ? 10.0 * std::log10 (p) : -300.0;
     }
 
+    /** The power of a - b over [from, to) against the power of a, in dB:
+        how far two renders that should be the same sample for sample are
+        from it. */
+    double residualDb (const Stereo& a, const Stereo& b, int from, int to)
+    {
+        double d = 0.0, p = 0.0;
+        for (int i = from; i < to; ++i)
+        {
+            const auto dl = (double) a.l[(size_t) i] - b.l[(size_t) i];
+            const auto dr = (double) a.r[(size_t) i] - b.r[(size_t) i];
+            d += dl * dl + dr * dr;
+            p += (double) a.l[(size_t) i] * a.l[(size_t) i] + (double) a.r[(size_t) i] * a.r[(size_t) i];
+        }
+        return p > 0.0 ? 10.0 * std::log10 (std::max (d, 1.0e-300) / p) : 0.0;
+    }
+
     /** The longest run of samples at or under `floor` in magnitude, in
         either channel, over [from, to). A floor of zero counts exact zeros;
         a small one counts near-silence too, which is what a silent table
@@ -1418,6 +1434,103 @@ int main()
             std::cout << "  VARIATION 6 -> " << away << " -> 6 through silence: peak " << db (peak) << " dBFS after returning\n";
             check (peak <= 1.0e-6f, "returning to VARIATION 6 through silence is silent (below -120 dBFS): no stale comb audio");
         }
+    }
+
+    //== A finished crossfade leaves the diffuser's normaliser on the new set =====
+    //
+    // `weigh()` updates the per-band powers the diffuser's normaliser is built
+    // from only for the active set, and the crossfade flips which set that is
+    // without weighing it again -- so a table change at a steady DENSITY kept
+    // the old set's powers, and the old set's normaliser, for good. Against a
+    // fresh instance fed the same noise, the two must agree sample for sample
+    // once the line has turned over.
+    {
+        struct Move { const char* what; int index; float value; };
+        bool same = true;
+
+        for (const auto m : { Move { "VARIATION 4 -> 0", Index::ervariation, 0.0f },
+                              Move { "VARIATION 4 -> 5", Index::ervariation, 5.0f },
+                              Move { "ER MODE Taps -> Energy", Index::ermode, (float) energy },
+                              Move { "SIZE -> 30 m", Index::size, 30.0f } })
+        {
+            auto v = erOnly (room);
+            v[Index::erdensity] = 100.0f;      // all three diffuser stages in
+            auto to = v;
+            to[(size_t) m.index] = m.value;
+
+            ReverbDsp dsp;
+            dsp.prepare (48000.0, 512, 2);
+            dsp.setParams (v.data(), (int) v.size());
+            Stereo s;
+            runNoise (dsp, s, 0, 72000, 512, [&] (int at) {
+                if (at >= 24000)
+                    dsp.setParams (to.data(), (int) to.size());
+            });
+
+            ReverbDsp ref;
+            ref.prepare (48000.0, 512, 2);
+            ref.setParams (to.data(), (int) to.size());
+            Stereo h;
+            runNoise (ref, h, 0, 72000, 512);
+
+            const auto r = residualDb (h, s, 48000, 72000);
+            std::cout << "  " << m.what << " at DENSITY 100: " << r << " dB residual against a fresh instance there\n";
+            same = same && r <= -100.0;
+        }
+
+        check (same, "after a table crossfade the output is a fresh instance's, sample for sample (residual under -100 dB)");
+    }
+
+    //== reset() in the middle of a crossfade finishes the move ===================
+    //
+    // reset() cleared the fade flag without flipping to the set the fade was
+    // going to, and the config was already recorded as current -- so the old
+    // table went on playing until something else changed. The same for a
+    // TYPE dip cut short before its midpoint, which had not built the new
+    // table yet.
+    //
+    // The bar is -80 dB and not the -100 the crossfade check above uses:
+    // **a reset() instance and a fresh one differ by -86 dB even when nothing
+    // moved at all** (measured on AURORA, 2026-09-30, and steady from 200 ms
+    // on), because reset() snaps the smoothed values -- the ER hi-cut's
+    // coefficient, the fader gains -- to their targets, where a fresh
+    // instance glides there from its construction defaults and, in float,
+    // stalls a few hundred ulps short. (Holding the hi-cut's glide alone
+    // moved the floor to -91 dB.) The old table playing on measured +0.18 dB.
+    {
+        struct Move { const char* what; int index; float value; };
+        bool landed = true;
+
+        for (const auto m : { Move { "a VARIATION crossfade", Index::ervariation, 0.0f },
+                              Move { "a TYPE dip", Index::type, (float) hall } })
+        {
+            auto v = erOnly (room);
+            auto to = v;
+            to[(size_t) m.index] = m.value;
+
+            ReverbDsp dsp;
+            dsp.prepare (48000.0, 512, 2);
+            dsp.setParams (v.data(), (int) v.size());
+            Stereo warm;
+            runNoise (dsp, warm, 0, 24000, 512);
+            dsp.setParams (to.data(), (int) to.size());
+            runNoise (dsp, warm, 24000, 24064, 64);        // 64 samples into a 1440-sample move
+            dsp.reset();
+            Stereo s;
+            runNoise (dsp, s, 0, 24000, 512);
+
+            ReverbDsp ref;
+            ref.prepare (48000.0, 512, 2);
+            ref.setParams (to.data(), (int) to.size());
+            Stereo h;
+            runNoise (ref, h, 0, 24000, 512);
+
+            const auto r = residualDb (h, s, 14400, 24000);
+            std::cout << "  reset() in " << m.what << ": " << r << " dB residual against a fresh instance at the new setting\n";
+            landed = landed && r <= -80.0;
+        }
+
+        check (landed, "reset() during a crossfade or a TYPE dip lands on the new setting, not the old one (residual under -80 dB)");
     }
 
     //== Energy: finite, and energy-renormalised to the room =====================

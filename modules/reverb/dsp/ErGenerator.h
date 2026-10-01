@@ -130,6 +130,26 @@ public:
 
     void reset()
     {
+        // **A move in flight is finished, not dropped.** `current` already
+        // names the new table when a crossfade or a TYPE dip is running, so
+        // nothing would ever ask for it again: a fade cut short has to land
+        // on the set it was fading to, and a dip cut short before its
+        // midpoint has to build the table it was going to swap in. Until the
+        // 2026-09-30 review, reset() cleared the flags and left the old table
+        // playing until some other control moved.
+        if (fading)
+        {
+            active = 1 - active;
+            weigh (sets[active]);
+        }
+        else if (dipping && dipPos < fadeLength)
+        {
+            rebuild (current, sets[active]);
+            sizeAtBuild = current.sizeM;
+        }
+
+        lastNormDensity = -1.0f;   // the diffuser's normaliser is rebuilt for whichever set now plays
+
         std::fill (line.begin(), line.end(), 0.0f);
         std::fill (combLine.begin(), combLine.end(), 0.0f);
         for (auto& b : stageLine)

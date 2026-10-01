@@ -23,6 +23,19 @@ option(BMO_DSP_ONLY "Build only the JUCE-free DSP tests and measurement tools" O
 option(BMO_BUILD_RACK "Build the rack, its modules and its products" ON)
 option(BMO_BUILD_TUNE "Build BMO Tune RT" ON)
 
+# Link-time optimisation on the plugin targets. ON by default, so a build made
+# by hand or by a release tag is exactly what it was. It is a switch because
+# the Windows CI job spent 36 to 49 minutes in its Build step with 97 % of
+# compiles already served from the compiler cache (measured 2026-10-01), and
+# the suspect is the 24 plugin links -- twelve products, VST3 and Standalone
+# each -- every one of which regenerates the whole plugin's code at link time
+# where no cache can help. Turning it off for pull-request builds is the
+# experiment; `.github/workflows/build.yml` says what it measured.
+#
+# It reaches the plugin binaries only. The tests are separate executables
+# that were never link-time optimised, so what `ctest` proves is unaffected.
+option(BMO_LTO "Link-time optimisation on the plugin targets" ON)
+
 if(NOT BMO_BUILD_RACK AND NOT BMO_BUILD_TUNE)
     message(FATAL_ERROR
         "Nothing to build: BMO_BUILD_RACK and BMO_BUILD_TUNE are both OFF.")
@@ -183,8 +196,11 @@ if(NOT BMO_DSP_ONLY)
                 juce::juce_dsp
             PUBLIC
                 juce::juce_recommended_config_flags
-                juce::juce_recommended_lto_flags
                 juce::juce_recommended_warning_flags)
+
+        if(BMO_LTO)
+            target_link_libraries(${target} PUBLIC juce::juce_recommended_lto_flags)
+        endif()
     endfunction()
 
     # A plain executable that uses the shared code without being a plugin:

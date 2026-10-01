@@ -152,6 +152,15 @@ jobs:
               args+=(-DCMAKE_OSX_ARCHITECTURES="arm64")
             fi
           fi
+          # EXPERIMENT (2026-10-01): a pull-request build skips link-time
+          # optimisation on the plugin targets, to measure how much of the
+          # Windows Build step it is. A push and a tag build exactly as
+          # before. A pull request's packaged plugins are therefore NOT the
+          # release build: install from a main or tag run to listen or to
+          # measure CPU. See the BMO_LTO option in CMakeLists.txt.
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            args+=(-DBMO_LTO=OFF)
+          fi
           cmake "${args[@]}"
 
       - name: Build

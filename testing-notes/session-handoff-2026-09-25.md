@@ -14,7 +14,7 @@ as of M2), then the two notes it points at:
 
 ## Where the work is
 
-- **Repo:** `C:\Users\stefr\bmo-mix-rack` on ICE QUEEN, a fresh clone of
+- **Repo:** the `bmo-mix-rack` folder in the user folder on ICE QUEEN, a fresh clone of
   Kevin's `kevkloud/bmo-mix-rack` made on 2026-09-24. Its only remote is
   `origin` = Kevin's. The older `bmo-mix-rack-333` folder next to it is
   abandoned and must not be worked in. **Work goes to Kevin's main as PRs.**
@@ -102,7 +102,7 @@ Recorded in the M2 note and not blocking:
 
 ## How to pick up
 
-1. `cd C:\Users\stefr\bmo-mix-rack`, `git status --short` (clean),
+1. `cd` into that `bmo-mix-rack` clone, `git status --short` (clean),
    `git log --oneline -14` (the thirteen commits and `aa4416d`).
 2. Build the two trees with named targets and run both suites before
    changing anything; record the counts and the machine.

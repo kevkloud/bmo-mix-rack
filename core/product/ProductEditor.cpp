@@ -13,27 +13,7 @@ ProductEditor::ProductEditor (SingleModuleProcessor& p)
     lookAndFeel.refreshColours();
     setLookAndFeel (&lookAndFeel);
 
-    {
-        auto ctx = proc.makeContext();
-
-        // A panel with an expand arrow of its own -- BMO Dwell's, docs/delay/13
-        // §6a -- gets a setter that re-lays the window out rather than the
-        // processor's bare flag, so the view follows the click instead of
-        // waiting for the once-a-second poll in timerCallback. Nothing is torn
-        // down by applyView, so it is safe to run inside the panel's own mouse
-        // handler; the header's chevron asks rather than remembers, so
-        // refreshExpand at the end of applyView keeps the two in step.
-        ctx.setExpanded = [this] (bool shouldBe)
-        {
-            if (shouldBe != proc.isExpanded())
-            {
-                proc.setExpanded (shouldBe);
-                applyView();
-            }
-        };
-
-        panel = proc.getModule().createPanel (std::move (ctx));
-    }
+    panel = proc.getModule().createPanel (proc.makeContext());
 
     if (proc.getModule().isExpandable())
         header.setExpandable ([this] { return proc.isExpanded(); },

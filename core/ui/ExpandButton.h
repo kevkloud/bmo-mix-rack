@@ -10,18 +10,9 @@ namespace bmo::ui
     compact and wide layouts.
 
     It lives on the bar *above* a panel -- the standalone header, a rack
-    slot's bar. Every control on a panel changes the sound; this changes the
-    window, and putting it among them would make it read as one more of them.
-
-    **BMO Dwell is the one exception, and it is a decision rather than a
-    lapse** (docs/delay/13 §6a, Frosty 2026-09-20): its FX section *is* the
-    column the wide view opens, its `fx` switch sits on the panel beside it,
-    and the two are tied -- clicking `fx` on while compact opens the column
-    once, after which the arrow alone toggles it and touches no parameter. So
-    Dwell's panel carries one of these as well, reaching the same session-only
-    flag through ui::ModuleContext::setExpanded. Nothing here changes for it:
-    the button asks rather than remembers, so a panel's copy and a bar's copy
-    cannot disagree.
+    slot's bar -- and never on the panel itself. Every control on a panel
+    changes the sound; this changes the window, and putting it among them
+    would make it read as one more of them.
 
     Two chevrons: pointing out when the next press widens, pointing in when
     it narrows. It asks rather than remembers, so whatever changed the view --

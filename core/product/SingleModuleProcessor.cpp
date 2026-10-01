@@ -117,7 +117,7 @@ juce::AudioProcessorEditor* SingleModuleProcessor::createEditor()
 
 ui::ModuleContext SingleModuleProcessor::makeContext()
 {
-    ui::ModuleContext ctx { engine.params(), def,
+    return { engine.params(), def,
              [this] { return engine.meter().maxPeak(); },
              [this] { return engine.meter().maxRms(); },
              [this] { return engine.inputMeter().maxPeak(); },
@@ -126,19 +126,6 @@ ui::ModuleContext SingleModuleProcessor::makeContext()
              [this] { return engine.sampleRate(); },
              [this] (int band) { engine.setSolo (band); },
              engine.analyser() };
-
-    // The session-only view, for a panel with an expand arrow of its own.
-    // Assigned rather than passed positionally: every other field above is
-    // aggregate-initialised in declaration order, and these two are last so
-    // that adding them re-binds nothing.
-    //
-    // This one only moves the flag. ProductEditor replaces it with a closure
-    // that also re-lays the window out, so the arrow acts inside the click;
-    // left to this, the editor's once-a-second poll would answer it.
-    ctx.isExpanded  = [this] { return isExpanded(); };
-    ctx.setExpanded = [this] (bool shouldBe) { setExpanded (shouldBe); };
-
-    return ctx;
 }
 
 //==============================================================================

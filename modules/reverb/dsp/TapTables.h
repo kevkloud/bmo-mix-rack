@@ -232,7 +232,7 @@ inline constexpr float kReferenceSizeM = 12.0f;
     no bottom, and SIZE reaches 0.5 m: at the settings a user has, pink noise at
     -18 dBFS RMS came out over full scale under about 4 m and at +18.6 dBFS at
     0.5 m (the PR #27 review, on AURORA). Nothing under 6 m was in either
-    listening set, so Frosty's call on 2026-10-01 was to hold the gain at its
+    listening set, so Frosty's call on 2026-09-30 was to hold the gain at its
     6 m figure for every smaller room. Everything he heard is untouched, and
     only the gain is held: the times go on scaling, so a smaller room is still
     an earlier and tighter one.
@@ -247,7 +247,7 @@ inline constexpr float kGainFloorSizeM = 6.0f;
 /** How fast a tap eases down as the room shrinks below `kGainFloorSizeM`: its
     gain is the 6 m gain times (SIZE / 6) ^ this, about 1.5 dB per halving.
 
-    Frosty's call on 2026-10-02, and his reason: short of an extreme resonance
+    Frosty's call on 2026-10-01, and his reason: short of an extreme resonance
     or a room mode, a real room's reflections never double what went in, so a
     room that only got smaller should not come out louder. 0.25 is the one
     slope that offsets the bunching across all six tables -- measured on

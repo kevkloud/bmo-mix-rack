@@ -2149,11 +2149,11 @@ int main()
     // under about 4 m and read +18.6 dBFS at Room 0.5 m. Nothing below 6 m was
     // in either listening set.
     //
-    // Frosty's two calls. 2026-10-01: stop the gain rising below 6 m, so
+    // Frosty's two calls. 2026-09-30: stop the gain rising below 6 m, so
     // everything he heard stays as it was. That held the gain and not the
     // level -- with the times still shrinking the taps bunch up and sum more
     // coherently in the bass, worth up to 7 dB at 0.5 m, and the bottom corner
-    // still read +1.8 dBFS. 2026-10-02: flatten it, because short of a room
+    // still read +1.8 dBFS. 2026-10-01: flatten it, because short of a room
     // mode a real room's reflections never double what went in. So below 6 m
     // the gain eases down as (SIZE / 6) ^ 0.25, about 1.5 dB per halving,
     // which is what the bunching was adding. The times are untouched all the

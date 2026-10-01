@@ -53,10 +53,11 @@ parameter, metering, tail and type sections of `10-dsp-spec.md`.
 - Never commit renders, audio or fonts. Renders go in `snapshots/`
   (gitignored). Fonts come from the `.bmo-fontdir` pointer; copy the pointer
   from the main folder, not the font files.
-- BMO Opto's hashes guard shared UI code: `ab3ff3b77116b7a5` (dark),
-  `878cca7b1a80a551` (light), `88a7653a82c19ae0` (GR dark). They are rendered
+- BMO Opto's hashes guard shared UI code: `59d85c014da98432` (dark),
+  `313df8cc740e9aa3` (light), `393f13e24fbf96c3` (GR dark). They are rendered
   at `signal=-18`; a bare render does not reproduce all three. Re-prove them if
-  anything in `core/ui` changes.
+  anything in `core/ui` changes (`appearance=` and `surface=simple` named; see
+  testing-notes/opto-reference-hashes-2026-10-01.md).
 - Name the machine in every note. Do not push or open a PR until Frosty says.
 
 ## Decided, do not reopen

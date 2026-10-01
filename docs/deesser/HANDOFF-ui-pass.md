@@ -47,8 +47,9 @@ and `docs/deesser/11-integration-and-test-plan.md`.
 - The GR meter is the shared `ui::DynamicsMeter`: 24 dB scale, stock 0.7
   bezel. It will show peak band reduction. Do not change `core/ui` unless it
   is unavoidable, and if you do, re-prove BMO Opto's hashes:
-  `ab3ff3b77116b7a5` (dark), `878cca7b1a80a551` (light), `88a7653a82c19ae0`
-  (GR dark).
+  `59d85c014da98432` (dark), `313df8cc740e9aa3` (light), `393f13e24fbf96c3`
+  (GR dark) (`appearance=` and `surface=simple` named; see
+  testing-notes/opto-reference-hashes-2026-10-01.md).
 - No hardware or third-party product names in code, docs or UI strings.
 
 ## State of the skeleton

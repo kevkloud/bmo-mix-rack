@@ -225,9 +225,28 @@ inline constexpr const Tap (&kReferenceTaps)[kNumReferenceTaps] = kTypeTaps[0];
     `roomDefaults::kSizeM` by a test rather than by a comment. */
 inline constexpr float kReferenceSizeM = 12.0f;
 
+/** The room size below which a tap stops getting louder.
+
+    The 1 / d law is physical -- closer walls, stronger reflections -- but it has
+    no bottom, and SIZE reaches 0.5 m: at the settings a user has, pink noise at
+    -18 dBFS RMS came out over full scale under about 4 m and at +18.6 dBFS at
+    0.5 m (the PR #27 review, on AURORA). Nothing under 6 m was in either
+    listening set, so Frosty's call on 2026-10-01 was to hold the gain at its
+    6 m figure for every smaller room. Everything he heard is untouched, and
+    only the gain is held: the times go on scaling, so a smaller room is still
+    an earlier and tighter one.
+
+    **It is a cap on the gain, not on the level.** Taps that bunch up sum more
+    coherently in the bass, so the output still rises by up to about 7 dB
+    between 6 m and 0.5 m on a bass-heavy signal, and the bottom corner reads
+    +1.8 dBFS on that same noise. `tests/dsp/ReverbDspTests.cpp` pins both
+    figures; flattening the residue is an open point for the owner. */
+inline constexpr float kGainFloorSizeM = 6.0f;
+
 /** The tap's arrival at room size `sizeM`. Times scale with the dimension;
-    gains scale as 1 / d and so as the inverse of the same factor. **The law
-    is linear over the whole 0.5-80 m range**: 10 section 3's window clamp
+    gains scale as 1 / d and so as the inverse of the same factor, down to
+    `kGainFloorSizeM` and no further. **The time law is linear over the whole
+    0.5-80 m range**: 10 section 3's window clamp
     (5-100 ms, 5-200 ms for halls) is not applied, because the panel's sketch
     scales linearly and the two would otherwise disagree. Recorded as an open
     point in the M2 note. */
@@ -238,7 +257,7 @@ inline constexpr float tapTimeMsAt (const Tap& t, float sizeM) noexcept
 
 inline constexpr float tapGainAt (const Tap& t, float sizeM) noexcept
 {
-    return t.gain * kReferenceSizeM / (sizeM > 0.01f ? sizeM : 0.01f);
+    return t.gain * kReferenceSizeM / (sizeM > kGainFloorSizeM ? sizeM : kGainFloorSizeM);
 }
 
 /** When a type's last reflection arrives, in milliseconds, at room size

@@ -2140,6 +2140,161 @@ int main()
         }
     }
 
+    //== The early reflections stop getting louder below a 6 m room ===========
+    //
+    // A tap's gain is 1 / d, so halving the room doubles it, and SIZE reaches
+    // 0.5 m. The review of PR #27 measured what that does at the settings a
+    // user actually has -- each type's own voicing, MIX at its default, pink
+    // noise at -18 dBFS RMS -- and the output went over full scale under
+    // about 4 m and reached +15 to +18 dBFS at 0.5 m. Nothing below 6 m was in
+    // either listening set, so Frosty's call on 2026-10-01 was to hold the
+    // level at its 6 m figure for every smaller room: everything he heard is
+    // untouched, and a small room is still earlier and tighter, because the
+    // tap *times* go on scaling. These three checks are that decision.
+    {
+        const auto& first = kTypeTaps[room][0];
+
+        // (b) The law itself: untouched from 6 m up, flat below.
+        bool lawAbove = true, flatBelow = true, stillEarlier = true;
+
+        for (const auto size : { 6.0f, 8.0f, 12.0f, 24.0f, 80.0f })
+            lawAbove = lawAbove && near (tapGainAt (first, size), first.gain * kReferenceSizeM / size, 1.0e-6f);
+
+        for (const auto size : { 0.5f, 1.0f, 2.0f, 3.0f, 5.9f })
+        {
+            flatBelow    = flatBelow && near (tapGainAt (first, size), tapGainAt (first, kGainFloorSizeM), 1.0e-6f);
+            stillEarlier = stillEarlier && tapTimeMsAt (first, size) < tapTimeMsAt (first, kGainFloorSizeM);
+        }
+
+        check (lawAbove,     "at 6 m and above a tap's gain is the 1/d law, exactly as it was heard");
+        check (flatBelow,    "below 6 m a tap's gain is its 6 m gain, so a smaller room is not a louder one");
+        check (stillEarlier, "below 6 m a tap still arrives earlier, so a smaller room is still a tighter one");
+
+        // A fixed pink noise at -18 dBFS RMS, two seconds: the file's own
+        // hashed white noise through the usual three-decade pinking filter, so
+        // every platform runs the same samples.
+        const auto n = 96000;
+        std::vector<float> pink ((size_t) n);
+        {
+            double b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0, sum = 0;
+
+            for (int i = 0; i < n; ++i)
+            {
+                const auto w = (double) noiseAt (i);
+                b0 = 0.99886 * b0 + w * 0.0555179;  b1 = 0.99332 * b1 + w * 0.0750759;
+                b2 = 0.96900 * b2 + w * 0.1538520;  b3 = 0.86650 * b3 + w * 0.3104856;
+                b4 = 0.55000 * b4 + w * 0.5329522;  b5 = -0.7616 * b5 - w * 0.0168980;
+                const auto p = b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362;
+                b6 = w * 0.115926;
+                pink[(size_t) i] = (float) p;
+                sum += p * p;
+            }
+
+            const auto k = std::pow (10.0, -18.0 / 20.0) / std::sqrt (sum / (double) n);
+            for (auto& s : pink)
+                s = (float) ((double) s * k);
+        }
+
+        /** Peak of both channels, in dBFS, of the pink noise through `v`. */
+        const auto peakThrough = [&pink, n] (const std::vector<float>& v)
+        {
+            ReverbDsp dsp;
+            dsp.prepare (48000.0, 512, 2);
+            dsp.setParams (v.data(), (int) v.size());
+
+            std::vector<float> l (512), r (512);
+            float peak = 0.0f;
+
+            for (int at = 0; at < n; at += 512)
+            {
+                const auto count = std::min (512, n - at);
+
+                for (int i = 0; i < count; ++i)
+                    l[(size_t) i] = r[(size_t) i] = pink[(size_t) (at + i)];
+
+                float* chans[] { l.data(), r.data() };
+                dsp.setParams (v.data(), (int) v.size());
+                dsp.process (chans, 2, count);
+
+                for (int i = 0; i < count; ++i)
+                    peak = std::max (peak, std::max (std::abs (l[(size_t) i]), std::abs (r[(size_t) i])));
+            }
+
+            return db (peak);
+        };
+
+        // (a) At the settings a user has, no type goes over full scale from 2 m
+        // up, and none goes more than 2 dB over it anywhere. The cap does not
+        // make the bottom of the knob perfectly level: with the gains held and
+        // the times still shrinking, the taps bunch up and sum more coherently
+        // in the bass, which is worth up to 7 dB at 0.5 m on a bass-heavy
+        // signal. Before the cap the same corner read +18.6 dBFS; it now reads
+        // +1.8, and that residue is recorded as an open point for the owner
+        // rather than hidden behind a looser check.
+        float worst = -300.0f, worstFromTwo = -300.0f;
+        std::string worstAt;
+
+        for (int t = 0; t < numTypes; ++t)
+            for (const auto size : { 0.5f, 1.0f, 2.0f, 3.0f, 4.0f, 6.0f, 8.0f, 12.0f, 24.0f, 80.0f })
+            {
+                auto v = defaults();
+                v[Index::type] = (float) t;
+
+                for (const auto& s : typeSettings (t))
+                    if (const auto index = indexOfParam (specs(), s.id); index >= 0)
+                        v[(size_t) index] = s.value;
+
+                v[Index::size] = size;
+
+                const auto peak = peakThrough (v);
+
+                if (size >= 2.0f)
+                    worstFromTwo = std::max (worstFromTwo, peak);
+
+                if (peak > worst)
+                {
+                    worst   = peak;
+                    worstAt = std::string (kTypeNames[t]) + " at " + std::to_string (size) + " m";
+                }
+            }
+
+        if (! (worstFromTwo < 0.0f && worst <= 2.0f))
+            std::cerr << "  worst output peak " << worst << " dBFS, " << worstAt
+                      << "; worst from 2 m up " << worstFromTwo << " dBFS\n";
+
+        check (worstFromTwo < 0.0f,
+               "pink noise at -18 dBFS RMS stays under full scale at every type's own voicing from 2 m up");
+        check (worst <= 2.0f,
+               "and is never more than 2 dB over full scale at any SIZE, where it was 18.6 dB over");
+
+        // (c) Smaller, and no longer much louder: with the ER alone, the peak a
+        // small room makes is within 7.5 dB of the 6 m room's (measured: up to
+        // 6.9 dB, Plate at 0.5 m), where the uncapped law put 0.5 m 23 to 28 dB
+        // above it. What is left is the bunching described under (a).
+        bool held = true;
+
+        for (int t = 0; t < numTypes; ++t)
+        {
+            auto v = erOnly (t);
+            v[Index::size] = kGainFloorSizeM;
+            const auto atFloor = peakThrough (v);
+
+            for (const auto size : { 0.5f, 1.0f, 2.0f, 3.0f })
+            {
+                v[Index::size] = size;
+                const auto rise = peakThrough (v) - atFloor;
+
+                if (! (rise <= 7.5f))
+                {
+                    held = false;
+                    std::cerr << "  " << kTypeNames[t] << " at " << size << " m: " << rise << " dB above its 6 m peak\n";
+                }
+            }
+        }
+
+        check (held, "the ER alone at 0.5 to 3 m peaks within 7.5 dB of its 6 m peak, where it was up to 28 dB above");
+    }
+
     //== prepare() and reset() are reachable and do not throw ================
     // Thin, and it is worth having: the real engine allocates in prepare() and
     // nowhere else, and this is the call that will start doing so.

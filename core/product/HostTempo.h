@@ -17,10 +17,22 @@ namespace bmo
     left out. */
 struct HostTempo
 {
-    double bpm   = 0.0;     ///< 0.0 whenever `valid` is false
+    double bpm   = 0.0;     ///< in the window below when valid; 0.0 when not
     bool valid   = false;
     bool playing = false;
 };
+
+/** The window a host's tempo has to be inside to count as one, **both ends
+    included** (Frosty, 2026-10-01: "let's lock it 10-999").
+
+    A validity window and not a clamp: a tempo outside it is refused, as if
+    the host had sent none, and never pulled in to the nearer edge -- so a
+    module never runs at a tempo the host did not report. The window is wider
+    than any transport a DAW offers, so no real session is refused; what it
+    is for is that no module has to defend a division, or a samples-per-beat
+    conversion, against a host that hands it 1e-300 or 1e300. */
+inline constexpr double kMinHostBpm = 10.0;
+inline constexpr double kMaxHostBpm = 999.0;
 
 /** Reads the host's tempo for this block, or the default "no tempo".
 
@@ -30,10 +42,11 @@ struct HostTempo
     `BusLayouts.h` is one function: the standalone plugin and the rack
     cannot then disagree about what a host meant.
 
-    No playhead, no position, no tempo, or a tempo that is not one (zero,
-    negative, not finite) all come back as the same default, `playing`
-    included: `ModuleDsp::setTempo` says why the module is not made to tell
-    them apart. A stopped transport with a known tempo is valid.
+    No playhead, no position, no tempo, or a tempo outside the window above
+    (zero, negative and not finite included) all come back as the same
+    default, `playing` included: `ModuleDsp::setTempo` says why the module is
+    not made to tell them apart. A stopped transport with a tempo inside the
+    window is valid.
 
     Called on the audio thread, from `processBlock` and nowhere else, which is
     the one place JUCE says a playhead may be asked. Nothing here allocates,
@@ -59,7 +72,11 @@ inline HostTempo readHostTempo (juce::AudioPlayHead* playHead)
 
     const auto bpm = position->getBpm();
 
-    if (! bpm.hasValue() || ! std::isfinite (*bpm) || *bpm <= 0.0)
+    // isfinite first, and spelled out, although the window alone would refuse
+    // a NaN (every comparison with one is false): the next reader should not
+    // have to know that to see that a NaN cannot get through.
+    if (! bpm.hasValue() || ! std::isfinite (*bpm)
+          || *bpm < kMinHostBpm || *bpm > kMaxHostBpm)
         return {};
 
     return { *bpm, true, position->getIsPlaying() };

@@ -132,13 +132,14 @@ public:
         `valid` is false whenever the host gave no playhead, no position or no
         usable tempo, and then `bpm` is 0.0 -- never a figure a module could
         mistake for a tempo -- and `playing` is false. A tempo the host does
-        send but which is not one (zero, negative, not finite) is the third
-        case. **The three are indistinguishable by design**, down to the last
-        value: a module has nothing different to do about any of them, so it
-        is neither made nor able to tell them apart. That includes a host that
-        reports its transport running without a tempo -- `playing` is false
-        whenever `valid` is -- so a later module that wants the transport on
-        its own needs its own hook, not this one.
+        send but outside 10 to 999 bpm (zero, negative and not finite
+        included) is the third case; see below. **The three are
+        indistinguishable by design**, down to the last value: a module has
+        nothing different to do about any of them, so it is neither made nor
+        able to tell them apart. That includes a host that reports its
+        transport running without a tempo -- `playing` is false whenever
+        `valid` is -- so a later module that wants the transport on its own
+        needs its own hook, not this one.
 
         A stopped transport is not one of those cases: it is `playing ==
         false` with `valid` still true and `bpm` intact whenever the host knows
@@ -152,7 +153,17 @@ public:
         module knows what holding means for it, which is why `bpm` arrives as
         0.0 rather than as a remembered value somebody else chose.
 
-        **Three things a module must not assume**, each of which the first
+        **A valid `bpm` is always within 10 to 999, both ends included**
+        (Frosty, 2026-10-01), and a module may rely on that: it never has to
+        defend a division or a samples-per-beat conversion against a tempo of
+        1e-300. It is a validity window, not a clamp -- a host tempo outside it
+        is refused as "no tempo", never pulled in to the nearer edge, so a
+        module never runs at a tempo the host did not report. The window is
+        the plumbing's; a module's musical limits are still its own -- a delay
+        whose dotted half note at 10 bpm is longer than its buffer has to
+        decide what to do about that itself.
+
+        **Two things a module must not assume**, each of which the first
         consumer would otherwise find in a host:
 
         - **That what it remembers survives a rack chain edit.** Adding,
@@ -166,10 +177,6 @@ public:
           the parameters and prepares, and the first `setTempo` arrives with
           the first block. A module has to be correct, and allocate whatever
           its synced time could need, between the two.
-        - **That a valid tempo is a sane one.** Valid means finite and
-          positive and nothing more; the plumbing does not bound it. A module
-          clamps it to its own range before it divides by it or turns it into
-          a length in samples.
 
         **Deliberately not carried:** PPQ position, time signature, sample or
         second position, loop points and record state. Nothing in the suite

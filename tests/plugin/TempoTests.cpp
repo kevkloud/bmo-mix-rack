@@ -63,6 +63,19 @@ constexpr int    kBlock  = 512;
 constexpr int    kBlocks = 16;
 constexpr int    kLength = kBlock * kBlocks;
 
+/** The window a host tempo has to be inside to be valid, both ends included
+    (Frosty, 2026-10-01: "let's lock it 10-999"). Written out as the numbers
+    they are rather than read from HostTempo.h, so a change to the constants
+    there fails here instead of moving the test with it. */
+constexpr double kFloorBpm   = 10.0;
+constexpr double kCeilingBpm = 999.0;
+
+/** Every tempo a host can send that must arrive as "no tempo": just outside
+    each edge of the window, and the values that are not tempos at all. */
+const double kRefused[] { 9.999, 999.001, 0.0, -120.0,
+                          std::numeric_limits<double>::quiet_NaN(),
+                          std::numeric_limits<double>::infinity() };
+
 /** Every assertion in this file goes through here, so the suite can say how
     many it made: a count that drops is a test that stopped running. */
 int checksMade = 0;
@@ -370,15 +383,36 @@ int main()
         expectOrder ("no bpm");
         expectTempo (0.0, false, false, "position with no bpm, transport running");
 
-        // A tempo that is not a tempo is the same "no tempo".
-        for (const auto nonsense : { 0.0, -120.0,
-                                     std::numeric_limits<double>::quiet_NaN(),
-                                     std::numeric_limits<double>::infinity() })
+        // A tempo that is not a tempo is the same "no tempo" -- and so is one
+        // outside the window, which is refused rather than pulled in to its
+        // edge: a module never runs at a tempo the host did not report.
+        for (const auto nonsense : kRefused)
         {
             playHead.set (nonsense, true);
             oneBlock (*proc);
-            expectTempo (0.0, false, false, "a host bpm of " + juce::String (nonsense));
+            expectTempo (0.0, false, false, "a host bpm of " + juce::String (nonsense, 6));
         }
+
+        // Both edges of the window are inside it, and arrive as themselves.
+        for (const auto edge : { kFloorBpm, kCeilingBpm })
+        {
+            playHead.set (edge, true);
+            oneBlock (*proc);
+            expectTempo (edge, true, true, "the window's edge, " + juce::String (edge) + " bpm");
+        }
+
+        // The numbers this file writes down are the numbers the code uses.
+        expect (kFloorBpm == bmo::kMinHostBpm && kCeilingBpm == bmo::kMaxHostBpm,
+                "the window written down here is HostTempo.h's own");
+
+        // Crossing the floor between blocks: refused, then valid on the very
+        // next block, with nothing held over from the refusal.
+        playHead.set (9.999, true);
+        oneBlock (*proc);
+        expectTempo (0.0, false, false, "9.999 bpm, the block before");
+        playHead.set (10.0, true);
+        oneBlock (*proc);
+        expectTempo (10.0, true, true, "10 bpm, the block after 9.999");
 
         // And back again: a valid tempo after an invalid one is not held off.
         playHead.set (120.0, true);
@@ -459,6 +493,25 @@ int main()
 
             playHead.set ({}, true);
             expectAgree (0.0, false, false, "rack, no bpm");
+
+            // The window, through the rack: the same refusals and the same
+            // edges, handed identically to both slots.
+            for (const auto nonsense : kRefused)
+            {
+                playHead.set (nonsense, true);
+                expectAgree (0.0, false, false, "rack, a host bpm of " + juce::String (nonsense, 6));
+            }
+
+            playHead.set (kFloorBpm, true);
+            expectAgree (kFloorBpm, true, true, "rack, the floor");
+
+            playHead.set (kCeilingBpm, false);
+            expectAgree (kCeilingBpm, true, false, "rack, the ceiling, stopped");
+
+            playHead.set (9.999, true);
+            expectAgree (0.0, false, false, "rack, 9.999 bpm, the block before");
+            playHead.set (10.0, true);
+            expectAgree (10.0, true, true, "rack, 10 bpm, the block after 9.999");
 
             rack->setPlayHead (nullptr);
             expectAgree (0.0, false, false, "rack, no playhead");

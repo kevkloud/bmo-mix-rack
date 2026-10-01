@@ -114,20 +114,23 @@ rack/     SlotParameter (one generic host parameter, remapped live),
   disagree within a block; a block its try-lock skips gets no tempo, as it
   gets no audio. Three values and no more: bpm, valid, playing. **The three
   fallbacks are one case, indistinguishable by design** -- no playhead, no
-  position, no usable bpm (zero, negative and non-finite included) all
-  arrive as bpm 0.0, valid false, playing false, even from a host that says
-  it is playing without a tempo; a module that wants the transport alone
-  needs a hook of its own. A stopped transport is not one of them: it keeps
+  position, no bpm inside the window all arrive as bpm 0.0, valid false,
+  playing false, even from a host that says it is playing without a tempo;
+  a module that wants the transport alone needs a hook of its own. **The
+  window is 10 to 999 bpm, both ends included** (Frosty, 2026-10-01;
+  `kMinHostBpm`/`kMaxHostBpm`), and it is a validity window, not a clamp: a
+  tempo outside it (zero, negative and non-finite included) is refused, not
+  pulled to the edge, so a module never runs at a tempo the host did not
+  report. A module may rely on a valid bpm being inside it, and still owns
+  its own musical limits. A stopped transport is not a fallback: it keeps
   its bpm, with valid true and playing false. Holding the last tempo,
   falling back to a time parameter and not flushing on stop are the
   module's policy, never the plumbing's, which is why nothing here
   remembers a tempo. **What a module must not assume:** that a held tempo
   survives a chain edit (`rebuild` gives every slot a new engine, touched
   or not, and the new one is handed the tempo again on its first block --
-  which matters only while the host's tempo is invalid); that `prepare`
-  comes with a tempo (the first `setTempo` comes with the first block); or
-  that a valid bpm is a sane one (it is finite and positive, unbounded, and
-  the module clamps it before dividing by it or sizing anything from it).
+  which matters only while the host's tempo is invalid); or that `prepare`
+  comes with a tempo (the first `setTempo` comes with the first block).
   The default does nothing, and `tempo_tests` holds every registered module
   byte-identical with and without a playhead. Position, time signature and
   loop points are deliberately not carried; a beat-anchored module gets its

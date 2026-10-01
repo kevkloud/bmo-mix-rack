@@ -35,9 +35,12 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <iterator>
 #include <limits>
 #include <new>
 #include <string>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 namespace P = bmo::dwell;
@@ -176,7 +179,13 @@ void testSchemaIsWhatItWillAlwaysBe()
     // have to move for it to start failing.
     check (std::string (specs[26].id) == P::kFxLink, "fx_link closes the table at id 26");
 
-    if (specs.size() != 26)
+    // The row-by-row table runs only when the counts agree, so it never reads
+    // past either end -- and it is compared with the table's own length, not a
+    // number: until 2026-10-01 this said 26 while the table said 27, and the
+    // whole walk below was skipped without a failure.
+    check (specs.size() == std::size (kSchema), "the golden table has a row for every parameter");
+
+    if (specs.size() != std::size (kSchema))
         return;
 
     for (const auto& row : kSchema)

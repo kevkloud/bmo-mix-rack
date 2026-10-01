@@ -1381,6 +1381,45 @@ int main()
         }
     }
 
+    //== VARIATION 6 never replays what it heard before it was left ==============
+    //
+    // The review's experiment, exactly: a burst at VARIATION 6, then 5 through
+    // a second of silent input, then back to 6 with the input still silent.
+    // The comb pair's delay line was written only while VARIATION was 6, so
+    // coming back read the burst out of it a second after it ended -- 0.112
+    // peak, -19 dBFS, from ~64 samples to +39 ms. Silence in has to be
+    // silence out.
+    {
+        for (const auto away : { 5, 4 })
+        {
+            auto v = erOnly (room);
+            v[Index::ervariation] = 6.0f;
+
+            ReverbDsp dsp;
+            dsp.prepare (48000.0, 512, 2);
+            dsp.setParams (v.data(), (int) v.size());
+
+            Stereo s;
+            runNoise (dsp, s, 0, 9600, 512);                                    // the burst, at 6
+
+            v[Index::ervariation] = (float) away;
+            dsp.setParams (v.data(), (int) v.size());
+            runNoise (dsp, s, 9600, 9600 + 48000, 512, {}, true);               // a second of silence, away
+
+            v[Index::ervariation] = 6.0f;
+            dsp.setParams (v.data(), (int) v.size());
+            const auto back = (int) s.l.size();
+            runNoise (dsp, s, back, back + 9600, 512, {}, true);                // back at 6, still silent
+
+            float peak = 0.0f;
+            for (int i = back; i < (int) s.l.size(); ++i)
+                peak = std::max (peak, std::max (std::abs (s.l[(size_t) i]), std::abs (s.r[(size_t) i])));
+
+            std::cout << "  VARIATION 6 -> " << away << " -> 6 through silence: peak " << db (peak) << " dBFS after returning\n";
+            check (peak <= 1.0e-6f, "returning to VARIATION 6 through silence is silent (below -120 dBFS): no stale comb audio");
+        }
+    }
+
     //== Energy: finite, and energy-renormalised to the room =====================
     {
         const auto taps  = render ([] (auto&) {});

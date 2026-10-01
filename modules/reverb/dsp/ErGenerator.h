@@ -229,17 +229,32 @@ public:
 
             // VARIATION 6: L = M + D, R = M - D, D a delayed copy of the
             // centred cluster, so the mono sum is exactly flat (10 section 3).
-            if (comb)
+            //
+            // **The comb line is written on every sample at every VARIATION**,
+            // and read only at 6. Written only at 6, it kept the last 8.7 ms it
+            // heard there for as long as VARIATION was elsewhere, and coming
+            // back read that out again -- a burst replayed at -19 dBFS a
+            // second after the input had stopped (the review of PR #27,
+            // 2026-09-30). Written always, it holds this generator's own last
+            // 8.7 ms, so entering 6 reads current audio: nothing stale and no
+            // hole where D should be. One store and an index step a sample;
+            // clearing it on the way out instead would have cost a sweep of
+            // the line inside one sample and left D silent for 8.7 ms on the
+            // way back in. At 6 the set is built centred, l == r, and
+            // 0.5 (l + r) is l exactly.
             {
-                const auto m = l;   // built centred: l == r
+                const auto m = 0.5f * (l + r);
                 combLine[(size_t) combIdx] = m;
                 auto rd = combIdx - sets[active].combDelay;
                 if (rd < 0) rd += combLength;
                 const auto d = combLine[(size_t) rd];
                 if (++combIdx >= combLength) combIdx = 0;
 
-                l = (m + d) * 0.70710678f;
-                r = (m - d) * 0.70710678f;
+                if (comb)
+                {
+                    l = (m + d) * 0.70710678f;
+                    r = (m - d) * 0.70710678f;
+                }
             }
 
             hiCutCoef += (hiCutTarget - hiCutCoef) * smooth;

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 
@@ -236,16 +237,29 @@ inline constexpr float kReferenceSizeM = 12.0f;
     only the gain is held: the times go on scaling, so a smaller room is still
     an earlier and tighter one.
 
-    **It is a cap on the gain, not on the level.** Taps that bunch up sum more
-    coherently in the bass, so the output still rises by up to about 7 dB
-    between 6 m and 0.5 m on a bass-heavy signal, and the bottom corner reads
-    +1.8 dBFS on that same noise. `tests/dsp/ReverbDspTests.cpp` pins both
-    figures; flattening the residue is an open point for the owner. */
+    **Holding the gain did not hold the level.** Taps that bunch up sum more
+    coherently in the bass, so with the gain merely held the output still rose
+    by up to about 7 dB between 6 m and 0.5 m on a bass-heavy signal, and the
+    bottom corner read +1.8 dBFS on that same noise. `kSmallRoomSlope` below
+    is what takes that back out. */
 inline constexpr float kGainFloorSizeM = 6.0f;
+
+/** How fast a tap eases down as the room shrinks below `kGainFloorSizeM`: its
+    gain is the 6 m gain times (SIZE / 6) ^ this, about 1.5 dB per halving.
+
+    Frosty's call on 2026-10-02, and his reason: short of an extreme resonance
+    or a room mode, a real room's reflections never double what went in, so a
+    room that only got smaller should not come out louder. 0.25 is the one
+    slope that offsets the bunching across all six tables -- measured on
+    AURORA with the ER alone, a room of 0.5 to 3 m peaks between 2.2 dB above
+    and 3.5 dB below its 6 m figure, and at every type's own voicing the
+    output stays under full scale at every SIZE (worst -0.7 dBFS, Room at
+    0.5 m). One slope cannot put six tables on zero, and it errs quiet. */
+inline constexpr float kSmallRoomSlope = 0.25f;
 
 /** The tap's arrival at room size `sizeM`. Times scale with the dimension;
     gains scale as 1 / d and so as the inverse of the same factor, down to
-    `kGainFloorSizeM` and no further. **The time law is linear over the whole
+    `kGainFloorSizeM`; below it they ease back down (`kSmallRoomSlope`). **The time law is linear over the whole
     0.5-80 m range**: 10 section 3's window clamp
     (5-100 ms, 5-200 ms for halls) is not applied, because the panel's sketch
     scales linearly and the two would otherwise disagree. Recorded as an open
@@ -255,9 +269,13 @@ inline constexpr float tapTimeMsAt (const Tap& t, float sizeM) noexcept
     return t.timeMs * sizeM / kReferenceSizeM;
 }
 
-inline constexpr float tapGainAt (const Tap& t, float sizeM) noexcept
+inline float tapGainAt (const Tap& t, float sizeM) noexcept
 {
-    return t.gain * kReferenceSizeM / (sizeM > kGainFloorSizeM ? sizeM : kGainFloorSizeM);
+    if (sizeM >= kGainFloorSizeM)
+        return t.gain * kReferenceSizeM / sizeM;
+
+    const auto ratio = (sizeM > 0.01f ? sizeM : 0.01f) / kGainFloorSizeM;
+    return t.gain * kReferenceSizeM / kGainFloorSizeM * std::pow (ratio, kSmallRoomSlope);
 }
 
 /** When a type's last reflection arrives, in milliseconds, at room size

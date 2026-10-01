@@ -2140,34 +2140,49 @@ int main()
         }
     }
 
-    //== The early reflections stop getting louder below a 6 m room ===========
+    //== A room under 6 m is earlier and tighter, and no louder ===============
     //
     // A tap's gain is 1 / d, so halving the room doubles it, and SIZE reaches
     // 0.5 m. The review of PR #27 measured what that does at the settings a
     // user actually has -- each type's own voicing, MIX at its default, pink
-    // noise at -18 dBFS RMS -- and the output went over full scale under
-    // about 4 m and reached +15 to +18 dBFS at 0.5 m. Nothing below 6 m was in
-    // either listening set, so Frosty's call on 2026-10-01 was to hold the
-    // level at its 6 m figure for every smaller room: everything he heard is
-    // untouched, and a small room is still earlier and tighter, because the
-    // tap *times* go on scaling. These three checks are that decision.
+    // noise at -18 dBFS RMS, on AURORA -- and the output went over full scale
+    // under about 4 m and read +18.6 dBFS at Room 0.5 m. Nothing below 6 m was
+    // in either listening set.
+    //
+    // Frosty's two calls. 2026-10-01: stop the gain rising below 6 m, so
+    // everything he heard stays as it was. That held the gain and not the
+    // level -- with the times still shrinking the taps bunch up and sum more
+    // coherently in the bass, worth up to 7 dB at 0.5 m, and the bottom corner
+    // still read +1.8 dBFS. 2026-10-02: flatten it, because short of a room
+    // mode a real room's reflections never double what went in. So below 6 m
+    // the gain eases down as (SIZE / 6) ^ 0.25, about 1.5 dB per halving,
+    // which is what the bunching was adding. The times are untouched all the
+    // way down. These checks are those two decisions.
     {
         const auto& first = kTypeTaps[room][0];
+        const auto atFloorGain = tapGainAt (first, kGainFloorSizeM);
 
-        // (b) The law itself: untouched from 6 m up, flat below.
-        bool lawAbove = true, flatBelow = true, stillEarlier = true;
+        // (b) The law itself: untouched from 6 m up, easing down below.
+        bool lawAbove = true, easesBelow = true, stillEarlier = true;
 
         for (const auto size : { 6.0f, 8.0f, 12.0f, 24.0f, 80.0f })
             lawAbove = lawAbove && near (tapGainAt (first, size), first.gain * kReferenceSizeM / size, 1.0e-6f);
 
-        for (const auto size : { 0.5f, 1.0f, 2.0f, 3.0f, 5.9f })
+        float previous = atFloorGain;
+
+        for (const auto size : { 5.9f, 3.0f, 2.0f, 1.0f, 0.5f })
         {
-            flatBelow    = flatBelow && near (tapGainAt (first, size), tapGainAt (first, kGainFloorSizeM), 1.0e-6f);
+            const auto gain = tapGainAt (first, size);
+
+            easesBelow   = easesBelow
+                        && near (gain, atFloorGain * std::pow (size / kGainFloorSizeM, kSmallRoomSlope), 1.0e-6f)
+                        && gain < previous;
             stillEarlier = stillEarlier && tapTimeMsAt (first, size) < tapTimeMsAt (first, kGainFloorSizeM);
+            previous     = gain;
         }
 
         check (lawAbove,     "at 6 m and above a tap's gain is the 1/d law, exactly as it was heard");
-        check (flatBelow,    "below 6 m a tap's gain is its 6 m gain, so a smaller room is not a louder one");
+        check (easesBelow,   "below 6 m a tap's gain eases down from its 6 m figure as (SIZE / 6) ^ 0.25");
         check (stillEarlier, "below 6 m a tap still arrives earlier, so a smaller room is still a tighter one");
 
         // A fixed pink noise at -18 dBFS RMS, two seconds: the file's own
@@ -2223,15 +2238,10 @@ int main()
             return db (peak);
         };
 
-        // (a) At the settings a user has, no type goes over full scale from 2 m
-        // up, and none goes more than 2 dB over it anywhere. The cap does not
-        // make the bottom of the knob perfectly level: with the gains held and
-        // the times still shrinking, the taps bunch up and sum more coherently
-        // in the bass, which is worth up to 7 dB at 0.5 m on a bass-heavy
-        // signal. Before the cap the same corner read +18.6 dBFS; it now reads
-        // +1.8, and that residue is recorded as an open point for the owner
-        // rather than hidden behind a looser check.
-        float worst = -300.0f, worstFromTwo = -300.0f;
+        // (a) No type goes over full scale at the settings a user has, at any
+        // SIZE. Measured: -0.7 dBFS at the worst corner (Room at 0.5 m), where
+        // the uncapped law read +18.6 and the cap alone +1.8.
+        float worst = -300.0f;
         std::string worstAt;
 
         for (int t = 0; t < numTypes; ++t)
@@ -2246,31 +2256,24 @@ int main()
 
                 v[Index::size] = size;
 
-                const auto peak = peakThrough (v);
-
-                if (size >= 2.0f)
-                    worstFromTwo = std::max (worstFromTwo, peak);
-
-                if (peak > worst)
+                if (const auto peak = peakThrough (v); peak > worst)
                 {
                     worst   = peak;
                     worstAt = std::string (kTypeNames[t]) + " at " + std::to_string (size) + " m";
                 }
             }
 
-        if (! (worstFromTwo < 0.0f && worst <= 2.0f))
-            std::cerr << "  worst output peak " << worst << " dBFS, " << worstAt
-                      << "; worst from 2 m up " << worstFromTwo << " dBFS\n";
+        if (! (worst < 0.0f))
+            std::cerr << "  worst output peak " << worst << " dBFS, " << worstAt << '\n';
 
-        check (worstFromTwo < 0.0f,
-               "pink noise at -18 dBFS RMS stays under full scale at every type's own voicing from 2 m up");
-        check (worst <= 2.0f,
-               "and is never more than 2 dB over full scale at any SIZE, where it was 18.6 dB over");
+        check (worst < 0.0f,
+               "pink noise at -18 dBFS RMS stays under full scale at every type's own voicing and every SIZE");
 
-        // (c) Smaller, and no longer much louder: with the ER alone, the peak a
-        // small room makes is within 7.5 dB of the 6 m room's (measured: up to
-        // 6.9 dB, Plate at 0.5 m), where the uncapped law put 0.5 m 23 to 28 dB
-        // above it. What is left is the bunching described under (a).
+        // (c) Smaller, not louder: with the ER alone, a small room's peak
+        // stays close to the 6 m room's -- measured between 2.2 dB above
+        // (Plate at 3 m) and 3.5 dB below (Chamber at 0.5 m), where the
+        // uncapped law put 0.5 m 23 to 28 dB above it. One slope for six
+        // tables cannot land every type on zero, and it errs quiet.
         bool held = true;
 
         for (int t = 0; t < numTypes; ++t)
@@ -2284,15 +2287,15 @@ int main()
                 v[Index::size] = size;
                 const auto rise = peakThrough (v) - atFloor;
 
-                if (! (rise <= 7.5f))
+                if (! (rise <= 3.0f && rise >= -4.5f))
                 {
                     held = false;
-                    std::cerr << "  " << kTypeNames[t] << " at " << size << " m: " << rise << " dB above its 6 m peak\n";
+                    std::cerr << "  " << kTypeNames[t] << " at " << size << " m: " << rise << " dB against its 6 m peak\n";
                 }
             }
         }
 
-        check (held, "the ER alone at 0.5 to 3 m peaks within 7.5 dB of its 6 m peak, where it was up to 28 dB above");
+        check (held, "the ER alone at 0.5 to 3 m peaks within +3 / -4.5 dB of its 6 m peak");
     }
 
     //== prepare() and reset() are reachable and do not throw ================

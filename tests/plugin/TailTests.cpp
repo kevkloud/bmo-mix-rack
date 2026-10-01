@@ -261,6 +261,30 @@ int main()
         checkClose (tailAt ({ 0.0f, 20.0f, 1.00f, 1.00f, 12.0f }), 20.110849, 1.0e-4,
                     "20.1 s is under the ceiling and is reported in full");
 
+        // **In Energy mode t_ER,max is Energy's own window**, 3.1 x ER SPREAD
+        // up to 500 ms, and not the Taps table's last tap: the cluster is laid
+        // over that window whatever the SIZE. Until the 2026-09-30 review both
+        // modes reported the Taps span, which is what every row above still
+        // is, so none of them moved; these two are new.
+        //   ER SPREAD 125: 0 + 1.8 * 1.20 + 3.1 * 125 ms + 0.05 = 2.16 + 0.3875 + 0.05
+        //   ER SPREAD 200: 0 + 1.8 * 1.20 + 500 ms (the cap; 620 uncapped) + 0.05
+        {
+            apply (params, kDefaults);
+            params.setReal (bmo::reverb::kErMode, 1.0f);
+            params.setReal (bmo::reverb::kErSpread, 125.0f);
+            proc->prepareToPlay (kRate, kBlock);
+            checkClose (proc->getTailLengthSeconds(), 2.5975, 1.0e-4,
+                        "Energy mode reports its own window, 3.1 x ER SPREAD, as t_ER,max");
+
+            params.setReal (bmo::reverb::kErSpread, 200.0f);
+            proc->prepareToPlay (kRate, kBlock);
+            checkClose (proc->getTailLengthSeconds(), 2.71, 1.0e-4,
+                        "Energy mode's window is capped at 500 ms in the tail it reports");
+
+            params.setReal (bmo::reverb::kErMode, 0.0f);
+            params.setReal (bmo::reverb::kErSpread, 80.0f);
+        }
+
         // Nothing outside the formula moves it. MIX at zero is a bypassed
         // reverb by ear and a ringing one by contract -- the host still has to
         // pull the tail through, because MIX is automatable and can come back.

@@ -337,6 +337,19 @@ public:
         return n;
     }
 
+    /** Energy mode's window in ms at this ER SPREAD: the plateau's end,
+        0.6 sigma, plus two and a half sigmas of the handover, to the
+        500 ms the line is sized for. **The one copy**: `rebuild()` lays the
+        pulses over it and `DspCore::tailSecondsFor` reports it, so the tail a
+        host is told and the cluster that plays cannot come apart -- they had,
+        until the 2026-09-30 review, when the tail added the Taps span in both
+        modes. */
+    static float energyWindowMs (float spreadMs) noexcept
+    {
+        const auto sigma = std::clamp (spreadMs, 5.0f, 200.0f);
+        return std::min (0.60f * sigma + 2.5f * sigma, kEnergyWindowMax);
+    }
+
     /** Infill tap `i`'s activation threshold: the panel's own formula. */
     static constexpr float infillThreshold (int i) noexcept
     {
@@ -874,7 +887,7 @@ private:
         const auto tauR    = 0.20f * sigma;
         const auto tauP    = 0.60f * sigma;
         const auto p       = std::clamp (c.shape, 0.0f, 3.0f);
-        const auto windowE = std::min (tauP + 2.5f * sigma, kEnergyWindowMax);
+        const auto windowE = energyWindowMs (c.spreadMs);
         const auto envelope = [tauR, tauP, sigma, p] (float ms)
         {
             if (ms < tauR) return std::pow (ms / tauR, p);

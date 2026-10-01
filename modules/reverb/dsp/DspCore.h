@@ -422,10 +422,19 @@ public:
         eight maxed reverbs in one chain would otherwise report four minutes. */
     static float tailSecondsFor (const Params& p) noexcept
     {
+        // t_ER,max is the span of the ER mode in use. Taps plays the type's
+        // table, whose last tap scales with SIZE; Energy lays its pulses over
+        // its own window, up to 500 ms whatever the SIZE. Adding the Taps
+        // span in both modes, as this did until the 2026-09-30 review, told a
+        // host 231 ms at DECAY 0.1 s while an Energy cluster at ER SPREAD 200
+        // played for half a second.
+        const auto erMs = p.erMode == ErMode::energy ? ErGenerator::energyWindowMs (p.erSpreadMs)
+                                                     : erSpanMsAt ((int) p.type, p.sizeM);
+
         const auto longest = std::max (1.0f, std::max (p.dampLo, p.dampHi));
         const auto seconds = p.preDelayMs * 0.001f
                            + p.decaySeconds * longest
-                           + erSpanMsAt ((int) p.type, p.sizeM) * 0.001f
+                           + erMs * 0.001f
                            + 0.05f;
 
         return std::min (seconds, kMaxTailSeconds);

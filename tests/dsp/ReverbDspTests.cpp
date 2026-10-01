@@ -1773,6 +1773,45 @@ int main()
         delayed.preDelayMs = 250.0f;
         check (DspCore::tailSecondsFor (delayed) > DspCore::tailSecondsFor (p),
                "pre-delay lengthens the reported tail");
+
+        // **t_ER,max is the span of the mode in use.** Energy mode lays its
+        // pulses over its own window, 3.1 x ER SPREAD up to 500 ms, and not
+        // over the Taps table's 61 ms; the formula added the Taps span in
+        // both modes until the 2026-09-30 review, so at a short DECAY a
+        // bounce cut most of an Energy cluster off.
+        //   0 + 1.8 * 1.20 + 500 ms + 0.05 = 2.71
+        DspCore::Params spread = p;
+        spread.erMode     = ErMode::energy;
+        spread.erSpreadMs = 200.0f;
+        check (near (DspCore::tailSecondsFor (spread), 2.71f, 1.0e-3f),
+               "Energy mode's tail carries its own 500 ms window at ER SPREAD 200");
+
+        // And the figure covers what actually plays, in both modes, at the
+        // shortest DECAY -- where the ER span is most of the answer.
+        for (const auto mode : { taps, energy })
+        {
+            const auto edit = [mode] (std::vector<float>& v)
+            {
+                v[Index::ermode]  = (float) mode;
+                v[Index::erspread] = 200.0f;
+                v[Index::decay]   = 0.1f;
+            };
+
+            const auto ir = render (edit, 48000.0, 512, 1.0f);
+
+            auto v = defaults();
+            edit (v);
+            ReverbDsp dsp;
+            const auto tail = dsp.tailSecondsForParams (v.data(), (int) v.size());
+            const auto cut  = (int) (tail * 48000.0);
+            const auto all  = ir.energy (0, ir.size());
+            const auto past = ir.energy (cut, ir.size());
+
+            std::cout << "  reported tail in " << (mode == taps ? "Taps" : "Energy") << " mode at DECAY 0.1 s: " << tail
+                      << " s; ER energy past it " << 10.0f * std::log10 (std::max (past, 1.0e-30f) / all) << " dB\n";
+            check (past <= all * 1.0e-6f,
+                   "the reported tail covers the rendered ER to -60 dB in both modes at DECAY 0.1 s");
+        }
     }
 
     //== The Reverb EQ: three nodes, fixed shapes, and one mode ===============

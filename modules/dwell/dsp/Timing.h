@@ -51,9 +51,17 @@ inline double syncedMs (int choice, double bpm) noexcept
 inline constexpr double kTailFloorSeconds   = 0.5;
 inline constexpr double kTailCeilingSeconds = 30.0;
 
-/** Laps from the first repeat to -60 dB at loop gain `g`, §9's
-    `ceil(60 / -20 log10(min(g, 0.97)))`, or -1 when the loop holds or builds
-    and never gets there. A loop with no feedback still plays one repeat. */
+/** Laps from the first repeat to -60 dB at loop gain `g`,
+    `ceil(60 / -20 log10 g)`, or -1 when the loop holds or builds and never
+    gets there. A loop with no feedback still plays one repeat.
+
+    **The gain is not capped.** §9 writes `min(g, 0.97)`, and that cap counted
+    the laps for a loop faster than the one running: between about 95 % and
+    97 % FEEDBACK the figure came out at a fraction of the real decay --
+    measured on AURORA 2026-10-01, FEEDBACK 96.9 % at TIME 20 ms reported
+    4.54 s and was still ringing after 40. Uncapped, a gain near unity asks for
+    thousands of laps, and the 30 s ceiling in `tailSecondsFor` is what bounds
+    the answer, as it already did for a loop at or past unity. */
 inline double lapsToSixtyDb (double g) noexcept
 {
     if (g >= 1.0)
@@ -62,7 +70,7 @@ inline double lapsToSixtyDb (double g) noexcept
     if (g <= 0.0)
         return 1.0;
 
-    return std::ceil (60.0 / (-20.0 * std::log10 (std::min (g, 0.97))));
+    return std::ceil (60.0 / (-20.0 * std::log10 (g)));
 }
 
 /** How long Dwell rings on after its input stops, in seconds, for the

@@ -4198,6 +4198,119 @@ void testCrushInTheLoopDecaysToSilence()
     }
 }
 
+/** How long `v` really rings after a burst ends: the time from the burst's
+    last sample to the last output sample, either channel, above -60 dB of the
+    burst's peak -- the host's meaning of a tail, the time it has to keep
+    processing after its input has gone silent. Rendered for `seconds` after
+    the burst; a render still above the line in its last 100 ms returns
+    `seconds`, so a figure that ran out of render cannot pass for a short one.
+
+    Two bursts, both peaking at 0.5: 5 ms of 300 Hz under a Hann window, and
+    50 ms of windowed noise, which reaches every band the loop passes. */
+double measuredTailSeconds (std::vector<float> v, bool noise, double seconds)
+{
+    constexpr auto rate = 48000.0;
+    const auto burst = noise ? (int) (0.05 * rate) : (int) (0.005 * rate);
+    const auto n = burst + (int) std::ceil (seconds * rate);
+
+    P::DwellDsp dsp;
+    dsp.prepare (rate, 512, 2);
+
+    Block block { n };
+    Noise source;
+    auto peak = 0.0f;
+
+    for (int i = 0; i < burst; ++i)
+    {
+        const auto w = 0.5 - 0.5 * std::cos (2.0 * P::kPiD * (double) i / (double) (burst - 1));
+        const auto s = noise ? (float) (0.5 * w * source.next())
+                             : (float) (0.5 * w * std::sin (2.0 * P::kPiD * 300.0 * (double) i / rate));
+        block.left[(size_t) i] = block.right[(size_t) i] = s;
+        peak = std::max (peak, std::abs (s));
+    }
+
+    renderAsHost (dsp, v, block, n, 512, [] (int) {});
+
+    const auto line = peak * 1.0e-3f;
+    auto last = -1;
+
+    for (int i = n - 1; i >= 0 && last < 0; --i)
+        if (std::abs (block.left[(size_t) i]) > line || std::abs (block.right[(size_t) i]) > line)
+            last = i;
+
+    if (last >= n - (int) (0.1 * rate))
+        return seconds;
+
+    return (double) (last + 1 - burst) / rate;
+}
+
+/** **The tail Dwell reports is never shorter than the decay it describes**
+    (`dsp/Timing.h`; 10 §9, §11.6; `11` §4j).
+
+    `testTheTailIsTheLongerEngine` checks the arithmetic against itself. This
+    renders the loop and times it: a burst, then the time to the last sample
+    above -60 dB, against `tailSecondsFor` -- rendered for the reported figure
+    plus a lap and half a second, so a repeat arriving after the figure is
+    seen. A figure at the 30 s ceiling is the ceiling (it stands, by decision)
+    and is not rendered.
+
+    The rows are the review's (AURORA, 2026-10-01) plus the defaults, on every
+    character. */
+struct TailRow { int character; float feedback, timeMs; bool fx; int fxType; float fxAmount; };
+
+void checkTailRows (const std::vector<TailRow>& rows, const char* what)
+{
+    for (const auto& r : rows)
+    {
+        auto v = settings (r.character, r.timeMs, r.feedback, 100.0f);
+        v[P::Index::fx]       = r.fx ? 1.0f : 0.0f;
+        v[P::Index::fxType]   = (float) r.fxType;
+        v[P::Index::fxAmount] = r.fxAmount;
+
+        const auto reported = P::tailSecondsFor (v.data(), (int) v.size());
+
+        if (reported >= P::kTailCeilingSeconds)
+        {
+            check (reported == P::kTailCeilingSeconds,
+                   std::string (what) + ": " + characterName (r.character) + ", FEEDBACK "
+                       + std::to_string (r.feedback) + ", TIME " + std::to_string ((int) r.timeMs)
+                       + " ms reports the 30 s ceiling, which stands");
+            continue;
+        }
+
+        for (const auto noise : { false, true })
+        {
+            const auto window = reported + (double) r.timeMs * 0.001 + 0.5;
+            const auto measured = measuredTailSeconds (v, noise, window);
+
+            char buf[240];
+            std::snprintf (buf, sizeof (buf),
+                           "%s: %s, FEEDBACK %.1f, TIME %.0f ms%s, %s burst: reported %.3f s, "
+                           "measured %s%.3f s to -60 dB",
+                           what, characterName (r.character), (double) r.feedback, (double) r.timeMs,
+                           r.fx ? (std::string (", FX ") + fxTypeName (r.fxType) + " "
+                                   + std::to_string ((int) r.fxAmount)).c_str() : "",
+                           noise ? "noise" : "300 Hz", reported,
+                           measured >= window ? "> " : "", measured);
+
+            check (measured <= reported, buf);
+        }
+    }
+}
+
+void testTheReportedTailIsNeverShorterThanTheDecay()
+{
+    std::vector<TailRow> rows;
+
+    for (int c = 0; c < 3; ++c)
+        for (const auto& [fb, t] : std::initializer_list<std::pair<float, float>> {
+                 { 35.0f, 375.0f }, { 90.0f, 375.0f }, { 90.0f, 100.0f }, { 96.0f, 50.0f },
+                 { 96.0f, 100.0f }, { 96.9f, 20.0f }, { 96.9f, 100.0f }, { 96.0f, 5.0f } })
+            rows.push_back ({ c, fb, t, false, 0, 0.0f });
+
+    checkTailRows (rows, "the tail is never short");
+}
+
 } // namespace
 
 //==============================================================================
@@ -4259,6 +4372,7 @@ int main()
     testMixAcrossTheHingeIsSmoothed();
     testTheFirstTempoLandsTheSyncedTime();
     testCrushInTheLoopDecaysToSilence();
+    testTheReportedTailIsNeverShorterThanTheDecay();
 
     std::printf ("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

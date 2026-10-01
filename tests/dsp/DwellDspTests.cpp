@@ -362,6 +362,19 @@ void testEveryParameterIsWiredToItsOwnValue()
     // pair. Set to different numbers above for that reason.
     check (p.timeMs != p.laneTimeMs, "TIME and LANE TIME are not the same lane");
     check (p.fxTypeChoice != p.laneFxTypeChoice, "FX TYPE and LANE FX TYPE are not the same lane");
+
+    // **LANE NOTE has no field in the core** -- the adapter keeps it and maps
+    // it to the lane's time at the host's tempo -- so it is checked where it
+    // lands: with SYNC on (set above) and a tempo, the lane runs LANE NOTE's
+    // division and the main delay NOTE's, each its own. 1/4D at 120 bpm is
+    // 750 ms; NOTE's 1/16 is 125.
+    v[P::Index::laneNote] = 11.0f;
+    dsp.setParams (v.data(), (int) v.size());
+    dsp.setTempo (120.0, true, true);
+
+    const auto& synced = dsp.getCore().getParams();
+    checkClose (synced.laneTimeMs, P::syncedMs (11, 120.0), 1.0e-3, "LANE NOTE reaches the lane, as its time");
+    checkClose (synced.timeMs, P::syncedMs (3, 120.0), 1.0e-3, "NOTE reaches the main delay, not the lane");
 }
 
 /** SYNC follows the host's tempo, docs/delay/10 §7, through the adapter.

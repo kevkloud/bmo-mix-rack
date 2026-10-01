@@ -16,6 +16,7 @@
 #include "modules/dwell/presets/FactoryPresets.h"
 #include "products/dwell/Product.h"
 
+#include <iterator>
 #include <string>
 
 using namespace test;
@@ -203,9 +204,12 @@ int main()
             { P::kFx,           1.0f },
             { P::kFxType,       2.0f },
             { P::kFxAmount,    12.0f },
-            // The lane's own five.
+            // The lane's own six. LANE NOTE goes to 11 (1/4D), off its 1/8
+            // default and off NOTE's 3, so a lane restored from the wrong
+            // slot cannot pass.
             { P::kLaneLevel,     -7.5f },
             { P::kLaneTime,     431.0f },
+            { P::kLaneNote,      11.0f },
             { P::kLaneFx,         1.0f },
             { P::kLaneFxType,     2.0f },
             { P::kLaneFxAmount,  88.0f },
@@ -214,6 +218,11 @@ int main()
             // parameter here that does not start at zero-ish.
             { P::kFxLink,         0.0f },
         };
+
+        // Every row, so a parameter appended later and left out here fails
+        // instead of going unchecked, as `lane_note` did until 2026-10-01.
+        check (std::size (settings) == P::specs().size(),
+               "the state round-trip sets every one of BMO Dwell's parameters");
 
         {
             auto proc = createDwell();

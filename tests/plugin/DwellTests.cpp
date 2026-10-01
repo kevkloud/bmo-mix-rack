@@ -1,7 +1,7 @@
 /*
     BMO Dwell as a host sees it.
 
-    The golden schema table below is the permanent one: ids 0-25 in their
+    The golden schema table below is the permanent one: ids 0-26 in their
     frozen order, with their ranges, defaults and choice counts. A session keys
     automation by position, so this table changing is the schema moving -- a
     decision for Frosty, not a fix.
@@ -83,7 +83,8 @@ int main()
         //
         // **This assertion said "exactly one row is over the line, and it is
         // `fx_link`" while the schema had thirty-three rows.** Cutting the
-        // lane's voicing on 2026-09-22 took it to twenty-six, so nothing is
+        // lane's voicing on 2026-09-22 took it to twenty-six (twenty-seven
+        // once `lane_note` joined the same day), so nothing is
         // over the line and the message has to say *that* -- an assertion that
         // went on describing an overflow would pass for the wrong reason the
         // moment the overflow came back.

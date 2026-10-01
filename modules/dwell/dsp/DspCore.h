@@ -196,7 +196,7 @@ public:
     struct Params
     {
         float timeMs        = 375.0f;
-        bool  sync          = false;    ///< read only once 12's tempo plumbing lands
+        bool  sync          = false;    ///< `DwellDsp` maps the divisions before they get here
         int   noteChoice    = kDefaultNote;
         float feedbackPct   = 35.0f;
         int   characterChoice = 0;
@@ -482,9 +482,10 @@ private:
         const auto laneFxType   = params.fxLink ? params.fxTypeChoice : params.laneFxTypeChoice;
         const auto laneFxAmount = params.fxLink ? params.fxAmountPct : params.laneFxAmountPct;
 
-        // **`lane_note` is ignored here exactly as `note` is** (10 §11.7):
-        // both ship disabled on the one `kSyncIsEnabled` switch until `12`'s
-        // tempo plumbing lands, so the lane engine runs from `lane_time`.
+        // **`lane_note` never reaches here, any more than `note` does** (10
+        // §11.7): with SYNC on, `DwellDsp::apply` maps both divisions to
+        // milliseconds at the held host tempo before handing the parameters
+        // over, so the lane engine runs from `laneTimeMs` either way.
         laneEngine.setParams (voiceOf (params.laneTimeMs, laneFxOn, laneFxType, laneFxAmount),
                               snapNow);
 

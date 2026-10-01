@@ -56,17 +56,18 @@ public:
         p.fxTypeChoice    = (int) v[Index::fxType];
         p.fxAmountPct     = v[Index::fxAmount];
 
-        // The lane, ids 20-24. **Five values, and no voicing among them**: the
+        // The lane, ids 20-25. **Six values, and no voicing among them**: the
         // lane runs the character, stereo mode, cuts, modulation and drive
         // read above, so there is nothing here to keep in step with them
-        // (modules/dwell/params.h, 2026-09-22).
+        // (modules/dwell/params.h, 2026-09-22). Five go to the core; the
+        // sixth, `lane_note` (22), is kept here and mapped in `apply`.
         p.laneLevelDb           = v[Index::laneLevel];
         p.laneTimeMs            = v[Index::laneTime];
         p.laneFx                = v[Index::laneFx] > 0.5f;
         p.laneFxTypeChoice      = (int) v[Index::laneFxType];
         p.laneFxAmountPct       = v[Index::laneFxAmount];
 
-        // Id 25, the last row: whether the lane's FX trio follows the main
+        // Id 26, the last row: whether the lane's FX trio follows the main
         // delay's. Carried whatever it says -- a value that stops arriving
         // here is a value the lane could not go back to.
         p.fxLink                = v[Index::fxLink] > 0.5f;

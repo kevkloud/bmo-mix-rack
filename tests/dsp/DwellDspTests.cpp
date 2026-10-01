@@ -1,11 +1,10 @@
 /*
-    BMO Dwell's DSP, stage 1: the schema and the wiring, before there is any
-    delay to measure.
-
-    docs/delay/11-integration-and-test-plan.md §4 lists the suites this file
-    grows into -- time accuracy, feedback decay, the mix law, the FX stage.
-    None of them can be written yet. What can be written, and is worth writing
-    first, is everything that is *permanent*: ids 0-25 in their frozen order,
+    BMO Dwell's DSP. This file began at stage 1, the schema and the wiring,
+    before there was any delay to measure, and has grown since into the suites
+    docs/delay/11-integration-and-test-plan.md §4 lists -- time accuracy,
+    feedback decay, the mix law, the FX stage -- stage by stage below. What it
+    wrote first, and still opens with, is everything that is *permanent*: ids
+    0-26 in their frozen order,
     the three choice lists in their frozen index order, and the mapping from
     spec index to named value in DwellDsp::setParams.
 

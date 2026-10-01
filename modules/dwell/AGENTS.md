@@ -14,7 +14,7 @@ automatable standalone, but **with no host automation lane in a rack**.
 **Dwell uses none of that** — 27 rows fit inside the grid with **five lanes to
 spare**. The limit is still worth knowing, because it is the constraint that
 shaped this module: controls were being cut to fit it until Frosty pulled the
-lane's voicing back on 2026-09-23 (`docs/delay/15`, "The module was pulled
+lane's voicing back on 2026-09-22 (`docs/delay/15`, "The module was pulled
 back"). Frozen from the first release: **the
 ids, their order, and the index order of the four choice lists** — `note`,
 `character`, `stereo`, `fx_type`. A session keys automation by position and
@@ -27,7 +27,7 @@ end of their list.
 VOICE deleted and everything after it renumbered, `throw` renamed `send`,
 `throw_mode` replaced by the bipolar float `lane_gain`, `freeze` renamed `hold`,
 `chop` added, `fx_type` shortened from seven entries to four and then to three,
-`lane_*` rows appended and then **seven of them deleted again on 2026-09-23** —
+`lane_*` rows appended and then **seven of them deleted again on 2026-09-22** —
 `link` and the lane's six voicing rows — with everything after them renumbering
 and **no holes left behind**. Deletions, reorders, renames and type changes are
 illegal after ship; appends are not. **There is no lane DRIVE to reconsider any
@@ -125,7 +125,7 @@ hold after it.
 - **The main delay has no input gate.** `docs/delay/10` §3's `s` term is
   removed, not repurposed, so nothing the lane does can disturb the main loop —
   and `11` §4e's headline test asserts exactly that, bit for bit.
-- **The lane shares the main delay's voicing** (DECIDED, Frosty 2026-09-23).
+- **The lane shares the main delay's voicing** (DECIDED, Frosty 2026-09-22).
   `character`, `stereo`, both cuts, both modulation rows and `drive` govern
   **both engines**; **`duck` is main-engine only** — the ducker never reaches
   the lane; `mix` governs both, since both sum into the wet before it. The lane

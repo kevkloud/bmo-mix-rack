@@ -226,9 +226,10 @@ it, and three of them were things this pack had wrong or hedged.
     ceiling is baseline × 1.30, which is three times the method's worst noise
     and still tight enough for the guard to fire first; `11` §4k carries the
     conditions, the full baseline and the argument. **The heaviest case is
-    Clean + Diffuse, not bucket-brigade** — Clean's 32-tap sinc is the single
-    largest cost in the module, and **reducing the taps is now a separate piece
-    of work in flight**, so re-base the baseline downward if it lands. **The
+    Clean + Diffuse, not bucket-brigade** — Clean's sinc is the single
+    largest cost in the module. **Its taps came down from 32 to 24 on
+    2026-10-01** (`10` §1), and the baseline, taken at 32, is owed a downward
+    re-base. **The
     lane costs nothing at the defaults** (HOLD ships off and the second engine
     genuinely does not run) and **84–102 % when it runs**. `11` §4l's ≤ 1.3×
     per FX type **holds** — Diffuse 1.200×, Pan/Tremolo 1.022×, Crush 0.949×.

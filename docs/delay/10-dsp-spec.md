@@ -22,11 +22,24 @@ instances at 192 kHz. Alias control moves to ADAA and the in-loop low-pass (§4)
 Ring length a power of two, `mask`-indexed, at base rate (02: an oversampled buffer
 is the expensive option). Read position `w − D`, real-valued.
 
-- **clean**: 32-tap polyphase Kaiser sinc, reusing `modules/tune/dsp/SincTable.h`
+- **clean**: 24-tap polyphase Kaiser sinc, reusing `modules/tune/dsp/SincTable.h`
   (00 §1) at `cutoff = 1.0`. Unity gain at every phase, exact delay at whole
   samples, so the repeat chain accumulates no phase-dependent HF loss — the only
-  place ~32 MACs is spent. Its `kHalf = 16` samples of headroom hold whenever
-  `D ≥ 16`; below that, fall back to Hermite.
+  place ~24 MACs is spent. Its `kHalf = 12` samples of headroom hold whenever
+  `D ≥ 13` (one past `kHalf`, `DelayEngine.h` says why); below that, fall back to Hermite.
+
+  **Why 24** (DECIDED, Frosty 2026-10-01, blind A/B on AURORA, headphones;
+  `testing-notes/dwell-sinc-ab-2026-09-23.md`). This used to say 32, which came
+  in with the header: Tune measured 32 for reads at a rate other than 1, where
+  the kernel is also the anti-alias filter, and Dwell's read is at rate 1. At
+  rate 1 the width buys top end and nothing else; the alias floor is −87.7 to
+  −90.8 dBFS at every width from 8 to 32, against §4's −60. In the blind set no
+  width could be told apart on repeats or a long tail. Frosty's rule for the
+  floor was that the shipped width must still **pass a centred mono signal
+  unchanged**, and 24 is the narrowest that does: 0.00 dB at 18 kHz, where 16
+  droops 0.13 dB and 12 droops 0.77. It costs 13 % less than 32 on Clean bare
+  and 8 % less at the heaviest. Do not narrow it without another listening
+  round; `BMO_DWELL_SINC_TAPS` in `DelayEngine.h` exists so it can be measured.
 - **tape / bucket-brigade**: 4-point, 3rd-order Hermite (02: near Lagrange-3,
   smoother phase, good under modulation, low CPU). Worst case is the half-sample
   phase — roughly −0.1 dB at 0.1·f_s, −1 dB at 0.25·f_s, several dB at 0.4·f_s, flat
@@ -818,7 +831,7 @@ unexplained — 11 §4k flags it, and it must not be quoted as "Crush is free".
 
 | Quantity | Value | Trace |
 |---|---|---|
-| Interpolators | 32-tap sinc (clean) / 4-point Hermite | 02; 00 §1 |
+| Interpolators | 24-tap sinc (clean) / 4-point Hermite | 02; 00 §1 |
 | Glide τ / rate cap | 120 ms / 0.25 | CALIBRATE, 01 glide |
 | Clean crossfade | 20 ms raised cosine | CALIBRATE, 00 §1 |
 | Feedback law | `g = 1.05·fb^1.6`, unity at fb ≈ 97% | DECIDED (Frosty, 2026-09-20); 01 |

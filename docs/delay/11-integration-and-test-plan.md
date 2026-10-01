@@ -600,12 +600,17 @@ module and the whole reason Clean is the most expensive character**: bare, at
 48 kHz, Clean is 89.82 ms against Tape's 50.30 and bucket-brigade's 64.79 —
 **1.79× Tape, and identically 1.79× at 192 kHz**, which is the interpolator and
 nothing else (`10` §1 gives Tape and BBD a 4-point Hermite and calls the sinc
-"the only place ~32 MACs is spent"). Frosty has decided to **reduce the tap
-count and weigh the cost in quality**; that is a separate piece of work, **in
-flight and not pre-judged here.** The figures above are the engine as it stands
-at 720b8b7 with the 32-tap read intact. **If the taps come down, re-base this
-whole baseline downward and say so** — do not leave a ceiling in place that the
-module has walked away from.
+"the only place ~32 MACs is spent"). **The taps came down to 24 on 2026-10-01**
+(Frosty, blind A/B; `10` §1 has the reason). The baseline above is still the
+32-tap engine at 720b8b7, so **it now over-states the module**. The bench of
+2026-09-22 put 24 taps at 13 % under 32 on Clean bare and 8 % under at the
+heaviest, so every row should come down. **The guard cannot misfire on this**,
+because a cheaper module reads under its baseline, never over it. But the
+ceilings now sit further above the module than the ×1.30 argument intends.
+**Re-base this whole baseline downward and say so**, and do it through the
+`cpu` mode below, not a rebuilt scratch harness. The harness that took the
+figures above was in a session scratchpad and no longer exists, which is the
+reproducibility gap below in a nutshell.
 
 **What is still not reproducible from the repository alone, and it is the one
 thing left open.** The baseline above was taken with a **single-file harness

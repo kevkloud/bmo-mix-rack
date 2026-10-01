@@ -64,7 +64,7 @@ a corrupt state lands on.
 
 `DwellDsp::latencyForParams` returns 0 at every setting and is meant to keep
 doing so. `docs/delay/10` §0 drops oversampling outright — that is what pays
-for the 32-tap interpolator — and there is no lookahead, so there is no dry
+for the 24-tap interpolator — and there is no lookahead, so there is no dry
 compensation ring either.
 
 The trap is the other direction: **reporting TIME as latency**. What a host

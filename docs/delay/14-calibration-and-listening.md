@@ -80,10 +80,10 @@ measures the laptop rather than the module.
 if Diffuse wins on sound it costs about a fifth of a delay engine to keep
 (1.200× the FX-off loop) and the other two are free** (Pan/Tremolo 1.022×,
 Crush 0.949×, the last of those an unexplained reading that §4k flags rather
-than smooths). And **Clean's 32-tap sinc is the single largest cost in the
-module**; reducing the taps and weighing it in quality is **a separate piece of
-work now in flight**, so a listening round that compares Clean before and after
-it may be wanted — the outcome is not pre-judged here.
+than smooths). And **Clean's sinc is the single largest cost in the module**.
+The tap count was weighed by ear in its own blind A/B and came down from 32 to
+**24** on 2026-10-01 (`10` §1, `testing-notes/dwell-sinc-ab-2026-09-23.md`).
+That round is done; this one does not need to revisit it.
 
 **What is still outstanding is §2's own requirement, not the numbers.** The
 baseline came from a harness outside the repository; no tool in the tree has a

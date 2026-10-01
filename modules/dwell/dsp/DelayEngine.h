@@ -11,24 +11,26 @@
 #include <cstdint>
 #include <vector>
 
-/** EXPERIMENT, AURORA 2026-09-23 -- clean's sinc tap count, made nameable.
+/** Clean's sinc tap count: 24, DECIDED by Frosty 2026-10-01 after a blind A/B
+    on AURORA (`testing-notes/dwell-sinc-ab-2026-09-23.md`).
 
-    `10` §1 asks for a "32-tap polyphase Kaiser sinc, reusing
-    `modules/tune/dsp/SincTable.h`", and 32 is the width Tune measured for
-    *its* job: reading at a rate other than 1, where the kernel is also the
-    anti-aliasing filter (`modules/tune/AGENTS.md`: 16 taps reach -24 dB at
-    0.4 fs, 32 reach -78). Dwell's clean read is at rate 1, so the number came
-    in with the header rather than being derived for this engine -- and the CPU
-    bench of 2026-09-22 found that read to be the single largest cost in the
-    module, which is why clean is the *most* expensive character.
+    32 came in with `modules/tune/dsp/SincTable.h`, where Tune measured it for
+    *its* job: reading at a rate other than 1, with the kernel doubling as the
+    anti-aliasing filter. Dwell's clean read is at rate 1, so that reasoning
+    never applied here, and the read was the single largest cost in the module.
 
-    Defining `BMO_DWELL_SINC_TAPS` to 8 or 16 builds a narrower kernel, so the
-    cost of the width can be measured against what it buys. **The default is 32
-    and the shipping behaviour is unchanged**; deleting this block and writing
-    `<32>` back into `Sinc` below reverts the experiment whole. Frosty decides
-    by ear. */
+    In the blind set no width could be told apart on repeats or a long tail,
+    and the two files that stood out were both 16 taps, one liked and one
+    disliked, with nothing in their measured envelopes to separate them from 32.
+    Frosty's criterion was that the narrowest width shipped should still pass a
+    centred mono signal unchanged. 24 is the narrowest that does: 0.00 dB at
+    18 kHz where 16 droops 0.13 dB, and the same alias floor as every width.
+    It is 13 % cheaper than 32 on Clean bare and 8 % at the heaviest.
+
+    The macro stays so the width can be re-measured without editing the engine;
+    do not narrow it without another listening round. */
 #ifndef BMO_DWELL_SINC_TAPS
- #define BMO_DWELL_SINC_TAPS 32
+ #define BMO_DWELL_SINC_TAPS 24
 #endif
 
 namespace bmo::dwell
@@ -1387,7 +1389,7 @@ private:
     {
         const auto pos = (double) writeIdx - delay;
 
-        // 10 §1: a polyphase Kaiser sinc on clean, 32 taps by default (see
+        // 10 §1: a polyphase Kaiser sinc on clean, 24 taps by default (see
         // BMO_DWELL_SINC_TAPS at the head of this file) -- unity gain at every
         // phase and an exact delay at whole samples, so the repeat chain
         // accumulates no phase-dependent HF loss. Tape and bucket-brigade take
@@ -1847,7 +1849,7 @@ private:
         tap can never wrap onto the newest write. */
     static constexpr int kRingGuard = Sinc::kTaps + 4;
 
-    /** The scratch ring the kernel is probed out of. 128 holds all 32 taps
+    /** The scratch ring the kernel is probed out of. 128 holds a 32-tap kernel
         around the centre without wrapping, and so holds any narrower kernel
         BMO_DWELL_SINC_TAPS can ask for. */
     static constexpr int kProbeSize = 128;

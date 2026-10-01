@@ -76,7 +76,7 @@ public:
     /** **Zero, at every setting, permanently.**
 
         There is no oversampling (docs/delay/10 §0 drops it outright, which is
-        what pays for the 32-tap interpolator) and no lookahead, so nothing
+        what pays for the 24-tap interpolator) and no lookahead, so nothing
         here ever costs the host a sample of delay.
 
         **The wet delay time is not latency and is never reported as such.**

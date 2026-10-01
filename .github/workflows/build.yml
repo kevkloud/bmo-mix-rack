@@ -60,7 +60,14 @@ jobs:
   plugin:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    # 90, not 60. The Windows build ran 54 to 59 minutes on four of the five
+    # runs before 2026-10-01, and the
+    # first push after the tenth module's UI work went over: the job was
+    # cancelled at 60.5 minutes with nothing wrong in it, which also means no
+    # BMO-Windows package for that commit. A timeout is there to stop a hung
+    # job, not to race a healthy one, so it sits well clear of the longest
+    # honest run. macOS finishes in 10 to 17 minutes and is unaffected.
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:

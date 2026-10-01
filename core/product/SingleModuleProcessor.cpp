@@ -98,6 +98,10 @@ void SingleModuleProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
     // source of mystery dropouts. Must be first.
     juce::ScopedNoDenormals noDenormals;
 
+    // The host's tempo, read once for the block. No playhead, no position and
+    // no tempo all arrive as HostTempo's "none" -- see HostTempo.h.
+    const auto tempo = readHostTempo (getPlayHead());
+
     const auto numSamples = buffer.getNumSamples();
     const auto numIn      = getTotalNumInputChannels();
     const auto numOut     = getTotalNumOutputChannels();
@@ -106,7 +110,7 @@ void SingleModuleProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
     // one channel and silence. BusLayouts.h says why at length.
     buses::spreadInputAcrossOutputs (buffer, numIn, numOut);
 
-    engine.process (buffer.getArrayOfWritePointers(), numOut, numSamples, HostTempo {});
+    engine.process (buffer.getArrayOfWritePointers(), numOut, numSamples, tempo);
 }
 
 //==============================================================================

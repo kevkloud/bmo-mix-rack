@@ -494,6 +494,12 @@ void RackProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
 {
     juce::ScopedNoDenormals noDenormals;
 
+    // The host's tempo, read ONCE for the whole chain: every slot below is
+    // handed this same value, so two modules synced to the tempo cannot
+    // disagree within a block. A block the try-lock skips gets no tempo, as it
+    // gets no processing.
+    const auto tempo = readHostTempo (getPlayHead());
+
     const auto numSamples = buffer.getNumSamples();
     const auto numIn      = getTotalNumInputChannels();
     const auto numOut     = getTotalNumOutputChannels();
@@ -509,7 +515,7 @@ void RackProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
 
     for (auto& s : slots)
         if (s.engine != nullptr)
-            s.engine->process (buffer.getArrayOfWritePointers(), numOut, numSamples, HostTempo {});
+            s.engine->process (buffer.getArrayOfWritePointers(), numOut, numSamples, tempo);
 }
 
 juce::AudioProcessorEditor* RackProcessor::createEditor()

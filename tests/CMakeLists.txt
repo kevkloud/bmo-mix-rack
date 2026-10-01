@@ -149,6 +149,14 @@ bmo_add_tool(tail_tests plugin/TailTests.cpp ${BMO_ROOT}/products/rack/Registry.
 target_link_libraries(tail_tests PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp bmo_deesser bmo_fetcomp bmo_reverb)
 add_test(NAME tail COMMAND tail_tests)
 
+# The host's tempo, handed to every module once per block: the order and the
+# three fallbacks through both processors, a probe module in two rack slots,
+# and every registered module byte-identical with and without a playhead.
+# Linked like tail_tests because it walks the registry.
+bmo_add_tool(tempo_tests plugin/TempoTests.cpp ${BMO_ROOT}/products/rack/Registry.cpp)
+target_link_libraries(tempo_tests PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp bmo_deesser bmo_fetcomp bmo_reverb)
+add_test(NAME tempo COMMAND tempo_tests)
+
 # Layout assertions on the real panels. JUCE, not bmo_add_dsp_tool: no
 # rendering happens, but Tokens.h includes juce_gui_basics, so a UI assertion
 # cannot run in the DSP-only job whatever docs/ui-workflow-brief.md §4 says.

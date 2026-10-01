@@ -1,7 +1,8 @@
 # BMO Dwell — the sinc A/B: what to decide, and somewhere to write it
 
-**Prepared on AURORA, 2026-09-23. The answers are not filled in yet.**
-This is a form. Frosty listens, writes here, and the decision gets committed.
+**Prepared on AURORA, 2026-09-23. Answered 2026-10-01: 24 taps** (see the
+decision at the end). It was written as a form for Frosty to listen and fill
+in; the answers and the decision are below.
 
 ## What is being decided
 

@@ -7,11 +7,12 @@
         measure_dwell schema     the permanent parameter table, printed
         measure_dwell latency    the reported latency across the grid
 
-    **Stage 1: these are the two modes that can exist before the loop does.**
-    docs/delay/11-integration-and-test-plan.md §4 lists what this harness grows
-    into -- time accuracy by sub-sample peak fit, the feedback decay table,
-    accumulated alias floors, the ducking envelope, the FX candidates' cost --
-    and each of those arrives with the DSP step it measures.
+    **Still the two modes it was written with at stage 1, before the loop
+    existed.** The loop has since been built, and the measurements
+    docs/delay/11-integration-and-test-plan.md §4 lists -- time accuracy, the
+    feedback decay, the alias floors, the ducking, the FX stage, the tail --
+    live as assertions in tests/dsp/DwellDspTests.cpp rather than as modes
+    here. A mode that prints one of them is still welcome; none exists yet.
 
     `schema` exists because the parameter list is permanent from this release,
     and the cheapest way to check a table against a specification is to print

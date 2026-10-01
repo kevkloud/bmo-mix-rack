@@ -55,6 +55,11 @@ const ModuleDef& module()
             return std::make_unique<DwellPanel> (std::move (ctx));
         },
         0,
+        // `acceptsMonoInput` is left at false on purpose: the mono-in,
+        // stereo-out layout is opt-in by Frosty's decision (core/product/
+        // ModuleDef.h) and Dwell has not been opted in, so on a mono track it
+        // runs mono to mono, where ping-pong and dual offset collapse to one
+        // line (docs/delay/10 §8).
     };
 
     return def;

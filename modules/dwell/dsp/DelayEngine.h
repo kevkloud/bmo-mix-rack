@@ -723,7 +723,7 @@ private:
 class DelayEngine
 {
 public:
-    /** 32 unless the experiment at the head of this file overrides it. */
+    /** 24 (`BMO_DWELL_SINC_TAPS`, at the head of this file) unless a build overrides it. */
     using Sinc = bmo::tune::SincTable<BMO_DWELL_SINC_TAPS>;
 
     static constexpr int kMaxChannels = 2;

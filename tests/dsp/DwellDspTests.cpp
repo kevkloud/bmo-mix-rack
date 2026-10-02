@@ -4196,6 +4196,96 @@ void testTheFirstTempoLandsTheSyncedTime()
     }
 }
 
+//==============================================================================
+// The tail, sixth round (2026-10-02, an independent review of rounds 2-5).
+// Every row is held to "keep it safe" (Frosty): measured from the last
+// non-zero input sample to the last output sample on either channel above
+// 1e-3 of the input's peak, MIX 100, the figure is never shorter.
+//==============================================================================
+
+/** What drives a tail row. A held tone at `hz` (0: aligned to the main TIME
+    near 500 Hz) for `heldSeconds`, a 5 ms 300 Hz Hann burst, or one sample;
+    `leadSeconds` of silence first, so a burst can be placed on a chosen phase
+    of the modulation. */
+struct Drive
+{
+    enum Kind { impulse, burst, held } kind = burst;
+    double hz = 0.0, amplitude = 0.5, heldSeconds = 1.0, leadSeconds = 0.0;
+};
+
+/** The measured decay for `d` through a fresh instance at `v`, in seconds, or
+    `seconds` if the render is still above the line in its last 100 ms. */
+double measuredDecay (std::vector<float> v, const Drive& d, double seconds, double rate)
+{
+    const auto lead = (int) (d.leadSeconds * rate);
+    const auto len = d.kind == Drive::impulse ? 1 : (d.kind == Drive::burst ? (int) (0.005 * rate) : (int) (d.heldSeconds * rate));
+    const auto lap = (double) v[P::Index::time] * 0.001;
+    const auto hz = d.hz > 0.0 ? d.hz : std::round (500.0 * lap) / lap;
+    const auto n = lead + len + (int) std::ceil (seconds * rate);
+
+    P::DwellDsp dsp;
+    dsp.prepare (rate, 512, 2);
+
+    Block block { n };
+    auto peak = 0.0f;
+    auto lastIn = lead;
+
+    for (int i = 0; i < len; ++i)
+    {
+        const auto w = d.kind == Drive::burst ? 0.5 - 0.5 * std::cos (2.0 * P::kPiD * (double) i / (double) (len - 1)) : 1.0;
+        const auto s = d.kind == Drive::impulse ? (float) d.amplitude
+                     : d.kind == Drive::burst   ? (float) (d.amplitude * w * std::sin (2.0 * P::kPiD * 300.0 * (double) i / rate))
+                                                : (float) (d.amplitude * std::sin (2.0 * P::kPiD * hz * (double) i / rate));
+        block.left[(size_t) (lead + i)] = block.right[(size_t) (lead + i)] = s;
+        peak = std::max (peak, std::abs (s));
+
+        if (s != 0.0f)
+            lastIn = lead + i;
+    }
+
+    renderAsHost (dsp, v, block, n, 512, [] (int) {});
+
+    const auto line = peak * 1.0e-3f;
+    auto last = lastIn;
+
+    for (int i = n - 1; i > lastIn; --i)
+        if (std::abs (block.left[(size_t) i]) > line || std::abs (block.right[(size_t) i]) > line)
+        {
+            last = i;
+            break;
+        }
+
+    if (last >= n - (int) (0.1 * rate))
+        return seconds;
+
+    return (double) (last - lastIn) / rate;
+}
+
+/** One row: the figure against `measuredDecay`, rendered for the figure, the
+    longer TIME and a second more. A row at the ceiling tests nothing and says
+    so. Returns measured / reported. */
+double checkDecay (const std::vector<float>& v, const Drive& d, double rate, const std::string& what)
+{
+    const auto reported = P::tailSecondsFor (v.data(), (int) v.size());
+
+    if (reported >= P::kTailCeilingSeconds)
+    {
+        check (false, what + " reports the 30 s ceiling and so tests nothing; pick a row under it");
+        return 0.0;
+    }
+
+    const auto longest = std::max ((double) v[P::Index::time], v[P::Index::hold] > 0.5f ? (double) v[P::Index::laneTime] : 0.0);
+    const auto window = reported + longest * 0.001 + 1.0;
+    const auto measured = measuredDecay (v, d, window, rate);
+
+    char buf[300];
+    std::snprintf (buf, sizeof (buf), "%s, %.1f kHz: reported %.4f s, measured %s%.4f s (%+.2f %%)", what.c_str(),
+                   rate / 1000.0, reported, measured >= window ? "> " : "", measured, 100.0 * (measured / reported - 1.0));
+    check (measured <= reported, buf);
+
+    return measured / reported;
+}
+
 /** **Crush in the loop decays to silence** (10 §11a: every in-loop FX is
     non-expanding, `|F| <= 1`).
 
@@ -4268,14 +4358,16 @@ void testCrushInTheLoopDecaysToSilence()
     the burst; a render still above the line in its last 100 ms returns
     `seconds`, so a figure that ran out of render cannot pass for a short one.
 
-    Four inputs, all peaking at 0.5: one sample, which reaches every band the
-    loop passes; 5 ms of 300 Hz under a Hann window; 50 ms of windowed noise;
-    and **one second of a tone aligned to the delay** -- a whole number of
-    cycles in TIME, near 500 Hz, ending abruptly -- which is the input that
-    builds a loop up furthest above the level it went in at: every repeat
-    lands in phase on the next, so a loop of gain `g` settles at `1/(1 - g)` of
-    its input. The figure promises to cover that build-up (from 2026-10-01;
-    before, an input longer than one lap could ring 11 % past it). */
+    Four inputs: one sample, 5 ms of 300 Hz under a Hann window and 50 ms of
+    windowed noise, all peaking at 0.5; and **one second of a tone aligned to
+    the delay** -- a whole number of cycles in TIME, near 500 Hz, ending
+    abruptly -- which is the input that builds a loop up furthest above the
+    level it went in at: every repeat lands in phase on the next, so a loop of
+    gain `g` settles at `1/(1 - g)` of its input. The figure promises to cover
+    that build-up (from 2026-10-01; before, an input longer than one lap could
+    ring 11 % past it). **The tone is at 0.1** (sixth round): at 0.5 a loop at
+    FEEDBACK 80 or 90 % builds into its clip, which takes the build-up away,
+    and those rows ran at 0.55-0.93 of the figure and tested it loosely. */
 enum class TailInput { impulse, tone, noise, sustained };
 
 double measuredTailSeconds (std::vector<float> v, TailInput input, double seconds, double rate = 48000.0)
@@ -4300,7 +4392,7 @@ double measuredTailSeconds (std::vector<float> v, TailInput input, double second
         const auto w = burst > 1 ? 0.5 - 0.5 * std::cos (2.0 * P::kPiD * (double) i / (double) (burst - 1)) : 1.0;
         const auto s = input == TailInput::noise     ? (float) (0.5 * w * source.next())
                      : input == TailInput::tone      ? (float) (0.5 * w * std::sin (2.0 * P::kPiD * 300.0 * (double) i / rate))
-                     : input == TailInput::sustained ? (float) (0.5 * std::sin (2.0 * P::kPiD * alignedHz * (double) i / rate))
+                     : input == TailInput::sustained ? (float) (0.1 * std::sin (2.0 * P::kPiD * alignedHz * (double) i / rate))
                                                      : 0.5f;
         block.left[(size_t) i] = block.right[(size_t) i] = s;
         peak = std::max (peak, std::abs (s));
@@ -4482,6 +4574,34 @@ void testTheReportedTailIsNeverShorterThanTheDecay()
                 sustained.push_back ({ c, fb, t, false, 0, 0.0f, rate, true });
 
     checkTailRows (sustained, "the tail is never short after a sustained input");
+
+    // **High FEEDBACK, under the ceiling** (sixth round). Round 2 dropped four
+    // rows at FEEDBACK 96 and 96.9 % that had come to report the 30 s ceiling
+    // and so tested nothing; these put the hundreds-of-laps region back where
+    // the figure is finite and a short count would show: FEEDBACK 93-95 % at
+    // TIME 5-20 ms, every character. A burst there runs at about half the
+    // figure, because the figure counts the up-to-31 dB a held note builds,
+    // so the input is a held aligned tone, 3 s long to reach that build-up,
+    // at 0.01 so that 37 times it stays clear of the clip.
+    for (int c = 0; c < 3; ++c)
+        for (const auto& [fb, t] : std::initializer_list<std::pair<float, float>> {
+                 { 93.0f, 20.0f }, { 94.0f, 10.0f }, { 95.0f, 5.0f }, { 95.0f, 20.0f } })
+        {
+            Drive d;
+            d.kind = Drive::held;
+            d.amplitude = 0.01;
+            d.heldSeconds = 3.0;
+
+            // Tape's loop peaks at 63 Hz, under its head bump, and decays
+            // slowest there, so its tone is the lap's harmonic nearest that.
+            if (c == 1)
+                d.hz = std::max (1.0, std::round (63.0 * (double) t * 0.001)) / ((double) t * 0.001);
+
+            char what[160];
+            std::snprintf (what, sizeof (what), "the tail is never short at high FEEDBACK: a held tone on %s, FEEDBACK %.0f, TIME %.0f ms",
+                           characterName (c), (double) fb, (double) t);
+            checkDecay (settings (c, t, fb, 100.0f), d, 48000.0, what);
+        }
 }
 
 /** **Block size cannot change the audio when DUCK is automated** (`11` §4k).
@@ -5202,96 +5322,6 @@ void testEveryInLoopEffectLosesEnergyUnderUnity()
 
     std::printf ("      the in-loop energy property ran %d rows in %.1f s\n", rows,
                  std::chrono::duration<double> (std::chrono::steady_clock::now() - started).count());
-}
-
-//==============================================================================
-// The tail, sixth round (2026-10-02, an independent review of rounds 2-5).
-// Every row is held to "keep it safe" (Frosty): measured from the last
-// non-zero input sample to the last output sample on either channel above
-// 1e-3 of the input's peak, MIX 100, the figure is never shorter.
-//==============================================================================
-
-/** What drives a tail row. A held tone at `hz` (0: aligned to the main TIME
-    near 500 Hz) for `heldSeconds`, a 5 ms 300 Hz Hann burst, or one sample;
-    `leadSeconds` of silence first, so a burst can be placed on a chosen phase
-    of the modulation. */
-struct Drive
-{
-    enum Kind { impulse, burst, held } kind = burst;
-    double hz = 0.0, amplitude = 0.5, heldSeconds = 1.0, leadSeconds = 0.0;
-};
-
-/** The measured decay for `d` through a fresh instance at `v`, in seconds, or
-    `seconds` if the render is still above the line in its last 100 ms. */
-double measuredDecay (std::vector<float> v, const Drive& d, double seconds, double rate)
-{
-    const auto lead = (int) (d.leadSeconds * rate);
-    const auto len = d.kind == Drive::impulse ? 1 : (d.kind == Drive::burst ? (int) (0.005 * rate) : (int) (d.heldSeconds * rate));
-    const auto lap = (double) v[P::Index::time] * 0.001;
-    const auto hz = d.hz > 0.0 ? d.hz : std::round (500.0 * lap) / lap;
-    const auto n = lead + len + (int) std::ceil (seconds * rate);
-
-    P::DwellDsp dsp;
-    dsp.prepare (rate, 512, 2);
-
-    Block block { n };
-    auto peak = 0.0f;
-    auto lastIn = lead;
-
-    for (int i = 0; i < len; ++i)
-    {
-        const auto w = d.kind == Drive::burst ? 0.5 - 0.5 * std::cos (2.0 * P::kPiD * (double) i / (double) (len - 1)) : 1.0;
-        const auto s = d.kind == Drive::impulse ? (float) d.amplitude
-                     : d.kind == Drive::burst   ? (float) (d.amplitude * w * std::sin (2.0 * P::kPiD * 300.0 * (double) i / rate))
-                                                : (float) (d.amplitude * std::sin (2.0 * P::kPiD * hz * (double) i / rate));
-        block.left[(size_t) (lead + i)] = block.right[(size_t) (lead + i)] = s;
-        peak = std::max (peak, std::abs (s));
-
-        if (s != 0.0f)
-            lastIn = lead + i;
-    }
-
-    renderAsHost (dsp, v, block, n, 512, [] (int) {});
-
-    const auto line = peak * 1.0e-3f;
-    auto last = lastIn;
-
-    for (int i = n - 1; i > lastIn; --i)
-        if (std::abs (block.left[(size_t) i]) > line || std::abs (block.right[(size_t) i]) > line)
-        {
-            last = i;
-            break;
-        }
-
-    if (last >= n - (int) (0.1 * rate))
-        return seconds;
-
-    return (double) (last - lastIn) / rate;
-}
-
-/** One row: the figure against `measuredDecay`, rendered for the figure, the
-    longer TIME and a second more. A row at the ceiling tests nothing and says
-    so. Returns measured / reported. */
-double checkDecay (const std::vector<float>& v, const Drive& d, double rate, const std::string& what)
-{
-    const auto reported = P::tailSecondsFor (v.data(), (int) v.size());
-
-    if (reported >= P::kTailCeilingSeconds)
-    {
-        check (false, what + " reports the 30 s ceiling and so tests nothing; pick a row under it");
-        return 0.0;
-    }
-
-    const auto longest = std::max ((double) v[P::Index::time], v[P::Index::hold] > 0.5f ? (double) v[P::Index::laneTime] : 0.0);
-    const auto window = reported + longest * 0.001 + 1.0;
-    const auto measured = measuredDecay (v, d, window, rate);
-
-    char buf[300];
-    std::snprintf (buf, sizeof (buf), "%s, %.1f kHz: reported %.4f s, measured %s%.4f s (%+.2f %%)", what.c_str(),
-                   rate / 1000.0, reported, measured >= window ? "> " : "", measured, 100.0 * (measured / reported - 1.0));
-    check (measured <= reported, buf);
-
-    return measured / reported;
 }
 
 /** **The in-loop effect's delay is charged to every lap, the first included**

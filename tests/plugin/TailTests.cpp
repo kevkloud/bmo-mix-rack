@@ -262,11 +262,12 @@ int main()
         };
 
         // From 2026-10-01 a lap is TIME plus the loop filters' own group
-        // delay (modules/dwell/dsp/Timing.h), under 2 ms a lap at the rails,
-        // so each figure is its laps times TIME lengthened by less than that.
+        // delay (modules/dwell/dsp/Timing.h), under 3 ms a lap at the rails,
+        // so each figure is its laps times TIME lengthened by less than that;
+        // and the laps count down from the build-up a sustained input leaves.
         const auto laps = [] (double tail, int count, double seconds)
         {
-            return tail >= count * seconds && tail < count * (seconds + 0.002);
+            return tail >= count * seconds && tail < count * (seconds + 0.003);
         };
 
         const auto atDefaults = tailAfter ({});
@@ -279,8 +280,8 @@ int main()
                     "dwell with no feedback floors at 0.5 s");
         checkClose (tailAfter ({ { "feedback", 100.0f } }), 30.0, 1.0e-9,
                     "dwell self-oscillating reports the 30 s ceiling");
-        check (laps (tailAfter ({ { "hold", 1.0f }, { "lane_gain", -40.0f } }), 9, 0.25),
-               "dwell's held THROW at -40 % outlasts its main delay: 9 laps of 250 ms");
+        check (laps (tailAfter ({ { "hold", 1.0f }, { "lane_gain", -40.0f } }), 10, 0.25),
+               "dwell's held THROW at -40 % outlasts its main delay: 10 laps of 250 ms");
         checkClose (tailAfter ({ { "hold", 1.0f }, { "lane_gain", 0.0f } }), 30.0, 1.0e-9,
                     "dwell's held FREEZE reports the ceiling");
         check (laps (tailAfter ({ { "sync", 1.0f } }), 5, 2.0),

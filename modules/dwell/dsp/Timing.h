@@ -52,17 +52,35 @@ inline double syncedMs (int choice, double bpm) noexcept
 inline constexpr double kTailFloorSeconds   = 0.5;
 inline constexpr double kTailCeilingSeconds = 30.0;
 
-/** Laps from the first repeat to -60 dB at loop gain `g`,
-    `ceil(60 / -20 log10 g)`, or -1 when the loop holds or builds and never
-    gets there. A loop with no feedback still plays one repeat.
+/** How far above its input a loop of gain `g` can stand, in dB: a sustained
+    input in phase with the loop settles at `1 / (1 - g)` of itself, every
+    repeat landing on the next. Bounded at 120 dB, which only a gain within a
+    millionth of unity reaches and which the 30 s ceiling outruns anyway. */
+inline double buildUpDb (double g) noexcept
+{
+    if (g <= 0.0)
+        return 0.0;
 
-    **The gain is not capped.** §9 writes `min(g, 0.97)`, and that cap counted
-    the laps for a loop faster than the one running: between about 95 % and
-    97 % FEEDBACK the figure came out at a fraction of the real decay --
-    measured on AURORA 2026-10-01, FEEDBACK 96.9 % at TIME 20 ms reported
-    4.54 s and was still ringing after 40. Uncapped, a gain near unity asks for
-    thousands of laps, and the 30 s ceiling in `tailSecondsFor` is what bounds
-    the answer, as it already did for a loop at or past unity. */
+    return std::min (120.0, -20.0 * std::log10 (std::max (1.0 - g, 1.0e-6)));
+}
+
+/** Laps for a loop of gain `g` to fall from where a sustained input left it
+    to -60 dB of that input: `ceil((60 + buildUpDb(g)) / -20 log10 g)`, or -1
+    when the loop holds or builds and never gets there. A loop with no
+    feedback still plays one repeat.
+
+    **The build-up is counted** (DECIDED, Frosty 2026-10-01). Counted from the
+    first repeat alone, the figure covered a short burst and not a held note:
+    one second of a tone in phase with the loop rang 3.750 s at TIME 375 ms and
+    FEEDBACK 60 % against 3.391 s reported (measured on AURORA). The input the
+    -60 dB is drawn from is the one the host stopped sending, whatever it was.
+
+    **The gain is not capped.** §9 wrote `min(g, 0.97)`, and that cap counted
+    the laps for a loop faster than the one running: FEEDBACK 96.9 % at TIME
+    20 ms reported 4.54 s and was still ringing after 40. Uncapped, a gain near
+    unity asks for thousands of laps, and the 30 s ceiling in
+    `tailSecondsFor` bounds the answer, as it does for a loop at or past
+    unity. */
 inline double lapsToSixtyDb (double g) noexcept
 {
     if (g >= 1.0)
@@ -71,7 +89,7 @@ inline double lapsToSixtyDb (double g) noexcept
     if (g <= 0.0)
         return 1.0;
 
-    return std::ceil (60.0 / (-20.0 * std::log10 (g)));
+    return std::ceil ((60.0 + buildUpDb (g)) / (-20.0 * std::log10 (g)));
 }
 
 //==============================================================================
@@ -226,7 +244,9 @@ inline double fxLapDelaySeconds (bool on, int type, float amountPercent) noexcep
 }
 
 /** One engine's tail: at each frequency, the laps its loop gain needs to fall
-    60 dB, times the lap that frequency actually takes; the longest wins.
+    from the build-up a held input can leave there to 60 dB under that input
+    (`lapsToSixtyDb`), times the lap that frequency actually takes; the
+    longest wins.
 
     - **The loss is the reference chain's** -- the cuts on their rails, as
       §3 defines `P_c` -- and the gain law's `g` is the loop's gain at that
@@ -277,7 +297,10 @@ inline double engineTailSeconds (double seconds, double g, int character,
 
 /** How long Dwell rings on after its input stops, in seconds, for the
     parameter values `v`: the time from the last input sample to the last
-    output above -60 dB of the first repeat.
+    output above -60 dB of that input -- **whatever the input was**, a short
+    burst or a held note that has built the loop up to `1 / (1 - g)` of itself
+    (from 2026-10-01; before, the count started at the first repeat and a held
+    note rang up to 11 % past it).
 
     **The larger of the two engines'** (§11.6), each from `engineTailSeconds`.
     The main delay's runs at FEEDBACK's loop gain. The lane's counts only while
@@ -292,17 +315,13 @@ inline double engineTailSeconds (double seconds, double g, int character,
     `testing-notes/dwell-review-fixes-2026-10-01.md`:
 
     - a loop past 30 s rings past the ceiling, which stands by decision;
-    - the figure is the loop's own decay, so an input longer than one lap that
-      builds a high-FEEDBACK loop up above the level it went in at takes longer
-      to fall 60 dB below *that input* (tape, TIME 1 ms, FEEDBACK 96.9 %: 2.95 s
-      after one sample, 4.57 s after 50 ms of noise);
     - bucket-brigade at a fractional-sample delay, driven by a one-sample
-      impulse, rings up to 17 % past it (44.1 kHz), because the compander's two
-      rings are interpolated separately and a one-sample transient does not
-      hold the gain constant across the taps; bursts of 5 and 50 ms stay inside;
-    - Crush at AMOUNT 100 and FEEDBACK 95 % and above can hold a one-step
-      limit cycle through the lap's filter overshoot (bucket-brigade and clean
-      at 44.1 kHz, bucket-brigade at 96 kHz; none at 48 kHz), which no finite
+      impulse, has rung past it (up to 17 % at 44.1 kHz before the build-up
+      term), because the compander's two rings are interpolated separately and
+      a one-sample transient does not hold the gain constant across the taps;
+      bursts of 5 and 50 ms and held tones stay inside;
+    - Crush's sample-and-hold, phase-locked to a tone, can grow a loop above
+      about 85 % FEEDBACK to a steady peak above its input, which no finite
       figure covers. See `FxStage::crush`.
 
     **With SYNC on, each engine's time is taken at the ring's full 2 s.** A

@@ -101,7 +101,8 @@ hold after it.
 - **Dwell reports a tail** (`tailSecondsForParams`, `dsp/Timing.h`): the
   longer of the two engines', clamped [0.5 s, 30 s]. Each engine's is swept
   over frequency (2026-10-01): the laps the loop gain at `P_c` = 1 needs to
-  fall 60 dB there, times **TIME plus that frequency's filter group delay plus
+  fall from **the build-up a held input can leave, `1/(1 - g)` of that
+  input**, to 60 dB under it, times **TIME plus that frequency's filter group delay plus
   what an in-loop FX adds to a lap** -- Diffuse's peak allpass delay, which is
   conservative by design (renders ran 8-88 % of it), and Crush's hold. The
   lane counts only with HOLD on, and a FREEZE or BUILD reports 30 s. **With

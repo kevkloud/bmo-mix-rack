@@ -370,18 +370,43 @@ never clipped, the lane at the top of LEVEL's travel can legitimately put about
 
 The null test asserts bit-exactness for **every m ≤ 0.5**, not just m = 0: with TIME
 beyond the test block so no repeat arrives, output must equal input
-sample-for-sample at m = 0, 0.1, 0.25, 0.4 and 0.5. The dry gain must therefore snap
-to exactly 1.0, not approach it.
+sample-for-sample at m = 0, 0.1, 0.25, 0.4 and 0.5. The dry gain must therefore be
+exactly 1.0, not approach it — on arrival from above the hinge, once it has landed.
 
 Bypass mutes input injection but keeps processing, so the tail decays rather than
-cuts; MIX ramps over 30 ms. Tail to report (00 §3, hardcoded 0):
-`tail = T·ceil(60 / −20·log10(min(g, 0.97)))`, clamped to [0.5 s, 30 s]; at `g ≥ 1`
-report the clamp, from parameters only like `latencyForParams`.
+cuts; MIX ramps over 30 ms. Tail to report (00 §3, hardcoded 0), from parameters
+only like `latencyForParams`, clamped to [0.5 s, 30 s], the clamp reported at
+`g ≥ 1`. As built from 2026-10-01 (`modules/dwell/dsp/Timing.h`; the review of
+PR #35, measured on AURORA):
 
-Smoothing: 20 ms one-pole on wet gain, DRIVE, cutoffs, DUCK; 30 ms on feedback gain;
-snap-to-target inside epsilon. Below 50% the dry gain is constant, so it is never
-smoothed and cannot zipper; above the hinge it smooths at 20 ms and snaps exactly on
-the way back. TIME is not smoothed — §2 owns it.
+`tail = max over ω of ceil((60 + B(ω)) / −20·log10 g(ω)) · (T + τ(ω) + τ_FX)`,
+`g(ω) = g·|H_ref(ω)| / P`, `B(ω) = −20·log10(1 − g(ω))`
+
+— at each frequency, the laps the loop needs to fall from the most a held input
+can build it up to (`1/(1 − g)` of that input, every repeat landing in phase on
+the next) down to −60 dB under the input, times the lap it actually takes: TIME
+plus the loop filters' group delay `τ(ω)`, plus what an in-loop FX adds (§11a).
+`H_ref` is the chain §3 defines `P_c` against (the cuts on their rails, so a
+user's cut gets no credit for the loss it adds) in analog closed form, `P` its
+peak, and `τ` the larger of that chain's delay and the chain's as set. **What the
+figure promises**: from the last input sample, whatever the input was — a burst
+or a held note — the output is under −60 dB of that input by the reported time,
+up to the 30 s ceiling; the exceptions measured are written at `tailSecondsFor`.
+Three changes from what this section first wrote, all found by measurement:
+**no `min(g, 0.97)`** — FEEDBACK 96.9 % at TIME 20 ms reported 4.54 s and rang
+past 40; **a lap is longer than T** by the filters' own delay, which left
+bucket-brigade a few ms short at long TIME; and **the build-up `B`** — one second
+of an in-phase tone at TIME 375 ms and FEEDBACK 60 % rang 3.750 s against
+3.391 s reported (now 3.762 s).
+
+Smoothing: 20 ms one-pole on wet gain, dry gain, DRIVE, cutoffs, DUCK; 30 ms on
+feedback gain. **Both MIX gains are smoothed on both sides of the hinge and
+across it** (from 2026-10-01): a host jump from 100 to 35 % inside one block
+used to snap the dry gain from 0 to 1 and stepped the output by 0.433 on a 0.5
+sine. Below 50 % the dry gain smooths toward 1.0 and *lands* on it exactly —
+a float one-pole stalls short of its target, so the landing is done when a step
+stops moving the value — after which the dry is multiplied by nothing, and the
+null above is bit-exact again. TIME is not smoothed — §2 owns it.
 
 ## 10. Maximum time and memory
 

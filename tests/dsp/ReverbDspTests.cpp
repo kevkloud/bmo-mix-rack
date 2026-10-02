@@ -1087,7 +1087,8 @@ int main()
     //== Automation does not run the normaliser every block ======================
     //
     // Until 2026-10-02 the diffuser's normaliser re-ran on every block DENSITY
-    // or ER HI-CUT moved, ~48 % of a core at 192 kHz / 32 under a drawn ramp.
+    // or ER HI-CUT moved: 13.0 % and 36.6 % of a core at 192 kHz / 32 under a
+    // drawn ramp (`measure_reverb bench`, ICE QUEEN).
     // It now runs on a step. Counted, not timed, so the test is the same on
     // every machine: under 10 % of blocks for a 1 s ramp across each range,
     // where the old code ran on every one. And the step must not leave a held

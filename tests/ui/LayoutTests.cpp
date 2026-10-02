@@ -2879,6 +2879,50 @@ void checkReverbPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
             resetEq();
         }
 
+        //-- ER SPREAD dims in Taps and is live in Energy -----------------------
+        //
+        // A control a mode makes inert is dimmed (modules/AGENTS.md). Taps never
+        // reads SPREAD, and the panel must say so on the same
+        // `erSpreadIsLive` the engine asks -- both halves, and the value must
+        // survive the round trip, because a mode that reset the knob to make the
+        // dim "true" would pass a check on the dim alone.
+        {
+            reverbPanel->setPage (R::Page::early);
+
+            const auto spreadLive = [&]() -> int
+            {
+                auto* found = dynamic_cast<bmo::ui::PlainKnob*> (findNamed (panel, "ER SPREAD"));
+                const auto* face = found != nullptr ? knobFace (*found) : nullptr;
+
+                if (face == nullptr)
+                {
+                    check (false, who + " the EARLY page has no ER SPREAD knob with a rotary under it");
+                    return -1;
+                }
+
+                return face->isEnabled() ? 1 : 0;
+            };
+
+            params.setReal (R::Index::erspread, 125.0f);
+
+            params.setReal (R::Index::ermode, (float) R::taps);
+            check (spreadLive() == 0, who + " ER SPREAD should dim in Taps, which never reads it");
+            check (! R::erSpreadIsLive ((int) R::taps), who + " the engine should agree Taps ignores SPREAD");
+
+            params.setReal (R::Index::ermode, (float) R::energy);
+            check (spreadLive() == 1, who + " ER SPREAD should be live in Energy");
+            check (R::erSpreadIsLive ((int) R::energy), who + " the engine should agree Energy reads SPREAD");
+
+            params.setReal (R::Index::ermode, (float) R::taps);
+            check (spreadLive() == 0, who + " ER SPREAD should dim again on the way back to Taps");
+
+            checkNear (params.getReal (R::Index::erspread), 125.0, 1.0e-3,
+                       who + " ER MODE must not write the SPREAD it is ignoring");
+
+            params.setReal (R::Index::erspread, R::roomDefaults::kErSpreadMs);
+            reverbPanel->setPage (R::Page::eq);   // the blocks either side of this one are on EQ
+        }
+
         //-- Four node states, two strokes, and they compose ------------------
         //
         // **A ring says the knobs edit this node; a fill says the node is

@@ -567,3 +567,111 @@ after.
 exit 0; `ctest -C Release` 39 of 39 passed (`tune_hardtune_target` is disabled
 by design); `dwell_dsp_tests` 1411 checks, 0 failures. Nothing has been
 listened to.
+
+## Sixth round (2026-10-02): an independent review of rounds 2-5
+
+An independent review attacked rounds 2-5 (96c5b0c..73036df). Five of the six
+DSP commits held: a fuzzer found nothing over the spike bound in 456 M samples,
+and no Crush row holds a level. One did not, and it was the review's own
+request. All figures below are on AURORA; measured means from the last
+non-zero input sample to the last output sample on either channel above 1e-3
+of the input's peak, MIX 100.
+
+### de781b3 was a mistake, and is undone
+
+On 2026-10-01 the review asked for the first lap to be spared the in-loop
+effect's delay, on the premise that the first repeat is tapped before the
+effect. That holds for a burst and not for a held note: when the input stops
+the effect's state is full -- Diffuse's allpasses are still ringing -- and the
+first lap after it carries their delay too. The premise had only been tested
+at FEEDBACK 1 %. With it, a 0.1 tone held 1 s rang past the figure; the FX
+delay is now charged on every lap again (1e50b61):
+
+| row (0.1 tone held 1 s, FEEDBACK 50 %, TIME 47 ms) | rate | before: reported / measured | now: reported / measured |
+|---|---|---|---|
+| clean, Diffuse 100, 1 kHz | 48 kHz | 4.6341 / 4.7718 (+2.97 %) | 5.3485 / 4.7718 (−10.78 %) |
+| clean, Diffuse 20, 664 Hz | 96 kHz | 0.5487 / 0.5668 (+3.30 %) | 0.5822 / 0.5668 (−2.65 %) |
+| bucket-brigade, Diffuse 100, 1 kHz | 48 kHz | 4.6343 / 4.7709 (+2.95 %) | 5.3487 / 4.7709 (−10.80 %) |
+
+The same three rows were short at the other two rates too (+2.03 to +3.32 %).
+
+### Three settings the figure never covered
+
+None was introduced by rounds 2-5, but the docs had come to say the figure
+"holds up to the 30 s ceiling", so each is now a derived term (48 kHz below;
+the same at 44.1 and 96 kHz to the fourth decimal unless noted):
+
+| setting | before: reported / measured | now: reported / measured | term |
+|---|---|---|---|
+| clean, TIME 120, FEEDBACK 35, MOD 100 at 8 Hz, burst 1/8 into the wow | 0.6127 / 0.6371 (+3.98 %) | 0.6527 / 0.6371 (−2.39 %) | MOD's largest delay swing, every lap (7c2f63d) |
+| the same, burst 2/8 in | 0.6127 / 0.6329 (+3.29 %) | 0.6527 / 0.6329 (−3.04 %) | |
+| tape, TIME 1000, MOD 100 at 1 Hz, 1/8 in, 96 kHz | 5.0255 / 5.0640 (+0.77 %) | 5.1394 / 5.0640 (−1.47 %) | |
+| main FEEDBACK 0, THROW −40 % at 250 ms, LANE LEVEL +24 dB, burst | 2.5029 / 2.7491 (+9.84 %) | 3.5066 / 2.7491 (−21.60 %) | the lane's LEVEL above 0 dB (b419424) |
+| the same at +12 dB | 2.5029 / 2.4989 (−0.16 %) | 3.0111 / 2.4989 | |
+| main FEEDBACK 60 % at 250 ms and a THROW lane at the same gain, 400 Hz held 1 s at 0.25, clean | 2.5118 / 2.7505 (+9.50 %) | 2.7604 / 2.7505 (−0.36 %) | 6.02 dB for each engine when both ring (5f043c0) |
+| the same, bucket-brigade | 2.5137 / 2.7523 (+9.49 %) | 2.7628 / 2.7523 (−0.38 %) | |
+
+The two-engine term is a bound, not a fit: two loops at the same gain fed the
+same held tone add in phase to twice either, which is what the −0.36 % shows.
+The hand-worked lane figure at the defaults with HOLD on moves from 10 laps of
+250 ms to 11 (10.01 laps with the 6.02 dB).
+
+### The grid, on the built code
+
+The never-shorter grid of the third round (every character, FEEDBACK
+35–96.9 %, TIME 1–2000 ms, Diffuse 35/60/100, Crush 0/60/100, Pan/Tremolo 100,
+four inputs, 44.1/48/96 kHz, plus FX off at 44.1: 14,952 rows), plus held
+notes through every FX type (1,296 rows), MOD at 50 and 100 % on four phases
+of the wow (1,296), lane LEVEL 0 to +24 dB (540) and both engines ringing
+together (108), at 44.1, 48 and 96 kHz: **18,192 rows, 5,688 at the 30 s
+ceiling and not rendered, 12,504 rendered, 0 short; worst 0.9986 of the
+figure** (clean, Crush 0, FEEDBACK 35 %, TIME 2000 ms, 1 kHz burst). Worst per
+set: never-shorter 0.9986, held FX 0.974, MOD 0.997, lane 0.871, both
+engines 0.998. The harness was rebuilt after the scratch folder was lost, from
+the third round's definition.
+
+### Smaller items
+
+- **FX AMOUNT lands on its target** (6151284). 3643cfc missed it; it sat
+  1.3e-5 off at 44.1 kHz, 1.4e-5 at 48 and 5.7e-5 at 192.
+- **Every Crush hold obeys the energy rule** (4c3d13e). The first hold after a
+  clear covered one sample and was held for N: with a 0.9 tone from the first
+  sample, 25.58 times its block at AMOUNT 100, and 11.99 when AMOUNT went 35 to
+  100 mid-tone. A hold now spreads its block's energy over the samples it is
+  held for (the same value in steady state): 0.880 / 1.000 / 1.000. And FX
+  back on picked up the hold from before it went out (the FX state of a
+  tone-fed and a silent engine, the moment FX is back on, was 94.2167 against
+  94.7124); Crush is now cleared whenever it comes (back) into the loop, and
+  both read 32.7124.
+- **The spike bound is per read path with the loop's actual gain**
+  (1ca4af9). The round-4 bound, 2.87, passed every row of an engine whose
+  output was deliberately doubled; the new one fails 155 of the property's 288
+  rows (FEEDBACK 0 rows added) and one boundary row on that engine, and none
+  on the real one.
+- **The sustained tail rows run at 0.1** (e13a181): at 0.5 they built into the
+  clip at FEEDBACK 80 and 90 % and ran at 0.55–0.93 of the figure; at 0.1
+  clean reads 0.962 / 0.921 and bucket-brigade 0.925 / 0.907 (tape 0.808 /
+  0.623). **High FEEDBACK is back under the ceiling**: FEEDBACK 93–95 % at
+  TIME 5–20 ms with a held tone at 0.01, clean and bucket-brigade at 0.92–0.98
+  of the figure.
+- **Crush's lap charge is a bound** (5c444d5): 2 (N − 1) samples, not N − 1,
+  which the measured 32.5 samples at AMOUNT 100 exceeded. No row had been
+  short; 3-bit truncation ends those tails first.
+
+### CI time
+
+The JUCE-free Dwell suite, built the same way each time on AURORA: 57.7 s at
+73036df, 64.2 s with this round's rows, **51.0 s** after the trim (228b6ce);
+the CMake-built `dwell_dsp_tests` 51.9 s. What went: the energy property's
+Diffuse and Pan/Tremolo rows at 44.1 and 96 kHz and at AMOUNT 0 (108 of 216
+rows; 15.5 → 7.1 s), and the never-shorter test's Diffuse 100 / FEEDBACK
+80 % / TIME 100 ms row at 44.1 and 96 kHz (18 renders of a 22 s figure the
+decay reaches 28 % of; 24.0 → 19.4 s). Crush keeps every rate and AMOUNT, and
+Diffuse's figure is held at all three rates by the held-note rows.
+
+### What the figure covers now
+
+For the parameters as they stand, the output on either channel at MIX 100 is
+under 1e-3 of the input's peak by the reported time, up to the 30 s ceiling,
+whatever the input. Not covered, by name: a loop past 30 s (by decision), and a
+parameter moved while the loop rings.

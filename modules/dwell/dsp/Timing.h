@@ -361,10 +361,26 @@ inline double engineTailSeconds (double seconds, double g, int character,
     tail's gain; a FREEZE or a BUILD never decays and reports the ceiling.
     Clamped to [0.5 s, 30 s]; a loop at or past unity reports 30.
 
-    **The figure is never shorter than the measured decay, up to the 30 s
-    ceiling** (`11` §4j), and `DwellDspTests::testTheReportedTailIsNeverShorter
-    ThanTheDecay` renders it to hold it there. The one thing it does not
-    cover is a loop past 30 s, which rings past the ceiling by decision.
+    **What the figure covers** ("keep it safe", Frosty; `11` §4j). For the
+    parameters as they stand, from the last non-zero input sample, the output
+    on either channel at MIX 100 is under 1e-3 of the input's peak by the
+    reported time, up to the 30 s ceiling -- whatever the input was, through
+    every character, FX type, MOD setting, stereo mode, cut, DRIVE and DUCK,
+    and with the lane at any LANE LEVEL. Each engine's countdown is
+    `laps x (T + filter delay + FX delay + MOD swing)`, the laps taken from
+    the build-up a held input leaves to 60 dB under that input, plus the
+    lane's LEVEL above 0 dB, plus 6.02 dB for each engine when both ring
+    (sixth round, 2026-10-02: the FX delay is charged on the first lap again,
+    and MOD, LANE LEVEL and the two-engine sum are counted at all). The
+    renders that hold it there are `DwellDspTests::testTheReportedTailIsNever
+    ShorterThanTheDecay` and the sixth-round tests beside it.
+
+    **What it does not cover, by name:**
+    - a loop past 30 s, which rings past the ceiling by decision;
+    - a parameter moved while the loop is ringing: the figure is for the
+      values it is given, and a FEEDBACK or TIME raised mid-tail makes a
+      longer tail than the figure the host was given before the move. A host
+      asks again when parameters change.
 
     **Bucket-brigade at a fractional-sample delay is not an exception.** Until
     the fourth round (2026-10-01) a one-sample impulse there rang up to 34 %

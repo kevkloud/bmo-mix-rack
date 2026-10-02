@@ -409,24 +409,35 @@ only like `latencyForParams`, clamped to [0.5 s, 30 s], the clamp reported at
 `g ≥ 1`. As built from 2026-10-01 (`modules/dwell/dsp/Timing.h`; the review of
 PR #35, measured on AURORA):
 
-`tail = max over ω of L(ω)·(T + τ(ω)) + (L(ω) − 1)·τ_FX`,
-`L(ω) = ceil((60 + B(ω)) / −20·log10 g(ω))`, `g(ω) = g·|H_ref(ω)| / P`,
+`tail = max over ω of L(ω)·(T + τ(ω) + τ_FX + τ_MOD)`,
+`L(ω) = ceil((60 + B(ω) + E) / −20·log10 g(ω))`, `g(ω) = g·|H_ref(ω)| / P`,
 `B(ω) = −20·log10(1 − g(ω))`
 
 — at each frequency, the laps the loop needs to fall from the most a held input
 can build it up to (`1/(1 − g)` of that input, every repeat landing in phase on
 the next) down to −60 dB under the input, times the lap it actually takes: TIME
-plus the loop filters' group delay `τ(ω)`, plus what an in-loop FX adds (§11a) —
-on every lap but the first, which is tapped before the loop's effects and has
-never been through them (from 2026-10-01; it had been charged one FX delay too
-many, 0.71 s at Diffuse 100).
+plus the loop filters' group delay `τ(ω)`, plus what an in-loop FX adds (§11a),
+plus the most MOD can lengthen the read (§5: `MOD·8 ms` on clean; `T·depth·(1 +
+0.25 flutter on tape + 0.3·3 σ wear)` on a transport, tape's floor included).
+`E` is the extra countdown: the lane's LEVEL above 0 dB for the lane, and
+6.02 dB for each engine whenever both ring, so that their sum is under the line.
+The FX delay is charged on **every** lap: on 2026-10-01 the review had the first
+lap exempted, on the premise that the first repeat is tapped before the effect,
+and that holds for a burst and not for a held note, whose effect state is full
+when it stops — a held tone through Diffuse then rang up to 3.3 % past the
+figure. Undone on 2026-10-02 (sixth round); MOD, LANE LEVEL and the two-engine
+sum were added the same day, each from a measured short tail (+4.0 %, +9.8 %,
++9.5 %).
 `H_ref` is the chain §3 defines `P_c` against (the cuts on their rails, so a
 user's cut gets no credit for the loss it adds) in analog closed form, `P` its
 peak, and `τ` the larger of that chain's delay and the chain's as set. **What the
-figure promises**: from the last input sample, whatever the input was — a burst
-or a held note — the output is under −60 dB of that input by the reported time,
-up to the 30 s ceiling, with no exception left (the bucket-brigade one recorded
-until the fourth round was the expander's spike, §4, not the tail).
+figure promises**: for the parameters as they stand, from the last non-zero
+input sample, whatever the input was — a burst or a held note — the output on
+either channel at MIX 100 is under 1e-3 of the input's peak by the reported
+time, up to the 30 s ceiling. **What it does not cover**: a loop past 30 s (by
+decision), and a parameter moved while the loop rings — the figure is for the
+values it is given. (The bucket-brigade exception recorded until the fourth
+round was the expander's spike, §4, not the tail.)
 Three changes from what this section first wrote, all found by measurement:
 **no `min(g, 0.97)`** — FEEDBACK 96.9 % at TIME 20 ms reported 4.54 s and rang
 past 40; **a lap is longer than T** by the filters' own delay, which left
@@ -777,10 +788,15 @@ the lane's by the same formula at `T_lane` and `g_lane`, with its own FX trio
 build does not decay. With HOLD off the lane contributes nothing. `11` §4j's
 assertion — the reported tail is never below the measured time to −60 dB — is
 rendered by `DwellDspTests::testTheReportedTailIsNeverShorterThanTheDecay`, and
-holds up to the 30 s ceiling. The three exceptions once recorded here are gone:
-an input longer than a lap at high FEEDBACK (the build-up term, §9), Crush's
-frozen hold (since replaced, §11a), and bucket-brigade at a fractional delay on
-a one-sample transient, which was the expander's spike (§4), not the tail.
+holds up to the 30 s ceiling for the parameters as they stand. **The output is
+the sum of the two engines**, so when the lane rings beside the main delay each
+is counted down 6.02 dB further, and the lane's LEVEL above 0 dB is counted too
+(§9; sixth round, 2026-10-02: a held tone through both at the same loop gain
+rang 9.5 % past the old figure, a THROW at LANE LEVEL +24 dB 9.8 %). The three
+exceptions once recorded here are gone: an input longer than a lap at high
+FEEDBACK (the build-up term, §9), Crush's frozen hold (since replaced, §11a),
+and bucket-brigade at a fractional delay on a one-sample transient, which was
+the expander's spike (§4), not the tail.
 
 ### 11.7 The lane and tempo: one SYNC, two divisions
 
@@ -899,15 +915,20 @@ Candidates — list and order free until ship (11 §3):
     −7.1 dB forty seconds after a burst (AMOUNT 100, FEEDBACK 80). Truncation
     keeps `|q| ≤ |x|`.
   - **The hold matches the block's energy** (DECIDED, Frosty, 2026-10-02:
-    "energy match it"). Each held value has the magnitude of the RMS of the N
-    samples since the last hold, `√(Σx²/N)`, and the sign of the newest of them —
-    the sample a frozen hold would have taken (0 if it is 0) — and is held for
-    the next N. N copies of it carry exactly the block's energy (`N·rms² = Σx²`),
-    so the hold can neither add energy nor take it away, and truncation after it
-    can only take some. It is causal by one block: a lap through Crush is about
-    N − 1 samples later than without it (measured 0.21–0.23 / 0.35–0.40 /
-    0.54–0.68 ms at AMOUNT 35 / 60 / 100 at 48 kHz); the first repeat never
-    passes through it and is exact.
+    "energy match it"). Each held value carries the energy of the samples since
+    the last hold spread over the N it is held for, `√(Σx²/N)` — the block's RMS
+    in steady state — with the sign of the newest of them, the sample a frozen
+    hold would have taken (0 if it is 0). N copies of it carry exactly the
+    block's energy, so the hold can neither add energy nor take it away, and
+    truncation after it can only take some. Spreading over the hold rather than
+    over the samples covered keeps the first hold after a clear (one sample) and
+    a hold whose length AMOUNT has just moved inside the rule too, and Crush's
+    hold is cleared whenever it comes (back) into the loop (sixth round,
+    2026-10-02; the first hold had carried up to 25.6 times its block). It is
+    causal by one block: a lap through Crush is about N − 1 samples later than
+    without it (measured 0.21–0.23 / 0.35–0.40 / 0.54–0.68 ms at AMOUNT 35 / 60
+    / 100 at 48 kHz) and at most 2 (N − 1), which is what the tail charges; the
+    first repeat of a burst never passes through it and is exact.
     A tone at exactly the hold rate, sampled at its crest every block, comes out
     as DC, and the 10 Hz blocker after the stage (§4) keeps it out of the ring.
 

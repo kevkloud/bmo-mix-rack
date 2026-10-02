@@ -102,16 +102,23 @@ hold after it.
   longer of the two engines', clamped [0.5 s, 30 s]. Each engine's is swept
   over frequency (2026-10-01): the laps the loop gain at `P_c` = 1 needs to
   fall from **the build-up a held input can leave, `1/(1 - g)` of that
-  input**, to 60 dB under it, times **TIME plus that frequency's filter group delay plus
-  what an in-loop FX adds to a lap** -- Diffuse's peak allpass delay, which is
-  conservative by design (renders ran 8-88 % of it), and Crush's hold -- the FX
-  part charged to every lap but the first, which is tapped before the loop's
-  effects. The
-  lane counts only with HOLD on, and a FREEZE or BUILD reports 30 s. **With
-  SYNC on each time is taken at the 2 s ring**, because a tail comes from
-  parameters alone and the tempo is not one. `DwellDspTests` renders the
-  figure against the real decay, and nothing under the 30 s ceiling rings past
-  it (the 14,952-row grid on AURORA, 2026-10-01, fourth round). The
+  input**, to 60 dB under it, times **TIME plus that frequency's filter group
+  delay plus what an in-loop FX adds to a lap plus MOD's largest swing** --
+  Diffuse's peak allpass delay, which is conservative by design (renders ran
+  8-88 % of it), Crush's hold at 2 (N - 1) samples, and the read's widest
+  modulation excursion. **The FX delay is charged on every lap, the first
+  included**: a held note leaves the effect's state full when it stops. The
+  first lap was exempted on 2026-10-01 at the review's request and a held tone
+  through Diffuse then rang 3.3 % past the figure; undone 2026-10-02. **The
+  output is the sum of the two engines**: the lane counts down its LEVEL above
+  0 dB further, and when both ring each counts down 6.02 dB further. The lane
+  counts only with HOLD on, and a FREEZE or BUILD reports 30 s. **With SYNC on
+  each time is taken at the 2 s ring**, because a tail comes from parameters
+  alone and the tempo is not one. `DwellDspTests` renders the figure against
+  the real decay; what it covers and the two things it does not (a loop past
+  30 s, a parameter moved mid-tail) are written at `tailSecondsFor`. **Before
+  adding anything to the loop or to the output, ask what it does to the
+  tail**: every short figure so far was a term nobody had modelled. The
   bucket-brigade "impulse exception" once written at `tailSecondsFor` was the
   expander's spike, below. `tests/plugin/TailTests.cpp` lists Dwell beside
   Linger as the two modules that ring.
@@ -125,7 +132,9 @@ hold after it.
   interpolate the gain ring on its own again**, on any read path (Hermite,
   sinc, both halves of a crossfade). `testABucketBrigadeBoundaryNeverSpikes`
   and `testNoEventSpikesTheOutputOnAnyCharacter` hold every event to the read's
-  bound, the kernel's absolute sum times `(input peak + 1)`.
+  bound: the absolute sum of the kernel that row reads with, at its phase,
+  times the input's peak plus the loop's actual gain -- tight enough that an
+  output twice too loud fails (sixth round).
 - **Under 100 % FEEDBACK every in-loop effect loses energy** (Frosty,
   2026-10-01: "under 100% feedback should lose energy, not be indefinite").
   `testEveryInLoopEffectLosesEnergyUnderUnity` holds every FX type to it; do
@@ -137,8 +146,13 @@ hold after it.
   a box filter, about -30 dB at 5 and 10 kHz at AMOUNT 60. **Do not low-pass
   Crush again**: `testCrushKeepsItsTopEnd` pins the one-pass levels it was
   chosen for, and `testCrushHoldsTheBlockEnergy` pins the rule. There is no
-  dead zone. The hold delays each lap by about one hold (`docs/delay/10`
-  §11a), which the tail's per-lap FX charge covers.
+  dead zone. A hold spreads its block's energy over the samples it is held
+  for, so the first hold after a clear and a hold AMOUNT has just resized
+  obey the rule too, and Crush is cleared whenever it comes (back) into the
+  loop. The hold delays each lap by about one hold and at most two
+  (`docs/delay/10` §11a); the tail charges the two.
+- **Every smoother lands** (`Smoother::tickLanding`): FEEDBACK, DRIVE, LANE
+  LEVEL and FX AMOUNT. A plain float one-pole stalls short of its target.
 - **MIX is smoothed across its 50 % hinge**, and the dry *lands* on exactly 1.0
   below it (`Smoother::tickLanding`), which is when the bit-exact null returns.
   A float one-pole on its own stalls about 3e-5 short of 1.0.

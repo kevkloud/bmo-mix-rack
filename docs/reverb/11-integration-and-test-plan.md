@@ -98,11 +98,11 @@ bundle id, preset extension, state tags and accent freeze too.
 Add `virtual double tailSecondsForParams(const float*, int) const` to
 `bmo::ModuleDsp` **defaulting to 0.0**, mirroring `latencyForParams` — from
 parameter values, not DSP state. Formula per 10 §5:
-`preDelay + T_mid·max(1, r_lo, r_hi) + t_ER,max + 0.05 s`, clamped to 30 s. The
+`preDelay + T_mid·max(1, r_lo, r_hi) + t_ER,max + 0.05 s`, clamped to 40 s (30 s until 2026-10-02). The
 rack **sums** across occupied slots, never maxes: slots are in series, so 4 s
 feeding 2 s rings longer than either, and under-reporting truncates tails while
 over-reporting only costs idle pulling. **The rack clamps its summed total at
-the same 30 s a module clamps itself at** — added 2026-09-21 with Frosty's
+the same 40 s a module clamps itself at** — added 2026-09-21 with Frosty's
 approval, for the case the slot limit does not stop: `addModule` counts slots
 and never looks for duplicates, so eight BMO Lingers is a legal chain and eight
 honest thirties is a four-minute tail. That is free at transport stop, where
@@ -724,7 +724,7 @@ reflection stops fusing with the direct sound. **The right-hand end ran to 30 s
 at all times until 2026-09-22** — `bmo::kMaxTailSeconds`, the clamp rather than
 a setting anybody uses — and at the 1.8 s default the curve finished about 60 %
 across with the remaining 40 % a flat line. It follows the tail now, far enough
-past it to leave 8 % of the *width* clear, clamped at the same 30 s. What that
+past it to leave 8 % of the *width* clear, clamped at the same 40 s. What that
 costs is comparability, and the readout pays it back: the decades are labelled
 inside the box and the bezel line prints absolute seconds.
 
@@ -809,7 +809,7 @@ The rest, one line each:
 | Stability | Matrix orthogonal to 1e−6, `max\|Hᵢ(ω)\| ≤ 1 − 1e−4`. At `damphi` 2.0 / `decay` 20 s (effective T60 40 s): ten minutes then silence, never above +6 dBFS, RMS never growing over any 10 s window |
 | Denormals | 60 s of silence after a loud burst with FTZ/DAZ **disabled** — block time must not rise (the ~100× trap), tail reaching exactly 0.0f; this is what 10 §4's ±1e−20 injection is for |
 | NaN / silence | ±1.0 square, DC step, denormal input, fuzzed over schema corners at every type — every sample finite; after `reset()`, zeros in gives exactly zeros out |
-| Tail report | `tailSecondsForParams` **≥ measured −60 dB time** and **≤30 s**, every type, 44.1/48/96/192 kHz — what makes §2(a) mean anything |
+| Tail report | `tailSecondsForParams` **≥ measured −60 dB time** and **≤40 s** (30 s until 2026-10-02), every type, 44.1/48/96/192 kHz — what makes §2(a) mean anything |
 | Bypass | No per-slot enable flag exists (`00` §2, 10 §5), so a removed reverb truncates: assert the wet bus fades over **150 ms** in `reset()` on the envelope slope, and no click into the remaining chain |
 | Sample rate | 44.1–192 kHz. *Must not differ:* per-band T60 ±5%, tap times *in ms* ±0.1 ms, pre-delay ±0.1 ms, density crossing ±10%, latency **exactly 0**. *May differ:* sample values (lines re-primed per rate), modal detail above ~15 kHz, memory (linear in rate) |
 | Block size | 1/16/32/64/**127**/512/2048 **bit-identical** for fixed parameters; if not, something smooths per block instead of per sample — a bug, not a tolerance |
@@ -892,7 +892,8 @@ date given:
   in the trim (§4a).*
 - **The MIX law and its default** (2026-09-24): dry = min(1, 2(1 − mix)), wet =
   min(1, 2 mix), default 50 %, 100 % is verb only for a send.
-- **The tail ceiling rises to 40 s** (2026-09-26). `decay` 20 s × `damphi` or
+- **The tail ceiling rises to 40 s** (decided 2026-09-26, done 2026-10-02 in
+  M3a). `decay` 20 s × `damphi` or
   `damplo` 2.0 rings for 40 s, and §6 asked the report to be both ≥ measured
   and ≤ 30 s there. `kMaxTailSeconds` in `core/dsp/ModuleDsp.h` goes to 40 in
   M3, with the tests that prove the corner; §6's "≤30 s" becomes "≤40 s" in

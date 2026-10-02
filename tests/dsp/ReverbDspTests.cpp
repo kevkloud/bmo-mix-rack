@@ -2001,7 +2001,7 @@ int main()
         worst.preDelayMs = 250.0f;
         worst.sizeM = 80.0f;
         check (near (DspCore::tailSecondsFor (worst), DspCore::kMaxTailSeconds, 1.0e-3f),
-               "40 s of effective decay is reported as the 30 s ceiling");
+               "40.7 s of arithmetic at the corner is reported as the 40 s ceiling");
 
         // Pre-delay is tail-only and can never be negative, so it can only
         // ever add to the figure.

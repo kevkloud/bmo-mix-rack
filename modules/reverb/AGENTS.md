@@ -1087,14 +1087,14 @@ and is on the open list.
 
   The rack **sums** it over occupied slots rather than taking the maximum —
   slots are in series, so 4 s feeding 2 s rings for 6 — and **then clamps the
-  total at `bmo::kMaxTailSeconds`, the same thirty seconds a module clamps
+  total at `bmo::kMaxTailSeconds`, the same forty seconds a module clamps
   itself at.** The clamp arrived 2026-09-21 with Frosty's approval, and the
   case it exists for is the one the slot limit does not stop: `addModule`
   counts slots and never looks for duplicates, so eight BMO Lingers is a legal
   chain and eight honest thirties is a four-minute tail — free at transport
   stop, where over-reporting only idles the host, and not free for an offline
   bounce, where the figure is rendered onto the end of every export. Both
-  clamps read the one constant in `core/dsp/ModuleDsp.h`; do not write 30.0
+  clamps read the one constant in `core/dsp/ModuleDsp.h`; do not write 40.0
   anywhere else.
 - **The engine.** `11` section 1 names the headers it grows —
   `ErGenerator.h`, `TapTables.h`, `Fdn.h`, `Absorbent.h`. Milestones M2–M4.

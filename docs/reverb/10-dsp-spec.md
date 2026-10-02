@@ -430,8 +430,8 @@ over 150 ms in `reset()`; a real bypass needs a rack change (§8).
 (`SingleModuleProcessor.h:41`, `RackProcessor.h:124`); reverb is the first module
 for which that is wrong. Report
 **T_tail = preDelay_s + T_mid·max(1, *r*_lo, *r*_hi) + *t*_ER,max + 0.05 s**,
-from parameter values rather than DSP state, clamped to a 30 s ceiling so a
-20 s × 2.0 setting does not hand the host 40 s. Tails compound along a chain, so
+from parameter values rather than DSP state, clamped to a 40 s ceiling (30 s until 2026-10-02) so a
+setting at the corner (40.8 s of arithmetic) hands the host 40 s and no more. Tails compound along a chain, so
 the rack figure is the **sum** over occupied slots, not the maximum.
 
 ## 6. CPU and memory

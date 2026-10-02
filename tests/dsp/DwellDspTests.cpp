@@ -5077,37 +5077,140 @@ void testEveryInLoopEffectLosesEnergyUnderUnity()
                  std::chrono::duration<double> (std::chrono::steady_clock::now() - started).count());
 }
 
-/** **The first repeat is not charged the in-loop effect's delay** (`dsp/
-    Timing.h`).
+//==============================================================================
+// The tail, sixth round (2026-10-02, an independent review of rounds 2-5).
+// Every row is held to "keep it safe" (Frosty): measured from the last
+// non-zero input sample to the last output sample on either channel above
+// 1e-3 of the input's peak, MIX 100, the figure is never shorter.
+//==============================================================================
 
-    The engine's output is the raw read, tapped before the loop's chain, so
-    the first repeat is the input TIME late and has not been through the FX
-    stage; only the laps after it have. The figure charged every lap the FX
-    delay, the first included -- about 0.71 s too much at Diffuse 100. With
-    one repeat (FEEDBACK 1 %: one lap is 64 dB down), an effect therefore adds
-    nothing at all, and the rendered decay is inside the figure either way. */
-void testTheFirstRepeatIsNotChargedTheFxDelay()
+/** What drives a tail row. A held tone at `hz` (0: aligned to the main TIME
+    near 500 Hz) for `heldSeconds`, a 5 ms 300 Hz Hann burst, or one sample;
+    `leadSeconds` of silence first, so a burst can be placed on a chosen phase
+    of the modulation. */
+struct Drive
 {
-    for (int type = 0; type < 3; ++type)
+    enum Kind { impulse, burst, held } kind = burst;
+    double hz = 0.0, amplitude = 0.5, heldSeconds = 1.0, leadSeconds = 0.0;
+};
+
+/** The measured decay for `d` through a fresh instance at `v`, in seconds, or
+    `seconds` if the render is still above the line in its last 100 ms. */
+double measuredDecay (std::vector<float> v, const Drive& d, double seconds, double rate)
+{
+    const auto lead = (int) (d.leadSeconds * rate);
+    const auto len = d.kind == Drive::impulse ? 1 : (d.kind == Drive::burst ? (int) (0.005 * rate) : (int) (d.heldSeconds * rate));
+    const auto lap = (double) v[P::Index::time] * 0.001;
+    const auto hz = d.hz > 0.0 ? d.hz : std::round (500.0 * lap) / lap;
+    const auto n = lead + len + (int) std::ceil (seconds * rate);
+
+    P::DwellDsp dsp;
+    dsp.prepare (rate, 512, 2);
+
+    Block block { n };
+    auto peak = 0.0f;
+    auto lastIn = lead;
+
+    for (int i = 0; i < len; ++i)
     {
-        auto v = settings (0, 1000.0f, 1.0f, 100.0f);
-        const auto bare = P::tailSecondsFor (v.data(), (int) v.size());
+        const auto w = d.kind == Drive::burst ? 0.5 - 0.5 * std::cos (2.0 * P::kPiD * (double) i / (double) (len - 1)) : 1.0;
+        const auto s = d.kind == Drive::impulse ? (float) d.amplitude
+                     : d.kind == Drive::burst   ? (float) (d.amplitude * w * std::sin (2.0 * P::kPiD * 300.0 * (double) i / rate))
+                                                : (float) (d.amplitude * std::sin (2.0 * P::kPiD * hz * (double) i / rate));
+        block.left[(size_t) (lead + i)] = block.right[(size_t) (lead + i)] = s;
+        peak = std::max (peak, std::abs (s));
 
-        v[P::Index::fx]       = 1.0f;
-        v[P::Index::fxType]   = (float) type;
-        v[P::Index::fxAmount] = 100.0f;
-        const auto withFx = P::tailSecondsFor (v.data(), (int) v.size());
-
-        char buf[200];
-        std::snprintf (buf, sizeof (buf),
-                       "one repeat through %s 100: the figure is the bare loop's (%.4f s against %.4f s)",
-                       fxTypeName (type), withFx, bare);
-        check (std::abs (withFx - bare) < 1.0e-9, buf);
-
-        const auto measured = measuredTailSeconds (v, TailInput::impulse, withFx + 1.5);
-        check (measured <= withFx, std::string ("and the one repeat through ") + fxTypeName (type)
-                                       + " 100 rings inside it (" + std::to_string (measured) + " s)");
+        if (s != 0.0f)
+            lastIn = lead + i;
     }
+
+    renderAsHost (dsp, v, block, n, 512, [] (int) {});
+
+    const auto line = peak * 1.0e-3f;
+    auto last = lastIn;
+
+    for (int i = n - 1; i > lastIn; --i)
+        if (std::abs (block.left[(size_t) i]) > line || std::abs (block.right[(size_t) i]) > line)
+        {
+            last = i;
+            break;
+        }
+
+    if (last >= n - (int) (0.1 * rate))
+        return seconds;
+
+    return (double) (last - lastIn) / rate;
+}
+
+/** One row: the figure against `measuredDecay`, rendered for the figure, the
+    longer TIME and a second more. A row at the ceiling tests nothing and says
+    so. Returns measured / reported. */
+double checkDecay (const std::vector<float>& v, const Drive& d, double rate, const std::string& what)
+{
+    const auto reported = P::tailSecondsFor (v.data(), (int) v.size());
+
+    if (reported >= P::kTailCeilingSeconds)
+    {
+        check (false, what + " reports the 30 s ceiling and so tests nothing; pick a row under it");
+        return 0.0;
+    }
+
+    const auto longest = std::max ((double) v[P::Index::time], v[P::Index::hold] > 0.5f ? (double) v[P::Index::laneTime] : 0.0);
+    const auto window = reported + longest * 0.001 + 1.0;
+    const auto measured = measuredDecay (v, d, window, rate);
+
+    char buf[300];
+    std::snprintf (buf, sizeof (buf), "%s, %.1f kHz: reported %.4f s, measured %s%.4f s (%+.2f %%)", what.c_str(),
+                   rate / 1000.0, reported, measured >= window ? "> " : "", measured, 100.0 * (measured / reported - 1.0));
+    check (measured <= reported, buf);
+
+    return measured / reported;
+}
+
+/** **The in-loop effect's delay is charged to every lap, the first included**
+    (sixth round, 2026-10-02; undoes de781b3).
+
+    de781b3 stopped charging the first lap, on the premise that the first
+    repeat is tapped before the effect. That holds for a burst and not for a
+    held note: when the input stops, the effect's own state -- Diffuse's six
+    allpasses -- is full, and the first lap after the input carries its delay
+    too. The premise had only been tested at FEEDBACK 1 %. Measured on AURORA
+    on 73036df, a 0.1 tone held 1 s, FEEDBACK 50 %, TIME 47 ms: 48 kHz clean
+    Diffuse 100 at 1 kHz rang 4.772 s against 4.634 reported (+2.97 %), 96 kHz
+    clean Diffuse 20 at 664 Hz 0.567 against 0.549 (+3.30 %), 48 kHz
+    bucket-brigade Diffuse 100 at 1 kHz 4.771 against 4.634 (+2.95 %).
+
+    Held notes through every FX type, at 44.1, 48 and 96 kHz, at 0.1 so the
+    loop stays linear. */
+void testTheFxDelayIsChargedOnEveryLap()
+{
+    struct Row { int character, type; float amount, feedback, timeMs; double hz; };
+    const Row rows[]
+    {
+        { 0, 0, 100.0f, 50.0f, 47.0f, 1000.0 }, { 0, 0, 20.0f, 50.0f, 47.0f, 664.0 },
+        { 2, 0, 100.0f, 50.0f, 47.0f, 1000.0 }, { 1, 0, 60.0f, 50.0f, 47.0f, 1000.0 },
+        { 0, 2, 100.0f, 80.0f, 20.0f, 300.0 },  { 0, 1, 100.0f, 50.0f, 47.0f, 1000.0 },
+    };
+
+    for (const auto rate : { 44100.0, 48000.0, 96000.0 })
+        for (const auto& r : rows)
+        {
+            auto v = settings (r.character, r.timeMs, r.feedback, 100.0f);
+            v[P::Index::fx]       = 1.0f;
+            v[P::Index::fxType]   = (float) r.type;
+            v[P::Index::fxAmount] = r.amount;
+
+            Drive d;
+            d.kind = Drive::held;
+            d.hz = r.hz;
+            d.amplitude = 0.1;
+
+            char what[160];
+            std::snprintf (what, sizeof (what), "a held %.0f Hz tone through %s %.0f on %s, FEEDBACK %.0f, TIME %.0f ms",
+                           r.hz, fxTypeName (r.type), (double) r.amount, characterName (r.character),
+                           (double) r.feedback, (double) r.timeMs);
+            checkDecay (v, d, rate, what);
+        }
 }
 
 //==============================================================================
@@ -5411,7 +5514,7 @@ int main()
     testCrushKeepsItsTopEnd();
     testCrushCarriesNoDcOutOfTheLoop();
     testEveryInLoopEffectLosesEnergyUnderUnity();
-    testTheFirstRepeatIsNotChargedTheFxDelay();
+    testTheFxDelayIsChargedOnEveryLap();
 
     // The fourth round, 2026-10-01: the expander's boundary.
     testABucketBrigadeBoundaryNeverSpikes();

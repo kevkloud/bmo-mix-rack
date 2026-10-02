@@ -262,12 +262,14 @@ inline double fxLapDelaySeconds (bool on, int type, float amountPercent) noexcep
     - **The delay is the larger of the two chains'**, the cuts as set and as
       on their rails, because a cut adds delay even where it adds no loss.
     - `extraDelay` is what an in-loop FX adds to a lap; see
-      `fxLapDelaySeconds`. **It is charged to every lap but the first**: the
-      engine's output is the raw read, tapped before the loop's chain, so the
-      first repeat is the input TIME late and has never been through the FX
-      stage. Charging it too over-stated the figure by one whole FX delay --
-      0.71 s at Diffuse 100 (fixed 2026-10-01; "keep it safe", Frosty: the
-      per-lap bound itself is unchanged).
+      `fxLapDelaySeconds`. **It is charged to every lap, the first
+      included.** The first repeat of a burst is tapped before the effect
+      and never passes through it, but a held note leaves the effect's own
+      state full when it stops -- Diffuse's allpasses keep ringing -- and the
+      first lap after the input carries that delay too. de781b3 (2026-10-01)
+      stopped charging the first lap on the burst's premise, tested only at
+      FEEDBACK 1 %, and a 0.1 tone held 1 s then rang up to 3.3 % past the
+      figure (sixth round, 2026-10-02; measured on AURORA). Undone.
 
     Swept over 512 points, 10 Hz to 20 kHz, log-spaced; no allocation. */
 inline double engineTailSeconds (double seconds, double g, int character,
@@ -299,8 +301,7 @@ inline double engineTailSeconds (double seconds, double g, int character,
         const auto asSet = lapResponseAt (w, character, seconds, lowCutHz, highCutHz);
         const auto laps  = lapsToSixtyDb (g * rails.magnitude / std::max (peak, 1.0e-12));
 
-        worst = std::max (worst, laps * (seconds + std::max (rails.delay, asSet.delay))
-                                     + (laps - 1.0) * extraDelay);
+        worst = std::max (worst, laps * (seconds + std::max (rails.delay, asSet.delay) + extraDelay));
     }
 
     return worst;

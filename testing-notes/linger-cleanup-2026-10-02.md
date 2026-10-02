@@ -87,3 +87,32 @@ left alone.
 - *Answered 2026-10-02:* the host-facing name becomes "Darken" (above), and
   DEQ's DYN stays undimmed. Frosty: it is the switch that unlocks the
   dynamics section, and he overrode the dim on purpose.
+
+## After QA's review, same day
+
+QA reviewed `9817ef6` and found two defects in point 4, both in
+`ErGenerator.h`. Both were fixed with a test first that failed on the
+unfixed code. The figures below are from QA's review probe, rebuilt and run
+on ICE QUEEN.
+
+- **A slow DENSITY ramp ran the normaliser every block** (`8794ec5`). Under
+  1e-5 a block, the smoother snaps to its target, so the control read as
+  settled while it was moving. 0.6 → 1.0 over 20 s ran 119 999 of 120 000
+  blocks at 192 kHz / 32. Now 159 in every rate and block size tried.
+- **Each normaliser update was an unramped gain step** (`91bc9e0`). It
+  measured 3.5–16× `main` on the second difference under a slow ramp. Each
+  update now ramps over up to 2 ms. A stage that fades out keeps applying its
+  ramping normaliser until it lands on one, because dropping it at the
+  threshold was itself a step of up to 2.5 %. Result: 0.34–1.06× `main`
+  across all sixteen cells, and 0.62× on the full-range triangle. The cost is
+  level: during fast DENSITY moves it differs from `main` by up to 0.35 dB, for
+  the duration of a jump. All figures are in the commit body.
+- Point 5's bus row was regenerated a second time. Against `main`, its peaks
+  are now up to 0.008 dB apart and its RMS up to 0.0014 dB. The figure above,
+  "0.00015 dB", was wrong: 1.1e-5 on 0.065 is 0.0015 dB.
+- The ER SPREAD dim is now asserted in `ui_layout`, standalone and in a rack
+  slot (`0560b0b`).
+
+CPU at 192 kHz / 32, final head: held 3.62 %, DENSITY ramp 2.99 %, ER
+HI-CUT ramp 4.31 %. 48 kHz / 128 held: 0.87 %. `build-dsp` 18/18 and
+`build-full` 36/36 runnable, both builds exit 0.

@@ -145,7 +145,9 @@ steady state, and up to **+0.184 dB per dB of envelope step** through a rising
 one — +3.7 dB on a 20 dB transient, unbounded, in-loop, at the same point in the
 circulating word every lap. `10` §4 now specifies the expander reading the
 compressor's **stored** gain at the same fractional position and applying its
-exact reciprocal, so the pair is unity at every instant. The clamp fallback
+exact reciprocal, so the pair is unity at every instant. (From 2026-10-01 the
+reciprocal is taken tap by tap before the interpolator, after dividing one
+interpolation by the other was measured spiking to +115 dBFS; `10` §4.) The clamp fallback
 remains Frosty's call, and **the overshoot figure is MEASURED**: a re-detecting
 pair benched at **+3.67 dB on a 20 dB step, 0.184 dB per dB** (AURORA,
 2026-09-22, stage 2b at c4d2d33), landing exactly on the model. **The control

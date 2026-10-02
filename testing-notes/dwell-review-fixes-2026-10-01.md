@@ -360,3 +360,99 @@ fourth round, at the cause.
 
 docs/delay/15 has no 2026-09-23 date left (lane_note and stage 2b were
 committed on 2026-09-22, 1d5b5bd and c4d2d33).
+
+## Fourth round (the same day): the bucket-brigade output spike
+
+**The defect.** The expander read `I(v·g) / I(g)`: the interpolated audio ring
+divided by the interpolated gain ring. The gain ring holds exactly 1.0 wherever
+nothing was companded — after `prepare`, after a reset or a HOLD clear, and
+over anything written on clean or tape — beside compressor gains of 0.708 to
+31.6. At a fractional read position the interpolator's negative taps carry the
+step from 1.0 to 31.6 through zero (Hermite at the halfway phase:
+−0.0625 + 0.5625 + 0.5625 − 0.0625 × 31.6 = −0.91), the division went to its
+1e-6 clamp, and one output sample came out at up to 6.3e5 — **+115 dBFS**. It
+has been there since the compander was built: d783f59 gives the same figures.
+
+**The fix** (`DelayEngine::readExpanded`): every tap is divided by the gain
+written beside it, then interpolated, `I(v·g / g)` — on the Hermite read, on
+Clean's sinc (which reads a move off bucket-brigade's ring), and on both halves
+of a crossfade. The read is then an interpolation of what was written, bounded
+by that times the kernel's absolute sum: **1.25** for Hermite (exact, phase ½)
+and **2.21** for the 24-tap sinc (measured from the built table, phase ½). The
+stored gains are 1.0 or 0.708–31.6, so the clamp can no longer fire.
+
+**Every event, output peak with noise at 0.3, MIX 100, FEEDBACK 60**
+(`testABucketBrigadeBoundaryNeverSpikes`; bound `K (0.3 + 1)` = 2.87 per
+engine, 5.74 with the lane summed in):
+
+| event | rate, TIME | 05572c7 | now |
+|---|---|---|---|
+| signal on the first sample after prepare | 44.1 kHz, 375 | **5.5e5** | 0.366 |
+| signal on the first sample after prepare | 48 kHz, 375.3 | **6.3e5** | 0.363 |
+| signal through a reset | 44.1 kHz, 375 | **1.9e4** | 0.357 |
+| signal through a reset | 48 kHz, 375.3 | **4.8e5** | 0.357 |
+| signal starting at a reset | 44.1 kHz, 375 | **5.5e5** | 0.366 |
+| clean → bucket-brigade mid-signal | 44.1 kHz, 375 | **2.5e5** | 0.479 |
+| clean → bucket-brigade mid-signal | 48 kHz, 375.3 | **2.3e5** | 0.433 |
+| tape → bucket-brigade mid-signal | 44.1 kHz, 375 | **8.7e4** | 0.409 |
+| tape → bucket-brigade mid-signal | 48 kHz, 375.3 | **3.0e5** | 0.411 |
+| bucket-brigade idle → clean, signal at the move | 44.1 kHz, 375 | **2.3e5** | 0.509 |
+| bucket-brigade idle → clean, signal at the move | 48 kHz, 375.3 | **2.0e5** | 0.499 |
+| bucket-brigade idle → tape, signal at the move | 44.1 kHz, 375 | **2.7e5** | 0.364 |
+| bucket-brigade idle → tape, signal at the move | 48 kHz, 375 | **2.3e5** | 0.360 |
+| MOD 50 on a whole-sample TIME, after prepare | 48 kHz, 375 | **3.4e5** | 0.360 |
+| TIME 375 → 600 ms in flight, after prepare | 48 kHz, 375 | **6.2e5** | 0.337 |
+| the lane, HOLD and SEND after prepare | 44.1 kHz, lane 375.3 | **5.5e5** | 0.683 |
+| the lane, HOLD and SEND after prepare | 48 kHz, lane 375.3 | **26.6** | 0.652 |
+| the lane, HOLD and SEND after a reset | 48 kHz, lane 375.3 | **12.4** | 0.639 |
+
+Three of these were not in the report that opened the round. **A move off
+bucket-brigade spikes too**, when the line was idle and the signal starts at
+the move: the boundary then runs from companded silence (31.6) down to 1.0, and
+Clean's sinc and Tape's Hermite both read it. Tape's modulation floor makes
+every tape read fractional, so that row spikes at 48 kHz on a whole-sample TIME.
+**MOD and a TIME move** make a whole-sample TIME fractional, so 48 kHz is not
+safe on its own. **The lane** is the same engine and HOLD resets it. With signal
+throughout, a move off bucket-brigade does not spike (gains near 1.8 against
+1.0), which is why it looked clear.
+
+**The property of record** (`testNoEventSpikesTheOutputOnAnyCharacter`): every
+character after prepare and after reset and all six moves, 44.1 / 48 / 96 kHz,
+TIME 375 and 375.3, noise throughout or from the event — 144 rows, 1.7 s. On
+05572c7 **25 fail**, worst 6.3e5, every one a fractional read across a 1.0 /
+companded boundary; clean and tape on their own pass every row there too, so
+there is no new finding on them. Now 0 fail; worst peak 0.588.
+
+**Steady state** (noise at 0.3 for 2 s from 1 s after prepare, MIX 100):
+
+- bucket-brigade at a whole-sample delay, 48 kHz TIME 375, FEEDBACK 0 and 60,
+  and with the noise from sample 0: **bit-identical** (same hashes);
+- at a fractional delay, 44.1 kHz TIME 375, against the old render: from 1.5
+  to 2.9 s, difference peak 0.00018 / 0.00022 and RMS −89.8 / −89.6 dBFS at
+  FEEDBACK 0 / 60, 72.6 / 72.5 dB under the signal; over the whole render the
+  peak is 0.0022, at the first repeat's onset (1.380 s), where the gain moves
+  fastest.
+
+The second round's character-move row still holds: a 0.05 repeat in flight
+comes back at −29.05 dBFS, peak 0.0500, on bucket-brigade → clean, → tape,
+clean → bucket-brigade and the renders that stayed.
+
+**Cost**, bucket-brigade at FEEDBACK 60, best of seven, ns per stereo sample:
+126.0–127.4 before, 119.7–125.6 after (44.1 and 48 kHz, TIME 375 and 375.3).
+One Hermite with four divisions is cheaper than two Hermites and a division.
+
+**The tail.** With the spike gone the bucket-brigade "impulse exception" is
+gone with it. The 16 rows it covered (44.1 kHz, TIME 1 / 2 / 5 / 375 ms, FX off
+and Diffuse 60 / 100, FEEDBACK 35 / 60 %) are now in
+`testTheReportedTailIsNeverShorterThanTheDecay`: all 16 fail on 05572c7 (e.g.
+Diffuse 100, FEEDBACK 35 %, TIME 375: 5.281 s against 4.747) and all pass now
+(that row 1.039 s; FX off, FEEDBACK 60 %, TIME 375: 1.877 s against 3.765). The
+same impulse given a second of silence first was inside the figure on 05572c7
+as well (258 rows, worst 0.992 of the figure). **The never-shorter grid**
+(14,952 rows, as in the third round) on the built code: **0 short** under the
+30 s ceiling (12 on 05572c7); the worst row is 0.997 of its figure.
+
+**Build and tests, on AURORA**: a Release build of every test target, named,
+exit 0; `ctest -C Release` 39 of 39 passed (`tune_hardtune_target` is disabled
+by design); `dwell_dsp_tests` 1390 checks, 0 failures. Crush is unchanged from
+05572c7 in this round. Nothing has been listened to.

@@ -110,9 +110,22 @@ hold after it.
   lane counts only with HOLD on, and a FREEZE or BUILD reports 30 s. **With
   SYNC on each time is taken at the 2 s ring**, because a tail comes from
   parameters alone and the tempo is not one. `DwellDspTests` renders the
-  figure against the real decay; the exceptions it does not cover are written
-  at `tailSecondsFor`. `tests/plugin/TailTests.cpp` lists Dwell beside Linger
-  as the two modules that ring.
+  figure against the real decay, and nothing under the 30 s ceiling rings past
+  it (the 14,952-row grid on AURORA, 2026-10-01, fourth round). The
+  bucket-brigade "impulse exception" once written at `tailSecondsFor` was the
+  expander's spike, below. `tests/plugin/TailTests.cpp` lists Dwell beside
+  Linger as the two modules that ring.
+- **Bucket-brigade's expander divides each tap by its own gain, then
+  interpolates** (`DelayEngine::readExpanded`, 2026-10-01, fourth round). The
+  gain ring holds 1.0 wherever nothing was companded -- after `prepare`, a
+  reset or a HOLD clear, and over clean or tape writes -- beside gains up to
+  31.6. Dividing one interpolated ring by the other took that step through
+  zero and put out one sample of up to 6.3e5 (+115 dBFS) on any fractional
+  read across it, from the compander's first build until then. **Never
+  interpolate the gain ring on its own again**, on any read path (Hermite,
+  sinc, both halves of a crossfade). `testABucketBrigadeBoundaryNeverSpikes`
+  and `testNoEventSpikesTheOutputOnAnyCharacter` hold every event to the read's
+  bound, the kernel's absolute sum times `(input peak + 1)`.
 - **Under 100 % FEEDBACK every in-loop effect loses energy** (Frosty,
   2026-10-01: "under 100% feedback should lose energy, not be indefinite").
   `testEveryInLoopEffectLosesEnergyUnderUnity` holds every FX type to it; do
@@ -257,7 +270,8 @@ the order `docs/delay/HANDOFF-add-bmo-dwell.md` sets out.
 **The memory figure doubles twice, and both are structural.** The lane's ring is
 the same fixed maximum as the main's — `lane_time` shares TIME's range — and the
 **compander's control ring is as long as the audio ring**, per channel per
-engine, allocated whichever character is selected (`docs/delay/10` §4, §10). So
+engine, allocated whichever character is selected, because every tap of the
+audio read is divided by the gain written beside it (`docs/delay/10` §4, §10). So
 an instance is **16 MB at 192 kHz**, 4.0 MB at 44.1 kHz; the 8.0 MB an earlier
 pass quoted counted the audio rings alone; `params.h`'s `kMaxTimeMs` comment
 carries the 16 MB figure and names the two wrong ones. Every

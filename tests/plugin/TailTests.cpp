@@ -283,8 +283,10 @@ int main()
                     "dwell with no feedback floors at 0.5 s");
         checkClose (tailAfter ({ { "feedback", 100.0f } }), 30.0, 1.0e-9,
                     "dwell self-oscillating reports the 30 s ceiling");
-        check (laps (tailAfter ({ { "hold", 1.0f }, { "lane_gain", -40.0f } }), 10, 0.25),
-               "dwell's held THROW at -40 % outlasts its main delay: 10 laps of 250 ms");
+        // 11 laps from 2026-10-02: with the main delay ringing beside it the
+        // lane counts down 6 dB further, so the sum of the two is under the line.
+        check (laps (tailAfter ({ { "hold", 1.0f }, { "lane_gain", -40.0f } }), 11, 0.25),
+               "dwell's held THROW at -40 % outlasts its main delay: 11 laps of 250 ms");
         checkClose (tailAfter ({ { "hold", 1.0f }, { "lane_gain", 0.0f } }), 30.0, 1.0e-9,
                     "dwell's held FREEZE reports the ceiling");
         check (laps (tailAfter ({ { "sync", 1.0f } }), 5, 2.0),

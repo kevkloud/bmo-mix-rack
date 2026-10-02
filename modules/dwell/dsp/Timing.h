@@ -404,9 +404,18 @@ inline double tailSecondsFor (const float* v, int count) noexcept
     // own TIME, because a transport's swing scales with it.
     const auto modDepth = v[Index::modDepth];
 
+    // **Two engines ringing at once sum** (sixth round). The figure is the
+    // later of the two, but the output is main + lane, and two loops fed the
+    // same input can add in phase. So when the lane rings too, each is
+    // counted down to half the line -- 6.02 dB further -- and the sum is
+    // under it once both are. A lane that holds or builds reports the
+    // ceiling anyway.
+    const auto laneRings = v[Index::hold] > 0.5f && v[Index::laneGain] < 0.0f;
+    const auto sharedDb = laneRings ? 20.0 * std::log10 (2.0) : 0.0;
+
     auto tail = engineTailSeconds (mainT, (double) feedbackGainFor (v[Index::feedback], 1.0),
                                    character, lowCut, highCut,
-                                   mainFx + modLapSeconds (character, mainT, modDepth));
+                                   mainFx + modLapSeconds (character, mainT, modDepth), sharedDb);
 
     if (v[Index::hold] > 0.5f)
     {
@@ -425,7 +434,7 @@ inline double tailSecondsFor (const float* v, int count) noexcept
                                 : engineTailSeconds (laneT, (double) laneGainFor (v[Index::laneGain], 1.0),
                                                      character, lowCut, highCut,
                                                      laneFx + modLapSeconds (character, laneT, modDepth),
-                                                     std::max (0.0, (double) v[Index::laneLevel]));
+                                                     std::max (0.0, (double) v[Index::laneLevel]) + sharedDb);
         tail = std::max (tail, laneTail);
     }
 

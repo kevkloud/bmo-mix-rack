@@ -488,12 +488,14 @@ void testTheTailIsTheLongerEngine()
     checkLaps (tailOf (v), 5, 2.0, "TIME 2000 at FEEDBACK 35 is 10 s");
 
     // The lane, HOLD on, TAIL -40 %: g = 0.6^1.6 = 0.4416, -7.10 dB a lap,
-    // 5.06 dB of build-up, 9.16 laps, so 10 of LANE TIME 250 ms: 2.5 s --
-    // longer than the main's 1.875.
+    // 5.06 dB of build-up and, with the main delay ringing beside it, 6.02 dB
+    // more so the sum of the two is under the line (2026-10-02): 10.01 laps,
+    // so 11 of LANE TIME 250 ms: 2.75 s -- longer than the main's 1.875.
+    // (Before the two-engine term: 9.16 laps, 10.)
     v = defaults();
     v[P::Index::hold]     = 1.0f;
     v[P::Index::laneGain] = -40.0f;
-    checkLaps (tailOf (v), 10, 0.25, "a held THROW at -40 % rings 10 laps of 250 ms, past the main delay");
+    checkLaps (tailOf (v), 11, 0.25, "a held THROW at -40 % rings 11 laps of 250 ms, past the main delay");
 
     // HOLD off: the same lane setting contributes nothing.
     v[P::Index::hold] = 0.0f;
@@ -5273,6 +5275,39 @@ void testALouderLaneCountsDownFurther()
         }
 }
 
+/** **Two engines ringing together count down 6 dB further** (sixth round).
+
+    The figure took the longer engine's tail, but the output is the sum of
+    the two: two loops at the same gain, fed the same held tone, add in phase
+    to twice either. Each is therefore counted down to half the line, 6.02 dB
+    further. Measured on AURORA on 73036df: main FEEDBACK 60 % at 250 ms and a
+    THROW lane at the same loop gain and time, a 400 Hz tone held 1 s at 0.25:
+    clean 2.7505 s against 2.5118 (+9.50 %), bucket-brigade 2.7523 against
+    2.5137. */
+void testTwoEnginesRingingTogetherCountDownFurther()
+{
+    // The lane's THROW law is (1 + L)^1.6 and FEEDBACK's is 1.05 . f^1.6, so
+    // this L puts the two loops at the same gain.
+    const auto sameGain = (float) ((std::pow (1.05 * std::pow (0.6, 1.6), 1.0 / 1.6) - 1.0) * 100.0);
+
+    for (const auto rate : { 44100.0, 48000.0, 96000.0 })
+        for (int c = 0; c < 3; ++c)
+        {
+            auto v = laneSettings (c, 250.0f, sameGain, 0.0f);
+            v[P::Index::send]     = 1.0f;
+            v[P::Index::time]     = 250.0f;
+            v[P::Index::feedback] = 60.0f;
+
+            Drive d;
+            d.kind = Drive::held;
+            d.hz = 400.0;
+            d.amplitude = 0.25;
+
+            checkDecay (v, d, rate, std::string ("a 400 Hz tone held through the main delay and a lane at the same gain, ")
+                                        + characterName (c));
+        }
+}
+
 //==============================================================================
 // The expander's boundary, 2026-10-01 (fourth round). Bucket-brigade's gain
 // ring holds 1.0 wherever nothing was companded -- after `prepare`, after
@@ -5577,6 +5612,7 @@ int main()
     testTheFxDelayIsChargedOnEveryLap();
     testModulationIsChargedToEveryLap();
     testALouderLaneCountsDownFurther();
+    testTwoEnginesRingingTogetherCountDownFurther();
 
     // The fourth round, 2026-10-01: the expander's boundary.
     testABucketBrigadeBoundaryNeverSpikes();

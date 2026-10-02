@@ -396,8 +396,9 @@ public:
         coefficient as well as in the lengths. */
     static constexpr double kDiffuseCoefficient = 0.7;
 
-    /** §11a's crush law, verbatim: `b = 16 - AMOUNT . 13` bits, sample-and-hold
-        at `f_s / ceil(1 + AMOUNT . 31)`. */
+    /** §11a's crush law: `b = 16 - AMOUNT . 13` bits, and a hold of
+        `ceil(1 + AMOUNT . 31)` samples -- §11a wrote "sample-and-hold"; what is
+        held is each block's energy (`crush`). */
     static constexpr double kCrushBitsAtZero = 16.0;
     static constexpr double kCrushBitsSpan = 13.0;
     static constexpr double kCrushHoldSpan = 31.0;

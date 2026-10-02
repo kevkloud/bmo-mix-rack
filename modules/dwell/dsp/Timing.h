@@ -213,12 +213,16 @@ inline constexpr double kLowestSampleRate = 44100.0;
       figure built from the slowest frequency there is cannot be beaten by a
       render; a figure fitted to the renders could be, at a frequency the grid
       did not try.
-    - **Crush: the hold**, `divisor - 1` samples at the lowest rate. The
-      energy-matched hold is causal by one block, which delays a lap by about
-      that much: measured on AURORA 2026-10-02 at 48 kHz, 10.0-11.0, 16.8-19.1
-      and 25.8-32.5 samples at AMOUNT 35, 60 and 100 against 11, 19 and 31
-      charged, and with Crush in the loop no never-shorter row is short at
-      44.1, 48 or 96 kHz (5,664 rows, worst 0.998 of the figure).
+    - **Crush: the hold, `2 (N - 1)` samples at the lowest rate**, N the
+      hold length. A hold taken at sample `k` carries the block
+      `k - N + 1 .. k` and is output from `k` to `k + N - 1`, so no sample's
+      energy leaves the stage more than `2 (N - 1)` samples after it came in.
+      That is the bound; the average is about `N - 1` (measured on AURORA
+      2026-10-02 at 48 kHz: 10.0-11.0, 16.8-19.1 and 25.8-32.5 samples at
+      AMOUNT 35, 60 and 100). Until the sixth round `N - 1` was charged,
+      which the 32.5 measured at AMOUNT 100 exceeds; no row was short with it,
+      because 3-bit truncation ends those tails long before the figure (they
+      ran at 0.45 of it), but a figure is a bound or it is not.
     - **Pan/Tremolo** is a memoryless gain and adds nothing. */
 inline double fxLapDelaySeconds (bool on, int type, float amountPercent) noexcept
 {
@@ -242,7 +246,7 @@ inline double fxLapDelaySeconds (bool on, int type, float amountPercent) noexcep
     }
 
     if (type == kCrush)
-        return (std::ceil (1.0 + amount * FxStage::kCrushHoldSpan) - 1.0) / kLowestSampleRate;
+        return 2.0 * (std::ceil (1.0 + amount * FxStage::kCrushHoldSpan) - 1.0) / kLowestSampleRate;
 
     return 0.0;
 }

@@ -4505,9 +4505,10 @@ void testTheReportedTailIsNeverShorterThanTheDecay()
     // **With an in-loop FX stage.** Diffuse's six allpasses delay every lap
     // by up to their combined peak group delay, which is a smear the plain
     // figure did not count at all: the review measured FEEDBACK 80 % and TIME
-    // 100 ms at AMOUNT 100 reporting 2.30 s and ringing 6.20 s. Crush's
-    // sample-and-hold delays a lap by up to its divisor. Pan/Tremolo is a
-    // memoryless gain and adds nothing, and is here to say so.
+    // 100 ms at AMOUNT 100 reporting 2.30 s and ringing 6.20 s. Crush's hold
+    // carries a block's energy into the next block, so a lap through it is up
+    // to 2 (N - 1) samples late. Pan/Tremolo is a memoryless gain and adds
+    // nothing, and is here to say so.
     std::vector<TailRow> fxRows;
 
     for (int c = 0; c < 3; ++c)

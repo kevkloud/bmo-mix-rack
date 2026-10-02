@@ -257,7 +257,13 @@ inline double fxLapDelaySeconds (bool on, int type, float amountPercent) noexcep
       FEEDBACK 96.9 % rang 24 % longer than such a figure).
     - **The delay is the larger of the two chains'**, the cuts as set and as
       on their rails, because a cut adds delay even where it adds no loss.
-    - `extraDelay` is what an in-loop FX adds to every lap; see `fxLapDelay`.
+    - `extraDelay` is what an in-loop FX adds to a lap; see
+      `fxLapDelaySeconds`. **It is charged to every lap but the first**: the
+      engine's output is the raw read, tapped before the loop's chain, so the
+      first repeat is the input TIME late and has never been through the FX
+      stage. Charging it too over-stated the figure by one whole FX delay --
+      0.71 s at Diffuse 100 (fixed 2026-10-01; "keep it safe", Frosty: the
+      per-lap bound itself is unchanged).
 
     Swept over 512 points, 10 Hz to 20 kHz, log-spaced; no allocation. */
 inline double engineTailSeconds (double seconds, double g, int character,
@@ -289,7 +295,8 @@ inline double engineTailSeconds (double seconds, double g, int character,
         const auto asSet = lapResponseAt (w, character, seconds, lowCutHz, highCutHz);
         const auto laps  = lapsToSixtyDb (g * rails.magnitude / std::max (peak, 1.0e-12));
 
-        worst = std::max (worst, laps * (seconds + std::max (rails.delay, asSet.delay) + extraDelay));
+        worst = std::max (worst, laps * (seconds + std::max (rails.delay, asSet.delay))
+                                     + (laps - 1.0) * extraDelay);
     }
 
     return worst;

@@ -4888,6 +4888,39 @@ void testEveryInLoopEffectLosesEnergyUnderUnity()
                  std::chrono::duration<double> (std::chrono::steady_clock::now() - started).count());
 }
 
+/** **The first repeat is not charged the in-loop effect's delay** (`dsp/
+    Timing.h`).
+
+    The engine's output is the raw read, tapped before the loop's chain, so
+    the first repeat is the input TIME late and has not been through the FX
+    stage; only the laps after it have. The figure charged every lap the FX
+    delay, the first included -- about 0.71 s too much at Diffuse 100. With
+    one repeat (FEEDBACK 1 %: one lap is 64 dB down), an effect therefore adds
+    nothing at all, and the rendered decay is inside the figure either way. */
+void testTheFirstRepeatIsNotChargedTheFxDelay()
+{
+    for (int type = 0; type < 3; ++type)
+    {
+        auto v = settings (0, 1000.0f, 1.0f, 100.0f);
+        const auto bare = P::tailSecondsFor (v.data(), (int) v.size());
+
+        v[P::Index::fx]       = 1.0f;
+        v[P::Index::fxType]   = (float) type;
+        v[P::Index::fxAmount] = 100.0f;
+        const auto withFx = P::tailSecondsFor (v.data(), (int) v.size());
+
+        char buf[200];
+        std::snprintf (buf, sizeof (buf),
+                       "one repeat through %s 100: the figure is the bare loop's (%.4f s against %.4f s)",
+                       fxTypeName (type), withFx, bare);
+        check (std::abs (withFx - bare) < 1.0e-9, buf);
+
+        const auto measured = measuredTailSeconds (v, TailInput::impulse, withFx + 1.5);
+        check (measured <= withFx, std::string ("and the one repeat through ") + fxTypeName (type)
+                                       + " 100 rings inside it (" + std::to_string (measured) + " s)");
+    }
+}
+
 } // namespace
 
 //==============================================================================
@@ -4956,6 +4989,7 @@ int main()
     testMixSnapsAfterReset();
     testCrushHoldsTheBlockMean();
     testEveryInLoopEffectLosesEnergyUnderUnity();
+    testTheFirstRepeatIsNotChargedTheFxDelay();
 
     std::printf ("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

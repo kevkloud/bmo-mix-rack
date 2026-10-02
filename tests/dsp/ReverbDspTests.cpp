@@ -1160,6 +1160,50 @@ int main()
         check (std::abs (dHiCut) <= 0.01, "ER HI-CUT held after a ramp is exactly where a fresh instance is");
     }
 
+    //== A slow DENSITY ramp is still a moving control ===========================
+    //
+    // QA, 2026-10-02: under 1e-5 of DENSITY per block, the smoother snaps to
+    // its target every block, so "has DENSITY reached its target" read as
+    // "not moving" while a ramp was under way, and the settle rule ran the
+    // normaliser on every block -- 119 999 of 120 000 at 192 kHz / 32 for 0.6
+    // to 1.0 over 20 s. 0.60 to 0.70 over 5 s is 3.3e-6 a block, well inside
+    // that, and held to the same bound as the fast ramp above.
+    {
+        constexpr double rate  = 192000.0;
+        constexpr int    block = 32;
+        const auto blocks = (int) (5.0 * rate / block);
+
+        ReverbDsp dsp;
+        dsp.prepare (rate, block, 2);
+        auto v = defaults();
+        v[Index::erdensity]   = 60.0f;
+        v[Index::ervariation] = 5.0f;
+
+        std::vector<float> l ((size_t) block, 0.0f), r ((size_t) block, 0.0f);
+        float* chans[] { l.data(), r.data() };
+        const auto run = [&]
+        {
+            std::fill (l.begin(), l.end(), 0.0f);
+            std::fill (r.begin(), r.end(), 0.0f);
+            dsp.setParams (v.data(), (int) v.size());
+            dsp.process (chans, 2, block);
+        };
+
+        for (int b = 0; b < (int) (0.5 * rate / block); ++b)
+            run();
+
+        const auto before = dsp.getCore().earlyReflections().normaliserRuns();
+        for (int b = 0; b < blocks; ++b)
+        {
+            v[Index::erdensity] = 60.0f + 10.0f * (float) b / (float) blocks;
+            run();
+        }
+        const auto runs = dsp.getCore().earlyReflections().normaliserRuns() - before;
+
+        std::cout << "  normaliser runs over a 5 s DENSITY ramp 60 -> 70 % at 192 kHz / 32: " << runs << " of " << blocks << " blocks\n";
+        check (runs > 0 && runs <= blocks / 10, "a slow DENSITY ramp runs the normaliser on under 10 % of blocks");
+    }
+
     //== ER hi-cut: -3 dB where it says, and no tap moves =========================
     {
         const auto open = render ([] (auto&) {});

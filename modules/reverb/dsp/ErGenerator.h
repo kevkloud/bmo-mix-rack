@@ -604,8 +604,17 @@ private:
             far   = far   || rel (bandCoef[i], lastNormBandCoef[i]);
         }
 
-        const bool moving = density != densityTarget || fading || hiCutTarget != lastBlockHiCut;
-        lastBlockHiCut = hiCutTarget;
+        // **Moving is the target changing, not the smoother lagging it.** A
+        // ramp slower than 1e-5 of DENSITY a block is snapped to its target
+        // every block by `updateDensity`, so "density has not reached its
+        // target" read false all through it, the settle rule fired on every
+        // block, and the step bought nothing: 119 999 runs of 120 000 at
+        // 192 kHz / 32 for 0.6 to 1.0 over 20 s (QA, 2026-10-02). The target
+        // is compared block to block, as the hi-cut's always was.
+        const bool moving = density != densityTarget || densityTarget != lastBlockDensityTarget
+                         || fading || hiCutTarget != lastBlockHiCut;
+        lastBlockDensityTarget = densityTarget;
+        lastBlockHiCut         = hiCutTarget;
 
         if (far || (stale && ! moving))
         {
@@ -1197,7 +1206,7 @@ private:
     int     stageDelay[kNumStages][4] {};
     float   lastNormDensity = -1.0f, lastNormHiCut = -1.0f;
     float   lastNormBandCoef[kNumBands] { -1.0f, -1.0f, -1.0f, -1.0f };
-    float   lastBlockHiCut = -1.0f;
+    float   lastBlockHiCut = -1.0f, lastBlockDensityTarget = -1.0f;
     long long normRuns = 0;
 
     OnePole hiCutL, hiCutL2, hiCutR, hiCutR2;   ///< two poles a side: 12 dB/octave

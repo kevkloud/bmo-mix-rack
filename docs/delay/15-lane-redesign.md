@@ -148,7 +148,7 @@ compressor's **stored** gain at the same fractional position and applying its
 exact reciprocal, so the pair is unity at every instant. The clamp fallback
 remains Frosty's call, and **the overshoot figure is MEASURED**: a re-detecting
 pair benched at **+3.67 dB on a 20 dB step, 0.184 dB per dB** (AURORA,
-2026-09-23, stage 2b at c4d2d33), landing exactly on the model. **The control
+2026-09-22, stage 2b at c4d2d33), landing exactly on the model. **The control
 ring that buys the fix costs as much memory as the audio ring** — see the
 memory note below.
 
@@ -174,7 +174,7 @@ candidates cheapest first. Add to it:
   went with LINK; `fx_link` needs none, because the lane's FX values are never
   overwritten while the tie is on.
 
-**What stage 2b turned up** (built and committed 2026-09-23, c4d2d33):
+**What stage 2b turned up** (built and committed 2026-09-22, c4d2d33):
 
 - **Memory is 16 MB per instance at 192 kHz, not 8.0** (`10` §10). Two engines
   is two audio rings, and the compander's control ring is **the same length as
@@ -238,7 +238,7 @@ Rows 4–10 — CHARACTER, STEREO, the two cuts, the two modulation controls and
 DRIVE — **govern both engines** from 2026-09-22. DUCK (11) is main-engine only;
 MIX (12) governs both because both sum into the wet before it.
 
-**`lane_note` (22) was added on 2026-09-23** and takes the count to 27, ids
+**`lane_note` (22) was added on 2026-09-22** and takes the count to 27, ids
 0–26, with **five rack lanes spare**. The lane had its own TIME and no division,
 so the moment `12`'s plumbing landed the main delay would lock to the grid while
 the lane free-ran in milliseconds and **drifted against it** — which destroys
@@ -281,7 +281,7 @@ NOTE. `10` §11.7 owns all of this.
   second or two was always the path with least to work with; it now gets the
   main's setting, which is more than it had.
 - **SYNC and NOTE are kept** even though they ship disabled, and **LANE NOTE
-  joins them** (2026-09-23) on the same disabled switch — see the note under the
+  joins them** (2026-09-22) on the same disabled switch — see the note under the
   table.
 - **Both FX buttons are kept.** Using "amount at 0" as the bypass was considered
   and rejected: it loses the one-click A/B that makes an effect stage usable,

@@ -5251,6 +5251,28 @@ void testModulationIsChargedToEveryLap()
             }
 }
 
+/** **A lane louder than its input counts down further** (sixth round).
+
+    The lane's output is the lane times LANE LEVEL, so at +24 dB it starts
+    24 dB above the input and has 84 dB to fall, not 60, before it is under
+    the line. Measured on AURORA on 73036df: main FEEDBACK 0, a THROW lane at
+    -40 % and 250 ms, a 5 ms burst: +24 dB rang 2.7491 s against 2.5029
+    (+9.84 %); +12 dB 2.4989, at the edge. */
+void testALouderLaneCountsDownFurther()
+{
+    for (const auto rate : { 44100.0, 48000.0, 96000.0 })
+        for (const auto level : { 6.0f, 12.0f, 18.0f, 24.0f })
+        {
+            auto v = laneSettings (0, 250.0f, -40.0f, level);
+            v[P::Index::send]     = 1.0f;
+            v[P::Index::feedback] = 0.0f;
+
+            char what[160];
+            std::snprintf (what, sizeof (what), "a burst into a THROW lane at -40 %%, 250 ms, LANE LEVEL %+.0f dB", (double) level);
+            checkDecay (v, Drive {}, rate, what);
+        }
+}
+
 //==============================================================================
 // The expander's boundary, 2026-10-01 (fourth round). Bucket-brigade's gain
 // ring holds 1.0 wherever nothing was companded -- after `prepare`, after
@@ -5554,6 +5576,7 @@ int main()
     testEveryInLoopEffectLosesEnergyUnderUnity();
     testTheFxDelayIsChargedOnEveryLap();
     testModulationIsChargedToEveryLap();
+    testALouderLaneCountsDownFurther();
 
     // The fourth round, 2026-10-01: the expander's boundary.
     testABucketBrigadeBoundaryNeverSpikes();

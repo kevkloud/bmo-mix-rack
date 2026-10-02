@@ -81,7 +81,7 @@ inline double buildUpDb (double g) noexcept
     unity asks for thousands of laps, and the 30 s ceiling in
     `tailSecondsFor` bounds the answer, as it does for a loop at or past
     unity. */
-inline double lapsToSixtyDb (double g) noexcept
+inline double lapsToSixtyDb (double g, double extraDb = 0.0) noexcept
 {
     if (g >= 1.0)
         return -1.0;
@@ -89,7 +89,7 @@ inline double lapsToSixtyDb (double g) noexcept
     if (g <= 0.0)
         return 1.0;
 
-    return std::ceil ((60.0 + buildUpDb (g)) / (-20.0 * std::log10 (g)));
+    return std::ceil ((60.0 + buildUpDb (g) + std::max (extraDb, 0.0)) / (-20.0 * std::log10 (g)));
 }
 
 //==============================================================================
@@ -309,7 +309,8 @@ inline double modLapSeconds (int character, double timeSeconds, float modDepthPe
 
     Swept over 512 points, 10 Hz to 20 kHz, log-spaced; no allocation. */
 inline double engineTailSeconds (double seconds, double g, int character,
-                                 double lowCutHz, double highCutHz, double extraDelay) noexcept
+                                 double lowCutHz, double highCutHz, double extraDelay,
+                                 double extraDb = 0.0) noexcept
 {
     if (g >= 1.0)
         return kTailCeilingSeconds;
@@ -335,7 +336,7 @@ inline double engineTailSeconds (double seconds, double g, int character,
         const auto w = omegaAt (i);
         const auto rails = lapResponseAt (w, character, seconds, 20.0, 18000.0);
         const auto asSet = lapResponseAt (w, character, seconds, lowCutHz, highCutHz);
-        const auto laps  = lapsToSixtyDb (g * rails.magnitude / std::max (peak, 1.0e-12));
+        const auto laps  = lapsToSixtyDb (g * rails.magnitude / std::max (peak, 1.0e-12), extraDb);
 
         worst = std::max (worst, laps * (seconds + std::max (rails.delay, asSet.delay) + extraDelay));
     }
@@ -417,11 +418,14 @@ inline double tailSecondsFor (const float* v, int count) noexcept
                                                         v[Index::laneFxAmount]);
 
         // The detent is a literal: lane_gain at 0 is FREEZE (laneGainFor).
+        // A lane LEVEL above 0 dB starts the lane that far above its input,
+        // so it has that much further to fall (sixth round).
         const auto laneTail = v[Index::laneGain] >= 0.0f
                                 ? kTailCeilingSeconds
                                 : engineTailSeconds (laneT, (double) laneGainFor (v[Index::laneGain], 1.0),
                                                      character, lowCut, highCut,
-                                                     laneFx + modLapSeconds (character, laneT, modDepth));
+                                                     laneFx + modLapSeconds (character, laneT, modDepth),
+                                                     std::max (0.0, (double) v[Index::laneLevel]));
         tail = std::max (tail, laneTail);
     }
 

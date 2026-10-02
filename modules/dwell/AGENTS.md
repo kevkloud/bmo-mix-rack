@@ -111,7 +111,12 @@ hold after it.
   first lap was exempted on 2026-10-01 at the review's request and a held tone
   through Diffuse then rang 3.3 % past the figure; undone 2026-10-02. **The
   output is the sum of the two engines**: the lane counts down its LEVEL above
-  0 dB further, and when both ring each counts down 6.02 dB further. The lane
+  0 dB further, and when both ring each counts down 6.02 dB further (charged
+  whenever HOLD is on and the lane decays: the parameters cannot say whether a
+  send still rings). **An engine with no feedback** (FEEDBACK 0, LANE GAIN
+  -100) plays one repeat, charged TIME + FX delay + MOD swing + the
+  interpolator's reach; it had been TIME alone and ran short with MOD on
+  (seventh round). The lane
   counts only with HOLD on, and a FREEZE or BUILD reports 30 s. **With SYNC on
   each time is taken at the 2 s ring**, because a tail comes from parameters
   alone and the tempo is not one. `DwellDspTests` renders the figure against

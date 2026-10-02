@@ -420,7 +420,13 @@ plus the loop filters' group delay `τ(ω)`, plus what an in-loop FX adds (§11a
 plus the most MOD can lengthen the read (§5: `MOD·8 ms` on clean; `T·depth·(1 +
 0.25 flutter on tape + 0.3·3 σ wear)` on a transport, tape's floor included).
 `E` is the extra countdown: the lane's LEVEL above 0 dB for the lane, and
-6.02 dB for each engine whenever both ring, so that their sum is under the line.
+6.02 dB for each engine whenever both ring, so that their sum is under the line
+(charged whenever HOLD is on and the lane decays, since the parameters cannot
+say whether an earlier send still rings). **At a loop gain of 0** (FEEDBACK 0,
+LANE GAIN −100) the one repeat is the tail: `T + τ_FX + τ_MOD` plus the
+interpolator's reach, `Sinc::kHalf` samples on clean and 2 on the Hermite at
+44.1 kHz (seventh round, 2026-10-02; it had been charged `T` alone and ran up
+to 1.89 % short with MOD on).
 The FX delay is charged on **every** lap: on 2026-10-01 the review had the first
 lap exempted, on the premise that the first repeat is tapped before the effect,
 and that holds for a burst and not for a held note, whose effect state is full

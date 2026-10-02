@@ -675,3 +675,80 @@ For the parameters as they stand, the output on either channel at MIX 100 is
 under 1e-3 of the input's peak by the reported time, up to the 30 s ceiling,
 whatever the input. Not covered, by name: a loop past 30 s (by decision), and a
 parameter moved while the loop rings.
+
+## Seventh round (2026-10-02): an independent check of round 6
+
+Ten of round 6's eleven commits held. One did not, and two smaller items were
+taken with it. On AURORA.
+
+### No feedback, one repeat, MOD on: the figure ran short (a96fcba)
+
+At a loop gain of 0 -- FEEDBACK 0 on the main delay, LANE GAIN −100 on the
+lane -- the figure returned TIME and stopped, so the one repeat was charged
+neither MOD's swing nor the read's kernel. It is now `T + FX delay + MOD swing
++ kernel spread`, the spread being how far back the interpolator reaches:
+`Sinc::kHalf` = 12 samples on clean, 2 on the Hermite, at 44.1 kHz. One
+impulse at 48 kHz, FEEDBACK 0, the worst of four wow phases (reported /
+measured):
+
+| row | 260dd5c | now |
+|---|---|---|
+| tape, TIME 600, MOD 100 at 8 Hz | 0.6000 / 0.6114 (+1.89 %) | 0.6137 / 0.6114 (−0.39 %) |
+| clean, the same | 0.6000 / 0.6066 (+1.10 %) | 0.6083 / 0.6066 (−0.28 %) |
+| bucket-brigade, the same | 0.6000 / 0.6097 (+1.61 %) | 0.6114 / 0.6097 (−0.29 %) |
+| tape, TIME 1900, MOD 100 | 1.9000 / 1.9058 (+0.31 %) | 1.9433 / 1.9058 (−1.93 %) |
+| tape, TIME 600, MOD 0 (its floor) | 0.6000 / up to +0.10 % | 0.6008 / 0.5999 |
+| lane at LANE GAIN −100, 1000 ms, clean, MOD 100 | 1.0000 / 1.0081 (+0.81 %) | inside |
+
+`testANoFeedbackRepeatIsChargedItsSwing`: 306 rows (every character, MOD
+0/30/100 at 0.6 and 8 Hz, TIME 600 and 1900 ms, impulses on four wow phases
+at 48 kHz and two at 44.1 and 96 kHz, and the lane), 137 fail on 260dd5c,
+0 now.
+
+### A Crush hold is never above its block's RMS (4075144)
+
+Round 6 spread each hold's energy over the samples it is held for. When
+AMOUNT falls mid-note the hold is shorter than its block and the level rose by
+`sqrt(N_block / N_hold)`: through the real 20 ms smoother with host jumps, a
+100 Hz tone at 44.1 kHz with AMOUNT 100 → 0 put the stage's peak at 1.2229 of
+the input's (1.000 at 73036df). The spread is now over the longer of the two;
+the worst is 1.0000. Before the cap the energy stayed at or under 0.99 of the
+input and the module output was unchanged; after it, the stage passes 0.83 to
+0.99 of the input's energy on the same automation.
+
+### What the figure costs at ordinary settings
+
+Reported tail in seconds, unchanged by this round except FEEDBACK 0 with MOD:
+
+| setting | 73036df | now |
+|---|---|---|
+| defaults | 1.8877 | 1.8877 |
+| HOLD on | 2.5029 | 2.7505 |
+| MOD 30 | 1.8877 | 1.8997 |
+| MOD 100 | 1.8877 | 1.9277 |
+| FEEDBACK 60 + HOLD | 3.7618 | 4.1354 |
+| Diffuse 100 | 4.7453 | 5.4597 |
+| FEEDBACK 80 | 10.1297 | 10.1297 |
+| FEEDBACK 80 + HOLD | 10.1297 | 10.8812 |
+| tape at defaults | 1.9005 | 1.9020 |
+| FEEDBACK 0, MOD 100, TIME 1000 | 1.0000 | 1.0083 |
+
+The main delay is charged the two-engine 6.02 dB whenever HOLD is on and the
+lane decays, even with nothing sent: the parameters cannot tell whether an
+earlier send is still ringing, so the bound assumes it is. Kept on purpose.
+
+### Recorded, not changed
+
+- The spike bound catches a doubled output on its FEEDBACK 0 rows; at
+  FEEDBACK 60 it is the boundary test that covers it.
+- The tape high-FEEDBACK tail rows run loose, at 0.34–0.77 of the figure.
+
+### The grids on the built code
+
+The never-shorter grid (14,952 rows) and the MOD set (1,296) again, plus a
+FEEDBACK 0 MOD set (every character, MOD 0/30/100 at 0.6 and 8 Hz, TIME 120 to
+1900 ms, four wow phases, one impulse: 1,080), at 44.1, 48 and 96 kHz: 17,328
+rows, 5,688 at the ceiling, 11,640 rendered, **0 short**. Worst 0.9986 on the
+never-shorter grid, 0.9968 on MOD, and 1.0000 on the FEEDBACK 0 set (clean,
+MOD 30 at 0.6 Hz, TIME 1900 ms: 1.9026 s measured against 1.9027 reported),
+which is the kernel's reach doing exactly its job.

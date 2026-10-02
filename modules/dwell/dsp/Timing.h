@@ -383,15 +383,24 @@ inline double engineTailSeconds (double seconds, double g, int character,
     parameters as they stand, from the last non-zero input sample, the output
     on either channel at MIX 100 is under 1e-3 of the input's peak by the
     reported time, up to the 30 s ceiling -- whatever the input was, through
-    every character, FX type, MOD setting, stereo mode, cut, DRIVE and DUCK,
-    and with the lane at any LANE LEVEL. Each engine's countdown is
-    `laps x (T + filter delay + FX delay + MOD swing)`, the laps taken from
-    the build-up a held input leaves to 60 dB under that input, plus the
-    lane's LEVEL above 0 dB, plus 6.02 dB for each engine when both ring
-    (sixth round, 2026-10-02: the FX delay is charged on the first lap again,
-    and MOD, LANE LEVEL and the two-engine sum are counted at all). The
-    renders that hold it there are `DwellDspTests::testTheReportedTailIsNever
-    ShorterThanTheDecay` and the sixth-round tests beside it.
+    every character, FX type, MOD setting, FEEDBACK, stereo mode, cut, DRIVE
+    and DUCK, and with the lane at any LANE LEVEL and LANE GAIN. Each engine's
+    countdown is `laps x (T + filter delay + FX delay + MOD swing)`, the laps
+    taken from the build-up a held input leaves to 60 dB under that input,
+    plus the lane's LEVEL above 0 dB, plus 6.02 dB for each engine when both
+    ring; an engine with no feedback plays one repeat, charged
+    `T + FX delay + MOD swing + the kernel's spread` (sixth round, 2026-10-02:
+    the FX delay is charged on the first lap again, and MOD, LANE LEVEL and
+    the two-engine sum are counted at all; seventh round, the same day: the
+    no-feedback repeat, which had been charged TIME alone and ran up to
+    1.89 % short with MOD on). The renders that hold it there are
+    `DwellDspTests::testTheReportedTailIsNeverShorterThanTheDecay` and the
+    sixth- and seventh-round tests beside it.
+
+    **The 6.02 dB is charged whenever HOLD is on and the lane decays, even
+    when nothing has been sent to it.** The parameters cannot say whether an
+    earlier send is still ringing, so the bound assumes it is: FEEDBACK 80 %
+    with HOLD on reports 10.881 s against 10.130 with it off. Kept on purpose.
 
     **What it does not cover, by name:**
     - a loop past 30 s, which rings past the ceiling by decision;

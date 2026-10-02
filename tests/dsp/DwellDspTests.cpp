@@ -5681,6 +5681,64 @@ void testTheLaneDetentsTakeAValueAHairOff()
     }
 }
 
+/** **Every other special value survives a host's hair, by construction**
+    (eighth round, the audit).
+
+    A fused `start + interval . n` keeps a hair only where the result is small
+    against the terms -- a range that crosses zero, at its centre: LANE GAIN
+    and LANE LEVEL, above. Everywhere else the exact product rounds to the
+    same float either way, and where the DSP compares with a special value it
+    clamps or follows a law that is continuous through it. So the values a
+    hair off here are a whole ulp off -- more than a host could hand back --
+    and the render must still be the exact value's, bit for bit: FEEDBACK,
+    MIX, FX AMOUNT, DRIVE, MOD DEPTH and DUCK one ulp past their tops (each
+    clamps), and MIX one ulp either side of its 50 % hinge (the dry and wet
+    laws both land on exactly 1.0 there). Zeros at the bottom of a range that
+    starts at 0 come back exactly 0, `start + interval . 0`. */
+void testSpecialValuesAHairOffRenderAsTheValue()
+{
+    constexpr auto rate = 48000.0;
+    const auto n = (int) (1.5 * rate);
+
+    const auto render = [&] (int index, float value)
+    {
+        auto v = settings (2, 50.0f, 60.0f, 50.0f);
+        v[P::Index::fx]       = 1.0f;
+        v[P::Index::fxType]   = 2.0f;
+        v[P::Index::modDepth] = 30.0f;
+        v[P::Index::drive]    = 40.0f;
+        v[P::Index::duck]     = 6.0f;
+        v[index] = value;
+
+        P::DwellDsp dsp;
+        dsp.prepare (rate, 512, 2);
+
+        Block block { n };
+        for (int i = 0; i < (int) (0.5 * rate); ++i)
+            block.left[(size_t) i] = block.right[(size_t) i] = (float) (0.3 * std::sin (2.0 * P::kPiD * 440.0 * (double) i / rate));
+
+        renderAsHost (dsp, v, block, n, 512, [] (int) {});
+        return block.left;
+    };
+
+    struct Row { const char* name; int index; float value; };
+    const Row rows[]
+    {
+        { "FEEDBACK 100", P::Index::feedback, 100.0f }, { "MIX 100", P::Index::mix, 100.0f },
+        { "FX AMOUNT 100", P::Index::fxAmount, 100.0f }, { "DRIVE 100", P::Index::drive, 100.0f },
+        { "MOD DEPTH 100", P::Index::modDepth, 100.0f }, { "DUCK 24", P::Index::duck, 24.0f },
+    };
+
+    for (const auto& r : rows)
+        check (render (r.index, std::nextafter (r.value, 1000.0f)) == render (r.index, r.value),
+               std::string (r.name) + " one ulp over renders as " + r.name + ", bit for bit");
+
+    const auto atHinge = render (P::Index::mix, 50.0f);
+    check (render (P::Index::mix, std::nextafter (50.0f, 100.0f)) == atHinge
+               && render (P::Index::mix, std::nextafter (50.0f, 0.0f)) == atHinge,
+           "MIX one ulp either side of its 50 % hinge renders as 50 %, bit for bit");
+}
+
 //==============================================================================
 // The expander's boundary, 2026-10-01 (fourth round). Bucket-brigade's gain
 // ring holds 1.0 wherever nothing was companded -- after `prepare`, after
@@ -6027,6 +6085,7 @@ int main()
     testTwoEnginesRingingTogetherCountDownFurther();
     testANoFeedbackRepeatIsChargedItsSwing();
     testTheLaneDetentsTakeAValueAHairOff();
+    testSpecialValuesAHairOffRenderAsTheValue();
 
     // The fourth round, 2026-10-01: the expander's boundary.
     testABucketBrigadeBoundaryNeverSpikes();

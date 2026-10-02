@@ -158,6 +158,13 @@ hold after it.
   (`docs/delay/10` §11a); the tail charges the two.
 - **Every smoother lands** (`Smoother::tickLanding`): FEEDBACK, DRIVE, LANE
   LEVEL and FX AMOUNT. A plain float one-pole stalls short of its target.
+- **Never compare a host's value with `==` at the centre of a range that
+  crosses zero** (2026-10-02, macOS CI). The snap `start + interval . n` is a
+  fused multiply-add on macOS arm64, so LANE GAIN's 0 comes back as 1.5e-6
+  there and LANE LEVEL's 0 dB as -5.4e-7; Windows gets 0. Take half a step as
+  the centre (`laneGainOnDetent`, `laneLevelOnUnity` in `dsp/GainLaws.h`).
+  Zeros at the bottom of a range, clamped tops and choice integers come back
+  exact; `testSpecialValuesAHairOffRenderAsTheValue` holds those claims.
 - **MIX is smoothed across its 50 % hinge**, and the dry *lands* on exactly 1.0
   below it (`Smoother::tickLanding`), which is when the bit-exact null returns.
   A float one-pole on its own stalls about 3e-5 short of 1.0.

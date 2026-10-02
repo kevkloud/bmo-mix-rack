@@ -752,3 +752,47 @@ rows, 5,688 at the ceiling, 11,640 rendered, **0 short**. Worst 0.9986 on the
 never-shorter grid, 0.9968 on MOD, and 1.0000 on the FEEDBACK 0 set (clean,
 MOD 30 at 0.6 Hz, TIME 1900 ms: 1.9026 s measured against 1.9027 reported),
 which is the kernel's reach doing exactly its job.
+
+## Eighth round (2026-10-02): macOS CI and a detent a hair off
+
+**What failed.** With the branch pushed to PR #35, macOS CI failed one check of
+the plugin-side `dwell` test: "LANE GAIN's centre detent is exactly zero"
+(`tests/plugin/DwellTests.cpp`, set 0, read back, compare `== 0.0f`). It had
+failed on the PR's original head as well, so it predates the review. Windows
+passes it, and everything else passed on macOS, `dwell_dsp_tests` included.
+
+**The cause.** A host's value comes back through the normalised float and the
+snap `start + interval . n`. On macOS arm64 that is fused into one
+multiply-add, and the exact product is kept: -100 + 0.1f . 1000 = 1.49e-6
+there, 0 when the product is rounded first (checked on AURORA with `fmaf`
+against product-then-add). **It is a functional defect, not only a test's:**
+the DSP compared `laneGain == 0.0f`, so on macOS the FREEZE detent was missed
+and the lane ran at 1.000606179 instead of 1.000606298 at -1.5e-6 -- a hold
+that quietly decays (or builds). LANE LEVEL's 0 dB, the centre of -24..+24 in
+0.01 steps, comes back -5.4e-7 the same way: a level of 0.99999994 or
+1.0000001 instead of 1.
+
+**What was made tolerant** (797d8c6, 6019830). Within half a step of either
+centre is the centre, exactly: `laneGainOnDetent` (half-width 0.05) and
+`laneLevelOnUnity` (0.005), applied in the DSP, the tail figure and the
+panel's loop-gain picture; the half-widths are held to the schema's steps by
+the test. `testTheLaneDetentsTakeAValueAHairOff` feeds LANE GAIN ±1.5e-6 and
+±0.049 and LANE LEVEL ±5.4e-7 and ±0.0049 dB and asserts the exact-centre
+render, loop gain, level and tail bit for bit; LANE GAIN -0.051 and LANE LEVEL
+0.0051 dB must differ. On 6053068 seven of its checks failed. The plugin test
+now asserts the value is within 1e-3 of zero, that the DSP's rule takes it as
+the detent, and feeds the rule the macOS value, ±1.5e-6, directly.
+
+**The audit** (951e5a3). A fused multiply-add keeps a hair only at the centre
+of a range that crosses zero, and LANE GAIN and LANE LEVEL are the only two
+such parameters. FEEDBACK 100, MIX 50 and 100, DUCK 24 come back exact either
+way; every top is clamped before use; MIX's hinge is continuous (both laws
+land on 1.0 there); zeros at the bottom of a range are `start` exactly; bools
+go through `> 0.5`; choices are exact integers. The other exact comparisons
+are on values the DSP computed itself (smoothers, change detectors, delay
+bookkeeping, the held tempo). `testSpecialValuesAHairOffRenderAsTheValue`
+renders the safe values one ulp off and asserts the exact render bit for bit.
+
+**macOS itself is not verified here** -- there is no macOS machine in this
+loop. Everything above ran on AURORA (Windows); macOS CI on the PR is the
+proof.

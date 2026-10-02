@@ -213,8 +213,12 @@ inline constexpr double kLowestSampleRate = 44100.0;
       figure built from the slowest frequency there is cannot be beaten by a
       render; a figure fitted to the renders could be, at a frequency the grid
       did not try.
-    - **Crush: the sample-and-hold**, which holds a sample for up to
-      `divisor - 1` more, at the lowest rate.
+    - **Crush: the hold**, `divisor - 1` samples at the lowest rate. The
+      energy-matched hold is causal by one block, which delays a lap by about
+      that much: measured on AURORA 2026-10-02 at 48 kHz, 10.0-11.0, 16.8-19.1
+      and 25.8-32.5 samples at AMOUNT 35, 60 and 100 against 11, 19 and 31
+      charged, and with Crush in the loop no never-shorter row is short at
+      44.1, 48 or 96 kHz (5,664 rows, worst 0.998 of the figure).
     - **Pan/Tremolo** is a memoryless gain and adds nothing. */
 inline double fxLapDelaySeconds (bool on, int type, float amountPercent) noexcept
 {
@@ -333,8 +337,9 @@ inline double engineTailSeconds (double seconds, double g, int character,
     second first was inside the figure before the fix as well (measured on
     AURORA; `testing-notes/dwell-review-fixes-2026-10-01.md`).
 
-    Crush is no longer an exception: with its hold holding each block's mean
-    (2026-10-01) no in-loop effect holds a level under unity FEEDBACK, and
+    Crush is no longer an exception: with a hold that carries each block's
+    energy and a quantiser that truncates (2026-10-02; the block's mean before
+    it, 2026-10-01) no in-loop effect holds a level under unity FEEDBACK, and
     `DwellDspTests::testEveryInLoopEffectLosesEnergyUnderUnity` holds every
     FX type to that.
 

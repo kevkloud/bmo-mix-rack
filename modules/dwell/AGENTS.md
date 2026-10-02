@@ -130,11 +130,15 @@ hold after it.
   2026-10-01: "under 100% feedback should lose energy, not be indefinite").
   `testEveryInLoopEffectLosesEnergyUnderUnity` holds every FX type to it; do
   not add an effect, or change one, without it passing. For Crush that means
-  **truncation toward zero and a hold of each block's mean**, not a frozen
-  sample (Frosty: "average instead of freeze"): rounding expanded, and a frozen
-  sample phase-locked to a tone grew loops above their input. The mean costs
-  top end (`docs/delay/10` §11a; the testing note has the table). There is no
-  dead zone; one was built for the frozen hold and removed with it.
+  **truncation toward zero and a hold that matches each block's energy** --
+  the block's RMS with the sign of its hold sample (Frosty, 2026-10-02:
+  "energy match it"). Rounding expanded; a frozen sample phase-locked to a tone
+  grew loops above their input; the block mean that replaced it for a day was
+  a box filter, about -30 dB at 5 and 10 kHz at AMOUNT 60. **Do not low-pass
+  Crush again**: `testCrushKeepsItsTopEnd` pins the one-pass levels it was
+  chosen for, and `testCrushHoldsTheBlockEnergy` pins the rule. There is no
+  dead zone. The hold delays each lap by about one hold (`docs/delay/10`
+  §11a), which the tail's per-lap FX charge covers.
 - **MIX is smoothed across its 50 % hinge**, and the dry *lands* on exactly 1.0
   below it (`Smoother::tickLanding`), which is when the bit-exact null returns.
   A float one-pole on its own stalls about 3e-5 short of 1.0.

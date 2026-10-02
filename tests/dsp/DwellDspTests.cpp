@@ -3662,8 +3662,9 @@ void testTheMainLoopIsUndisturbedByASendWithFxLive()
     bound is. So what is asserted is that it **converges**.
 
     The measurement is relative, and it has to be: at FEEDBACK 97 the loop is at
-    unity FX-off, but the hold is a low-pass with teeth, so the loop runs a
-    little under unity with it in and an absolute floor would fall with the
+    unity FX-off, but truncation and the hold's images take a little each lap,
+    so the loop runs a little under unity with Crush in and an absolute floor
+    would fall with the
     whole signal and pass for the wrong reason. What is tracked is the worst
     non-harmonic probe **against the fundamental in the same window**.
 

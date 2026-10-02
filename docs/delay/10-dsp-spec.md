@@ -779,7 +779,7 @@ assertion — the reported tail is never below the measured time to −60 dB —
 rendered by `DwellDspTests::testTheReportedTailIsNeverShorterThanTheDecay`, and
 holds up to the 30 s ceiling. The three exceptions once recorded here are gone:
 an input longer than a lap at high FEEDBACK (the build-up term, §9), Crush's
-frozen hold (the block mean, §11a), and bucket-brigade at a fractional delay on
+frozen hold (since replaced, §11a), and bucket-brigade at a fractional delay on
 a one-sample transient, which was the expander's spike (§4), not the tail.
 
 ### 11.7 The lane and tempo: one SYNC, two divisions
@@ -881,7 +881,7 @@ Candidates — list and order free until ship (11 §3):
   exactly; smear accumulates over k passes into a pseudo-reverb. ~12
   MACs/sample/channel, ≤ 32 kB per channel at 192 kHz.
 - **Crush** — quantise to `b = 16 − AMOUNT·13` bits and hold every
-  `⌈1 + AMOUNT·31⌉` samples (the mean of the block, from 2026-10-01 — below);
+  `⌈1 + AMOUNT·31⌉` samples (the block's energy, from 2026-10-02 — below);
   both non-expanding, both compounding each lap. **Deliberate
   aliasing.** The hold's images are made *inside* the loop and meet §4's 18 kHz cap
   on the *next* lap, so the cap tames them one repeat late instead of preventing
@@ -898,21 +898,37 @@ Candidates — list and order free until ship (11 §3):
     at 3 bits a 0.13 becomes 0.25 — and above about 60 % FEEDBACK the loop held
     −7.1 dB forty seconds after a burst (AMOUNT 100, FEEDBACK 80). Truncation
     keeps `|q| ≤ |x|`.
-  - **The hold holds the block's mean, not a frozen sample** (DECIDED, Frosty:
-    "average instead of freeze"). A frozen sample, phase-locked to a tone, turns
-    a sine into a square whose fundamental is up to 4/π of the sine's; from about
-    FEEDBACK 90 % that grew loops to a steady peak above their input (0.7277 from
-    a 0.5 burst at 44.1 kHz on bucket-brigade, AMOUNT 35, TIME 50 ms, 95 %). N
-    copies of the mean of N samples carry at most their energy (`N·mean² ≤ Σx²`).
-    The mean is a box filter and costs top end: one pass at 0.5, AMOUNT 60,
-    −0.32 dB at 300 Hz, −2.7 at 1 kHz, about −30 at 5 and 10 kHz; at AMOUNT 100 a
-    1 kHz sine at 0.5 averages below one step and is gone on the first pass.
-    The full table is in `testing-notes/dwell-review-fixes-2026-10-01.md`.
+  - **The hold matches the block's energy** (DECIDED, Frosty, 2026-10-02:
+    "energy match it"). Each held value has the magnitude of the RMS of the N
+    samples since the last hold, `√(Σx²/N)`, and the sign of the newest of them —
+    the sample a frozen hold would have taken (0 if it is 0) — and is held for
+    the next N. N copies of it carry exactly the block's energy (`N·rms² = Σx²`),
+    so the hold can neither add energy nor take it away, and truncation after it
+    can only take some. It is causal by one block: a lap through Crush is about
+    N − 1 samples later than without it (measured 0.21–0.23 / 0.35–0.40 /
+    0.54–0.68 ms at AMOUNT 35 / 60 / 100 at 48 kHz); the first repeat never
+    passes through it and is exact.
+    A tone at exactly the hold rate, sampled at its crest every block, comes out
+    as DC, and the 10 Hz blocker after the stage (§4) keeps it out of the ring.
 
-  A 0.35-step dead zone was built for a frozen hold's one-step cycle and
-  removed with it. With the mean, no grid row cycles or runs late — 1,944 rows
-  over every character, AMOUNT 35–100, TIME 20–375 ms, FEEDBACK 80–96.9 % at six
-  rates, 1,440 dense-FEEDBACK rows and 2,160 off the grid — and
+    Two holds came before it, both measured on AURORA on 2026-10-01. **A frozen
+    sample** is not energy-bounded: phase-locked to a tone it turns a sine into a
+    square whose fundamental is up to 4/π of the sine's, and from about FEEDBACK
+    90 % that grew loops to a steady peak above their input (0.7277 from a 0.5
+    burst at 44.1 kHz on bucket-brigade, AMOUNT 35, TIME 50 ms, 95 %). **The
+    block's mean** ("average instead of freeze", built the same day) is bounded
+    but is a box filter: one pass at 0.5, AMOUNT 60, −0.32 dB at 300 Hz, −2.7 at
+    1 kHz and about −30 at 5 and 10 kHz, and at AMOUNT 100 silent from 1 kHz up.
+    The energy-matched hold passes the same sine within 0.16 dB at AMOUNT 35 and
+    60, and at AMOUNT 100 at −3.0 dB from 1 kHz up and −4.0 to −5.2 dB at
+    300 Hz, which is the 3-bit truncation alone.
+    The tables are in `testing-notes/dwell-review-fixes-2026-10-01.md`.
+
+  A 0.35-step dead zone was built for the frozen hold's one-step cycle on
+  2026-10-01 and removed the same day. With the energy-matched hold no grid row
+  cycles or runs late — 1,944 rows over every character, AMOUNT 35–100, TIME
+  20–375 ms, FEEDBACK 80–96.9 % at six rates, 1,440 dense-FEEDBACK rows, 2,160
+  off the grid and 432 more at 44.1 / 48 / 96 kHz — and
   `DwellDspTests::testEveryInLoopEffectLosesEnergyUnderUnity` holds every FX type
   to the rule.
 > **Octave up, Octave down and Reverse were CUT on 2026-09-21** (Frosty; see
@@ -982,7 +998,7 @@ unexplained — 11 §4k flags it, and it must not be quoted as "Crush is free".
 | FX stage position | after mode filters, before DC blocker; skipped when off; **one stage per engine**, no shared state | DECISION |
 | FX loop bound | `\|F\| ≤ 1` for every candidate, normalised in closed form | DECISION |
 | Diffuse | 6-stage allpass, 7–37 ms × AMOUNT | CALIBRATE; 00 §1 |
-| Crush | 16→3 bits **truncated toward zero**, **the mean of every 1–32 samples held**; exempt from the alias floor | CALIBRATE / DECIDED (Frosty, 2026-10-01: "average instead of freeze") |
+| Crush | 16→3 bits **truncated toward zero**, **the energy of every 1–32 samples held** (RMS, with the sign of the hold sample); exempt from the alias floor | CALIBRATE / DECIDED (Frosty, 2026-10-02: "energy match it") |
 | Pan / Tremolo | stepped once per repeat; AMOUNT is depth | CALIBRATE |
 | FX types | Diffuse, Pan/Tremolo, Crush — **three**; Sweep cut because VOICE was | DECIDED (Frosty, 2026-09-22) |
 | Voicing | **Shared**: `character`, `stereo`, the cuts, the modulation and `drive` govern both engines; DUCK is main-only | DECIDED (Frosty, 2026-09-23) |

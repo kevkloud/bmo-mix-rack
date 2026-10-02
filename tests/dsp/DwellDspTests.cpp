@@ -5213,6 +5213,44 @@ void testTheFxDelayIsChargedOnEveryLap()
         }
 }
 
+/** **MOD is charged to every lap: its largest delay excursion** (sixth round).
+
+    The modulation moves the read, so a lap can be longer than TIME by as much
+    as the modulation's swing, and a burst that lands where the wow is
+    lengthening the delay rides that swing lap after lap -- the lap phase-locks
+    to the wow. The figure never modelled MOD. Measured on AURORA on 73036df:
+    clean, TIME 120 ms, FEEDBACK 35 %, MOD 100 at 8 Hz, a burst an eighth of a
+    wow cycle in, rang 0.6371 s against 0.6127 (+3.98 %) at 44.1, 48 and
+    96 kHz; tape at TIME 1000 ms and MOD 100 rang up to +0.77 %.
+
+    Bursts on several phases of the wow, every character, three rates. */
+void testModulationIsChargedToEveryLap()
+{
+    struct Row { int character; float timeMs, rateHz; };
+    const Row rows[] { { 0, 120.0f, 8.0f }, { 0, 375.0f, 8.0f }, { 1, 1000.0f, 1.0f }, { 2, 375.0f, 8.0f } };
+
+    for (const auto rate : { 44100.0, 48000.0, 96000.0 })
+        for (const auto& r : rows)
+            for (const auto eighth : { 0, 1, 2, 5 })
+            {
+                auto v = settings (r.character, r.timeMs, 35.0f, 100.0f);
+                v[P::Index::modDepth] = 100.0f;
+                v[P::Index::modRate]  = r.rateHz;
+
+                // The wow's own rate: on a transport it scales with TIME
+                // (DelayEngine::advanceModulation).
+                const auto wowHz = r.rateHz * (r.character == 0 ? 1.0 : std::clamp ((double) r.timeMs / 300.0, 0.5, 2.0));
+
+                Drive d;
+                d.leadSeconds = (double) eighth / (8.0 * wowHz);
+
+                char what[160];
+                std::snprintf (what, sizeof (what), "a burst %d/8 into the wow, %s, TIME %.0f ms, FEEDBACK 35, MOD 100 at %.0f Hz",
+                               eighth, characterName (r.character), (double) r.timeMs, (double) r.rateHz);
+                checkDecay (v, d, rate, what);
+            }
+}
+
 //==============================================================================
 // The expander's boundary, 2026-10-01 (fourth round). Bucket-brigade's gain
 // ring holds 1.0 wherever nothing was companded -- after `prepare`, after
@@ -5515,6 +5553,7 @@ int main()
     testCrushCarriesNoDcOutOfTheLoop();
     testEveryInLoopEffectLosesEnergyUnderUnity();
     testTheFxDelayIsChargedOnEveryLap();
+    testModulationIsChargedToEveryLap();
 
     // The fourth round, 2026-10-01: the expander's boundary.
     testABucketBrigadeBoundaryNeverSpikes();

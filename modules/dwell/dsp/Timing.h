@@ -247,6 +247,42 @@ inline double fxLapDelaySeconds (bool on, int type, float amountPercent) noexcep
     return 0.0;
 }
 
+/** **What MOD adds to every lap, in seconds, as a bound** (10 §5; sixth
+    round, 2026-10-02): the largest amount the modulation can lengthen the
+    read, from `DelayEngine::advanceModulation`'s own law.
+
+    A lap through a modulated read can be longer than TIME by as much as the
+    read's swing, and a burst that lands while the wow is lengthening the
+    delay rides that swing lap after lap -- the lap phase-locks to the wow.
+    Until this was counted the figure ran short: measured on AURORA, clean at
+    TIME 120 ms, FEEDBACK 35 % and MOD 100 at 8 Hz rang 0.6371 s against
+    0.6127 (+3.98 %) at 44.1, 48 and 96 kHz.
+
+    - **Clean** swings `MOD . 8 ms` absolute (`kCleanModSeconds`).
+    - **Tape and bucket-brigade** scale the delay by `1 + m`, with
+      `|m| <= depth . (1 + flutter + 0.3 . 3)`: the wow sine, tape's flutter
+      at a quarter of it, and the wear noise at 0.3 of it bounded at three
+      sigma. `depth = (MOD . 0.5 % + floor) . clamp(T / 300 ms, 0.5, 2)`, and
+      tape's floor is there at MOD 0, so tape is charged at every setting.
+
+    The charge is the bound, not the average: whichever phase the input lands
+    on, no lap is longer than `T + this`. */
+inline double modLapSeconds (int character, double timeSeconds, float modDepthPercent) noexcept
+{
+    using E = DelayEngine;
+    const auto knob = std::clamp ((double) modDepthPercent * 0.01, 0.0, 1.0);
+
+    if (character == kClean)
+        return knob * E::kCleanModSeconds;
+
+    const auto timeScale = std::clamp (timeSeconds * 1000.0 / 300.0, 0.5, 2.0);
+    const auto floorDepth = character == kTape ? E::kTapeWowFloor : 0.0;
+    const auto depth = (knob * E::kModDepthFraction + floorDepth) * timeScale;
+    const auto swing = 1.0 + (character == kTape ? E::kFlutterRatio : 0.0) + E::kModNoiseRatio * 3.0;
+
+    return timeSeconds * depth * swing;
+}
+
 /** One engine's tail: at each frequency, the laps its loop gain needs to fall
     from the build-up a held input can leave there to 60 dB under that input
     (`lapsToSixtyDb`), times the lap that frequency actually takes; the
@@ -363,8 +399,13 @@ inline double tailSecondsFor (const float* v, int count) noexcept
 
     const auto mainFx = fxLapDelaySeconds (v[Index::fx] > 0.5f, (int) v[Index::fxType], v[Index::fxAmount]);
 
+    // MOD is part of the shared voicing, so both engines swing; each by its
+    // own TIME, because a transport's swing scales with it.
+    const auto modDepth = v[Index::modDepth];
+
     auto tail = engineTailSeconds (mainT, (double) feedbackGainFor (v[Index::feedback], 1.0),
-                                   character, lowCut, highCut, mainFx);
+                                   character, lowCut, highCut,
+                                   mainFx + modLapSeconds (character, mainT, modDepth));
 
     if (v[Index::hold] > 0.5f)
     {
@@ -379,7 +420,8 @@ inline double tailSecondsFor (const float* v, int count) noexcept
         const auto laneTail = v[Index::laneGain] >= 0.0f
                                 ? kTailCeilingSeconds
                                 : engineTailSeconds (laneT, (double) laneGainFor (v[Index::laneGain], 1.0),
-                                                     character, lowCut, highCut, laneFx);
+                                                     character, lowCut, highCut,
+                                                     laneFx + modLapSeconds (character, laneT, modDepth));
         tail = std::max (tail, laneTail);
     }
 

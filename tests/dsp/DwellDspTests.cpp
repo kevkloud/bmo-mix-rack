@@ -5093,6 +5093,66 @@ void testABucketBrigadeBoundaryNeverSpikes()
     }
 }
 
+/** **The property of record: no CHARACTER, rate, TIME or event spikes.**
+
+    Every character after `prepare` and after `reset`, and every one of the
+    six CHARACTER moves, at 44.1, 48 and 96 kHz, at TIME 375 (fractional at
+    44.1 kHz, whole at 48 and 96) and 375.3 (fractional at all three), with
+    noise at 0.3 either present throughout or starting at the event: 144 rows
+    (126 distinct -- at `prepare` the two inputs are the same render), each
+    held to `expandedReadBound` and to every sample finite, in about 1.7 s on
+    AURORA. Clean and tape are in it because a move off bucket-brigade leaves
+    them reading its ring; on their own they never came near the bound. On
+    05572c7 25 rows failed, every one a fractional read across a boundary
+    between 1.0 and a companded gain, worst 6.3e5. */
+void testNoEventSpikesTheOutputOnAnyCharacter()
+{
+    const auto bound = expandedReadBound (0.3);
+    const auto started = std::chrono::steady_clock::now();
+
+    int rows = 0, failed = 0;
+    auto worst = 0.0f;
+
+    for (const auto rate : { 44100.0, 48000.0, 96000.0 })
+        for (const auto timeMs : { 375.0f, 375.3f })
+            for (const auto before : { true, false })
+                for (const auto event : { Event::prepare, Event::reset, Event::move })
+                    for (int a = 0; a < 3; ++a)
+                        for (int b = 0; b < 3; ++b)
+                        {
+                            if ((event == Event::move) == (a == b))
+                                continue;
+
+                            const auto result = peakAroundAnEvent (rate, timeMs, a, b, event, before,
+                                                                   [] (std::vector<float>&, int, int) {});
+                            ++rows;
+                            worst = std::max (worst, result.peak);
+
+                            if (result.finite && result.peak <= bound)
+                                continue;
+
+                            ++failed;
+
+                            char buf[220];
+                            std::snprintf (buf, sizeof (buf),
+                                           "%s%s%s at %.1f kHz, TIME %.1f, noise %s: output peak %.4g against %.2f, finite %s",
+                                           event == Event::prepare ? "prepare on " : (event == Event::reset ? "reset on " : ""),
+                                           characterName (a),
+                                           event == Event::move ? (std::string (" to ") + characterName (b)).c_str() : "",
+                                           rate / 1000.0, (double) timeMs, before ? "throughout" : "from the event",
+                                           (double) result.peak, bound, result.finite ? "yes" : "no");
+                            check (false, buf);
+                        }
+
+    char buf[200];
+    std::snprintf (buf, sizeof (buf), "no event spikes the output: %d rows, %d over the bound of %.2f, worst peak %.4f",
+                   rows, failed, bound, (double) worst);
+    check (rows == 144 && failed == 0, buf);
+
+    std::printf ("      the event-spike property ran %d rows in %.1f s\n", rows,
+                 std::chrono::duration<double> (std::chrono::steady_clock::now() - started).count());
+}
+
 } // namespace
 
 //==============================================================================
@@ -5165,6 +5225,7 @@ int main()
 
     // The fourth round, 2026-10-01: the expander's boundary.
     testABucketBrigadeBoundaryNeverSpikes();
+    testNoEventSpikesTheOutputOnAnyCharacter();
 
     std::printf ("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

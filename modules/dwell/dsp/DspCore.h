@@ -308,6 +308,13 @@ public:
         chopGate.snap (! params.chop);
         laneMute.snap (true);
         laneLive = holdOn;
+
+        // The rings are empty, so there is nothing for MIX, LANE LEVEL or
+        // DUCK's glide to protect: the next parameter set takes them at once,
+        // as the first after `prepare` does. Left primed, MIX 100 then 0 after
+        // a reset glided in from silence (out[0] 0.00052 on a 0.5 input,
+        // measured on AURORA 2026-10-01).
+        gainsPrimed = false;
     }
 
     /** **The first parameter set after `prepare` snaps; every one after it

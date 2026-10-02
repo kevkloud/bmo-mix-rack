@@ -4612,6 +4612,51 @@ void testTheSmoothersLandOnTheirTargets()
     }
 }
 
+/** **The first block after `reset` takes MIX at once, as the first after
+    `prepare` does.**
+
+    `reset` empties the rings, so there is nothing for a glide to protect, and
+    a host that resets and then hands over its MIX expects to hear that MIX
+    from the first sample. With the gains left primed it glided instead:
+    measured on AURORA, MIX 100 then 0 straight after a reset gave out[0]
+    0.00052 and out[511] 0.207 on a 0.5 input. At MIX 0 with the ring empty
+    the block must be the input itself, bit for bit. */
+void testMixSnapsAfterReset()
+{
+    constexpr auto rate = 48000.0;
+
+    P::DwellDsp dsp;
+    dsp.prepare (rate, 512, 2);
+
+    auto v = defaults();
+    v[P::Index::mix] = 100.0f;
+
+    Block warm { 512 * 8 };
+    for (int i = 0; i < 512 * 8; ++i)
+        warm.left[(size_t) i] = warm.right[(size_t) i] = 0.5f;
+
+    renderAsHost (dsp, v, warm, 512 * 8, 512, [] (int) {});
+
+    dsp.reset();
+    v[P::Index::mix] = 0.0f;
+
+    Block block { 512 };
+    for (int i = 0; i < 512; ++i)
+        block.left[(size_t) i] = block.right[(size_t) i] = 0.5f;
+
+    renderAsHost (dsp, v, block, 512, 512, [] (int) {});
+
+    char buf[160];
+    std::snprintf (buf, sizeof (buf), "MIX 0 straight after a reset is the input at once (out[0] %.5f, out[511] %.5f)",
+                   (double) block.left[0], (double) block.left[511]);
+
+    auto exact = true;
+    for (int i = 0; i < 512; ++i)
+        exact = exact && block.left[(size_t) i] == 0.5f && block.right[(size_t) i] == 0.5f;
+
+    check (exact, buf);
+}
+
 } // namespace
 
 //==============================================================================
@@ -4677,6 +4722,7 @@ int main()
     testDuckAutomationIsBlockSizeInvariant();
     testCrushEndsInZerosAtEveryRate();
     testTheSmoothersLandOnTheirTargets();
+    testMixSnapsAfterReset();
 
     std::printf ("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

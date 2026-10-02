@@ -5479,6 +5479,74 @@ void testTwoEnginesRingingTogetherCountDownFurther()
         }
 }
 
+/** **A loop with no feedback still charges its one repeat's swing** (seventh
+    round, 2026-10-02).
+
+    At a loop gain of 0 -- FEEDBACK 0, or LANE GAIN -100 on the lane -- the
+    figure returned TIME and stopped, so the one repeat was charged neither
+    MOD's swing nor the read's kernel. Measured on AURORA on 260dd5c, one
+    impulse at 48 kHz, FEEDBACK 0, the worst of four wow phases: tape at TIME
+    600 ms and MOD 100 at 8 Hz rang 0.6114 s against 0.6000 (+1.89 %),
+    bucket-brigade 0.6097, clean 0.6066; tape at 1900 ms 1.9058; and tape at
+    MOD 0, on its floor alone, a few hundredths of a per cent.
+
+    Every character, MOD 0, 30 and 100 at 0.6 and 8 Hz, TIME 600 and 1900 ms,
+    impulses on four phases of the wow at 48 kHz and two at 44.1 and 96 kHz;
+    and the lane at LANE GAIN -100 and 1000 ms with MOD 100. */
+void testANoFeedbackRepeatIsChargedItsSwing()
+{
+    for (const auto rate : { 44100.0, 48000.0, 96000.0 })
+        for (int c = 0; c < 3; ++c)
+            for (const auto depth : { 0.0f, 30.0f, 100.0f })
+                for (const auto rateHz : { 0.6f, 8.0f })
+                    for (const auto timeMs : { 600.0f, 1900.0f })
+                        for (const auto eighth : { 0, 1, 2, 5 })
+                        {
+                            if (rate != 48000.0 && (eighth == 0 || eighth == 2))
+                                continue;
+
+                            auto v = settings (c, timeMs, 0.0f, 100.0f);
+                            v[P::Index::modDepth] = depth;
+                            v[P::Index::modRate]  = rateHz;
+
+                            const auto wowHz = rateHz * (c == 0 ? 1.0 : std::clamp ((double) timeMs / 300.0, 0.5, 2.0));
+
+                            Drive d;
+                            d.kind = Drive::impulse;
+                            d.leadSeconds = (double) eighth / (8.0 * wowHz);
+
+                            char what[160];
+                            std::snprintf (what, sizeof (what), "one impulse %d/8 into the wow, %s, TIME %.0f ms, FEEDBACK 0, MOD %.0f at %.1f Hz",
+                                           eighth, characterName (c), (double) timeMs, (double) depth, (double) rateHz);
+                            checkDecay (v, d, rate, what);
+                        }
+
+    // The lane: HOLD and SEND on, no tail (LANE GAIN -100), main FEEDBACK 0.
+    // The impulse comes after the send's 5 ms opening ramp.
+    for (const auto rate : { 44100.0, 48000.0, 96000.0 })
+        for (int c = 0; c < 3; ++c)
+            for (const auto eighth : { 1, 5 })
+            {
+                auto v = laneSettings (c, 1000.0f, -100.0f, 0.0f);
+                v[P::Index::send]     = 1.0f;
+                v[P::Index::feedback] = 0.0f;
+                v[P::Index::time]     = 375.0f;
+                v[P::Index::modDepth] = 100.0f;
+                v[P::Index::modRate]  = 8.0f;
+
+                const auto wowHz = 8.0 * (c == 0 ? 1.0 : 2.0);
+
+                Drive d;
+                d.kind = Drive::impulse;
+                d.leadSeconds = 0.01 + (double) eighth / (8.0 * wowHz);
+
+                char what[160];
+                std::snprintf (what, sizeof (what), "one impulse through a lane at LANE GAIN -100, 1000 ms, %s, MOD 100, %d/8 in",
+                               characterName (c), eighth);
+                checkDecay (v, d, rate, what);
+            }
+}
+
 //==============================================================================
 // The expander's boundary, 2026-10-01 (fourth round). Bucket-brigade's gain
 // ring holds 1.0 wherever nothing was companded -- after `prepare`, after
@@ -5822,6 +5890,7 @@ int main()
     testModulationIsChargedToEveryLap();
     testALouderLaneCountsDownFurther();
     testTwoEnginesRingingTogetherCountDownFurther();
+    testANoFeedbackRepeatIsChargedItsSwing();
 
     // The fourth round, 2026-10-01: the expander's boundary.
     testABucketBrigadeBoundaryNeverSpikes();

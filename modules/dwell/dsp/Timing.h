@@ -194,6 +194,20 @@ inline LapResponse lapResponseAt (double w, int character, double timeSeconds,
     at. */
 inline constexpr double kLowestSampleRate = 44100.0;
 
+/** **The read's own spread**: the interpolator sums taps on both sides of
+    its position, so a repeat's energy lasts past its delay by as far back as
+    the kernel reaches -- `Sinc::kHalf` samples on clean's sinc, two on the
+    4-point Hermite (`DelayEngine::readAt`: taps `floor(pos) - kHalf + 1 ...`
+    and `floor(pos) - 1 ...`) -- taken at the lowest rate, where a sample is
+    longest. Charged once, on a loop with no feedback, whose one repeat is
+    the whole tail (seventh round, 2026-10-02: clean at FEEDBACK 0 rang about
+    0.2 ms past TIME plus MOD's swing, on AURORA). */
+inline double kernelSpreadSeconds (int character) noexcept
+{
+    const auto samples = character == kClean ? (double) DelayEngine::Sinc::kHalf : 2.0;
+    return samples / kLowestSampleRate;
+}
+
 /** **What an in-loop FX stage adds to every lap, in seconds, as a bound**
     (10 §11a). The stage's magnitude never adds to a lap -- every type is
     non-expanding -- but two of them delay it, and the delay compounds per
@@ -319,8 +333,12 @@ inline double engineTailSeconds (double seconds, double g, int character,
     if (g >= 1.0)
         return kTailCeilingSeconds;
 
+    // No feedback: one repeat, which is the whole tail -- but it is still
+    // read through the swing and the kernel, so those are charged once
+    // (seventh round, 2026-10-02: this returned TIME alone and ran short
+    // whenever MOD was on, and on tape at MOD 0).
     if (g <= 0.0)
-        return seconds;
+        return seconds + extraDelay + kernelSpreadSeconds (character);
 
     constexpr int kPoints = 512;
     const auto omegaAt = [] (int i)

@@ -455,6 +455,7 @@ public:
         held.fill (0.0);
         holdCounter.fill (0);
         heldSum.fill (0.0);
+        heldCount.fill (0);
 
         lfoPhase = 0.0;
         lfoValue = 1.0;
@@ -472,6 +473,7 @@ public:
         held.fill (0.0);
         holdCounter.fill (0);
         heldSum.fill (0.0);
+        heldCount.fill (0);
     }
 
     /** The allpass lengths, taken from AMOUNT **once per block**.
@@ -546,7 +548,7 @@ public:
         for (int ch = 0; ch < kMaxChannels; ++ch)
         {
             sum += held[(size_t) ch] + (double) holdCounter[(size_t) ch]
-                 + heldSum[(size_t) ch]
+                 + heldSum[(size_t) ch] + (double) heldCount[(size_t) ch]
                  + (double) writeIdx[(size_t) ch];
 
             for (const auto& line : lines[(size_t) ch])
@@ -641,12 +643,18 @@ private:
         forced by a measured limit cycle on AURORA:
 
         - **The hold matches the block's energy** (DECIDED, Frosty,
-          2026-10-02: "energy match it"). Each held value has the magnitude of
-          the RMS of the N samples since the last hold -- the square root of
-          the mean of `x^2` -- and the sign of the newest of them, the sample a
-          frozen hold would have taken; it is held for the next N. N copies of
-          the RMS of N samples carry exactly their energy, so the hold can
-          neither add energy nor take it away, and the stage keeps its top end.
+          2026-10-02: "energy match it"). Each held value carries the energy
+          of the samples since the last hold -- the block, `M` samples --
+          spread over the `N` it is held for or over the block, whichever is
+          longer: `sqrt(sum x^2 / max(N, M))`, with the sign of the newest
+          sample, the one a frozen hold would have taken. In steady state
+          `M = N` and that is the block's RMS, so the hold carries exactly the
+          block's energy and the stage keeps its top end. When they differ --
+          the first hold after a clear (`M = 1`), or AMOUNT moving `N` -- the
+          held block carries at most its input's energy and is never above
+          its RMS, so never above its peak (sixth and seventh rounds,
+          2026-10-02: spread over `N` alone, a hold that AMOUNT had just
+          shortened rose to 1.22 times its input's peak).
           Two holds were built before it and measured on AURORA:
           - a **frozen sample** (until 2026-10-01) is not energy-bounded:
             phase-locked to a tone it turns a sine into a square whose
@@ -686,19 +694,20 @@ private:
         const auto clean = std::isfinite (x) ? x : 0.0;
 
         heldSum[ch] += clean * clean;
+        ++heldCount[ch];
 
         if (holdCounter[ch] <= 0)
         {
-            // The block's energy, spread over the samples it will be held for
-            // -- not over the samples it covers. The two are the same N in
-            // steady state; they differ for the first hold after a clear (one
-            // sample, held for N) and when AMOUNT moves N, and spreading over
-            // the hold is what keeps those blocks inside the energy rule too
-            // (sixth round, 2026-10-02: the first hold carried up to 25.6x).
+            // The block's energy spread over the hold or over the block,
+            // whichever is longer (see above): over the hold alone, the first
+            // hold after a clear stays inside the energy rule; over the block
+            // too, a hold AMOUNT has just shortened stays under its RMS.
             const auto holdLength = std::max (1, divisor);
-            const auto magnitude = std::sqrt (heldSum[ch] / (double) holdLength);
+            const auto spread = std::max (holdLength, heldCount[ch]);
+            const auto magnitude = std::sqrt (heldSum[ch] / (double) spread);
             held[ch] = clean > 0.0 ? magnitude : (clean < 0.0 ? -magnitude : 0.0);
             heldSum[ch] = 0.0;
+            heldCount[ch] = 0;
             holdCounter[ch] = holdLength;
         }
 
@@ -723,9 +732,10 @@ private:
     std::array<double, kMaxChannels> held {};
     std::array<int, kMaxChannels> holdCounter {};
 
-    /** Crush's running sum of squares since the last hold: the energy the
-        next held value carries. */
+    /** Crush's running sum of squares and count since the last hold: the
+        block whose energy the next held value carries. */
     std::array<double, kMaxChannels> heldSum {};
+    std::array<int, kMaxChannels> heldCount {};
 
     double amountAtBlock = 0.0;
     double lfoPhase = 0.0, lfoValue = 1.0;

@@ -5248,6 +5248,47 @@ void testCrushIsClearedWhenItComesBackIn()
                              + std::to_string (fed) + " against " + std::to_string (quiet) + ")");
 }
 
+/** **No Crush hold is louder than its input's peak, however AMOUNT moves**
+    (seventh round, 2026-10-02).
+
+    A hold spreads its block's energy over the samples it is held for. When
+    AMOUNT falls mid-note the hold gets shorter than the block it carries, and
+    spreading a long block's energy over a short hold raised the level by
+    `sqrt(N_block / N_hold)`: measured on AURORA on 260dd5c, a 100 Hz tone at
+    44.1 kHz with AMOUNT 100 -> 0 through the 20 ms smoother put the stage's
+    peak at 1.223 times the input's. The spread is now over the longer of the
+    two, so a hold is never above its block's RMS. Both directions, the
+    amount ramped as `DelayEngine`'s smoother ramps it. */
+void testCrushNeverHoldsAboveItsInputPeak()
+{
+    for (const auto rate : { 44100.0, 48000.0 })
+        for (const auto [from, to] : { std::pair<double, double> { 1.0, 0.0 }, { 0.0, 1.0 } })
+        {
+            P::FxStage fx;
+            fx.prepare (rate, 2);
+
+            const auto coeff = 1.0 - std::exp (-1.0 / (rate * 0.020));
+            auto amount = from;
+            auto inPeak = 0.0, outPeak = 0.0;
+
+            for (int i = 0; i < (int) (0.5 * rate); ++i)
+            {
+                if (i >= (int) (0.1 * rate))
+                    amount += coeff * (to - amount);
+
+                const auto x = 0.9 * std::sin (2.0 * P::kPiD * 100.0 * (double) i / rate);
+                const auto y = fx.process (0, P::kCrush, x, amount, 2);
+                inPeak = std::max (inPeak, std::abs (x));
+                outPeak = std::max (outPeak, std::abs (y));
+            }
+
+            char buf[200];
+            std::snprintf (buf, sizeof (buf), "Crush with AMOUNT moving %.0f -> %.0f under a 100 Hz tone at %.1f kHz: stage peak %.3f of the input's",
+                           from * 100.0, to * 100.0, rate / 1000.0, outPeak / inPeak);
+            check (outPeak <= inPeak, buf);
+        }
+}
+
 /** **Under 100 % FEEDBACK every in-loop effect loses energy** -- the property
     of record for Frosty's rule (2026-10-01: "under 100% feedback should lose
     energy, not be indefinite").
@@ -5885,6 +5926,7 @@ int main()
     testCrushCarriesNoDcOutOfTheLoop();
     testCrushHoldsWithinItsEnergyFromTheFirstBlock();
     testCrushIsClearedWhenItComesBackIn();
+    testCrushNeverHoldsAboveItsInputPeak();
     testEveryInLoopEffectLosesEnergyUnderUnity();
     testTheFxDelayIsChargedOnEveryLap();
     testModulationIsChargedToEveryLap();

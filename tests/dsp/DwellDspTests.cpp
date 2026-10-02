@@ -4342,12 +4342,15 @@ void checkTailRows (const std::vector<TailRow>& rows, const char* what)
 
         const auto reported = P::tailSecondsFor (v.data(), (int) v.size());
 
+        // A row at the 30 s ceiling cannot be held to account -- a loop that
+        // rings past the ceiling is allowed to, by decision -- so it would
+        // test nothing. Rows are chosen under it, and this says so if one
+        // drifts up to it.
         if (reported >= P::kTailCeilingSeconds)
         {
-            check (reported == P::kTailCeilingSeconds,
-                   std::string (what) + ": " + characterName (r.character) + ", FEEDBACK "
-                       + std::to_string (r.feedback) + ", TIME " + std::to_string ((int) r.timeMs)
-                       + " ms reports the 30 s ceiling, which stands");
+            check (false, std::string (what) + ": " + characterName (r.character) + ", FEEDBACK "
+                              + std::to_string (r.feedback) + ", TIME " + std::to_string ((int) r.timeMs)
+                              + " ms reports the 30 s ceiling and so tests nothing; pick a row under it");
             continue;
         }
 
@@ -4391,8 +4394,8 @@ void testTheReportedTailIsNeverShorterThanTheDecay()
     // where the head bump puts the loop's peak at 63 Hz among the high-passes.
     for (int c = 0; c < 3; ++c)
         for (const auto& [fb, t] : std::initializer_list<std::pair<float, float>> {
-                 { 35.0f, 375.0f }, { 90.0f, 375.0f }, { 90.0f, 100.0f }, { 96.0f, 50.0f },
-                 { 96.0f, 100.0f }, { 96.9f, 20.0f }, { 96.9f, 100.0f }, { 96.0f, 5.0f },
+                 { 35.0f, 375.0f }, { 90.0f, 375.0f }, { 90.0f, 100.0f }, { 96.0f, 20.0f },
+                 { 95.0f, 50.0f }, { 96.0f, 5.0f },
                  { 60.0f, 375.0f }, { 60.0f, 1000.0f }, { 96.9f, 1.0f } })
             rows.push_back ({ c, fb, t, false, 0, 0.0f });
 
@@ -4409,7 +4412,7 @@ void testTheReportedTailIsNeverShorterThanTheDecay()
     for (int c = 0; c < 3; ++c)
         for (const auto& [type, amount, fb, t] : std::initializer_list<std::tuple<int, float, float, float>> {
                  { 0, 100.0f, 80.0f, 100.0f }, { 0, 100.0f, 35.0f, 20.0f }, { 0, 100.0f, 35.0f, 375.0f },
-                 { 0, 35.0f, 90.0f, 50.0f }, { 0, 60.0f, 60.0f, 2000.0f }, { 0, 100.0f, 90.0f, 5.0f },
+                 { 0, 35.0f, 90.0f, 50.0f }, { 0, 60.0f, 60.0f, 2000.0f }, { 0, 100.0f, 60.0f, 5.0f },
                  { 2, 100.0f, 96.0f, 5.0f }, { 2, 60.0f, 90.0f, 20.0f }, { 1, 100.0f, 90.0f, 100.0f } })
             fxRows.push_back ({ c, fb, t, true, type, amount });
 

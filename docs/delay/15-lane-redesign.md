@@ -48,7 +48,7 @@ own storage, so:
 - **SEND onto an occupied lane sums**, so words layer into a chord.
 - ~~**The lane is a full mirror of the main delay**, with LINK making it follow
   the main and unlinking seeding it from the main's current values.~~
-  **REVERSED 2026-09-23 — the lane shares the main delay's voicing rather than
+  **REVERSED 2026-09-22 — the lane shares the main delay's voicing rather than
   mirroring it**, and LINK is deleted along with the six rows it governed. See
   **"The module was pulled back"** below. The lane keeps its **TIME, LEVEL,
   tail, SEND / HOLD / CHOP and its own FX**, tied to the main's by `fx_link`; it
@@ -62,7 +62,7 @@ unity but still laps the character and filters each repeat, so a long freeze
 darkens and colours. That is a real capability leaving v1, recorded here rather
 than lost quietly.
 
-## The module was pulled back — 2026-09-23
+## The module was pulled back — 2026-09-22
 
 **Decided by Frosty.** The module had reached **33 parameters, a 980 px
 three-column panel, and one parameter pushed off the rack's 32 automation
@@ -191,7 +191,7 @@ candidates cheapest first. Add to it:
   0.03 % of speed, riding MOD RATE and summing with MOD DEPTH, modulating the
   **read position** so silence stays silent without a gate.
 
-## THE PARAMETER TABLE — settled 2026-09-21, amended 2026-09-22, cut back and then extended 2026-09-23, 27 parameters
+## THE PARAMETER TABLE — settled 2026-09-21, amended 2026-09-22, cut back and then extended 2026-09-22, 27 parameters
 
 The rack gives each slot **32 host automation lanes** (`RackProcessor.h`,
 `kParamsPerSlot`). Past that, `SlotOverflow` keeps a parameter working in the
@@ -235,7 +235,7 @@ nothing has shipped. Carrying holes where the deleted rows were would be worse.
 | 26 | `fx_link` | bool — ties the FX trio 23–25 to 17–19 | on |
 
 Rows 4–10 — CHARACTER, STEREO, the two cuts, the two modulation controls and
-DRIVE — **govern both engines** from 2026-09-23. DUCK (11) is main-engine only;
+DRIVE — **govern both engines** from 2026-09-22. DUCK (11) is main-engine only;
 MIX (12) governs both because both sum into the wet before it.
 
 **`lane_note` (22) was added on 2026-09-23** and takes the count to 27, ids
@@ -276,7 +276,7 @@ NOTE. `10` §11.7 owns all of this.
   reading only the list will see a gap where a sweep belongs. Again: lists are
   append-only after ship, so this was the last moment.
 - **lane DRIVE was cut on 2026-09-21**, and the question it left is now moot:
-  from 2026-09-23 **`drive` (10) drives both engines**, so there is nothing to
+  from 2026-09-22 **`drive` (10) drives both engines**, so there is nothing to
   append. Saturation being slow and cumulative, a thrown word decaying over a
   second or two was always the path with least to work with; it now gets the
   main's setting, which is more than it had.
@@ -289,12 +289,12 @@ NOTE. `10` §11.7 owns all of this.
 - **`fx_link` (id 26) is added rather than cut**, tying the lane's FX trio to
   the main's. Added off-lane on 2026-09-22 — *"leave this separate fx link off a
   lane in case it needs to be cut later"* (Frosty) — it is **an ordinary on-lane
-  parameter from 2026-09-23**, because at 27 rows there is no overflow to sit
+  parameter from 2026-09-22**, because at 27 rows there is no overflow to sit
   in. FX is the one part of the lane's voice that stayed its own: a thrown word
   can be crushed against a clean main delay, which a second set of cuts and
   modulation could not justify in the same way.
 - **The lane's voicing rows are cut, and `link` with them** (Frosty,
-  2026-09-23): `lane_character`, `lane_stereo`, `lane_low_cut`, `lane_high_cut`,
+  2026-09-22): `lane_character`, `lane_stereo`, `lane_low_cut`, `lane_high_cut`,
   `lane_mod_rate`, `lane_mod_depth` and `link` — **seven**. Not to fit a budget,
   which is the point: the budget was what had been driving the cuts, and sharing
   the voicing removed the pressure instead of paying it. See "The module was
@@ -337,7 +337,7 @@ bounds the lane should be run at the top of LEVEL's travel, not at unity.
   plate, because a bloom brightens and there is little room to brighten against
   light grey. The fix is a darker halo -- the panel already derives `#965491`
   for pale-plate legends at 4.6:1.
-- The **expanded width**, reopened downward by the 2026-09-23 pullback. What the
+- The **expanded width**, reopened downward by the 2026-09-22 pullback. What the
   reveal has to hold lost the lane's second voicing and its LINK entirely —
   seven controls — so the 980 px three-column layout is oversized for what is
   left. **The new width is the panel's to settle against a render**, not this
@@ -349,7 +349,7 @@ decided on paper — 1.05 is about 12 s from unity to the ceiling at 250 ms lane
 time, 1.10 about 6 s, 1.3 a violent swell, and the safety clip bounds every one
 of them. **Sweep is cut.**
 
-**Settled on 2026-09-23**: the lane **shares** the main delay's voicing, `link`
+**Settled on 2026-09-22**: the lane **shares** the main delay's voicing, `link`
 and the six lane voicing rows are deleted, **`lane_note` is added** with one
 SYNC governing both engines (`10` §11.7), the schema is **27 with nothing
 outside the rack's lanes**, and the DSP is **one engine instantiated twice**

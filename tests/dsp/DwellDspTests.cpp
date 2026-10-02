@@ -4427,9 +4427,7 @@ void testTheReportedTailIsNeverShorterThanTheDecay()
     // **At 44.1 and 96 kHz as well.** The figure is a function of the
     // parameters alone, so it is the same at every rate, and the loop's
     // filters are not quite: the rows above again at the lowest rate the
-    // suite runs and at double rate. At 44.1 kHz the times are whole samples
-    // -- bucket-brigade at a fractional-sample delay driven by a one-sample
-    // impulse is the recorded exception, written at `tailSecondsFor`.
+    // suite runs and at double rate.
     std::vector<TailRow> rates;
 
     for (const auto rate : { 44100.0, 96000.0 })
@@ -4445,6 +4443,28 @@ void testTheReportedTailIsNeverShorterThanTheDecay()
         }
 
     checkTailRows (rates, "the tail is never short at 44.1 and 96 kHz");
+
+    // **Bucket-brigade at a fractional-sample delay** (44.1 kHz: TIME 1, 2, 5
+    // and 375 ms are 44.1, 88.2, 220.5 and 16 537.5 samples). Until the fourth
+    // round these 16 rows were written down as an exception -- a one-sample
+    // impulse rang up to 34 % past the figure -- and the cause was not the
+    // tail at all: the impulse landed on the expander's boundary after
+    // `prepare` and came out as a spike of up to 9.9e5, which then rang down
+    // from there (`testABucketBrigadeBoundaryNeverSpikes`). With the read
+    // expanded tap by tap they are inside the figure like every other row.
+    std::vector<TailRow> fractional;
+
+    for (const auto& [fx, amount, fb, t] : std::initializer_list<std::tuple<bool, float, float, float>> {
+             { false, 0.0f, 35.0f, 375.0f }, { false, 0.0f, 60.0f, 375.0f } })
+        fractional.push_back ({ 2, fb, t, fx, 0, amount, 44100.0 });
+
+    for (const auto amount : { 60.0f, 100.0f })
+        for (const auto& [fb, t] : std::initializer_list<std::pair<float, float>> {
+                 { 35.0f, 1.0f }, { 35.0f, 2.0f }, { 35.0f, 5.0f }, { 35.0f, 375.0f },
+                 { 60.0f, 1.0f }, { 60.0f, 2.0f }, { 60.0f, 5.0f } })
+            fractional.push_back ({ 2, fb, t, true, 0, amount, 44100.0 });
+
+    checkTailRows (fractional, "the tail is never short on bucket-brigade at a fractional-sample delay");
 
     // **A sustained input** (2026-10-01): one second of a tone in phase with
     // the loop, which builds it to 1/(1 - g) of its input before it stops.

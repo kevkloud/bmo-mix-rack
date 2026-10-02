@@ -317,23 +317,21 @@ inline double engineTailSeconds (double seconds, double g, int character,
 
     **The figure is never shorter than the measured decay, up to the 30 s
     ceiling** (`11` §4j), and `DwellDspTests::testTheReportedTailIsNeverShorter
-    ThanTheDecay` renders it to hold it there. What it does not cover, all
-    measured on AURORA 2026-10-01 and recorded in
-    `testing-notes/dwell-review-fixes-2026-10-01.md`:
+    ThanTheDecay` renders it to hold it there. The one thing it does not
+    cover is a loop past 30 s, which rings past the ceiling by decision.
 
-    - a loop past 30 s rings past the ceiling, which stands by decision;
-    - **bucket-brigade at a fractional-sample delay, driven by a one-sample
-      impulse, rings past it** -- re-measured 2026-10-01 against the figure
-      as it now stands (build-up counted, the first lap not charged the FX
-      delay): at 44.1 kHz, TIME 1, 5 and 375 ms (44.1, 220.5 and 16537.5
-      samples), 12 rows of 14,952 rendered, by +0.3 % and +1.1 % with FX off
-      (FEEDBACK 60 and 35 %, TIME 375 ms), by +14 % to +26 % with Diffuse 60
-      and +17 % to +34 % with Diffuse 100 at TIME 1 and 5 ms (the worst:
-      Diffuse 100, FEEDBACK 35 %, TIME 5 ms, 3.873 s against 2.895). The
-      compander's two rings are interpolated separately, and a one-sample
-      transient does not hold the gain constant across the taps; the same
-      rows' 5 and 50 ms bursts, held tones, whole-sample times and every
-      other character stay inside. Left for Frosty; not fixed.
+    **Bucket-brigade at a fractional-sample delay is not an exception.** Until
+    the fourth round (2026-10-01) a one-sample impulse there rang up to 34 %
+    past the figure, and it was written down here as the tail's exception.
+    It was not the tail: the expander divided one interpolated ring by the
+    other, an impulse on the first sample after `prepare` landed on the
+    gain ring's step from 1.0 to a companded gain, and the read came out as a
+    single sample of up to 9.9e5 that the loop then rang down from. With the
+    read expanded tap by tap (`DelayEngine::readExpanded`), the 14,952-row
+    never-shorter grid has no short row under the ceiling, and the same
+    impulse given a silent
+    second first was inside the figure before the fix as well (measured on
+    AURORA; `testing-notes/dwell-review-fixes-2026-10-01.md`).
 
     Crush is no longer an exception: with its hold holding each block's mean
     (2026-10-01) no in-loop effect holds a level under unity FEEDBACK, and

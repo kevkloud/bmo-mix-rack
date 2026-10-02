@@ -186,8 +186,9 @@ did.
 
   A **2:1 compander (5/50 ms, CALIBRATE)** straddles the line, and **the expander
   does not re-detect**: the compressor's gain is written to a control ring beside
-  the audio and read at the same fractional position, and the expander applies its
-  exact reciprocal. The pair is then unity at every instant, transient included,
+  the audio, and the expander applies its exact reciprocal to every tap the read
+  takes, before the interpolator sums them (per tap from 2026-10-01; below). The
+  pair is then unity at every instant, transient included,
   and `P_bbd` comes from the filters alone. **This is a stability requirement, not
   a refinement.** A re-detecting pair with identical ballistics on both halves has
   net gain `Δ = 0.5·(Ê − S[Ê])` in dB — zero in steady state, but through a rising
@@ -212,17 +213,37 @@ did.
   writes made without companding store exactly 1.0. Before this, the move
   replayed a 0.05 repeat at a 0.558 peak (+15 dB), measured on AURORA.
 
-  **"Unity at every instant" holds at a whole-sample delay.** At a fractional
-  one the two rings are interpolated separately, and a one-sample transient does
-  not hold the gain constant across the interpolator's taps: measured on AURORA
-  at 44.1 kHz (TIME 375 ms is 16 537.5 samples), a one-sample impulse into a
-  FEEDBACK 60 % loop rang 3.778 s where the reported tail is 3.393 s. Bursts of
-  5 ms and 50 ms stayed inside it. Recorded, not changed.
+  **The reciprocal is taken per tap, before the interpolator** (fixed
+  2026-10-01, the fourth round of the review). As first built the read divided
+  one interpolation by another, `I(v·g) / I(g)`, which is unity only while the
+  gain is constant across the kernel. The control ring holds exactly 1.0
+  wherever nothing was companded — after `prepare`, after a reset or a HOLD
+  clear, and over anything written on clean or tape — beside compressor gains
+  of up to 31.6, and an interpolator with negative taps carries that step
+  through zero. The division then went to its 1e-6 clamp and **one output
+  sample came out at up to 6.3e5, +115 dBFS**, measured on AURORA at every
+  fractional read: signal on the first sample after `prepare` or a reset, a
+  move onto bucket-brigade mid-signal, a move off it (clean's sinc and tape's
+  Hermite both read the boundary) with the signal starting at the move, MOD
+  above 0, TIME moved while the boundary was in flight, and the lane. It was
+  there from the compander's first build. The same spike is what had been
+  recorded as a tail exception — a one-sample impulse into a fractional delay
+  at 44.1 kHz "ringing" up to 34 % past the figure.
+
+  The read now divides every tap by the gain stored beside it and then
+  interpolates, `I(v·g / g)`: the reciprocal is exact at every instant whatever
+  the gain does, the read is an interpolation of what was written, and its
+  magnitude is bounded by that times the kernel's absolute sum (1.25 for
+  Hermite, 2.21 for the 24-tap sinc). At a whole-sample delay the two forms are
+  the same division, so steady bucket-brigade audio there is **bit-identical**;
+  at a fractional delay they differ by −90 dBFS RMS on noise at 0.3 (44.1 kHz,
+  TIME 375 ms). `DwellDspTests::testABucketBrigadeBoundaryNeverSpikes` and
+  `testNoEventSpikesTheOutputOnAnyCharacter` hold every such event to the bound.
 
   **The control ring costs as much memory as the audio ring**, one per channel
-  per engine, because it has to be read at the same fractional position as the
-  audio it belongs to — §10 carries the arithmetic, and it is why the
-  per-instance figure doubled.
+  per engine, because every tap the audio is read from needs the gain written
+  beside it — §10 carries the arithmetic, and it is why the per-instance figure
+  doubled.
 - **Saturation**: the repo's ADAA residual shaper (`modules/sat/dsp/Shaper.h`,
   00 §1), driven by DRIVE, returning `shape(x) − x` anti-aliased by the first-order
   antiderivative quotient at zero latency. 02 warns aliases accumulate *per repeat*,
@@ -404,7 +425,8 @@ user's cut gets no credit for the loss it adds) in analog closed form, `P` its
 peak, and `τ` the larger of that chain's delay and the chain's as set. **What the
 figure promises**: from the last input sample, whatever the input was — a burst
 or a held note — the output is under −60 dB of that input by the reported time,
-up to the 30 s ceiling; the exceptions measured are written at `tailSecondsFor`.
+up to the 30 s ceiling, with no exception left (the bucket-brigade one recorded
+until the fourth round was the expander's spike, §4, not the tail).
 Three changes from what this section first wrote, all found by measurement:
 **no `min(g, 0.97)`** — FEEDBACK 96.9 % at TIME 20 ms reported 4.54 s and rang
 past 40; **a lap is longer than T** by the filters' own delay, which left
@@ -434,8 +456,8 @@ at 44.1 kHz. Allocate at `prepare` from the fixed maximum, never from a paramete
 1. **Per engine.** §11's lane is a second ring of the same fixed maximum —
    `lane_time` shares TIME's range — so the audio rings alone are 4.0 MB at
    192 kHz.
-2. **The compander's control ring** (§4). Bucket-brigade's expander reads the
-   compressor's **stored** gain at the same fractional position as the audio, so
+2. **The compander's control ring** (§4). Bucket-brigade's expander divides
+   every tap of the audio read by the compressor's **stored** gain beside it, so
    that ring is **the same length as the audio ring**, per channel per engine.
    It is allocated at `prepare` from the same fixed maximum like everything
    else, because it must exist whichever character is selected.
@@ -755,9 +777,10 @@ the lane's by the same formula at `T_lane` and `g_lane`, with its own FX trio
 build does not decay. With HOLD off the lane contributes nothing. `11` §4j's
 assertion — the reported tail is never below the measured time to −60 dB — is
 rendered by `DwellDspTests::testTheReportedTailIsNeverShorterThanTheDecay`, and
-holds up to the 30 s ceiling, with the exceptions §9 and §4 record (an input
-longer than a lap at high FEEDBACK; bucket-brigade's compander at a fractional
-delay on a one-sample transient) and the one §11a records for Crush.
+holds up to the 30 s ceiling. The three exceptions once recorded here are gone:
+an input longer than a lap at high FEEDBACK (the build-up term, §9), Crush's
+frozen hold (the block mean, §11a), and bucket-brigade at a fractional delay on
+a one-sample transient, which was the expander's spike (§4), not the tail.
 
 ### 11.7 The lane and tempo: one SYNC, two divisions
 

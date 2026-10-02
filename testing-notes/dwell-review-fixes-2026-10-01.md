@@ -57,13 +57,14 @@ the FX-off and FX sets again at 44.1 kHz and the FX-off set at 96 kHz.
   - ~~an input longer than one lap at high FEEDBACK~~ — **covered from the
     second round**: the figure now counts the build-up a held input leaves
     (below);
-  - bucket-brigade at a fractional-sample delay (44.1 kHz, TIME 1, 5 or 375 ms)
-    driven by a **one-sample** impulse rang up to 17 % past the first-round
-    figure (Diffuse 100, FEEDBACK 60 %, TIME 1 ms: 7.52 s against 6.45); bursts
-    stayed inside. The compander's audio and gain rings are interpolated
-    separately, and a one-sample transient does not hold the gain constant
-    across the taps. Not re-measured against the second-round figure;
-  - Crush's sample-and-hold growth, below.
+  - ~~bucket-brigade at a fractional-sample delay (44.1 kHz, TIME 1, 5 or 375
+    ms) driven by a **one-sample** impulse rang up to 17 % past the first-round
+    figure~~ — **not a tail exception at all** (fourth round, below): the
+    impulse sat on the first sample after `prepare`, where the expander's
+    division of one interpolated ring by the other put out a single sample of
+    up to 9.9e5, and the "decay" measured was that spike ringing down. Fixed
+    in the DSP; the rows are inside the figure;
+  - ~~Crush's sample-and-hold growth~~ — gone with the block mean (third round).
 
 ## Crush: the decision for Frosty (B1)
 
@@ -325,9 +326,13 @@ Never-shorter grid on the corrected figure: every character, FEEDBACK
 35–96.9 %, TIME 1–2000 ms, Diffuse 35/60/100, Crush 0/60/100 and Pan/Tremolo
 100, four inputs, at 44.1, 48 and 96 kHz, plus FX off at 44.1: **14,952 rows,
 12 short, every one the exception below**; none at 48 or 96 kHz, none on clean
-or tape, none with a burst or a held tone.
+or tape, none with a burst or a held tone. (Fourth round: 0 short.)
 
 ### The bucket-brigade impulse exception, re-measured
+
+**Superseded by the fourth round**: these "measured" figures are the ring-down
+of a one-sample output spike of up to 9.9e5 that the expander put out where the
+impulse landed, not a tail. Kept as the record of what was seen.
 
 Bucket-brigade, 44.1 kHz, a one-sample impulse, TIME at a fractional sample
 count. Figure in seconds, before this round's first-lap fix / after / measured:
@@ -348,8 +353,8 @@ count. Figure in seconds, before this round's first-lap fix / after / measured:
 | Diffuse 100 | 60 % | 5 ms | 7.206 | 6.492 | 7.622 | +17.4 % |
 
 Ten were short before the first-lap fix (by 0.3–7.3 %); the two Diffuse rows
-at 375 ms were inside (−3.3 %, −6.1 %) and the fix exposed them. Not fixed;
-for Frosty.
+at 375 ms were inside (−3.3 %, −6.1 %) and the fix exposed them. Fixed in the
+fourth round, at the cause.
 
 ### Also
 

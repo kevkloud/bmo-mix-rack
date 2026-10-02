@@ -4524,6 +4524,14 @@ void testDuckAutomationIsBlockSizeInvariant()
     from 9 s to 30 s against a 4.16 s reported tail; clean at 96.9 % held
     0.2440; at 96 kHz bucket-brigade at AMOUNT 60 held 0.0410.
 
+    **And the sample-and-hold grew loops above their input** (third round,
+    2026-10-01): phase-locked to a tone, a held sample turns a sine into a
+    square whose fundamental is up to 4/pi of the sine's. Reproduced: 44.1 kHz,
+    bucket-brigade, AMOUNT 35, TIME 50 ms -- FEEDBACK 90 % held a 0.5651 peak,
+    93 % 0.6650, 95 % 0.7276; AMOUNT 80 at TIME 20 ms and 95 %: 0.7399 at
+    44.1 kHz, 0.6647 at 48; AMOUNT 70, TIME 10 ms, 95 % at 48 kHz: 0.5415;
+    clean, AMOUNT 35, TIME 50 ms, 95 % at 44.1: 0.3585.
+
     A 5 ms burst, then 30 s -- the ceiling -- of silence: nothing after the
     reported tail may exceed -60 dB of the burst's peak, and the last second
     must be exact zeros. */
@@ -4541,6 +4549,11 @@ void testCrushEndsInZerosAtEveryRate()
         { 44100.0, 0, 100.0f,  50.0f, 92.0f }, { 44100.0, 1, 100.0f,  50.0f, 96.9f },
         { 96000.0, 0, 100.0f,  50.0f, 96.9f }, { 96000.0, 1,  60.0f, 100.0f, 96.9f },
         { 96000.0, 2, 100.0f,  20.0f, 94.0f },
+        // The sample-and-hold rows (third round).
+        { 44100.0, 2,  35.0f,  50.0f, 90.0f }, { 44100.0, 2,  35.0f,  50.0f, 93.0f },
+        { 44100.0, 2,  35.0f,  50.0f, 95.0f }, { 44100.0, 2,  80.0f,  20.0f, 95.0f },
+        { 48000.0, 2,  80.0f,  20.0f, 95.0f }, { 48000.0, 2,  70.0f,  10.0f, 95.0f },
+        { 44100.0, 0,  35.0f,  50.0f, 95.0f },
     };
 
     for (const auto& r : rows)
@@ -4699,6 +4712,100 @@ void testMixSnapsAfterReset()
     check (exact, buf);
 }
 
+/** **Crush holds the mean of each block, truncated, and nothing poisons it.**
+
+    The stage on its own: each held value must be the mean of the samples
+    since the last hold, truncated toward zero onto the grid, held for the
+    next block; a NaN or an infinity counts as 0 rather than entering the
+    sum; and `reset` returns the stage to the state of a fresh one. Then the
+    lane's own Crush, at a setting where the frozen hold grew the main loop,
+    has to end in exact zeros too -- the stage is one per engine. */
+void testCrushHoldsTheBlockMean()
+{
+    constexpr auto rate = 48000.0;
+    constexpr int divisor = 32;   // ceil(1 + 1.0 . 31) at AMOUNT 100
+    const auto step = std::exp2 (1.0 - 3.0);
+
+    P::FxStage fresh;
+    fresh.prepare (rate, 2);
+    const auto restingSignature = fresh.stateSignature();
+
+    P::FxStage fx;
+    fx.prepare (rate, 2);
+
+    // A ramp, and a NaN and an infinity in the first block.
+    std::vector<double> in ((size_t) (divisor * 4)), out (in.size());
+    for (size_t i = 0; i < in.size(); ++i)
+        in[i] = 0.9 * std::sin (0.05 * (double) i);
+    in[3] = std::numeric_limits<double>::quiet_NaN();
+    in[7] = std::numeric_limits<double>::infinity();
+
+    for (size_t i = 0; i < in.size(); ++i)
+        out[i] = fx.process (0, P::kCrush, in[i], 1.0, 2);
+
+    auto finite = true, means = true;
+
+    for (const auto y : out)
+        finite = finite && std::isfinite (y);
+
+    // The hold taken at sample k covers samples k - divisor + 1 .. k and is
+    // output from k on, for `divisor` samples.
+    for (int k = divisor; k + divisor <= (int) in.size(); k += divisor)
+    {
+        auto sum = 0.0;
+        for (int j = k - divisor + 1; j <= k; ++j)
+            sum += std::isfinite (in[(size_t) j]) ? in[(size_t) j] : 0.0;
+
+        const auto want = std::clamp (std::trunc ((sum / divisor) / step) * step, -1.0, 1.0);
+
+        for (int j = k; j < k + divisor; ++j)
+            means = means && out[(size_t) j] == want;
+    }
+
+    check (finite, "Crush's output stays finite with a NaN and an infinity in its input");
+    check (means, "Crush holds the truncated mean of each block of 32 samples, the bad ones counted as 0");
+
+    fx.reset();
+    check (fx.stateSignature() == restingSignature, "reset returns Crush's running mean to a fresh stage's state");
+
+    // The lane's own Crush, linked off, at the main loop's worst reproduced
+    // setting: 44.1 kHz, bucket-brigade, AMOUNT 35, a 50 ms lane at a tail
+    // gain of -2 % (about 0.97 a lap).
+    {
+        constexpr auto laneRate = 44100.0;
+        P::DwellDsp dsp;
+        dsp.prepare (laneRate, 512, 2);
+
+        auto v = laneSettings (2, 50.0f, -2.0f, 0.0f);
+        v[P::Index::send]         = 1.0f;
+        v[P::Index::feedback]     = 0.0f;
+        v[P::Index::fxLink]       = 0.0f;
+        v[P::Index::laneFx]       = 1.0f;
+        v[P::Index::laneFxType]   = 2.0f;
+        v[P::Index::laneFxAmount] = 35.0f;
+
+        const auto n = (int) (30.0 * laneRate);
+        const auto burst = (int) (0.005 * laneRate);
+        Block block { n };
+
+        for (int i = 0; i < burst; ++i)
+        {
+            const auto w = 0.5 - 0.5 * std::cos (2.0 * P::kPiD * (double) i / (double) (burst - 1));
+            block.left[(size_t) i] = block.right[(size_t) i]
+                = (float) (0.5 * w * std::sin (2.0 * P::kPiD * 300.0 * (double) i / laneRate));
+        }
+
+        renderAsHost (dsp, v, block, n, 512, [] (int) {});
+
+        auto zeros = true;
+        for (int i = n - (int) laneRate; i < n; ++i)
+            zeros = zeros && block.left[(size_t) i] == 0.0f && block.right[(size_t) i] == 0.0f;
+
+        check (zeros, "the lane's own Crush ends in exact zeros too (44.1 kHz, bucket-brigade, AMOUNT 35, last second peak "
+                          + std::to_string (peakOf (block.left, n - (int) laneRate, (int) laneRate)) + ")");
+    }
+}
+
 } // namespace
 
 //==============================================================================
@@ -4765,6 +4872,7 @@ int main()
     testCrushEndsInZerosAtEveryRate();
     testTheSmoothersLandOnTheirTargets();
     testMixSnapsAfterReset();
+    testCrushHoldsTheBlockMean();
 
     std::printf ("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

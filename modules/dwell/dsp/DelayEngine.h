@@ -334,7 +334,7 @@ enum FxType
 {
     kDiffuse = 0,      ///< 6-stage allpass chain, delays 7-37 ms scaled by AMOUNT
     kPanTremolo = 1,   ///< one LFO stepped at the delay period; chops on the mono bus
-    kCrush = 2         ///< quantise to 16-3 bits and sample-and-hold at f_s / 1-32
+    kCrush = 2         ///< quantise to 16-3 bits, holding the mean of every 1-32 samples
 };
 
 //==============================================================================
@@ -356,9 +356,10 @@ enum FxType
     §3's `|g| < 1` bound is untouched and `P_c` does not have to be re-swept
     when FX moves. Diffuse is an allpass, so it is exactly unity at every omega;
     Pan/Tremolo is peak-normalised in closed form (see `panGain`); Crush's
-    quantiser truncates toward zero, so it can never make a sample larger
-    (see `crush` -- it rounded, and expanded, until 2026-10-01), and a
-    zero-order hold can never exceed its own input.
+    quantiser truncates toward zero, so it can never make a sample larger, and
+    its hold holds a block's mean, which can never carry more energy than the
+    samples it averages (see `crush` -- until 2026-10-01 it rounded and held a
+    single sample, and both expanded).
 
     **AMOUNT zero is a wire on Diffuse and Pan/Tremolo** -- the allpass lengths
     round to nothing and every stage is skipped, and the pan normalisation
@@ -399,14 +400,6 @@ public:
     static constexpr double kCrushBitsAtZero = 16.0;
     static constexpr double kCrushBitsSpan = 13.0;
     static constexpr double kCrushHoldSpan = 31.0;
-
-    /** **Crush's dead zone, in steps** (DECIDED, Frosty 2026-10-01): a held
-        value keeps `floor(|x| / step - 0.35)` steps, so it has to clear the
-        step it lands on by 0.35 of one to keep it. See `crush` for why, and
-        `testing-notes/dwell-review-fixes-2026-10-01.md` for the measurement
-        that chose 0.35 -- the smallest shift that ended every one-step cycle
-        on the grid it was asked to (0.30 left one, at 176.4 kHz). */
-    static constexpr double kCrushDeadZoneSteps = 0.35;
 
     /** How far the stepped LFO turns per repeat (CALIBRATE).
 
@@ -459,6 +452,8 @@ public:
         writeIdx.fill (0);
         held.fill (0.0);
         holdCounter.fill (0);
+        heldSum.fill (0.0);
+        heldCount.fill (0);
 
         lfoPhase = 0.0;
         lfoValue = 1.0;
@@ -537,6 +532,7 @@ public:
         for (int ch = 0; ch < kMaxChannels; ++ch)
         {
             sum += held[(size_t) ch] + (double) holdCounter[(size_t) ch]
+                 + heldSum[(size_t) ch] + (double) heldCount[(size_t) ch]
                  + (double) writeIdx[(size_t) ch];
 
             for (const auto& line : lines[(size_t) ch])
@@ -625,40 +621,34 @@ private:
         measured FX-off, and why its own acceptance is only that the
         non-harmonic floor **stops growing by repeat 10** (`11` §4l).
 
-        **The quantiser truncates toward zero, so `|q| <= |x|` for every
-        sample** (2026-10-01; Frosty to confirm, see
-        `testing-notes/dwell-review-fixes-2026-10-01.md`). It rounded to the
-        nearest step until then, and rounding is *expanding*: at 3 bits a 0.13
-        becomes 0.25, nearly twice its input, so above about 60 % FEEDBACK the
-        loop held a limit cycle rather than decaying -- measured on AURORA, still
-        -7.1 dB under the first repeat forty seconds after a burst at AMOUNT 100
-        and FEEDBACK 80, and a -81 dB residue for good even at AMOUNT 0.
-        Truncation is the closest quantiser on the same grid that can never
-        make a sample larger, so the stage keeps 10 §11a's `|F| <= 1` itself and
-        the tail ends in exact zeros. What it costs is level: a pass loses up to
-        one step rather than half of one either way -- 4.0 dB on a 0.5 sine at
-        AMOUNT 100, 0.1 dB at AMOUNT 60 -- and a signal under one step is gone
-        on its first crushed lap.
+        **Every lap under unity FEEDBACK loses energy through this stage, by
+        construction** (Frosty's rule, 2026-10-01: "under 100% feedback should
+        lose energy, not be indefinite"). Two choices make it so, and each was
+        forced by a measured limit cycle on AURORA:
 
-        **Truncation alone left a one-step limit cycle, so there is a dead
-        zone** (DECIDED, Frosty 2026-10-01). From FEEDBACK 92 % up, a held
-        +-0.25 step comes back through the lap's filters with a few per cent of
-        overshoot and re-crosses the step it left, so a one-step square wave
-        circulated for good -- measured on AURORA at 44.1 kHz on bucket-brigade
-        at AMOUNT 100 (peak 0.2245 at FEEDBACK 92 %, against a 4.16 s tail),
-        on clean at 96.9 %, and at 96-192 kHz at AMOUNT 60. A held value now
-        keeps `floor(|x| / step - kCrushDeadZoneSteps)` steps: it must clear
-        its step by 0.35 of one, which the overshoot does not supply. It costs
-        level -- 7.0 dB a pass on a 0.5 sine at AMOUNT 100, where truncation
-        cost 4.0 -- and is still `|q| <= |x|`.
+        - **The hold holds the average, not a sample** (DECIDED, Frosty:
+          "average instead of freeze"). Each held value is the mean of the N
+          samples since the last one, held for the next N. A frozen sample is
+          not energy-bounded: phase-locked to a tone it turns a sine into a
+          square whose fundamental is up to 4/pi of the sine's, and from about
+          FEEDBACK 90 % that grew loops to a steady peak above their input --
+          0.7277 from a 0.5 burst at 44.1 kHz on bucket-brigade, AMOUNT 35,
+          TIME 50 ms, FEEDBACK 95 %. A block mean cannot: N copies of the mean
+          of N samples carry at most their energy (`N . mean^2 <= sum x^2`).
+          It costs some top end -- the mean is a box filter -- which the
+          testing note measures at 300 Hz to 10 kHz.
+        - **The quantiser truncates toward zero, so `|q| <= |x|`.** It rounded
+          to the nearest step until 2026-10-01, and rounding expands: at 3
+          bits a 0.13 becomes 0.25, and above about 60 % FEEDBACK the loop held
+          -7.1 dB forty seconds after a burst. A signal under one step is gone
+          on its first crushed lap.
 
-        **What the dead zone does not reach** (measured, not built): the
-        sample-and-hold itself is not energy-bounded. Phase-locked to a tone
-        it turns a sine into a square whose fundamental is up to 4/pi of the
-        sine's, and at FEEDBACK above about 85 % that can grow a loop to a
-        steady peak above its input -- 0.77 at 44.1 kHz on bucket-brigade at
-        AMOUNT 35. That is a choice about the hold, Frosty's, and recorded in
-        the testing note with the option measured.
+        With both, no dead zone is needed: the 0.35-step one built for the
+        frozen hold's one-step cycle came out again, and on the full grid (six
+        rates, every character, AMOUNT 35-100, FEEDBACK to 96.9 %) nothing is
+        left holding a level. A non-finite input is counted as 0 rather than
+        let into the running sum. Bounded work: one add and, once a hold, one
+        divide.
 
         The clamp to +-1 stays: a loud lap can still hand this stage more than
         full scale, and the shaper and clip come after it. */
@@ -666,9 +656,14 @@ private:
     {
         const auto divisor = (int) std::ceil (1.0 + amount * kCrushHoldSpan);
 
+        heldSum[ch] += std::isfinite (x) ? x : 0.0;
+        ++heldCount[ch];
+
         if (holdCounter[ch] <= 0)
         {
-            held[ch] = x;
+            held[ch] = heldSum[ch] / (double) heldCount[ch];
+            heldSum[ch] = 0.0;
+            heldCount[ch] = 0;
             holdCounter[ch] = std::max (1, divisor);
         }
 
@@ -676,8 +671,7 @@ private:
 
         const auto bits = kCrushBitsAtZero - amount * kCrushBitsSpan;
         const auto step = std::exp2 (1.0 - bits);
-        const auto steps = std::max (0.0, std::floor (std::abs (held[ch]) / step - kCrushDeadZoneSteps));
-        const auto q = held[ch] < 0.0 ? -steps * step : steps * step;
+        const auto q = std::trunc (held[ch] / step) * step;
 
         return std::clamp (q, -1.0, 1.0);
     }
@@ -693,6 +687,11 @@ private:
 
     std::array<double, kMaxChannels> held {};
     std::array<int, kMaxChannels> holdCounter {};
+
+    /** Crush's running sum and count since the last hold: what the next held
+        value is the mean of. */
+    std::array<double, kMaxChannels> heldSum {};
+    std::array<int, kMaxChannels> heldCount {};
 
     double amountAtBlock = 0.0;
     double lfoPhase = 0.0, lfoValue = 1.0;

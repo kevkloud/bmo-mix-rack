@@ -454,11 +454,23 @@ public:
         held.fill (0.0);
         holdCounter.fill (0);
         heldSum.fill (0.0);
-        heldCount.fill (0);
 
         lfoPhase = 0.0;
         lfoValue = 1.0;
         stepCounter = 0;
+    }
+
+    /** Crush coming back into the loop -- FX on again, or the type moved to
+        Crush -- starts its hold from nothing. The stage is skipped while it is
+        out, so without this its running sum and its hold were picked up again
+        from before it went out (sixth round, 2026-10-02). The other types'
+        state is left alone: an allpass picked up where it was left is a
+        smear, not a level. */
+    void engageCrush() noexcept
+    {
+        held.fill (0.0);
+        holdCounter.fill (0);
+        heldSum.fill (0.0);
     }
 
     /** The allpass lengths, taken from AMOUNT **once per block**.
@@ -533,7 +545,7 @@ public:
         for (int ch = 0; ch < kMaxChannels; ++ch)
         {
             sum += held[(size_t) ch] + (double) holdCounter[(size_t) ch]
-                 + heldSum[(size_t) ch] + (double) heldCount[(size_t) ch]
+                 + heldSum[(size_t) ch]
                  + (double) writeIdx[(size_t) ch];
 
             for (const auto& line : lines[(size_t) ch])
@@ -673,15 +685,20 @@ private:
         const auto clean = std::isfinite (x) ? x : 0.0;
 
         heldSum[ch] += clean * clean;
-        ++heldCount[ch];
 
         if (holdCounter[ch] <= 0)
         {
-            const auto blockRms = std::sqrt (heldSum[ch] / (double) heldCount[ch]);
-            held[ch] = clean > 0.0 ? blockRms : (clean < 0.0 ? -blockRms : 0.0);
+            // The block's energy, spread over the samples it will be held for
+            // -- not over the samples it covers. The two are the same N in
+            // steady state; they differ for the first hold after a clear (one
+            // sample, held for N) and when AMOUNT moves N, and spreading over
+            // the hold is what keeps those blocks inside the energy rule too
+            // (sixth round, 2026-10-02: the first hold carried up to 25.6x).
+            const auto holdLength = std::max (1, divisor);
+            const auto magnitude = std::sqrt (heldSum[ch] / (double) holdLength);
+            held[ch] = clean > 0.0 ? magnitude : (clean < 0.0 ? -magnitude : 0.0);
             heldSum[ch] = 0.0;
-            heldCount[ch] = 0;
-            holdCounter[ch] = std::max (1, divisor);
+            holdCounter[ch] = holdLength;
         }
 
         --holdCounter[ch];
@@ -705,10 +722,9 @@ private:
     std::array<double, kMaxChannels> held {};
     std::array<int, kMaxChannels> holdCounter {};
 
-    /** Crush's running sum of squares and count since the last hold: what the
-        next held value is the RMS of. */
+    /** Crush's running sum of squares since the last hold: the energy the
+        next held value carries. */
     std::array<double, kMaxChannels> heldSum {};
-    std::array<int, kMaxChannels> heldCount {};
 
     double amountAtBlock = 0.0;
     double lfoPhase = 0.0, lfoValue = 1.0;
@@ -1072,6 +1088,14 @@ public:
         const auto characterMoved = (p.character != params.character) || ! primed || snapNow;
         const auto cutsMoved = (p.lowCutHz != params.lowCutHz) || (p.highCutHz != params.highCutHz);
         const auto timeMoved = (p.timeMs != params.timeMs);
+
+        // Crush coming (back) into the loop starts from nothing; see
+        // `FxStage::engageCrush`.
+        const auto crushIn = p.fx && p.fxType == kCrush;
+        const auto crushWasIn = params.fx && params.fxType == kCrush;
+
+        if (crushIn && ! crushWasIn)
+            fx.engageCrush();
 
         params = p;
 

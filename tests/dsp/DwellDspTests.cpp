@@ -5014,6 +5014,115 @@ void testCrushCarriesNoDcOutOfTheLoop()
     check (allFinite (block.left) && std::abs (mean) < 1.0e-3 && (last == 0.0 || last < before), buf);
 }
 
+/** **Every hold obeys the energy rule, the first one and a changing one too**
+    (sixth round).
+
+    The rule was only true while each hold covered as many samples as it is
+    held for. The first hold after `prepare` covers one sample and is held for
+    N -- 32 times that sample's energy at AMOUNT 100 -- and a hold length that
+    grows mid-note (AMOUNT 35 to 100: 12 to 32) spreads 12 samples' RMS over
+    32. So a hold is now the block's energy spread over the samples it is held
+    for. With a tone playing from the first sample, and AMOUNT moved mid-tone,
+    no held block's output energy may exceed its input block's. */
+void testCrushHoldsWithinItsEnergyFromTheFirstBlock()
+{
+    constexpr auto rate = 48000.0;
+
+    for (const auto [first, second] : { std::pair<double, double> { 1.0, 1.0 }, { 0.35, 1.0 }, { 1.0, 0.35 } })
+    {
+        P::FxStage fx;
+        fx.prepare (rate, 2);
+
+        const auto n = 32 * 12;
+        std::vector<double> in ((size_t) n), out ((size_t) n);
+
+        for (int i = 0; i < n; ++i)
+        {
+            in[(size_t) i] = 0.9 * std::sin (2.0 * P::kPiD * 300.0 * (double) i / rate + 1.2);
+            out[(size_t) i] = fx.process (0, P::kCrush, in[(size_t) i], i < n / 2 ? first : second, 2);
+        }
+
+        // The holds fall at sample 0 and then every N samples, N cut from the
+        // AMOUNT in force when each is taken. A hold taken at `k` covers
+        // everything since the previous hold, up to and including `k`, and is
+        // output from `k` until the next.
+        auto worst = 0.0;
+        auto previous = -1;
+
+        for (int k = 0; k < n; )
+        {
+            const auto a = k < n / 2 ? first : second;
+            const auto next = k + (int) std::ceil (1.0 + a * P::FxStage::kCrushHoldSpan);
+
+            if (next > n)
+                break;   // the last hold is cut short by the end of the render
+
+            auto inEnergy = 0.0, outEnergy = 0.0;
+            for (int j = previous + 1; j <= k; ++j)
+                inEnergy += in[(size_t) j] * in[(size_t) j];
+            for (int j = k; j < next; ++j)
+                outEnergy += out[(size_t) j] * out[(size_t) j];
+
+            worst = std::max (worst, outEnergy / std::max (inEnergy, 1.0e-30));
+            previous = k;
+            k = next;
+        }
+
+        char buf[200];
+        std::snprintf (buf, sizeof (buf), "Crush at AMOUNT %.0f then %.0f, a tone from the first sample: the worst hold "
+                                          "carries %.3f of its input block's energy (want at most 1)",
+                       first * 100.0, second * 100.0, worst);
+        check (worst <= 1.0 + 1.0e-9, buf);
+    }
+}
+
+/** **Crush starts clean when it comes back into the loop** (sixth round).
+
+    FX off skips the stage, so its running sum and its hold were left as they
+    were, and FX back on picked them up: the first hold then counted samples
+    from before the stage went out. Two engines run the same history, one fed a
+    tone and one silence -- Crush on, FX off for a block, FX on again -- and
+    the moment FX is back on, before a sample is processed, their FX state must
+    agree: everything Crush held from before is gone. */
+void testCrushIsClearedWhenItComesBackIn()
+{
+    constexpr auto rate = 48000.0;
+
+    const auto signatureAfter = [&] (bool tone)
+    {
+        P::DwellDsp dsp;
+        dsp.prepare (rate, 512, 2);
+
+        auto v = settings (0, 1.0f, 50.0f, 100.0f);
+        v[P::Index::fx]       = 1.0f;
+        v[P::Index::fxType]   = 2.0f;
+        v[P::Index::fxAmount] = 100.0f;
+
+        Block block { 512 * 4 };
+
+        if (tone)
+            for (int i = 0; i < 512 * 4; ++i)
+                block.left[(size_t) i] = block.right[(size_t) i]
+                    = (float) (0.5 * std::sin (2.0 * P::kPiD * 300.0 * (double) i / rate));
+
+        // 2.5 blocks on, so the hold is part-way through a block; one off; on.
+        renderAsHost (dsp, v, block, 512 * 2 + 300, 512, [] (int) {});
+        v[P::Index::fx] = 0.0f;
+        dsp.setParams (v.data(), (int) v.size());
+        float* ch[] { block.left.data() + 1324, block.right.data() + 1324 };
+        dsp.process (ch, 2, 512);
+        v[P::Index::fx] = 1.0f;
+        dsp.setParams (v.data(), (int) v.size());
+
+        return dsp.getCore().getMainEngine().fxStateSignature();
+    };
+
+    const auto fed = signatureAfter (true), quiet = signatureAfter (false);
+
+    check (fed == quiet, "FX back on clears what Crush held from before it went out (state "
+                             + std::to_string (fed) + " against " + std::to_string (quiet) + ")");
+}
+
 /** **Under 100 % FEEDBACK every in-loop effect loses energy** -- the property
     of record for Frosty's rule (2026-10-01: "under 100% feedback should lose
     energy, not be indefinite").
@@ -5624,6 +5733,8 @@ int main()
     testCrushHoldsTheBlockEnergy();
     testCrushKeepsItsTopEnd();
     testCrushCarriesNoDcOutOfTheLoop();
+    testCrushHoldsWithinItsEnergyFromTheFirstBlock();
+    testCrushIsClearedWhenItComesBackIn();
     testEveryInLoopEffectLosesEnergyUnderUnity();
     testTheFxDelayIsChargedOnEveryLap();
     testModulationIsChargedToEveryLap();

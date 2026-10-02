@@ -4523,7 +4523,11 @@ void testTheReportedTailIsNeverShorterThanTheDecay()
     // **At 44.1 and 96 kHz as well.** The figure is a function of the
     // parameters alone, so it is the same at every rate, and the loop's
     // filters are not quite: the rows above again at the lowest rate the
-    // suite runs and at double rate.
+    // suite runs and at double rate. Diffuse is here through
+    // `testTheFxDelayIsChargedOnEveryLap`, at all three rates and on figures
+    // it comes within 3-11 % of; its FEEDBACK 80 %, TIME 100 ms row stays at
+    // 48 kHz only (sixth round, for CI time: a 22 s figure the decay reaches
+    // 28 % of, rendered nine times more at the two other rates).
     std::vector<TailRow> rates;
 
     for (const auto rate : { 44100.0, 96000.0 })
@@ -4534,7 +4538,7 @@ void testTheReportedTailIsNeverShorterThanTheDecay()
                 rates.push_back ({ c, fb, t, false, 0, 0.0f, rate });
 
             for (const auto& [type, amount, fb, t] : std::initializer_list<std::tuple<int, float, float, float>> {
-                     { 0, 100.0f, 80.0f, 100.0f }, { 2, 60.0f, 90.0f, 20.0f }, { 1, 100.0f, 90.0f, 100.0f } })
+                     { 2, 60.0f, 90.0f, 20.0f }, { 1, 100.0f, 90.0f, 100.0f } })
                 rates.push_back ({ c, fb, t, true, type, amount, rate });
         }
 
@@ -5248,11 +5252,15 @@ void testCrushIsClearedWhenItComesBackIn()
     of record for Frosty's rule (2026-10-01: "under 100% feedback should lose
     energy, not be indefinite").
 
-    Every FX type on every character, at AMOUNT 0, 35, 60 and 100, at 44.1,
-    48 and 96 kHz, at TIME 50 ms and FEEDBACK 93 % -- inside the region where a
-    frozen sample-and-hold grew loops, and on that hold this test fails -- and
-    at TIME 20 ms and FEEDBACK 96.9 %: a 5 ms burst, then silence. 216 rows,
-    about 16 s on AURORA.
+    Crush on every character at AMOUNT 0, 35, 60 and 100 at 44.1, 48 and
+    96 kHz, and Diffuse and Pan/Tremolo on every character at AMOUNT 35, 60 and
+    100 at 48 kHz, each at TIME 50 ms and FEEDBACK 93 % -- inside the region
+    where a frozen hold grew loops, and on that hold this test fails -- and at
+    TIME 20 ms and FEEDBACK 96.9 %: a 5 ms burst, then silence. 108 rows. Until
+    the sixth round Diffuse and Pan/Tremolo also ran at 44.1 and 96 kHz and at
+    AMOUNT 0 (216 rows, about 16 s on AURORA); they are energy-preserving by
+    construction, never came near failing, and at AMOUNT 0 are an exact wire,
+    so they were cut to one rate for CI time.
 
     - **It decays**: the last second of the render is exact zeros, or is
       quieter than the second before it. A loop holding a level fails that,
@@ -5276,6 +5284,13 @@ void testEveryInLoopEffectLosesEnergyUnderUnity()
                 for (const auto amount : { 0.0f, 35.0f, 60.0f, 100.0f })
                     for (const auto& s : chosen)
                     {
+                        // Crush is where loops grew, so it runs at every rate and AMOUNT.
+                        // Diffuse and Pan/Tremolo are energy-preserving by construction
+                        // and run at 48 kHz, AMOUNT 35-100: AMOUNT 0 is an exact wire on
+                        // both, the loop FX off already is (sixth round, for CI time).
+                        if (type != P::kCrush && (rate != 48000.0 || amount == 0.0f))
+                            continue;
+
                         auto v = settings (c, s.timeMs, s.feedback, 100.0f);
                         v[P::Index::fx]       = 1.0f;
                         v[P::Index::fxType]   = (float) type;

@@ -307,9 +307,10 @@ private:
     its way **into** the line.
 
     There is no second law for the expander. The expander is `1 / gain` read
-    back out of the control ring at the same fractional position, which is the
-    whole point of the construction (10 §4, and a stability requirement rather
-    than a refinement). */
+    back out of the control ring, tap by tap, at the same positions the audio
+    is read from, which is the whole point of the construction (10 §4, and a
+    stability requirement rather than a refinement; `readExpanded` says why it
+    is per tap). */
 inline double companderGainFor (double levelDb) noexcept
 {
     // The floor bounds the boost a near-silent line asks for: at -60 dBFS the
@@ -920,7 +921,7 @@ public:
 
         **The control ring beside it is the same size again.** 10 §4 requires
         the compressor's gain to travel with the audio so the expander can
-        apply its exact reciprocal at the same fractional position, and a
+        apply its exact reciprocal to every tap the read takes, and a
         control ring shorter than the delay cannot do that. 10 §10's memory
         figure predates the compander and does not include it: the real cost is
         twice what §10 and `11` §4k quote. Flagged rather than quietly paid. */
@@ -1159,10 +1160,10 @@ public:
 
         On bucket-brigade the compander straddles the ring rather than sitting
         inside `C(.)`: the compressor's gain multiplies what is written and is
-        written **beside** it, and the expander divides the read by the same
-        gain read at the same fractional position. That pair is unity at every
-        instant, transient included, which is why `P_bbd` comes from the
-        filters alone (10 §4). There is no second detector, so there is nothing
+        written **beside** it, and the expander divides every tap the read
+        takes by the gain written beside that tap, before the kernel sums them
+        (`readExpanded`). That pair is unity at every instant, transient
+        included, which is why `P_bbd` comes from the filters alone (10 §4). There is no second detector, so there is nothing
         to overshoot.
 
         **10 §8's stereo matrix is here, between the read and the write**, and
@@ -1253,25 +1254,26 @@ public:
 
                 const auto* line = ring[(size_t) ch].data();
 
-                auto y = readAt (line, readCurrent);
-
-                if (fading)
-                    y = fadeOld * y + fadeNew * readAt (line, readNext);
+                double y;
 
                 if (expand)
                 {
-                    // **The exact reciprocal at the same fractional position**
-                    // (10 §4). The same kernel reads both rings, so at a whole
-                    // sample the pair is unity to the bit, and away from one it
-                    // is unity to the extent the gain is constant across four
-                    // taps -- which at 5/50 ms it is.
+                    // **The exact reciprocal of each tap, then the kernel**
+                    // (10 §4) -- see `readExpanded`. A crossfade's two reads
+                    // are each expanded before they are mixed, for the same
+                    // reason.
                     const auto* gains = gainRing[(size_t) ch].data();
-                    auto g = readAt (gains, readCurrent);
+                    y = readExpanded (line, gains, readCurrent);
 
                     if (fading)
-                        g = fadeOld * g + fadeNew * readAt (gains, readNext);
+                        y = fadeOld * y + fadeNew * readExpanded (line, gains, readNext);
+                }
+                else
+                {
+                    y = readAt (line, readCurrent);
 
-                    y /= std::max (g, 1.0e-6);
+                    if (fading)
+                        y = fadeOld * y + fadeNew * readAt (line, readNext);
                 }
 
                 output[ch][n] = (float) y;
@@ -1505,19 +1507,73 @@ private:
         if (usesSinc() && delay >= (double) kSincFloor)
             return (double) sinc.read (line, mask, pos);
 
-        return hermite (line, pos);
+        return hermite (pos, [line, this] (int k) noexcept
+        {
+            return (double) line[(size_t) (k & mask)];
+        });
     }
 
-    double hermite (const float* line, double pos) const noexcept
+    /** **The expander's read: every tap divided by its own gain, then the
+        kernel** (10 §4, fixed 2026-10-01, fourth round).
+
+        Until then the read divided one interpolation by another,
+        `I(v . g) / I(g)`, which is the reciprocal only while `g` is constant
+        across the kernel. Where it is not -- the gain ring holds 1.0 wherever
+        nothing was companded, beside compressor gains of up to 31.6 -- a
+        kernel with negative taps carries a step from 1.0 to 31.6 through zero,
+        the clamp below turned that into a division by 1e-6, and one output
+        sample came out at 5.5e5 (+115 dBFS): on the first sample after
+        `prepare` or `reset`, on a move onto bucket-brigade mid-signal, on a
+        move off it with signal starting at the move, under MOD, under a TIME
+        move, and in the lane. Measured on AURORA, on every fractional read.
+
+        `I(v . g / g)` is the reciprocal at every instant whatever the gain
+        does, so the read is an interpolation of what was written and can be no
+        larger than that times the kernel's absolute sum (1.25 for Hermite,
+        2.21 for the 24-tap sinc). At a whole-sample position both forms are
+        the same division of the same two floats, so a steady whole-sample
+        bucket-brigade read is bit-identical to before; at a fractional one
+        they differ only by how far the gain moved across the kernel.
+
+        The ring's gains are 1.0 or `companderGainFor`'s 0.708 to 31.6, so the
+        clamp can no longer fire; it stays so that a corrupted ring cannot
+        divide by zero. Clean's sinc reads the expanded taps out of a small
+        stack copy, laid out at the same indices modulo its size, so the table
+        in `modules/tune` is used as it is. */
+    double readExpanded (const float* line, const float* gains, double delay) const noexcept
+    {
+        const auto pos = (double) writeIdx - delay;
+
+        const auto expanded = [line, gains, this] (int k) noexcept
+        {
+            const auto j = (size_t) (k & mask);
+            return (double) line[j] / std::max ((double) gains[j], 1.0e-6);
+        };
+
+        if (usesSinc() && delay >= (double) kSincFloor)
+        {
+            std::array<float, kExpandScratch> taps {};
+            const auto base = (int) (long long) std::floor (pos) - Sinc::kHalf + 1;
+
+            for (int k = base; k < base + Sinc::kTaps; ++k)
+                taps[(size_t) (k & (kExpandScratch - 1))] = (float) expanded (k);
+
+            return (double) sinc.read (taps.data(), kExpandScratch - 1, pos);
+        }
+
+        return hermite (pos, expanded);
+    }
+
+    /** The smallest power of two that holds the sinc's taps. */
+    static constexpr int kExpandScratch = Sinc::kTaps <= 32 ? 32 : 64;
+    static_assert (Sinc::kTaps <= 64, "readExpanded's scratch holds at most 64 taps");
+
+    template <typename Tap>
+    static double hermite (double pos, Tap&& at) noexcept
     {
         const auto whole = std::floor (pos);
         const auto f = pos - whole;
         const auto i = (int) (long long) whole;
-
-        const auto at = [line, this] (int k) noexcept
-        {
-            return (double) line[(size_t) (k & mask)];
-        };
 
         const auto ym1 = at (i - 1), y0 = at (i), y1 = at (i + 1), y2 = at (i + 2);
 

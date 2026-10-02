@@ -1524,10 +1524,11 @@ void testUnityLandsAtNinetySevenPercentOnEveryCharacter()
 /** **The compander is unity through a transient, and it discriminates.**
 
     10 §4 makes the delayed-gain construction a stability requirement: the
-    compressor's gain is written to a control ring beside the audio and read at
-    the same fractional position, and the expander applies its exact
-    reciprocal, so the pair is unity at every instant including through a
-    transient. It also quotes 0.184 dB per dB of envelope step for the
+    compressor's gain is written to a control ring beside the audio, and the
+    expander divides every tap the read takes by the gain beside it before the
+    kernel sums them (per tap from 2026-10-01; see
+    `testABucketBrigadeBoundaryNeverSpikes`), so the pair is unity at every
+    instant including through a transient. It also quotes 0.184 dB per dB of envelope step for the
     re-detecting alternative -- **modelled, not measured**, and flagged in the
     spec as needing a bench before it is quoted.
 
@@ -4921,6 +4922,177 @@ void testTheFirstRepeatIsNotChargedTheFxDelay()
     }
 }
 
+//==============================================================================
+// The expander's boundary, 2026-10-01 (fourth round). Bucket-brigade's gain
+// ring holds 1.0 wherever nothing was companded -- after `prepare`, after
+// `reset`, and over everything written on clean or tape -- beside compressor
+// gains of up to 31.6 wherever something was. The read divided one
+// interpolated ring by the other, and an interpolator with negative taps takes
+// a step from 1.0 to 31.6 through zero: one output sample of 5.5e5, +115 dBFS,
+// measured on AURORA on the default bucket-brigade patch at 44.1 kHz.
+//==============================================================================
+
+/** **The bound an expanded read cannot cross.**
+
+    After the fix every tap is divided by its own gain before the kernel sums
+    them, so the read is an interpolation of what was written, `v = u + g .
+    tanh(...)`: `|v| <= |u| + g` with `g < 1` under 100 % FEEDBACK. An
+    interpolation of values no larger than `V` is no larger than `V` times its
+    kernel's absolute sum -- 1.25 for the 4-point Hermite (exact, at phase
+    1/2), and for the sinc whatever the built table says, measured here so the
+    bound follows `BMO_DWELL_SINC_TAPS` (2.21 at 24 taps). So with noise at
+    0.3, `K (0.3 + 1)` per engine at MIX 100, and twice that with the lane
+    summed in at LANE LEVEL 0 dB. Before the fix the same rows reached 5.5e5. */
+double expandedReadBound (double inputPeak)
+{
+    P::DelayEngine::Sinc table;
+    table.build (1.0, 8.0);
+
+    auto sincSum = 0.0;
+
+    for (int p = 0; p <= 64; ++p)
+    {
+        auto sum = 0.0;
+
+        for (int j = 0; j < 64; ++j)
+        {
+            float probe[64] {};
+            probe[j] = 1.0f;
+            sum += std::abs ((double) table.read (probe, 63, 32.0 + (double) p / 64.0));
+        }
+
+        sincSum = std::max (sincSum, sum);
+    }
+
+    return std::max (1.25, sincSum) * (inputPeak + 1.0);
+}
+
+enum class Event { prepare, reset, move };
+
+struct EventPeak { float peak = 0.0f; bool finite = true; };
+
+/** Noise at 0.3 into the module, MIX 100, FEEDBACK 60, and the output peak
+    from the event on. `prepare` is the event at sample 0; `reset` and a
+    CHARACTER `move` happen 0.6 s in, on a block boundary, where a host makes
+    them. `signalBefore` false keeps the input silent until the event, so the
+    ring on the old side of the boundary is companded silence. */
+template <typename Tweak>
+EventPeak peakAroundAnEvent (double rate, float timeMs, int from, int to, Event event, bool signalBefore,
+                             Tweak&& tweak)
+{
+    P::DwellDsp dsp;
+    dsp.prepare (rate, 512, 2);
+
+    auto v = settings (from, timeMs, 60.0f, 100.0f);
+
+    const auto at = event == Event::prepare ? 0 : (int) (0.6 * rate) / 512 * 512;
+    const auto n  = at + (int) (((double) timeMs / 1000.0 + 0.3) * rate);
+
+    Block block { n };
+    Noise noise;
+
+    for (int i = signalBefore ? 0 : at; i < n; ++i)
+        block.left[(size_t) i] = block.right[(size_t) i] = 0.3f * noise.next();
+
+    renderAsHost (dsp, v, block, n, 512, [&] (int offset)
+    {
+        if (event == Event::reset && offset == at)
+            dsp.reset();
+
+        if (event == Event::move && offset >= at)
+            v[P::Index::character] = (float) to;
+
+        tweak (v, offset, at);
+    });
+
+    EventPeak result;
+
+    for (int i = at; i < n; ++i)
+    {
+        const auto l = block.left[(size_t) i], r = block.right[(size_t) i];
+
+        if (! std::isfinite (l) || ! std::isfinite (r))
+            result.finite = false;
+        else
+            result.peak = std::max (result.peak, std::max (std::abs (l), std::abs (r)));
+    }
+
+    return result;
+}
+
+/** **Nothing that leaves a gain-ring boundary spikes the output.**
+
+    Every way a boundary between a gain of 1.0 and a companded gain can come
+    to be read at a fractional position, each named for what a user does:
+    signal on the first sample after `prepare` and after `reset`, a move onto
+    bucket-brigade mid-signal from clean and from tape, a move off it with the
+    signal starting at the move (Clean's sinc and Tape's Hermite both read
+    that boundary), MOD on a whole-sample TIME, TIME moved while the boundary
+    is in flight, and the lane, which is the same engine and is reset by HOLD.
+    44.1 kHz at TIME 375 and 48 kHz at TIME 375.3 are fractional reads.
+    The bound is `expandedReadBound`'s; every sample must also be finite. */
+void testABucketBrigadeBoundaryNeverSpikes()
+{
+    const auto bound = expandedReadBound (0.3);
+
+    struct Case { const char* what; double rate; float timeMs; int from, to; Event event; bool before; int extra; };
+
+    // extra: 0 nothing, 1 MOD 50, 2 TIME to 600 ms after four blocks, 3 the lane
+    // (HOLD and SEND on two blocks after the event, lane TIME 375.3).
+    const Case cases[]
+    {
+        { "signal on the first sample after prepare",       44100.0, 375.0f, 2, 2, Event::prepare, true,  0 },
+        { "signal on the first sample after prepare",       48000.0, 375.3f, 2, 2, Event::prepare, true,  0 },
+        { "signal through a reset",                         44100.0, 375.0f, 2, 2, Event::reset,   true,  0 },
+        { "signal through a reset",                         48000.0, 375.3f, 2, 2, Event::reset,   true,  0 },
+        { "signal starting at a reset",                     44100.0, 375.0f, 2, 2, Event::reset,   false, 0 },
+        { "clean to bucket-brigade mid-signal",             44100.0, 375.0f, 0, 2, Event::move,    true,  0 },
+        { "clean to bucket-brigade mid-signal",             48000.0, 375.3f, 0, 2, Event::move,    true,  0 },
+        { "tape to bucket-brigade mid-signal",              44100.0, 375.0f, 1, 2, Event::move,    true,  0 },
+        { "tape to bucket-brigade mid-signal",              48000.0, 375.3f, 1, 2, Event::move,    true,  0 },
+        { "bucket-brigade idle to clean, signal at the move", 44100.0, 375.0f, 2, 0, Event::move,  false, 0 },
+        { "bucket-brigade idle to clean, signal at the move", 48000.0, 375.3f, 2, 0, Event::move,  false, 0 },
+        { "bucket-brigade idle to tape, signal at the move",  44100.0, 375.0f, 2, 1, Event::move,  false, 0 },
+        { "bucket-brigade idle to tape, signal at the move",  48000.0, 375.0f, 2, 1, Event::move,  false, 0 },
+        { "MOD 50 on a whole-sample TIME after prepare",    48000.0, 375.0f, 2, 2, Event::prepare, true,  1 },
+        { "TIME 375 to 600 ms in flight after prepare",     48000.0, 375.0f, 2, 2, Event::prepare, true,  2 },
+        { "the lane, HOLD and SEND after prepare",          44100.0, 375.0f, 2, 2, Event::prepare, true,  3 },
+        { "the lane, HOLD and SEND after prepare",          48000.0, 375.0f, 2, 2, Event::prepare, true,  3 },
+        { "the lane, HOLD and SEND after a reset",          48000.0, 375.0f, 2, 2, Event::reset,   true,  3 },
+    };
+
+    for (const auto& c : cases)
+    {
+        const auto extra = c.extra;
+        const auto result = peakAroundAnEvent (c.rate, c.timeMs, c.from, c.to, c.event, c.before,
+                                               [extra] (std::vector<float>& v, int offset, int at)
+        {
+            if (extra == 1)
+                v[P::Index::modDepth] = 50.0f;
+
+            if (extra == 2 && offset >= at + 512 * 4)
+                v[P::Index::time] = 600.0f;
+
+            if (extra == 3)
+            {
+                const auto on = offset >= at + 512 * 2;
+                v[P::Index::laneTime] = 375.3f;
+                v[P::Index::hold]     = on ? 1.0f : 0.0f;
+                v[P::Index::send]     = on ? 1.0f : 0.0f;
+            }
+        });
+
+        const auto limit = extra == 3 ? 2.0 * bound : bound;
+
+        char buf[220];
+        std::snprintf (buf, sizeof (buf), "%s, %.1f kHz, TIME %.1f: output peak %.4g against a bound of %.2f, all finite %s",
+                       c.what, c.rate / 1000.0, (double) c.timeMs, (double) result.peak, limit,
+                       result.finite ? "yes" : "no");
+
+        check (result.finite && result.peak <= limit, buf);
+    }
+}
+
 } // namespace
 
 //==============================================================================
@@ -4990,6 +5162,9 @@ int main()
     testCrushHoldsTheBlockMean();
     testEveryInLoopEffectLosesEnergyUnderUnity();
     testTheFirstRepeatIsNotChargedTheFxDelay();
+
+    // The fourth round, 2026-10-01: the expander's boundary.
+    testABucketBrigadeBoundaryNeverSpikes();
 
     std::printf ("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

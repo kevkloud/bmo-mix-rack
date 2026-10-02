@@ -54,16 +54,16 @@ the FX-off and FX sets again at 44.1 kHz and the FX-off set at 96 kHz.
   with no margin, reached 100 %).
 - **The 30 s ceiling stands**; loops longer than that ring past it.
 - **Exceptions, recorded at `tailSecondsFor` and not covered by the figure:**
-  - an input longer than one lap at high FEEDBACK builds the loop up above its
-    own level and then takes longer to fall 60 dB below that input: tape, TIME
-    1 ms, FEEDBACK 96.9 %: 2.95 s after one sample, 4.57 s after 50 ms of noise
-    (the figure is 9.31 s, so this row is inside it, but the effect is general);
+  - ~~an input longer than one lap at high FEEDBACK~~ — **covered from the
+    second round**: the figure now counts the build-up a held input leaves
+    (below);
   - bucket-brigade at a fractional-sample delay (44.1 kHz, TIME 1, 5 or 375 ms)
-    driven by a **one-sample** impulse rang up to 17 % past the figure (Diffuse
-    100, FEEDBACK 60 %, TIME 1 ms: 7.52 s against 6.45); bursts stayed inside.
-    The compander's audio and gain rings are interpolated separately, and a
-    one-sample transient does not hold the gain constant across the taps;
-  - Crush's one-step limit cycle, below.
+    driven by a **one-sample** impulse rang up to 17 % past the first-round
+    figure (Diffuse 100, FEEDBACK 60 %, TIME 1 ms: 7.52 s against 6.45); bursts
+    stayed inside. The compander's audio and gain rings are interpolated
+    separately, and a one-sample transient does not hold the gain constant
+    across the taps. Not re-measured against the second-round figure;
+  - Crush's sample-and-hold growth, below.
 
 ## Crush: the decision for Frosty (B1)
 
@@ -95,22 +95,106 @@ In the loop (AMOUNT / FEEDBACK / TIME, time to −60 dB of the first repeat):
 whenever rounding would make it larger. It is also non-expanding, keeps more
 level, and leaves part of the signal uncrushed.
 
-**A one-step limit cycle survives truncation.** At FEEDBACK 95 % and above with
-AMOUNT 100, a held ±0.25 step comes back through the lap's filters with a few
-per cent of overshoot and re-crosses the step it left. Twenty seconds after a
-5 ms burst, the last second still held a peak of 0.236–0.245:
+**A one-step limit cycle survived truncation** — corrected: it starts at
+**FEEDBACK 92 %**, not 95 % as this note first said (the review reproduced it;
+the first-round check had no row between 90 and 95). A held ±0.25 step comes
+back through the lap's filters with a few per cent of overshoot and re-crosses
+the step it left. 44.1 kHz, bucket-brigade, AMOUNT 100, TIME 50 ms: FEEDBACK 92 %
+held a 0.2245 peak from 9 s to 30 s against a 4.16 s reported tail; 95 % 0.2364;
+clean at 96.9 % 0.2440; 96 kHz bucket-brigade AMOUNT 60 0.0410; none at 48 kHz.
+**It is fixed in the second round** by a dead zone (below).
 
-- 44.1 kHz, bucket-brigade, FEEDBACK 95 / 96 / 96.9 %, TIME 50 and 100 ms;
-- 44.1 kHz, clean, FEEDBACK 96.9 %, TIME 50 ms;
-- 96 kHz, bucket-brigade, FEEDBACK 96.9 %, AMOUNT 60, TIME 100 ms (peak 0.041);
-- none at 48 kHz.
+## Second round (the same day, after an independent review of the first)
 
-A **half-step dead zone** (`|q| ≤ |x| − step/2`) ended every one of these below
-unity in the same check, at the per-pass cost in the table. Not built.
+### Crush's dead zone (Frosty's decision)
 
-## S1, output level — reported, not changed
+A held value now keeps `floor(|x| / step − 0.35)` steps. The size was measured
+over every character, AMOUNT 35/60/100, TIME 20/50/100/375 ms, FEEDBACK
+80/85/90/92/94/95/96/96.5/96.9 %, at 44.1, 48, 88.2, 96, 176.4 and 192 kHz
+(1,944 rows, a 5 ms burst then 30 s), then FEEDBACK 92–96.9 % in ten steps at
+AMOUNT 60/100 (1,440 rows). A row fails if anything after the reported tail
+passes −60 dB of the burst, or if Crush's last second is louder than the same
+loop without FX (Crush can only remove energy, so anything louder is Crush
+holding it).
 
-A −18 dBFS RMS 1 kHz sine, 20 s, unchanged by any of the fixes:
+| shift (steps) | 0 (truncate) | 0.10 | 0.25 | 0.30 | **0.35** | 0.40 | 0.50 |
+|---|---|---|---|---|---|---|---|
+| AMOUNT 60/100 rows still cycling | 23 | 6 | 1 | 1 | **0** | 0 | 0 |
+
+0.30 left one, at 176.4 kHz on bucket-brigade (AMOUNT 60, TIME 20 ms, 96.9 %).
+
+One pass on a 300 Hz sine, output RMS against input, dB:
+
+| AMOUNT | sine | truncate (round 1) | **dead zone 0.35 (built)** |
+|---|---|---|---|
+| 35 | 0.5 | −0.01 | −0.01 |
+| 35 | 0.125 | −0.04 | −0.05 |
+| 60 | 0.5 | −0.11 | −0.11 |
+| 60 | 0.125 | −0.43 | −0.43 |
+| 100 | 0.5 | −3.98 | −6.99 |
+| 100 | 0.125 | silent | silent |
+
+### What the dead zone does not reach: the hold (for Frosty)
+
+The required grid includes AMOUNT 35, and there, and off the grid at AMOUNT 70
+and 80, loops still do not end — **and no dead zone changes that** (truncation,
+0.10, 0.25, 0.5 and zeroing below 1.5 or 2 steps were all tried). These loops
+**grow above their input**: peaks of 0.046 to 0.767 from a 0.5 burst, from
+FEEDBACK 90 %. The cause is the sample-and-hold. Phase-locked to a tone it
+turns a sine into a square whose fundamental is up to 4/π of the sine's, so
+the stage is not energy-bounded. With the dead zone built, 56 rows cycle (29 at
+AMOUNT 35, 21 at 70, 6 at 80; 44.1 kHz most, also 88.2, 96, 176.4, 192), and
+one more is late (44.1 kHz, bucket-brigade, AMOUNT 35, TIME 50 ms, FEEDBACK 85 %:
+−49 dB after the 1.66 s tail, zero by 2.48 s).
+
+**A non-expanding hold ends all of them.** Holding the mean of the last N
+samples instead of the last sample cannot add energy (`N·mean² ≤ Σx²`). In the
+same checks, with plain truncation and **no dead zone**, it left 0 cycles and 0
+late rows on the 1,944-row grid and on 2,160 off-grid rows (AMOUNT 70/80/90,
+TIME 10/30/200/1000 ms, FEEDBACK 92–96.9 %), at all six rates; with the 0.35
+dead zone as well, also 0. One pass, dB, at 0.5 / 0.125: AMOUNT 35 −0.09 /
+−0.12; AMOUNT 60 −0.32 / −0.54; AMOUNT 100 −3.98 / silent (without the dead
+zone). It averages away some top end, so it changes what Crush does. Not built.
+
+### The tail counts the build-up of a held note (Frosty's decision)
+
+`lapsToSixtyDb` counts `ceil((60 + B) / −20 log10 g)`, `B = −20 log10 (1 − g)`,
+per frequency, bounded at 120 dB. One second of a tone in phase with the loop,
+clean, 48 kHz — reported → measured, before → after:
+
+| TIME / FEEDBACK | before | after |
+|---|---|---|
+| 375 ms / 60 % | 3.391 → rang 3.750 | 3.762 |
+| 250 ms / 80 % | 5.753 → rang 6.250 | 6.755 |
+| 100 ms / 90 % | 5.803 → rang 6.101 | 7.604 |
+
+The same rows at 44.1 and 96 kHz and on bucket-brigade failed before and pass
+now; tape passed both times. Figures that moved: the defaults 1.884 → 1.888 s,
+TIME 2000 and SYNC on 10.009 → 10.013 s, the held THROW at −40 % 2.258 →
+2.503 s (9 laps → 10).
+
+### The other items
+
+- FEEDBACK, DRIVE (both smoothers) and LANE LEVEL land exactly on their targets:
+  they stalled up to 3.9e-5 off at 44.1 kHz, 4.3e-5 at 48 and 1.7e-4 at 192
+  (LANE LEVEL up to 2.29e-4). 21 renders where no parameter moves hash the same
+  before and after.
+- After `reset`, MIX 100 → 0 gave out[0] 0.00052 and out[511] 0.20668 on a 0.5
+  input; now the block is the input.
+- **Correction:** the first round said every steady-state row was unchanged by
+  the MIX fix. That holds **only where MIX never moves**; the review measured
+  that after a MIX move the settled output differs by up to 1.45e-5, because
+  the gains now land exactly where they used to stall.
+- Test gaps closed: the clean later-tempo check is exact; no tail row sits at
+  the 30 s ceiling; the adapter and engine tail checks compare against figures;
+  the tail rows also run at 44.1 and 96 kHz; the state round-trip checks each
+  id once; a rack case fails without the first-tempo landing.
+- docs/delay/15 dates the voicing pull-back 2026-09-22.
+- The output level (below) is reviewed and left, by decision.
+
+## S1, output level — reviewed and left (Frosty, 2026-10-01)
+
+A −18 dBFS RMS 1 kHz sine, 20 s (probe, after the first round):
 
 | settings | peak | RMS, last 2 s |
 |---|---|---|
@@ -120,7 +204,8 @@ A −18 dBFS RMS 1 kHz sine, 20 s, unchanged by any of the fixes:
 | the same at LANE LEVEL +24 | +24.9 dBFS | +23.3 dBFS |
 
 The +6.7 is three signals each bounded near unity by their own in-loop clip
-(the dry, the main delay self-oscillating, the lane building) added together.
+(the dry, the main delay self-oscillating, the lane building) added together,
+and nothing limits their sum. No gain or limiter change, by decision.
 
 ## Smaller items
 

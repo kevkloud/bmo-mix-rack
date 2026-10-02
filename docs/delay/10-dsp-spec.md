@@ -871,15 +871,24 @@ Candidates — list and order free until ship (11 §3):
   level: up to one step a pass rather than half of one either way (−3.98 dB on a
   0.5 sine at AMOUNT 100, where rounding gave 0.00).
 
-  **One cycle survives truncation, and it is the lap's, not the quantiser's.** At
-  FEEDBACK 95 % and above, AMOUNT 100, a held ±0.25 step comes back through the
-  lap's filters with a few per cent of overshoot — bucket-brigade's Butterworth
-  pair, or clean's high-passes — and re-crosses the step it left, so a one-step
-  square wave circulates for good. Measured on AURORA at 44.1 kHz (bucket-brigade
-  from FEEDBACK 95 %, clean at 96.9 %, peak about 0.24) and at 96 kHz
-  (bucket-brigade, 96.9 %, AMOUNT 60); none at 48 kHz. A dead zone of half a step
-  (`|q| ≤ |x| − step/2`) ends every one of them below unity, at a further cost
-  (−6.99 dB a pass at AMOUNT 100 on a 0.5 sine). Not built: Frosty decides.
+  **And a dead zone of 0.35 of a step** (DECIDED, Frosty 2026-10-01): a held
+  value keeps `floor(|x|/step − 0.35)` steps. Truncation alone left a one-step
+  cycle from FEEDBACK 92 %: a held ±0.25 step came back through the lap's
+  filters with a few per cent of overshoot and re-crossed its step (44.1 kHz,
+  bucket-brigade, AMOUNT 100, TIME 50 ms: a 0.2245 peak held from 9 s to 30 s
+  against a 4.16 s tail). 0.35 is the smallest shift that ended every such
+  cycle at AMOUNT 60 and 100 over every character, TIME 20–375 ms, FEEDBACK
+  80–96.9 % and 44.1–192 kHz (0.30 left one). It costs −6.99 dB a pass at
+  AMOUNT 100 on a 0.5 sine, where truncation cost −3.98.
+
+  **The sample-and-hold is not energy-bounded, and no dead zone reaches that**
+  (measured, open, Frosty's call). Phase-locked to a tone, the hold turns a sine
+  into a square whose fundamental is up to 4/π of the sine's, and from about
+  FEEDBACK 90 % a loop can grow to a steady peak above its input — up to 0.767
+  from a 0.5 burst at AMOUNT 35, 44.1 kHz; also at AMOUNT 70 and 80. Holding the
+  mean of the last N samples instead (`N·mean² ≤ Σx²`) ended every one in the
+  same checks, with or without the dead zone; the figures are in
+  `testing-notes/dwell-review-fixes-2026-10-01.md`. Not built.
 > **Octave up, Octave down and Reverse were CUT on 2026-09-21** (Frosty; see
 > `15`). The octaves compound in a feedback loop — pitch moves ±12k semitones, so
 > three repeats is three octaves and the content leaves the band — and Reverse was
@@ -947,7 +956,7 @@ unexplained — 11 §4k flags it, and it must not be quoted as "Crush is free".
 | FX stage position | after mode filters, before DC blocker; skipped when off; **one stage per engine**, no shared state | DECISION |
 | FX loop bound | `\|F\| ≤ 1` for every candidate, normalised in closed form | DECISION |
 | Diffuse | 6-stage allpass, 7–37 ms × AMOUNT | CALIBRATE; 00 §1 |
-| Crush | 16→3 bits **truncated toward zero**, hold ÷1–32; exempt from the alias floor | CALIBRATE / DECISION (truncation: Frosty to confirm) |
+| Crush | 16→3 bits, **truncated toward zero with a 0.35-step dead zone**, hold ÷1–32; exempt from the alias floor | CALIBRATE / DECIDED (Frosty, 2026-10-01: the dead zone); the hold is open |
 | Pan / Tremolo | stepped once per repeat; AMOUNT is depth | CALIBRATE |
 | FX types | Diffuse, Pan/Tremolo, Crush — **three**; Sweep cut because VOICE was | DECIDED (Frosty, 2026-09-22) |
 | Voicing | **Shared**: `character`, `stereo`, the cuts, the modulation and `drive` govern both engines; DUCK is main-only | DECIDED (Frosty, 2026-09-23) |

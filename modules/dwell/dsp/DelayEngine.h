@@ -400,6 +400,14 @@ public:
     static constexpr double kCrushBitsSpan = 13.0;
     static constexpr double kCrushHoldSpan = 31.0;
 
+    /** **Crush's dead zone, in steps** (DECIDED, Frosty 2026-10-01): a held
+        value keeps `floor(|x| / step - 0.35)` steps, so it has to clear the
+        step it lands on by 0.35 of one to keep it. See `crush` for why, and
+        `testing-notes/dwell-review-fixes-2026-10-01.md` for the measurement
+        that chose 0.35 -- the smallest shift that ended every one-step cycle
+        on the grid it was asked to (0.30 left one, at 176.4 kHz). */
+    static constexpr double kCrushDeadZoneSteps = 0.35;
+
     /** How far the stepped LFO turns per repeat (CALIBRATE).
 
         §11a asks for "one LFO stepped at the delay period, so each repeat gets
@@ -632,13 +640,25 @@ private:
         AMOUNT 100, 0.1 dB at AMOUNT 60 -- and a signal under one step is gone
         on its first crushed lap.
 
-        **One cycle survives truncation, and it is the lap's rather than the
-        quantiser's**: at FEEDBACK 95 % and above with AMOUNT 100, a held
+        **Truncation alone left a one-step limit cycle, so there is a dead
+        zone** (DECIDED, Frosty 2026-10-01). From FEEDBACK 92 % up, a held
         +-0.25 step comes back through the lap's filters with a few per cent of
         overshoot and re-crosses the step it left, so a one-step square wave
-        circulates for good (measured on AURORA at 44.1 and 96 kHz, not at 48).
-        A dead zone of half a step would end it at a further cost in level;
-        that is Frosty's call and is not built.
+        circulated for good -- measured on AURORA at 44.1 kHz on bucket-brigade
+        at AMOUNT 100 (peak 0.2245 at FEEDBACK 92 %, against a 4.16 s tail),
+        on clean at 96.9 %, and at 96-192 kHz at AMOUNT 60. A held value now
+        keeps `floor(|x| / step - kCrushDeadZoneSteps)` steps: it must clear
+        its step by 0.35 of one, which the overshoot does not supply. It costs
+        level -- 7.0 dB a pass on a 0.5 sine at AMOUNT 100, where truncation
+        cost 4.0 -- and is still `|q| <= |x|`.
+
+        **What the dead zone does not reach** (measured, not built): the
+        sample-and-hold itself is not energy-bounded. Phase-locked to a tone
+        it turns a sine into a square whose fundamental is up to 4/pi of the
+        sine's, and at FEEDBACK above about 85 % that can grow a loop to a
+        steady peak above its input -- 0.77 at 44.1 kHz on bucket-brigade at
+        AMOUNT 35. That is a choice about the hold, Frosty's, and recorded in
+        the testing note with the option measured.
 
         The clamp to +-1 stays: a loud lap can still hand this stage more than
         full scale, and the shaper and clip come after it. */
@@ -656,7 +676,8 @@ private:
 
         const auto bits = kCrushBitsAtZero - amount * kCrushBitsSpan;
         const auto step = std::exp2 (1.0 - bits);
-        const auto q = std::trunc (held[ch] / step) * step;
+        const auto steps = std::max (0.0, std::floor (std::abs (held[ch]) / step - kCrushDeadZoneSteps));
+        const auto q = held[ch] < 0.0 ? -steps * step : steps * step;
 
         return std::clamp (q, -1.0, 1.0);
     }

@@ -4445,6 +4445,79 @@ void testDuckAutomationIsBlockSizeInvariant()
     }
 }
 
+/** **Crush ends in exact zeros at every rate, not just 48 kHz** (10 §11a).
+
+    Truncation alone left a one-step limit cycle: a held step comes back
+    through the lap's filters with a few per cent of overshoot and re-crosses
+    the step it left. Reproduced on AURORA, 2026-10-01: at 44.1 kHz on
+    bucket-brigade, AMOUNT 100 and TIME 50 ms, FEEDBACK 92 % held a 0.2245 peak
+    from 9 s to 30 s against a 4.16 s reported tail; clean at 96.9 % held
+    0.2440; at 96 kHz bucket-brigade at AMOUNT 60 held 0.0410.
+
+    A 5 ms burst, then 30 s -- the ceiling -- of silence: nothing after the
+    reported tail may exceed -60 dB of the burst's peak, and the last second
+    must be exact zeros. */
+void testCrushEndsInZerosAtEveryRate()
+{
+    struct Row { double rate; int character; float amount, timeMs, feedback; };
+
+    const Row rows[]
+    {
+        // The reproduced rows.
+        { 44100.0, 2, 100.0f,  50.0f, 92.0f }, { 44100.0, 2, 100.0f,  50.0f, 95.0f },
+        { 44100.0, 2, 100.0f, 100.0f, 95.0f }, { 44100.0, 0, 100.0f,  50.0f, 96.9f },
+        { 96000.0, 2,  60.0f, 100.0f, 96.9f },
+        // And every character at both rates, at the onset and the top.
+        { 44100.0, 0, 100.0f,  50.0f, 92.0f }, { 44100.0, 1, 100.0f,  50.0f, 96.9f },
+        { 96000.0, 0, 100.0f,  50.0f, 96.9f }, { 96000.0, 1,  60.0f, 100.0f, 96.9f },
+        { 96000.0, 2, 100.0f,  20.0f, 94.0f },
+    };
+
+    for (const auto& r : rows)
+    {
+        auto v = settings (r.character, r.timeMs, r.feedback, 100.0f);
+        v[P::Index::fx]       = 1.0f;
+        v[P::Index::fxType]   = 2.0f;   // Crush
+        v[P::Index::fxAmount] = r.amount;
+
+        const auto tail = P::tailSecondsFor (v.data(), (int) v.size());
+
+        P::DwellDsp dsp;
+        dsp.prepare (r.rate, 512, 2);
+
+        const auto burst = (int) (0.005 * r.rate);
+        const auto n = (int) (30.0 * r.rate);
+        Block block { n };
+
+        for (int i = 0; i < burst; ++i)
+        {
+            const auto w = 0.5 - 0.5 * std::cos (2.0 * P::kPiD * (double) i / (double) (burst - 1));
+            block.left[(size_t) i] = block.right[(size_t) i]
+                = (float) (0.5 * w * std::sin (2.0 * P::kPiD * 300.0 * (double) i / r.rate));
+        }
+
+        renderAsHost (dsp, v, block, n, 512, [] (int) {});
+
+        const auto afterTail = burst + (int) (tail * r.rate);
+        const auto late = std::max (peakOf (block.left, afterTail, n - afterTail),
+                                    peakOf (block.right, afterTail, n - afterTail));
+
+        auto zeros = true;
+
+        for (int i = n - (int) r.rate; i < n; ++i)
+            zeros = zeros && block.left[(size_t) i] == 0.0f && block.right[(size_t) i] == 0.0f;
+
+        char buf[220];
+        std::snprintf (buf, sizeof (buf),
+                       "Crush at %.1f kHz on %s, AMOUNT %.0f, TIME %.0f ms, FEEDBACK %.1f: peak after the "
+                       "%.2f s tail %.4f, last second exact zeros %d",
+                       r.rate / 1000.0, characterName (r.character), (double) r.amount, (double) r.timeMs,
+                       (double) r.feedback, tail, (double) late, (int) zeros);
+
+        check (zeros && late <= 0.5e-3f, buf);
+    }
+}
+
 } // namespace
 
 //==============================================================================
@@ -4508,6 +4581,7 @@ int main()
     testCrushInTheLoopDecaysToSilence();
     testTheReportedTailIsNeverShorterThanTheDecay();
     testDuckAutomationIsBlockSizeInvariant();
+    testCrushEndsInZerosAtEveryRate();
 
     std::printf ("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

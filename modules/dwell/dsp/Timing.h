@@ -322,11 +322,18 @@ inline double engineTailSeconds (double seconds, double g, int character,
     `testing-notes/dwell-review-fixes-2026-10-01.md`:
 
     - a loop past 30 s rings past the ceiling, which stands by decision;
-    - bucket-brigade at a fractional-sample delay, driven by a one-sample
-      impulse, has rung past it (up to 17 % at 44.1 kHz before the build-up
-      term), because the compander's two rings are interpolated separately and
-      a one-sample transient does not hold the gain constant across the taps;
-      bursts of 5 and 50 ms and held tones stay inside.
+    - **bucket-brigade at a fractional-sample delay, driven by a one-sample
+      impulse, rings past it** -- re-measured 2026-10-01 against the figure
+      as it now stands (build-up counted, the first lap not charged the FX
+      delay): at 44.1 kHz, TIME 1, 5 and 375 ms (44.1, 220.5 and 16537.5
+      samples), 12 rows of 14,952 rendered, by +0.3 % and +1.1 % with FX off
+      (FEEDBACK 60 and 35 %, TIME 375 ms), by +14 % to +26 % with Diffuse 60
+      and +17 % to +34 % with Diffuse 100 at TIME 1 and 5 ms (the worst:
+      Diffuse 100, FEEDBACK 35 %, TIME 5 ms, 3.873 s against 2.895). The
+      compander's two rings are interpolated separately, and a one-sample
+      transient does not hold the gain constant across the taps; the same
+      rows' 5 and 50 ms bursts, held tones, whole-sample times and every
+      other character stay inside. Left for Frosty; not fixed.
 
     Crush is no longer an exception: with its hold holding each block's mean
     (2026-10-01) no in-loop effect holds a level under unity FEEDBACK, and

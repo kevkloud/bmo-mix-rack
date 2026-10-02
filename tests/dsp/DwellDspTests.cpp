@@ -5443,58 +5443,81 @@ void testTwoEnginesRingingTogetherCountDownFurther()
 // measured on AURORA on the default bucket-brigade patch at 44.1 kHz.
 //==============================================================================
 
-/** **The bound an expanded read cannot cross.**
+/** **The bound an expanded read cannot cross, per read path** (sixth round:
+    a bound loose enough that a doubled output passed is no bound).
 
-    After the fix every tap is divided by its own gain before the kernel sums
-    them, so the read is an interpolation of what was written, `v = u + g .
-    tanh(...)`: `|v| <= |u| + g` with `g < 1` under 100 % FEEDBACK. An
-    interpolation of values no larger than `V` is no larger than `V` times its
-    kernel's absolute sum -- 1.25 for the 4-point Hermite (exact, at phase
-    1/2), and for the sinc whatever the built table says, measured here so the
-    bound follows `BMO_DWELL_SINC_TAPS` (2.21 at 24 taps). So with noise at
-    0.3, `K (0.3 + 1)` per engine at MIX 100, and twice that with the lane
-    summed in at LANE LEVEL 0 dB. Before the fix the same rows reached 5.5e5. */
-double expandedReadBound (double inputPeak)
+    After the fourth round every tap is divided by its own gain before the
+    kernel sums them, so the read is an interpolation of what was written,
+    `v = u + g . tanh(...)`, `|v| <= |u| + g`. An interpolation of values no
+    larger than `V` is no larger than `V` times its kernel's absolute sum **at
+    the phase it reads at**: for the 4-point Hermite `sum |k(f)|`, 1 at a whole
+    sample and 1.25 at a half; for the sinc whatever the built table gives,
+    1 at a whole sample and 2.21 at a half at 24 taps. A read whose phase moves
+    -- tape's floor, MOD, a TIME glide -- takes the path's worst phase. So the
+    bound is `K (U + g)` with the input's own peak `U` and the loop's actual
+    gain `g`: at FEEDBACK 0 on a whole-sample read it is the input itself, and
+    an output twice too loud fails. */
+double kernelAbsSum (bool sinc, double phase)
 {
+    if (! sinc)
+    {
+        const auto f = phase;
+        return std::abs (-0.5 * f + f * f - 0.5 * f * f * f) + std::abs (1.0 - 2.5 * f * f + 1.5 * f * f * f)
+             + std::abs (0.5 * f + 2.0 * f * f - 1.5 * f * f * f) + std::abs (-0.5 * f * f + 0.5 * f * f * f);
+    }
+
     P::DelayEngine::Sinc table;
     table.build (1.0, 8.0);
 
-    auto sincSum = 0.0;
+    auto sum = 0.0;
 
-    for (int p = 0; p <= 64; ++p)
+    for (int j = 0; j < 64; ++j)
     {
-        auto sum = 0.0;
-
-        for (int j = 0; j < 64; ++j)
-        {
-            float probe[64] {};
-            probe[j] = 1.0f;
-            sum += std::abs ((double) table.read (probe, 63, 32.0 + (double) p / 64.0));
-        }
-
-        sincSum = std::max (sincSum, sum);
+        float probe[64] {};
+        probe[j] = 1.0f;
+        sum += std::abs ((double) table.read (probe, 63, 32.0 + phase));
     }
 
-    return std::max (1.25, sincSum) * (inputPeak + 1.0);
+    return sum;
+}
+
+double readKernelBound (int character, double rate, float timeMs, bool phaseMoves)
+{
+    const auto delay = (double) timeMs * 0.001 * rate;
+    const auto sinc = character == 0 && delay >= (double) P::DelayEngine::kSincFloor;
+
+    if (phaseMoves || character == 1)
+    {
+        auto worst = 0.0;
+        for (int p = 0; p <= 64; ++p)
+            worst = std::max (worst, kernelAbsSum (sinc, (double) p / 64.0));
+        return worst;
+    }
+
+    // The read sits at `write - delay`, so its phase is the delay's
+    // fractional part taken from the other side.
+    const auto phase = std::ceil (delay) - delay;
+    return kernelAbsSum (sinc, phase >= 1.0 ? 0.0 : phase);
 }
 
 enum class Event { prepare, reset, move };
 
-struct EventPeak { float peak = 0.0f; bool finite = true; };
+struct EventPeak { float peak = 0.0f; bool finite = true; float inputPeak = 0.0f; double mainGain = 0.0, laneGain = 0.0; };
 
-/** Noise at 0.3 into the module, MIX 100, FEEDBACK 60, and the output peak
-    from the event on. `prepare` is the event at sample 0; `reset` and a
-    CHARACTER `move` happen 0.6 s in, on a block boundary, where a host makes
-    them. `signalBefore` false keeps the input silent until the event, so the
-    ring on the old side of the boundary is companded silence. */
+/** Noise at 0.3 into the module, MIX 100, FEEDBACK `feedback`, and the output
+    peak from the event on, with the input's own peak and both engines' loop
+    gains. `prepare` is the event at sample 0; `reset` and a CHARACTER `move`
+    happen 0.6 s in, on a block boundary, where a host makes them.
+    `signalBefore` false keeps the input silent until the event, so the ring
+    on the old side of the boundary is companded silence. */
 template <typename Tweak>
 EventPeak peakAroundAnEvent (double rate, float timeMs, int from, int to, Event event, bool signalBefore,
-                             Tweak&& tweak)
+                             Tweak&& tweak, float feedback = 60.0f)
 {
     P::DwellDsp dsp;
     dsp.prepare (rate, 512, 2);
 
-    auto v = settings (from, timeMs, 60.0f, 100.0f);
+    auto v = settings (from, timeMs, feedback, 100.0f);
 
     const auto at = event == Event::prepare ? 0 : (int) (0.6 * rate) / 512 * 512;
     const auto n  = at + (int) (((double) timeMs / 1000.0 + 0.3) * rate);
@@ -5517,6 +5540,9 @@ EventPeak peakAroundAnEvent (double rate, float timeMs, int from, int to, Event 
     });
 
     EventPeak result;
+    result.inputPeak = 0.3f;   // |0.3 . next()| < 0.3: the noise's own bound
+    result.mainGain = (double) dsp.getCore().getMainEngine().smoothedFeedbackGain();
+    result.laneGain = (double) dsp.getCore().getLaneEngine().smoothedFeedbackGain();
 
     for (int i = at; i < n; ++i)
     {
@@ -5541,11 +5567,10 @@ EventPeak peakAroundAnEvent (double rate, float timeMs, int from, int to, Event 
     that boundary), MOD on a whole-sample TIME, TIME moved while the boundary
     is in flight, and the lane, which is the same engine and is reset by HOLD.
     44.1 kHz at TIME 375 and 48 kHz at TIME 375.3 are fractional reads.
-    The bound is `expandedReadBound`'s; every sample must also be finite. */
+    The bound is `readKernelBound`'s per row, summed over the two engines when
+    the lane is in; every sample must also be finite. */
 void testABucketBrigadeBoundaryNeverSpikes()
 {
-    const auto bound = expandedReadBound (0.3);
-
     struct Case { const char* what; double rate; float timeMs; int from, to; Event event; bool before; int extra; };
 
     // extra: 0 nothing, 1 MOD 50, 2 TIME to 600 ms after four blocks, 3 the lane
@@ -5593,10 +5618,17 @@ void testABucketBrigadeBoundaryNeverSpikes()
             }
         });
 
-        const auto limit = extra == 3 ? 2.0 * bound : bound;
+        const auto phaseMoves = extra == 1 || extra == 2;
+        const auto u = (double) result.inputPeak;
+        auto limit = readKernelBound (c.to, c.rate, c.timeMs, phaseMoves) * (u + result.mainGain);
+
+        if (extra == 3)
+            limit += readKernelBound (c.to, c.rate, 375.3f, false) * (u + result.laneGain);
+
+        limit = limit * (1.0 + 1.0e-6) + 1.0e-6;
 
         char buf[220];
-        std::snprintf (buf, sizeof (buf), "%s, %.1f kHz, TIME %.1f: output peak %.4g against a bound of %.2f, all finite %s",
+        std::snprintf (buf, sizeof (buf), "%s, %.1f kHz, TIME %.1f: output peak %.4g against a bound of %.3f, all finite %s",
                        c.what, c.rate / 1000.0, (double) c.timeMs, (double) result.peak, limit,
                        result.finite ? "yes" : "no");
 
@@ -5609,21 +5641,23 @@ void testABucketBrigadeBoundaryNeverSpikes()
     Every character after `prepare` and after `reset`, and every one of the
     six CHARACTER moves, at 44.1, 48 and 96 kHz, at TIME 375 (fractional at
     44.1 kHz, whole at 48 and 96) and 375.3 (fractional at all three), with
-    noise at 0.3 either present throughout or starting at the event: 144 rows
-    (126 distinct -- at `prepare` the two inputs are the same render), each
-    held to `expandedReadBound` and to every sample finite, in about 1.7 s on
-    AURORA. Clean and tape are in it because a move off bucket-brigade leaves
+    noise at 0.3 either present throughout or starting at the event, at
+    FEEDBACK 0 and 60 %: 288 rows (252 distinct -- at `prepare` the two inputs
+    are the same render), each held to its read path's `readKernelBound` with
+    the loop's actual gain, and to every sample finite. FEEDBACK 0 is what
+    makes the bound tight -- on a whole-sample read it is the input's own
+    peak. Clean and tape are in it because a move off bucket-brigade leaves
     them reading its ring; on their own they never came near the bound. On
     05572c7 25 rows failed, every one a fractional read across a boundary
     between 1.0 and a companded gain, worst 6.3e5. */
 void testNoEventSpikesTheOutputOnAnyCharacter()
 {
-    const auto bound = expandedReadBound (0.3);
     const auto started = std::chrono::steady_clock::now();
 
     int rows = 0, failed = 0;
-    auto worst = 0.0f;
+    auto worst = 0.0;
 
+    for (const auto feedback : { 0.0f, 60.0f })
     for (const auto rate : { 44100.0, 48000.0, 96000.0 })
         for (const auto timeMs : { 375.0f, 375.3f })
             for (const auto before : { true, false })
@@ -5635,30 +5669,32 @@ void testNoEventSpikesTheOutputOnAnyCharacter()
                                 continue;
 
                             const auto result = peakAroundAnEvent (rate, timeMs, a, b, event, before,
-                                                                   [] (std::vector<float>&, int, int) {});
+                                                                   [] (std::vector<float>&, int, int) {}, feedback);
+                            const auto bound = readKernelBound (b, rate, timeMs, false)
+                                                 * ((double) result.inputPeak + result.mainGain) * (1.0 + 1.0e-6) + 1.0e-6;
                             ++rows;
-                            worst = std::max (worst, result.peak);
+                            worst = std::max (worst, (double) result.peak / bound);
 
                             if (result.finite && result.peak <= bound)
                                 continue;
 
                             ++failed;
 
-                            char buf[220];
+                            char buf[240];
                             std::snprintf (buf, sizeof (buf),
-                                           "%s%s%s at %.1f kHz, TIME %.1f, noise %s: output peak %.4g against %.2f, finite %s",
+                                           "%s%s%s at %.1f kHz, TIME %.1f, FEEDBACK %.0f, noise %s: output peak %.4g against %.3f, finite %s",
                                            event == Event::prepare ? "prepare on " : (event == Event::reset ? "reset on " : ""),
                                            characterName (a),
                                            event == Event::move ? (std::string (" to ") + characterName (b)).c_str() : "",
-                                           rate / 1000.0, (double) timeMs, before ? "throughout" : "from the event",
+                                           rate / 1000.0, (double) timeMs, (double) feedback, before ? "throughout" : "from the event",
                                            (double) result.peak, bound, result.finite ? "yes" : "no");
                             check (false, buf);
                         }
 
     char buf[200];
-    std::snprintf (buf, sizeof (buf), "no event spikes the output: %d rows, %d over the bound of %.2f, worst peak %.4f",
-                   rows, failed, bound, (double) worst);
-    check (rows == 144 && failed == 0, buf);
+    std::snprintf (buf, sizeof (buf), "no event spikes the output: %d rows, %d over their bounds, worst at %.3f of its bound",
+                   rows, failed, worst);
+    check (rows == 288 && failed == 0, buf);
 
     std::printf ("      the event-spike property ran %d rows in %.1f s\n", rows,
                  std::chrono::duration<double> (std::chrono::steady_clock::now() - started).count());

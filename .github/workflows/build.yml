@@ -7,7 +7,15 @@ on:
     paths-ignore: ['**.md']
   pull_request:
     paths-ignore: ['**.md']
+  # By hand, on any branch. Ticking "lto" builds that commit the way a release
+  # tag would, which is how a main build is checked against the release build
+  # of the same source: compare the two runs' Audio fingerprint steps.
   workflow_dispatch:
+    inputs:
+      lto:
+        description: 'Link-time optimise the plugins, as a release tag does'
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -67,7 +75,28 @@ jobs:
     # BMO-Windows package for that commit. A timeout is there to stop a hung
     # job, not to race a healthy one, so it sits well clear of the longest
     # honest run. macOS finishes in 10 to 17 minutes and is unaffected.
-    timeout-minutes: 90
+    #
+    # 150 for a link-time-optimised run. Those are now rare and start with the
+    # plugin targets' own files cold (see the cache step), and how long that
+    # takes has NOT been measured: the longest measured Windows Build step with
+    # link-time optimisation is 55 minutes, at 90 % cache hits or better. A
+    # release that times out is worse than a slow one, so the margin is wide.
+    # Bring it down once a tag has been built and timed.
+    timeout-minutes: ${{ (startsWith(github.ref, 'refs/tags/') || inputs.lto) && 150 || 90 }}
+    # Link-time optimisation is for what someone downloads, so release tags
+    # only -- and a run started by hand that asks for it. Measured on
+    # 2026-10-01, one commit built both ways at the same 90.6 % compiler-cache
+    # hit rate: the Windows Build step took 53.4 minutes with it and 22.3
+    # without, because every plugin link regenerates that plugin's code where
+    # no cache can help. With a warm cache and without it, the step took 14.4
+    # minutes, and macOS 1.5. So pull requests and main skip it. What they
+    # package is therefore not bit-for-bit the release build, and the Audio
+    # fingerprint step below is how the two are shown to make the same samples:
+    # on that commit they did, on both platforms
+    # (testing-notes/lto-null-2026-10-01.md).
+    # See the BMO_LTO option in CMakeLists.txt and tools/fingerprint/README.md.
+    env:
+      BMO_LTO: ${{ (startsWith(github.ref, 'refs/tags/') || inputs.lto) && 'ON' || 'OFF' }}
     strategy:
       fail-fast: false
       matrix:
@@ -148,12 +177,18 @@ jobs:
       # worth at most the gap between a 77 % and a 97 % hit rate -- and the
       # Build step took 36 to 49 minutes at 97 % either way, because most of
       # it is link-time work no compiler cache can serve.
+      #
+      # And only a push that built without link-time optimisation, which is a
+      # push to main. A tag or a hand-started run restores main's cache too --
+      # the modules, tests and tools compile the same either way and are
+      # served from it; only the plugin targets' own files differ -- but a
+      # cache it saved would sit under a ref nothing else can read from.
       - name: Compiler cache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
           key: ${{ matrix.name }}
           max-size: 1200M
-          save: ${{ github.event_name != 'pull_request' }}
+          save: ${{ github.event_name == 'push' && env.BMO_LTO == 'OFF' }}
 
       - name: Configure
         shell: bash
@@ -170,6 +205,7 @@ jobs:
               args+=(-DCMAKE_OSX_ARCHITECTURES="arm64")
             fi
           fi
+          args+=(-DBMO_LTO="$BMO_LTO")
           cmake "${args[@]}"
 
       - name: Build
@@ -200,3 +236,24 @@ jobs:
         with:
           name: BMO-${{ matrix.name }}
           path: out/
+
+      # One hash per product of the audio it makes from a fixed input, loaded
+      # as a host loads it. Two runs of one commit on one platform that print
+      # the same last line built plugins that make the same samples, whether
+      # or not either was link-time optimised. It fails only if a plugin does
+      # not load or does not repeat itself; no hash is expected, because every
+      # DSP change moves them on purpose. It comes after the upload, so a
+      # failure here marks the run without withholding the build. See
+      # tools/fingerprint/README.md.
+      - name: Audio fingerprint
+        shell: bash
+        run: |
+          echo "BMO_LTO=$BMO_LTO" | tee fingerprint.txt
+          build/tools/audio_fingerprint build | tee -a fingerprint.txt
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: BMO-${{ matrix.name }}-fingerprint
+          path: fingerprint.txt
+          if-no-files-found: ignore

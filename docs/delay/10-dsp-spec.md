@@ -388,13 +388,17 @@ only like `latencyForParams`, clamped to [0.5 s, 30 s], the clamp reported at
 `g ≥ 1`. As built from 2026-10-01 (`modules/dwell/dsp/Timing.h`; the review of
 PR #35, measured on AURORA):
 
-`tail = max over ω of ceil((60 + B(ω)) / −20·log10 g(ω)) · (T + τ(ω) + τ_FX)`,
-`g(ω) = g·|H_ref(ω)| / P`, `B(ω) = −20·log10(1 − g(ω))`
+`tail = max over ω of L(ω)·(T + τ(ω)) + (L(ω) − 1)·τ_FX`,
+`L(ω) = ceil((60 + B(ω)) / −20·log10 g(ω))`, `g(ω) = g·|H_ref(ω)| / P`,
+`B(ω) = −20·log10(1 − g(ω))`
 
 — at each frequency, the laps the loop needs to fall from the most a held input
 can build it up to (`1/(1 − g)` of that input, every repeat landing in phase on
 the next) down to −60 dB under the input, times the lap it actually takes: TIME
-plus the loop filters' group delay `τ(ω)`, plus what an in-loop FX adds (§11a).
+plus the loop filters' group delay `τ(ω)`, plus what an in-loop FX adds (§11a) —
+on every lap but the first, which is tapped before the loop's effects and has
+never been through them (from 2026-10-01; it had been charged one FX delay too
+many, 0.71 s at Diffuse 100).
 `H_ref` is the chain §3 defines `P_c` against (the cuts on their rails, so a
 user's cut gets no credit for the loss it adds) in analog closed form, `P` its
 peak, and `τ` the larger of that chain's delay and the chain's as set. **What the
@@ -853,8 +857,9 @@ Candidates — list and order free until ship (11 §3):
   delays 7–37 ms scaled by AMOUNT. Unit magnitude at every ω, so `|F| = 1`
   exactly; smear accumulates over k passes into a pseudo-reverb. ~12
   MACs/sample/channel, ≤ 32 kB per channel at 192 kHz.
-- **Crush** — quantise to `b = 16 − AMOUNT·13` bits and sample-and-hold at
-  `f_s/⌈1 + AMOUNT·31⌉`; both ≤ unity, both compounding each lap. **Deliberate
+- **Crush** — quantise to `b = 16 − AMOUNT·13` bits and hold every
+  `⌈1 + AMOUNT·31⌉` samples (the mean of the block, from 2026-10-01 — below);
+  both non-expanding, both compounding each lap. **Deliberate
   aliasing.** The hold's images are made *inside* the loop and meet §4's 18 kHz cap
   on the *next* lap, so the cap tames them one repeat late instead of preventing
   them — musical and bounded, and always ahead of the shaper. Crush is therefore
@@ -862,33 +867,31 @@ Candidates — list and order free until ship (11 §3):
   acceptance is only that the non-harmonic floor stops growing by repeat 10.
   Negligible cost and memory.
 
-  **The quantiser truncates toward zero** (2026-10-01, the review of PR #35;
-  Frosty to confirm). "Quantise" read as round-to-nearest is *expanding* — at 3
-  bits a 0.13 becomes 0.25 — and above about 60 % FEEDBACK the loop held a limit
-  cycle: measured on AURORA, still −7.1 dB under the first repeat forty seconds
-  after a burst at AMOUNT 100 and FEEDBACK 80, and −81 dB for good at AMOUNT 0.
-  Truncation keeps `|q| ≤ |x|`, and those tails now end in exact zeros. It costs
-  level: up to one step a pass rather than half of one either way (−3.98 dB on a
-  0.5 sine at AMOUNT 100, where rounding gave 0.00).
+  **Under 100 % FEEDBACK every in-loop effect loses energy** (Frosty, 2026-10-01:
+  "under 100% feedback should lose energy, not be indefinite"), and Crush keeps
+  that by two choices, each forced by a limit cycle measured on AURORA:
 
-  **And a dead zone of 0.35 of a step** (DECIDED, Frosty 2026-10-01): a held
-  value keeps `floor(|x|/step − 0.35)` steps. Truncation alone left a one-step
-  cycle from FEEDBACK 92 %: a held ±0.25 step came back through the lap's
-  filters with a few per cent of overshoot and re-crossed its step (44.1 kHz,
-  bucket-brigade, AMOUNT 100, TIME 50 ms: a 0.2245 peak held from 9 s to 30 s
-  against a 4.16 s tail). 0.35 is the smallest shift that ended every such
-  cycle at AMOUNT 60 and 100 over every character, TIME 20–375 ms, FEEDBACK
-  80–96.9 % and 44.1–192 kHz (0.30 left one). It costs −6.99 dB a pass at
-  AMOUNT 100 on a 0.5 sine, where truncation cost −3.98.
+  - **The quantiser truncates toward zero.** Round-to-nearest is *expanding* —
+    at 3 bits a 0.13 becomes 0.25 — and above about 60 % FEEDBACK the loop held
+    −7.1 dB forty seconds after a burst (AMOUNT 100, FEEDBACK 80). Truncation
+    keeps `|q| ≤ |x|`.
+  - **The hold holds the block's mean, not a frozen sample** (DECIDED, Frosty:
+    "average instead of freeze"). A frozen sample, phase-locked to a tone, turns
+    a sine into a square whose fundamental is up to 4/π of the sine's; from about
+    FEEDBACK 90 % that grew loops to a steady peak above their input (0.7277 from
+    a 0.5 burst at 44.1 kHz on bucket-brigade, AMOUNT 35, TIME 50 ms, 95 %). N
+    copies of the mean of N samples carry at most their energy (`N·mean² ≤ Σx²`).
+    The mean is a box filter and costs top end: one pass at 0.5, AMOUNT 60,
+    −0.32 dB at 300 Hz, −2.7 at 1 kHz, about −30 at 5 and 10 kHz; at AMOUNT 100 a
+    1 kHz sine at 0.5 averages below one step and is gone on the first pass.
+    The full table is in `testing-notes/dwell-review-fixes-2026-10-01.md`.
 
-  **The sample-and-hold is not energy-bounded, and no dead zone reaches that**
-  (measured, open, Frosty's call). Phase-locked to a tone, the hold turns a sine
-  into a square whose fundamental is up to 4/π of the sine's, and from about
-  FEEDBACK 90 % a loop can grow to a steady peak above its input — up to 0.767
-  from a 0.5 burst at AMOUNT 35, 44.1 kHz; also at AMOUNT 70 and 80. Holding the
-  mean of the last N samples instead (`N·mean² ≤ Σx²`) ended every one in the
-  same checks, with or without the dead zone; the figures are in
-  `testing-notes/dwell-review-fixes-2026-10-01.md`. Not built.
+  A 0.35-step dead zone was built for a frozen hold's one-step cycle and
+  removed with it. With the mean, no grid row cycles or runs late — 1,944 rows
+  over every character, AMOUNT 35–100, TIME 20–375 ms, FEEDBACK 80–96.9 % at six
+  rates, 1,440 dense-FEEDBACK rows and 2,160 off the grid — and
+  `DwellDspTests::testEveryInLoopEffectLosesEnergyUnderUnity` holds every FX type
+  to the rule.
 > **Octave up, Octave down and Reverse were CUT on 2026-09-21** (Frosty; see
 > `15`). The octaves compound in a feedback loop — pitch moves ±12k semitones, so
 > three repeats is three octaves and the content leaves the band — and Reverse was
@@ -956,7 +959,7 @@ unexplained — 11 §4k flags it, and it must not be quoted as "Crush is free".
 | FX stage position | after mode filters, before DC blocker; skipped when off; **one stage per engine**, no shared state | DECISION |
 | FX loop bound | `\|F\| ≤ 1` for every candidate, normalised in closed form | DECISION |
 | Diffuse | 6-stage allpass, 7–37 ms × AMOUNT | CALIBRATE; 00 §1 |
-| Crush | 16→3 bits, **truncated toward zero with a 0.35-step dead zone**, hold ÷1–32; exempt from the alias floor | CALIBRATE / DECIDED (Frosty, 2026-10-01: the dead zone); the hold is open |
+| Crush | 16→3 bits **truncated toward zero**, **the mean of every 1–32 samples held**; exempt from the alias floor | CALIBRATE / DECIDED (Frosty, 2026-10-01: "average instead of freeze") |
 | Pan / Tremolo | stepped once per repeat; AMOUNT is depth | CALIBRATE |
 | FX types | Diffuse, Pan/Tremolo, Crush — **three**; Sweep cut because VOICE was | DECIDED (Frosty, 2026-09-22) |
 | Voicing | **Shared**: `character`, `stereo`, the cuts, the modulation and `drive` govern both engines; DUCK is main-only | DECIDED (Frosty, 2026-09-23) |

@@ -326,10 +326,12 @@ inline double engineTailSeconds (double seconds, double g, int character,
       impulse, has rung past it (up to 17 % at 44.1 kHz before the build-up
       term), because the compander's two rings are interpolated separately and
       a one-sample transient does not hold the gain constant across the taps;
-      bursts of 5 and 50 ms and held tones stay inside;
-    - Crush's sample-and-hold, phase-locked to a tone, can grow a loop above
-      about 85 % FEEDBACK to a steady peak above its input, which no finite
-      figure covers. See `FxStage::crush`.
+      bursts of 5 and 50 ms and held tones stay inside.
+
+    Crush is no longer an exception: with its hold holding each block's mean
+    (2026-10-01) no in-loop effect holds a level under unity FEEDBACK, and
+    `DwellDspTests::testEveryInLoopEffectLosesEnergyUnderUnity` holds every
+    FX type to that.
 
     **With SYNC on, each engine's time is taken at the ring's full 2 s.** A
     tail comes from parameters alone, and the tempo is not a parameter; the

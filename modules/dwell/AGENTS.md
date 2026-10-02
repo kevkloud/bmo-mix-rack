@@ -104,20 +104,24 @@ hold after it.
   fall from **the build-up a held input can leave, `1/(1 - g)` of that
   input**, to 60 dB under it, times **TIME plus that frequency's filter group delay plus
   what an in-loop FX adds to a lap** -- Diffuse's peak allpass delay, which is
-  conservative by design (renders ran 8-88 % of it), and Crush's hold. The
+  conservative by design (renders ran 8-88 % of it), and Crush's hold -- the FX
+  part charged to every lap but the first, which is tapped before the loop's
+  effects. The
   lane counts only with HOLD on, and a FREEZE or BUILD reports 30 s. **With
   SYNC on each time is taken at the 2 s ring**, because a tail comes from
   parameters alone and the tempo is not one. `DwellDspTests` renders the
   figure against the real decay; the exceptions it does not cover are written
   at `tailSecondsFor`. `tests/plugin/TailTests.cpp` lists Dwell beside Linger
   as the two modules that ring.
-- **Crush truncates toward zero with a 0.35-step dead zone** (2026-10-01; the
-  dead zone is Frosty's decision): rounding expanded and held a limit cycle
-  above about 60 % FEEDBACK, and truncation alone left a one-step cycle from
-  92 %, through the lap's filter overshoot. **Still open**: the sample-and-hold
-  is not energy-bounded, and from about 90 % FEEDBACK at AMOUNT 35, 70 and 80 a
-  loop can grow above its input; a block-mean hold ended every measured case.
-  `docs/delay/10` §11a has the numbers.
+- **Under 100 % FEEDBACK every in-loop effect loses energy** (Frosty,
+  2026-10-01: "under 100% feedback should lose energy, not be indefinite").
+  `testEveryInLoopEffectLosesEnergyUnderUnity` holds every FX type to it; do
+  not add an effect, or change one, without it passing. For Crush that means
+  **truncation toward zero and a hold of each block's mean**, not a frozen
+  sample (Frosty: "average instead of freeze"): rounding expanded, and a frozen
+  sample phase-locked to a tone grew loops above their input. The mean costs
+  top end (`docs/delay/10` §11a; the testing note has the table). There is no
+  dead zone; one was built for the frozen hold and removed with it.
 - **MIX is smoothed across its 50 % hinge**, and the dry *lands* on exactly 1.0
   below it (`Smoother::tickLanding`), which is when the bit-exact null returns.
   A float one-pole on its own stalls about 3e-5 short of 1.0.

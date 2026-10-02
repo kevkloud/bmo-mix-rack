@@ -4422,6 +4422,28 @@ void testTheReportedTailIsNeverShorterThanTheDecay()
 
     checkTailRows (fxRows, "the tail is never short with FX in the loop");
 
+    // **At 44.1 and 96 kHz as well.** The figure is a function of the
+    // parameters alone, so it is the same at every rate, and the loop's
+    // filters are not quite: the rows above again at the lowest rate the
+    // suite runs and at double rate. At 44.1 kHz the times are whole samples
+    // -- bucket-brigade at a fractional-sample delay driven by a one-sample
+    // impulse is the recorded exception, written at `tailSecondsFor`.
+    std::vector<TailRow> rates;
+
+    for (const auto rate : { 44100.0, 96000.0 })
+        for (int c = 0; c < 3; ++c)
+        {
+            for (const auto& [fb, t] : std::initializer_list<std::pair<float, float>> {
+                     { 90.0f, 100.0f }, { 60.0f, 1000.0f }, { 96.0f, 20.0f } })
+                rates.push_back ({ c, fb, t, false, 0, 0.0f, rate });
+
+            for (const auto& [type, amount, fb, t] : std::initializer_list<std::tuple<int, float, float, float>> {
+                     { 0, 100.0f, 80.0f, 100.0f }, { 2, 60.0f, 90.0f, 20.0f }, { 1, 100.0f, 90.0f, 100.0f } })
+                rates.push_back ({ c, fb, t, true, type, amount, rate });
+        }
+
+    checkTailRows (rates, "the tail is never short at 44.1 and 96 kHz");
+
     // **A sustained input** (2026-10-01): one second of a tone in phase with
     // the loop, which builds it to 1/(1 - g) of its input before it stops.
     // The review measured clean at 48 kHz ringing 11 % past the old figure at

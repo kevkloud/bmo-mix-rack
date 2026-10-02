@@ -588,7 +588,7 @@ int LingerScreen::activeTapCount() const noexcept
 
 namespace
 {
-    /** IN HI-CUT, and it is **not** one of the three EQ nodes -- it is the input
+    /** DARKEN, and it is **not** one of the three EQ nodes -- it is the input
         high-cut in series ahead of them. One pole, no Q, no gain, so it has no
         `EqNodes` entry: giving it a `Biquad` would claim an order that nobody
         has chosen for it (10 section 2 does not say), and an unmarked guess
@@ -666,7 +666,7 @@ juce::Rectangle<float> LingerScreen::inputCutRegion() const noexcept
 
     const auto plot = plotArea();
 
-    // **Clamped, and that is the whole point of the accessor.** IN HI-CUT's
+    // **Clamped, and that is the whole point of the accessor.** DARKEN's
     // default is 20 kHz, which is the right-hand end of the axis exactly: the
     // open circle this replaced was centred there and drawn half outside the
     // frame.
@@ -800,7 +800,7 @@ juce::String LingerScreen::readout() const
             // two outer nodes read LOW and HIGH as shelves and LO CUT and HI CUT
             // as filters, so the line says what the picture says.
             //
-            // IN HI-CUT is deliberately not on this line: it has its own
+            // DARKEN is deliberately not on this line: it has its own
             // caption, it is a curtain rather than a node, and it is not part of
             // the Reverb EQ. The three that are, are here.
             //
@@ -1204,7 +1204,7 @@ void LingerScreen::paintEq (juce::Graphics& g, juce::Rectangle<float> plot,
     g.setColour (ink);
     g.strokePath (curve, juce::PathStrokeType (1.6f));
 
-    // **IN HI-CUT is a curtain and not a node.** A washed region from the corner
+    // **DARKEN is a curtain and not a node.** A washed region from the corner
     // to the end of the axis, with a bright edge at the corner and a tab along
     // the top of it, is a different kind of mark at any glance -- and
     // `inputCutRegion` clamps it so that at 20 kHz the edge is inside the plot
@@ -1362,7 +1362,7 @@ ReverbPanel::ReverbPanel (ui::ModuleContext ctx)
       // once, and the module rendered violet at the top and suite azure below as
       // though it were two plugins sharing a slot.
       //
-      // IN HI-CUT is the near miss and stays `character`: it is a tone control
+      // DARKEN is the near miss and stays `character`: it is a tone control
       // on the way in rather than a level. WIDTH is the other, and stays
       // `character` too -- it sets how wide the tail is made, which is BMO
       // Dimension's DIMENSION and not anybody's gain.
@@ -1397,12 +1397,15 @@ ReverbPanel::ReverbPanel (ui::ModuleContext ctx)
       // exactly what the style is for, and it is the same knob BMO DEQ leaves
       // blue at the foot of its own accent-coloured face.
       //
-      // **"IN HI-CUT" is a caption doing real work**: this module has two high
+      // **"DARKEN" is a caption doing real work**: this module has two high
       // cuts. Node 3 with FILTER on is a cut on the reverb path and lives under
       // the node selector; this one is the input's, ahead of the EQ and ahead of
-      // both generators. The screen says it a second way, by drawing this one as
-      // a curtain and the three EQ nodes as markers.
-      inHiCutKnob   (context.params.param (Index::inhicut),     "IN HI-CUT", ui::Knob::Style::character, kFaceScale, context.def.accent),
+      // both generators. It was IN HI-CUT, which read as a second EQ HIGH;
+      // Frosty named it DARKEN on 2026-09-29, a word for what it does to the
+      // room's feed that no EQ caption shares. The id stays `inhicut`. The
+      // screen says it a second way, by drawing this one as a curtain and the
+      // three EQ nodes as markers.
+      inHiCutKnob   (context.params.param (Index::inhicut),     "DARKEN",    ui::Knob::Style::character, kFaceScale, context.def.accent),
       outputKnob    (context.params.param (Index::output),      "OUTPUT",    ui::Knob::Style::utility,   kFaceScale, context.def.accent),
 
       // The strip. **Faders and not knobs**, because what a user judges here is
@@ -1455,7 +1458,11 @@ ReverbPanel::ReverbPanel (ui::ModuleContext ctx)
 
     erModeAttachment = std::make_unique<juce::ParameterAttachment> (
         context.params.param (Index::ermode),
-        [this] (float) { erModeSegments.setSelected ((int) std::lround (context.params.getReal (Index::ermode))); });
+        [this] (float)
+        {
+            erModeSegments.setSelected ((int) std::lround (context.params.getReal (Index::ermode)));
+            refreshErMode();
+        });
 
     // **The node selector is UI state and goes nowhere near a parameter.**
     // `specs()` is thirty with two lanes spare, and which node a panel is
@@ -1571,6 +1578,7 @@ ReverbPanel::ReverbPanel (ui::ModuleContext ctx)
     // reopened editor come up in the state they were left in.
     refreshScreen();
     refreshFilterMode();
+    refreshErMode();
 }
 
 //==============================================================================
@@ -1813,6 +1821,15 @@ void ReverbPanel::refreshFilterMode()
 
     if (gainKnob != nullptr)
         gainKnob->setKnobEnabled (eqNodeHasGain (node, filter));
+}
+
+void ReverbPanel::refreshErMode()
+{
+    // **A control a mode makes inert is dimmed** (Frosty, 2026-10-02, as a rule
+    // for every module, and this is where it settled the question 11 section 7
+    // left open). ER SPREAD is Energy's envelope and Taps never reads it. The
+    // value is kept and still automates; going back to Energy gives it back.
+    erSpreadKnob.setKnobEnabled (erSpreadIsLive ((int) std::lround (context.params.getReal (Index::ermode))));
 }
 
 //==============================================================================

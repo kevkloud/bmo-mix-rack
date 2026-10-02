@@ -13,7 +13,7 @@ namespace bmo::reverb
 //==============================================================================
 /** **A type is a voicing.** Selecting one re-applies that type's nine
     writable constants over the parameters that hold them -- SIZE, DENSITY,
-    ER SPREAD, MOD DEPTH, MOD RATE, IN HI-CUT, SOURCE, ER and REVERB --
+    ER SPREAD, MOD DEPTH, MOD RATE, DARKEN, SOURCE, ER and REVERB --
     overwriting whatever they currently read. Every time, not only when the
     module is instantiated. Frosty chose that knowingly on 2026-09-21 (11
     section 4); the alternative, a type that applied its block once and then

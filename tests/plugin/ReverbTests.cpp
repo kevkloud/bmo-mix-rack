@@ -86,7 +86,7 @@ namespace
         { P::kModDepth,   "Mod Depth",        0.1f,     0.8f,    0.28f,     0 },
         { P::kModRate,    "Mod Rate",         0.1f,     1.2f,    0.50f,     0 },
         { P::kWidth,      "Width",            0.0f,   200.0f,   100.0f,     0 },
-        { P::kInHiCut,    "In Hi-Cut",     2000.0f, 20000.0f, 20000.0f,     0 },
+        { P::kInHiCut,    "Darken",        2000.0f, 20000.0f, 20000.0f,     0 },
         { P::kErLevel,    "ER",             -40.0f,     0.0f,    -6.0f,     0 },
         { P::kVerbLevel,  "Reverb",         -40.0f,     0.0f,    -6.0f,     0 },
         { P::kMix,        "Mix",              0.0f,   100.0f,    50.0f,     0 },
@@ -297,7 +297,7 @@ int main()
         checkClose (def (P::Index::erspread),  P::roomDefaults::kErSpreadMs, 1.0e-4, "Room's ER SPREAD");
         checkClose (def (P::Index::moddepth),  P::roomDefaults::kModDepthMs, 1.0e-4, "Room's MOD DEPTH");
         checkClose (def (P::Index::modrate),   P::roomDefaults::kModRateHz,  1.0e-4, "Room's MOD RATE");
-        checkClose (def (P::Index::inhicut),   P::roomDefaults::kInHiCutHz,  1.0e-4, "Room's IN HI-CUT");
+        checkClose (def (P::Index::inhicut),   P::roomDefaults::kInHiCutHz,  1.0e-4, "Room's DARKEN");
         checkClose (def (P::Index::feed),      P::roomDefaults::kFeed,       1.0e-4, "Room's SOURCE");
 
         // And the tap table is quoted at the same size, so a fresh instance's
@@ -525,7 +525,7 @@ int main()
         checkClose (roomRow.erSpreadMs,  (double) P::roomDefaults::kErSpreadMs,  1.0e-6, "Room's ER SPREAD");
         checkClose (roomRow.modDepthMs,  (double) P::roomDefaults::kModDepthMs,  1.0e-6, "Room's MOD DEPTH");
         checkClose (roomRow.modRateHz,   (double) P::roomDefaults::kModRateHz,   1.0e-6, "Room's MOD RATE");
-        checkClose (roomRow.inHiCutHz,   (double) P::roomDefaults::kInHiCutHz,   1.0e-6, "Room's IN HI-CUT");
+        checkClose (roomRow.inHiCutHz,   (double) P::roomDefaults::kInHiCutHz,   1.0e-6, "Room's DARKEN");
         checkClose (roomRow.feed,        (double) P::roomDefaults::kFeed,        1.0e-6, "Room's SOURCE");
         checkClose (roomRow.erLevelDb,   (double) P::roomDefaults::kErLevelDb,   1.0e-6, "Room's ER");
         checkClose (roomRow.verbLevelDb, (double) P::roomDefaults::kVerbLevelDb, 1.0e-6, "Room's REVERB");

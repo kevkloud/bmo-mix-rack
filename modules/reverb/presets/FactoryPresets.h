@@ -29,7 +29,7 @@ namespace bmo::reverb
 
     **`kType` is first in every list below, and it has to stay first.**
     Selecting a type re-applies that type's nine writable constants over SIZE,
-    DENSITY, ER SPREAD, MOD DEPTH, MOD RATE, IN HI-CUT, SOURCE, ER and REVERB
+    DENSITY, ER SPREAD, MOD DEPTH, MOD RATE, DARKEN, SOURCE, ER and REVERB
     (`modules/reverb/TypeVoicing.h`), and `ParamSet::apply` walks a list in
     order -- so a preset that named its type last would stamp that type's block
     over its own carefully chosen sizes and levels, and nothing would say so.

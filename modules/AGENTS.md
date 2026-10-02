@@ -325,3 +325,29 @@ files.
 - Changing the sound: before 1.0 it is free; after, it is a new product.
   Either way the DSP tests say what the numbers are, and they change with
   the code, deliberately.
+
+## A control a mode makes inert is dimmed
+
+Frosty, 2026-10-02, for every module: **whenever a mode leaves a control doing
+nothing, the panel dims it.** A knob that looks live and does nothing is the
+one thing a panel must not do. The rule is about display only:
+
+- **Dim, never lock or write.** `ui::PlainKnob::setKnobEnabled (false)`. The
+  parameter keeps its value, still automates, and leaving the mode gives it
+  back. A mode must not eat an edit.
+- **The whole control fades, caption and all.** BMO Util's pass settled that,
+  2026-09-17: a full-strength name over a pale face reads as broken.
+- **The switch that caused it is never dimmed** -- it is the way back out
+  (BMO DEQ, 2026-09-15; BMO Util's MONO).
+- **Ask the DSP, do not restate it.** The panel and the engine read one
+  function for "is this control live", so they cannot disagree:
+  `eqNodeHasGain` (Linger's GAIN on a cut), `erSpreadIsLive` (Linger's ER
+  SPREAD in Taps).
+- **The one recorded exception is DEQ's DYN**, kept live on a cut filter by
+  Frosty's call (see `DeqPanel.cpp`), and confirmed when this rule was set:
+  it is the switch that unlocks the dynamics section, so it is the way in, and
+  he overrode the dim on purpose. Do not "fix" it. An exception is the owner's to make and
+  is written down where the control is wired.
+
+Precedents: BMO Util's WIDTH under MONO, BMO DEQ's gain on a cut, BMO Linger's
+GAIN on a cut and ER SPREAD in Taps.

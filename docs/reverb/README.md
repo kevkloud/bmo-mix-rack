@@ -50,9 +50,9 @@ labels.
    eight lanes that bought, the same day (decision 3), so the count is back to
    thirty. 11 §4 is the authoritative table, 11 §4a the record of the cut. The
    type list is append-only and settled: Room, Chamber, Hall, Cavern, Plate,
-   Ambience — **Large Hall was cut and Cavern took index 3**. Still open:
-   `inhicut` (IN HI-CUT) is marked "owner confirm" — accept or cut it before
-   first ship (11 §4d), now at index 25.
+   Ambience — **Large Hall was cut and Cavern took index 3**. Settled:
+   `inhicut` ships as a parameter (2026-09-26), captioned DARKEN (2026-09-29),
+   at index 25 (11 §4d, §7).
 3. ~~**The Reverb EQ becomes three parametric nodes.**~~ **Built 2026-09-21/22,
    committed and green.** The four shelf parameters *became* low shelf · bell ·
    high shelf — the change was purely additive, no id changed meaning — each

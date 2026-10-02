@@ -1,12 +1,12 @@
 # Handoff: BMO Linger's DSP
 
 For a fresh session. Written on AURORA, 2026-09-22; revised on AURORA,
-2026-09-23, after PR #25 merged; **revised on ICE QUEEN, 2026-09-24, with M2
-built.** The early reflections play and the tail is silent. Everything a host
-touches is built, tested and merged to `main` (PR #25, `68b1616`); the ER
-generator is on `frosty-linger-m2-er`, green in every suite on ICE QUEEN, and
-**waits at the listening checkpoint** — see "M2 is built" below before
-anything else.
+2026-09-23, after PR #25 merged; revised on ICE QUEEN, 2026-09-24, with M2
+built; **revised on ICE QUEEN, 2026-10-02: M2 is heard and merged, and M3 is
+next.** The early reflections play and the tail is silent. M2 merged to `main`
+as PR #27 (`655e929`) on 2026-10-01, with the small-room fix after it (#30).
+Every decision M3 waited on is made. **Start at "M3 runs in two halves"
+below.**
 
 Read this, then `modules/reverb/AGENTS.md`, then `10-dsp-spec.md` in full, then
 `11-integration-and-test-plan.md` §6. `README.md` in this folder indexes the
@@ -61,10 +61,11 @@ and 3.5 % at 192 kHz, against 1.5 % and 5 %.
 - The 150 ms wet fade in `reset()` is not done.
 - The panel still draws Room's table for every type.
 
-**What the next session inherits.** The listening checkpoint below, which
-needs the references installed and source clips on the machine. Then the
-two remaining owner decisions (the 30 s tail ceiling and `inhicut`), then M3. Do not start M3 on this branch; branch again
-from `origin/main` once this one has merged.
+*Since then (2026-09-26 to 2026-10-02): heard at the checkpoint below, every
+owner decision made, merged as #27, and the cleanup PR described under "M3
+runs in two halves" landed the rest. The three bullets above that are not done
+— the window clamp, the `reset()` wet fade, Room's table drawn for every type —
+are still not done; the first two are M3's (see below), the third M4's.*
 
 ### M2 opens with the CPU worst case
 
@@ -99,10 +100,58 @@ subtly**, which passes `11` §6's M2 exit condition; how far it should go is
 M4's. ER HI-CUT is 12 dB/octave from the same day. (A 250 Hz shift noted that day was
 the analyser's window moving, not the sound; see the listening-set note.)
 
-### M3 does not start until two decisions are made
+### M3 runs in two halves, after a cleanup PR
 
-These are Frosty's, they are open in `11` §7, and M3's tests depend on them.
-*The first of the original three is made:*
+Frosty, 2026-10-02. **Branch each piece fresh from `origin/main`** once the one
+before it has merged, in its own worktree and build tree.
+
+**0. The cleanup PR (`frosty-linger-cleanup`)** — so M3's PR is about the tail
+and nothing else:
+
+- ER SPREAD dims in Taps, under the new house rule (a control a mode makes
+  inert is dimmed — `modules/AGENTS.md`), and the engine stops rebuilding the
+  table on a SPREAD move it never reads. One function, `erSpreadIsLive`, for
+  both.
+- IN HI-CUT is captioned **DARKEN** on the panel; the id stays `inhicut`.
+- `measure_reverb bench <rate> <block> density|hicut` measures what
+  automating those controls costs, and the DENSITY-automation cost flagged on
+  2026-09-30 is dealt with there — and ER HI-CUT automation, which was worse
+  (`testing-notes/linger-cleanup-2026-10-02.md`).
+- `11` §7's "owner confirm" paragraph is closed out, and this file revised.
+
+**1. M3a — a tail you can hear.** In this order:
+
+1. Your own baseline (build exit code, counts, machine).
+2. **The CPU worst case first**, as M2 did: M2's worst-case ER plus the full
+   late network at 192 kHz/128, measured at `kNumLines` = 8 **and** 16 before
+   anything is tuned. Build at 8; the 16 figure says whether Plate's fix (see
+   below) is affordable, and it is cheapest to know before tuning.
+3. `kMaxTailSeconds` 30 → 40 as its own `core/` commit, with `TailTests` and
+   `11` §6's "≤30 s" → "≤40 s" moving in the same commit. Every module's tail
+   report moves, so name them in the commit body (BMO Dwell's too if #35 has
+   merged by then).
+4. The FDN on `kNumLines`, the absorbent filters and damping over the
+   per-type knees, and pre-delay (tail only, `kPreLinkFixed` false).
+5. `11` §6's late-tail rows that these touch: modal density (Plate red at 8 is
+   expected and written down, not hidden), ringing, pre-delay ±1 sample, the
+   stability corner (`decay` 20 s × `damphi` 2.0, now inside 40 s), "tail ≥
+   measured", parameter changes without clicks.
+
+**Then stop for a listening set** in gitignored `packages/reverb-listening/`:
+decay and damping across types, the ER-to-tail handover (the thing M2 could
+not let anyone hear), PRE-DELAY, and Plate at 8 lines on a vocal. Ask about
+the headphone amp's mono switch before a pass that follows a mono check.
+
+**2. M3b — the rest of the late block.** The Reverb EQ on the wet path,
+SOURCE, modulation (≤3 cents, its spectrum reported), the tail-onset contour
+over `TypeConstants::attack` and the decay-truncation contour, the 150 ms wet
+fade in `reset()`, and whatever of `11` §6 is still red. Its own listening
+items, then M4.
+
+### The decisions M3 needed — all made
+
+These were Frosty's, open in `11` §7, and M3's tests depend on them.
+*All of them are made:*
 
 - ~~**The MIX law and its default.**~~ **Decided 2026-09-24:** dry =
   min(1, 2(1 − mix)), wet = min(1, 2 mix), default 50 %, 100 % verb only for
@@ -123,9 +172,11 @@ These are Frosty's, they are open in `11` §7, and M3's tests depend on them.
   at the ceiling; restrict "≥ measured" to settings under it; or accept an
   under-report at the corner and write it down. Then fix `11` §6 to match.
 - ~~**`inhicut` as a parameter or a constant**~~ **Decided 2026-09-26: a
-  parameter, under a clearer name** (Frosty). The name is to be settled when
-  the panel is designed. **Whether ER SPREAD greys out in Taps mode or sits
-  inert** is still open, and with Blend gone it now shapes Energy only.
+  parameter, under a clearer name** (Frosty), and the name is **DARKEN**
+  (2026-09-29), on the panel from the cleanup PR.
+- ~~**Whether ER SPREAD greys out in Taps mode or sits inert.**~~ **Decided
+  2026-10-02: dimmed**, and as a rule for every module, not just this one: a
+  control a mode makes inert is dimmed (`modules/AGENTS.md`).
 
 ### M3 builds everything off `kNumLines`
 
@@ -178,9 +229,9 @@ Fitting them is M4 and it is a listening job, not a desk job.
 checkpoint: it sounded like a slightly worse Taps. ER MODE is two positions,
 and the count cannot change after first ship.
 
-Frosty's decisions still open are listed under "M3 does not start until
-three decisions are made" above — they are not yours to make, but they are
-yours to ask for.
+Every owner decision M3 depends on is made (see "The decisions M3 needed"
+above). New ones will come up; they are not yours to make, but they are yours
+to ask for.
 
 `10` §7's CALIBRATE rows are the full list of what has to be fitted rather than
 derived.
@@ -212,10 +263,13 @@ fails with "transport 'file' not allowed". Use
   leaves the old exe and ctest runs it. Capture the code properly:
   `cmake --build ... > /tmp/b.log 2>&1; echo "EXIT=$?"`. **Piping to `tail`
   makes `$?` the exit status of `tail`** — that has fooled this project twice.
-- **Establish your own baseline before you change anything.** It was 24/24
-  with Defang merged on 2026-09-22, but FET (#22) and Linger (#25) merged after
-  that, so the count is stale. Build the test targets, check the exit code, and
-  record the count and the machine in your first note.
+- **Establish your own baseline before you change anything.** On ICE QUEEN,
+  2026-10-02, at `origin/main` `a0e5ca2`: `build-dsp` 18/18 (plus
+  `tune_hardtune_target`, disabled by design). Anything merged since makes the
+  count stale. Build the test targets, check the exit code, and record the
+  count and the machine in your first note. **Name the targets**: in a fresh
+  Visual Studio tree, `ctest -N` cannot name an unbuilt executable, so take
+  the list from the generated `*_tests.vcxproj` files instead.
 - **Re-prove BMO Opto's hashes if anything under `core/ui` changes** —
   `59d85c014da98432` dark, `313df8cc740e9aa3` light, `393f13e24fbf96c3` GR dark
   (`appearance=` and `surface=simple` named; see

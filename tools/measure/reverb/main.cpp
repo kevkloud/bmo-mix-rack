@@ -24,7 +24,9 @@
         measure_reverb samples      raw samples over a range, for debugging
         measure_reverb bench        10 section 6's budget: 60 s of noise,
                                     Release, median of five; the worst case
-                                    (DENSITY 100 %, VARIATION 5) by default
+                                    (DENSITY 100 %, VARIATION 5) by default;
+                                    `density` or `hicut` keeps that control
+                                    moving, which is what automation costs
         measure_reverb constants    the internal constants v1 ships, so the
                                     value being argued about is the value in
                                     the build
@@ -349,12 +351,27 @@ void printIr (int type, float sizeM, float density, int variation)
 /** 10 section 6's budget, measured: 60 s of noise through the module at the
     given rate and block, wall-clock per block against the block's duration,
     **median of five runs**. `worst` is 10 section 8's worst case, DENSITY at
-    48 taps and three diffuser stages, which is the first thing to measure. */
-void printBench (double rate, int block, bool worst)
+    48 taps and three diffuser stages, which is the first thing to measure.
+
+    `density` and `hicut` start from the worst case and move one control the
+    whole time, a 2 s triangle across its range written every block, the way a
+    host lane drawn as a ramp arrives. A held setting never re-runs the
+    diffuser's normaliser; a moving one is where its cost lives. On ICE QUEEN,
+    2026-10-02, at 192 kHz / 32: 13.0 % (density) and 36.6 % (hicut) before the
+    normaliser ran on a step, 2.9 % and 4.3 % after. */
+void printBench (double rate, int block, const std::string& kind)
 {
+    const bool worst = kind != "default";
     auto v = defaults();
     v[Index::erdensity] = worst ? 100.0f : v[Index::erdensity];
     v[Index::ervariation] = worst ? 5.0f : v[Index::ervariation];
+
+    // A triangle 0 -> 1 -> 0 over two seconds of audio.
+    const auto triangle = [rate, block] (int b)
+    {
+        const auto t = std::fmod ((double) b * block / rate, 2.0);
+        return (float) (t < 1.0 ? t : 2.0 - t);
+    };
 
     const auto seconds = 60.0;
     const auto blocks  = (int) (seconds * rate / block);
@@ -378,6 +395,11 @@ void printBench (double rate, int block, bool worst)
             for (int i = 0; i < block; ++i)
                 l[(size_t) i] = r[(size_t) i] = 0.25f * next();
 
+            if (kind == "density")
+                v[Index::erdensity] = 100.0f * triangle (b);
+            else if (kind == "hicut")
+                v[Index::erhicut] = 1000.0f * std::pow (20.0f, triangle (b));   // 1 k to 20 k, log
+
             float* chans[] { l.data(), r.data() };
             dsp.setParams (v.data(), (int) v.size());
             dsp.process (chans, 2, block);
@@ -390,7 +412,9 @@ void printBench (double rate, int block, bool worst)
     std::sort (percent.begin(), percent.end());
 
     std::printf ("bench: %s, %g Hz / %d, 60 s of noise, Release, five runs\n",
-                 worst ? "worst case (DENSITY 100 %, VARIATION 5)" : "schema defaults", rate, block);
+                 kind == "density" ? "DENSITY automated 0-100 % every 2 s, VARIATION 5"
+                 : kind == "hicut" ? "ER HI-CUT automated 1-20 kHz every 2 s, DENSITY 100 %, VARIATION 5"
+                 : worst ? "worst case (DENSITY 100 %, VARIATION 5)" : "schema defaults", rate, block);
     std::printf ("  runs   %.3f  %.3f  %.3f  %.3f  %.3f  %% of one core\n",
                  percent[0], percent[1], percent[2], percent[3], percent[4]);
     std::printf ("  median %.3f %% of one core   (budget: <= 1.5 %% at 48 kHz, <= 5 %% at 192 kHz, 10 section 6)\n", percent[2]);
@@ -707,7 +731,7 @@ void printTables (int maxTries)
 void usage()
 {
     std::printf ("usage: measure_reverb <latency|tail|taps [size]|constants|schema|tables [tries]\n"
-                 "                       |bench [rate [block [worst|default]]]|ir [type [size [density [variation]]]]\n"
+                 "                       |bench [rate [block [worst|default|density|hicut]]]|ir [type [size [density [variation]]]]\n"
                  "                       |samples [density [from [to]]]|stats <in.wav>...\n"
                  "                       |stimulus <out.wav> [rate]|irwav <out.wav> [type [size [density [variation]]]]\n"
                  "                       |render <in.wav> <out.wav> [id=value ...]|analyse <in.wav>...>\n");
@@ -803,7 +827,7 @@ int main (int argc, char** argv)
     {
         printBench (argc > 2 ? std::atof (argv[2]) : 48000.0,
                     argc > 3 ? std::atoi (argv[3]) : 128,
-                    argc > 4 ? std::string (argv[4]) == "worst" : true);
+                    argc > 4 ? std::string (argv[4]) : std::string ("worst"));
         return 0;
     }
 

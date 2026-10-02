@@ -184,20 +184,23 @@ a tolerance, which is `tests/dsp/OptoDspTests.cpp`'s house rule.
 ### Two high cuts, and the captions are what tell them apart
 
 The module now has **two**, and they are different controls in different
-places. Do not merge them and do not rename either to something that drops its
-prefix:
+places. Do not merge them:
 
 | control | caption | where | shape |
 | --- | --- | --- | --- |
-| `inhicut` | **IN HI-CUT** | on the input, ahead of the EQ and ahead of both generators, over a fixed 20 Hz high-pass | one pole, no Q, no gain |
+| `inhicut` | **DARKEN** | on the input, ahead of the EQ and ahead of both generators, over a fixed 20 Hz high-pass | one pole, no Q, no gain |
 | `eqhifreq` with `eqfilter` on | **EQ HIGH FREQ** | node 3 of the Reverb EQ | second-order, with a Q |
 
-IN HI-CUT darkens *what the room is given*; node 3 darkens *the room*. The "EQ"
-prefix on the nine EQ captions and its absence on the tenth is what carries it,
-and the EQ screen says it a second way — the three EQ nodes are drawn as filled
-markers and IN HI-CUT as an **open** one, because it is in series with the EQ
-rather than part of it. `checkReverbPanel`'s caption list holds both words so a
-reviewer sees them together.
+DARKEN darkens *what the room is given*; node 3 darkens *the room*. It was
+captioned **IN HI-CUT** until Frosty renamed it on 2026-09-29: a second "HI-CUT"
+beside EQ HIGH read as the same control twice, and a word for what it does keeps
+them apart better than a prefix did. The id stays `inhicut` (permanent), and the
+host-facing name followed it to "Darken" on 2026-10-02 (free before first
+ship; nobody holds a Linger session yet). The "EQ" prefix on the nine EQ captions
+still marks those as the EQ's, and the EQ screen says it a second way — the
+three EQ nodes are markers and DARKEN is a washed **curtain**, because it is in
+series with the EQ rather than part of it. `checkReverbPanel`'s caption list
+holds both words so a reviewer sees them together.
 
 ### The filter design is reproduced, not stacked on
 
@@ -281,7 +284,8 @@ public — so each type's constant block *reserves three era fields* instead.
 Because they already exist as constants, promoting them to a 3-position control
 in v2 changes no type ordinals and no state layout.
 
-`inhicut` is marked **owner confirm**. `10-dsp-spec.md` reads as 29 parameters
+`inhicut` **was** marked owner confirm, and Frosty kept it as a parameter on
+2026-09-26 (captioned DARKEN from 2026-09-29). `10-dsp-spec.md` reads as 29 parameters
 plus an internal constant while its own list reads 30, and the input high-cut
 is the one it disagrees with itself about. It is kept because section 2 gives
 it a 2–20 kHz user range a constant would not need, and because it is the only
@@ -533,7 +537,7 @@ three faders and a TYPE / DECAY column.
   SIZE — with ER MODE as the segment row.
 - **TAIL (6, no segments):** PRE-DELAY, WIDTH, MOD RATE, LOW x, HIGH x,
   MOD DEPTH.
-- **EQ (6 + segments):** FREQ, GAIN, Q, FILTER, IN HI-CUT, OUTPUT — with
+- **EQ (6 + segments):** FREQ, GAIN, Q, FILTER, DARKEN, OUTPUT — with
   LOW / MID / HIGH as the segment row, repointing the first three.
 - **Always on, at the foot:** ER, REVERB, MIX as faders, then TYPE over DECAY in
   the fourth column.
@@ -920,11 +924,11 @@ reflection stops fusing with the direct sound.
 **EQ — logarithmic frequency, 20 Hz to 20 kHz**, level linear over ±24 dB.
 **Three marked nodes over one summed curve, and a curtain that is not a node.**
 The three are the Reverb EQ's, drawn by `EqNodes::design` — which is
-`dsp::designMatched`, which is the code the engine will run. IN HI-CUT's one
+`dsp::designMatched`, which is the code the engine will run. DARKEN's one
 pole is in the curve, because it is in the chain, and it is the screen's own
 arithmetic because nobody has chosen an order for it.
 
-**IN HI-CUT is drawn as a region and was an open circle until 2026-09-22.** The
+**DARKEN is drawn as a region and was an open circle until 2026-09-22.** The
 circle was wrong twice: one stroke's difference from three filled markers reads
 as a fourth node of the same EQ, when it is an *input* filter ahead of the EQ and
 ahead of both generators; and at its own default of 20 kHz it sat centred on the

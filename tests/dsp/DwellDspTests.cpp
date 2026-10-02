@@ -31,6 +31,7 @@
 #include "modules/dwell/dsp/DwellDsp.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -4806,6 +4807,87 @@ void testCrushHoldsTheBlockMean()
     }
 }
 
+/** **Under 100 % FEEDBACK every in-loop effect loses energy** -- the property
+    of record for Frosty's rule (2026-10-01: "under 100% feedback should lose
+    energy, not be indefinite").
+
+    Every FX type on every character, at AMOUNT 0, 35, 60 and 100, at 44.1,
+    48 and 96 kHz, at TIME 50 ms and FEEDBACK 93 % -- inside the region where a
+    frozen sample-and-hold grew loops, and on that hold this test fails -- and
+    at TIME 20 ms and FEEDBACK 96.9 %: a 5 ms burst, then silence. 216 rows,
+    about 16 s on AURORA.
+
+    - **It decays**: the last second of the render is exact zeros, or is
+      quieter than the second before it. A loop holding a level fails that,
+      however quiet the level.
+    - **It is under -60 dB of the burst by the reported tail**, wherever the
+      tail falls inside the render.
+
+    The render runs to the tail and a second more, capped at 8 s, which is
+    long enough for the severe rows to show a fall second over second. */
+void testEveryInLoopEffectLosesEnergyUnderUnity()
+{
+    struct Setting { float timeMs, feedback; };
+    const Setting chosen[] { { 50.0f, 93.0f }, { 20.0f, 96.9f } };
+    const auto started = std::chrono::steady_clock::now();
+
+    int rows = 0;
+
+    for (const auto rate : { 44100.0, 48000.0, 96000.0 })
+        for (int type = 0; type < 3; ++type)
+            for (int c = 0; c < 3; ++c)
+                for (const auto amount : { 0.0f, 35.0f, 60.0f, 100.0f })
+                    for (const auto& s : chosen)
+                    {
+                        auto v = settings (c, s.timeMs, s.feedback, 100.0f);
+                        v[P::Index::fx]       = 1.0f;
+                        v[P::Index::fxType]   = (float) type;
+                        v[P::Index::fxAmount] = amount;
+
+                        const auto tail = P::tailSecondsFor (v.data(), (int) v.size());
+                        const auto seconds = std::clamp (tail + 1.0, 2.0, 8.0);
+
+                        P::DwellDsp dsp;
+                        dsp.prepare (rate, 512, 2);
+
+                        const auto burst = (int) (0.005 * rate);
+                        const auto second = (int) rate;
+                        const auto n = burst + (int) (seconds * rate);
+                        Block block { n };
+
+                        for (int i = 0; i < burst; ++i)
+                        {
+                            const auto w = 0.5 - 0.5 * std::cos (2.0 * P::kPiD * (double) i / (double) (burst - 1));
+                            block.left[(size_t) i] = block.right[(size_t) i]
+                                = (float) (0.5 * w * std::sin (2.0 * P::kPiD * 300.0 * (double) i / rate));
+                        }
+
+                        renderAsHost (dsp, v, block, n, 512, [] (int) {});
+                        ++rows;
+
+                        const auto last = rms (block.left, n - second, second) + rms (block.right, n - second, second);
+                        const auto before = rms (block.left, n - 2 * second, second) + rms (block.right, n - 2 * second, second);
+                        const auto decays = last == 0.0 || last < before;
+
+                        const auto tailAt = burst + (int) (tail * rate);
+                        const auto late = tailAt < n ? std::max (peakOf (block.left, tailAt, n - tailAt),
+                                                                 peakOf (block.right, tailAt, n - tailAt))
+                                                     : 0.0f;
+
+                        char buf[260];
+                        std::snprintf (buf, sizeof (buf),
+                                       "%s at AMOUNT %.0f on %s, %.1f kHz, TIME %.0f ms, FEEDBACK %.1f: last second RMS %.3g "
+                                       "against %.3g the second before; peak after the %.2f s tail %.3g",
+                                       fxTypeName (type), (double) amount, characterName (c), rate / 1000.0,
+                                       (double) s.timeMs, (double) s.feedback, last, before, tail, (double) late);
+
+                        check (decays && late <= 0.5e-3f, buf);
+                    }
+
+    std::printf ("      the in-loop energy property ran %d rows in %.1f s\n", rows,
+                 std::chrono::duration<double> (std::chrono::steady_clock::now() - started).count());
+}
+
 } // namespace
 
 //==============================================================================
@@ -4873,6 +4955,7 @@ int main()
     testTheSmoothersLandOnTheirTargets();
     testMixSnapsAfterReset();
     testCrushHoldsTheBlockMean();
+    testEveryInLoopEffectLosesEnergyUnderUnity();
 
     std::printf ("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

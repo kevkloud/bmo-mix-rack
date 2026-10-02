@@ -104,6 +104,10 @@ public:
     static constexpr float kNormDensityStep = 0.0025f;
     static constexpr float kNormCoefStep    = 0.02f;
 
+    /** The longest ramp a normaliser update takes to land; see
+        `updateBandCoefs`. */
+    static constexpr float kNormRampMs = 2.0f;
+
     /** VARIATION 0..5: lateral spread of the bearings, and the fraction of
         each tap's energy moved to channel-specific times. Both rise
         monotonically, which is what makes gamma fall monotonically. Position
@@ -224,8 +228,11 @@ public:
 
         const auto smooth = smoothingCoef();
 
+        samplesSinceNormRun = (int) std::min<long long> ((long long) samplesSinceNormRun + numSamples, 1 << 30);
+
         for (int i = 0; i < numSamples; ++i)
         {
+            advanceNormRamp();
             line[(size_t) writeIdx] = in[i];
 
             float acc[kNumBands][2] {};
@@ -618,9 +625,51 @@ private:
 
         if (far || (stale && ! moving))
         {
+            const bool forced = lastNormDensity < 0.0f;
             updateStageNorms();
             ++normRuns;
+
+            // **An update is a ramp, not a step** (QA, 2026-10-02: stepped,
+            // it measured x14 on the second difference at 48 kHz / 32). Linear,
+            // from the value in use to the new one, over kNormRampMs or the time
+            // since the last update, whichever is shorter -- so the sparse
+            // updates of a slow ramp get 2 ms, and when it runs every block the
+            // ramp spans that block and lags no further than the every-block
+            // engine did. 2 ms rather than 5: both pass the second-difference
+            // bound, and 5 ms let the level drift 0.29 dB from the every-block
+            // engine mid-ramp where 2 ms holds it to 0.18. A forced run
+            // (prepare, reset, a rebuilt table) has nothing to fade from and
+            // lands at once.
+            const auto ramp = std::clamp (samplesSinceNormRun, 1, std::max (1, (int) std::lround (kNormRampMs * 0.001f * sampleRate)));
+            normRampLeft = forced ? 0 : ramp;
+            for (int b = 0; b < kNumBands; ++b)
+                for (int s = 0; s < kNumStages; ++s)
+                {
+                    if (forced)
+                        stageNormNow[b][s] = stageNorm[b][s];
+                    stageNormInc[b][s] = (stageNorm[b][s] - stageNormNow[b][s]) / (float) ramp;
+                }
+            samplesSinceNormRun = 0;
         }
+    }
+
+    /** One sample of the normaliser's ramp. Lands exactly on the target. */
+    void advanceNormRamp() noexcept
+    {
+        if (normRampLeft <= 0)
+            return;
+
+        if (--normRampLeft == 0)
+        {
+            for (int b = 0; b < kNumBands; ++b)
+                for (int s = 0; s < kNumStages; ++s)
+                    stageNormNow[b][s] = stageNorm[b][s];
+            return;
+        }
+
+        for (int b = 0; b < kNumBands; ++b)
+            for (int s = 0; s < kNumStages; ++s)
+                stageNormNow[b][s] += stageNormInc[b][s];
     }
 
     /** The diffuser stage delays, in samples at this rate: a mixed-radix
@@ -906,9 +955,24 @@ private:
                 const auto dl = 0.5f * (la + lb + rc - rd_);
                 const auto dr = 0.5f * (la - lb + rc + rd_);
 
-                const auto norm = stageNorm[bandIdx][s];
+                const auto norm = stageNormNow[bandIdx][s];
                 l = ((1.0f - w) * l + w * dl) * norm;
                 r = ((1.0f - w) * r + w * dr) * norm;
+            }
+            else if (stageNormNow[bandIdx][s] != 1.0f)
+            {
+                // **A stage that has just faded out keeps its ramp until it lands.**
+                // At w = 0 the stage passes the signal straight through, but the
+                // normaliser in use is still ramping down to one from where the
+                // last update left it -- up to 2.5 % above, one DENSITY step from
+                // the threshold. Dropping it the moment w reached zero was a gain
+                // step at every stage threshold on a falling ramp (QA probe,
+                // 2026-10-02: the largest second differences of a full-range
+                // triangle sat at 0.90 and 0.75 exactly). Applied, the output is
+                // continuous through the threshold, and it is exactly one, and
+                // free, once the ramp lands.
+                l *= stageNormNow[bandIdx][s];
+                r *= stageNormNow[bandIdx][s];
             }
         }
     }
@@ -1201,7 +1265,10 @@ private:
     float   bandCoef[kNumBands] { 1.0f, 1.0f, 1.0f, 1.0f };
 
     static constexpr int kMaxFir = 1024;   ///< the cascade's FIR at up to ~230 kHz
-    float   stageNorm[kNumBands][kNumStages] { { 1.0f, 1.0f, 1.0f }, { 1.0f, 1.0f, 1.0f }, { 1.0f, 1.0f, 1.0f }, { 1.0f, 1.0f, 1.0f } };
+    float   stageNorm[kNumBands][kNumStages] { { 1.0f, 1.0f, 1.0f }, { 1.0f, 1.0f, 1.0f }, { 1.0f, 1.0f, 1.0f }, { 1.0f, 1.0f, 1.0f } };      ///< the target
+    float   stageNormNow[kNumBands][kNumStages] { { 1.0f, 1.0f, 1.0f }, { 1.0f, 1.0f, 1.0f }, { 1.0f, 1.0f, 1.0f }, { 1.0f, 1.0f, 1.0f } };   ///< what `diffuse` applies
+    float   stageNormInc[kNumBands][kNumStages] {};
+    int     normRampLeft = 0, samplesSinceNormRun = 0;
     mutable float bandPower[kNumBands][3] {};   ///< per band: sum of left, right and cross tap energies; written by the const weigh()
     int     stageDelay[kNumStages][4] {};
     float   lastNormDensity = -1.0f, lastNormHiCut = -1.0f;

@@ -1204,6 +1204,84 @@ int main()
         check (runs > 0 && runs <= blocks / 10, "a slow DENSITY ramp runs the normaliser on under 10 % of blocks");
     }
 
+    //== A normaliser update is ramped, not stepped ==============================
+    //
+    // QA, 2026-10-02: once the normaliser ran on a step, each update landed at
+    // once, a gain step every few dozen blocks. It passed the first-difference
+    // test and showed on the second: x14 at 48 kHz / 32 against the
+    // every-block engine. A step that measures gets a fade, heard or not.
+    //
+    // Absolute rather than against the old engine: the largest second
+    // difference of the ER output on a sustained 100 Hz sine at -18 dBFS peak,
+    // while DENSITY ramps 0.60 -> 0.70 -> 0.60 over 4 s (stage 1's whole fade),
+    // must stay within 1.5 times the worst of the same engine **held** at
+    // 0.60, 0.65 and 0.70. The ramp may add its own slope, not a click.
+    {
+        const auto maxSecondDiff = [] (double rate, int block, std::function<float (double)> densityAt, double seconds)
+        {
+            ErGenerator g;
+            g.prepare (rate, block);
+            ErConfig c;
+            c.variation = 5;
+
+            std::vector<float> x ((size_t) block), l ((size_t) block), r ((size_t) block);
+            long long n = 0;
+            float p1[2] {}, p2[2] {};
+            int have = 0;
+            double worst = 0.0;
+
+            const auto step = [&] (float d, bool measure)
+            {
+                for (int i = 0; i < block; ++i, ++n)
+                    x[(size_t) i] = 0.12589f * (float) std::sin (2.0 * 3.14159265358979 * 100.0 * (double) n / rate);
+                g.setConfig (c);
+                g.setDensity (d);
+                g.setHiCut (7000.0f);
+                g.process (x.data(), l.data(), r.data(), block);
+
+                if (! measure)
+                    return;
+                for (int i = 0; i < block; ++i)
+                {
+                    const float y[2] { l[(size_t) i], r[(size_t) i] };
+                    for (int ch = 0; ch < 2; ++ch)
+                    {
+                        if (have >= 2)
+                            worst = std::max (worst, (double) std::abs (y[ch] - 2.0f * p1[ch] + p2[ch]));
+                        p2[ch] = p1[ch];
+                        p1[ch] = y[ch];
+                    }
+                    ++have;
+                }
+            };
+
+            for (int b = 0; b < (int) (0.5 * rate / block); ++b)
+                step (densityAt (0.0), false);
+            for (int b = 0; b < (int) (seconds * rate / block); ++b)
+                step (densityAt ((double) b * block / rate), true);
+            return worst;
+        };
+
+        const auto tri = [] (double t) { const auto u = std::fmod (t, 4.0) / 2.0; return (float) (u < 1.0 ? u : 2.0 - u); };
+
+        // Small blocks only. At 441 or 512 samples DENSITY's own weighting steps
+        // once a block, on `main` as here, and that alone sits 3 to 6 times over
+        // held; those cells are judged against `main` by the review probe.
+        const std::pair<double, int> cells[] { { 48000.0, 32 }, { 44100.0, 64 }, { 96000.0, 64 } };
+        for (const auto& [rate, block] : cells)
+        {
+            double held = 0.0;
+            for (float d : { 0.60f, 0.65f, 0.70f })
+                held = std::max (held, maxSecondDiff (rate, block, [d] (double) { return d; }, 1.0));
+
+            const auto ramp = maxSecondDiff (rate, block, [tri] (double t) { return 0.60f + 0.10f * tri (t); }, 4.0);
+            const auto label = std::to_string ((int) rate) + " / " + std::to_string (block);
+            std::cout << "  second difference, DENSITY .60-.70-.60 over 4 s, " << label << ": ramp " << ramp
+                      << ", held worst " << held << " (x" << ramp / held << ")\n";
+            check (ramp <= 1.5 * held, ("a slow DENSITY ramp's second difference is within 1.5x held, " + label).c_str());
+        }
+    }
+
     //== ER hi-cut: -3 dB where it says, and no tap moves =========================
     {
         const auto open = render ([] (auto&) {});

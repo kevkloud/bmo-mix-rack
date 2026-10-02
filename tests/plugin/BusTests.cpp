@@ -478,15 +478,18 @@ const Golden kSwept[]
     // every one of BMO Linger's thirty parameters is somewhere else, and a
     // placeholder does not care. This is the row that will move furthest.
     //
-    // Regenerated on ICE QUEEN, 2026-10-02, for this row alone: the diffuser's
-    // normaliser now follows DENSITY in 0.25 % steps rather than every block,
-    // and at 0.63 DENSITY sits just past the first stage, so the glide from
-    // the instance's starting 50 % moved the stereo peak by 1.1e-5 -- one
-    // tick past kPeakTol, 0.00015 dB. Every other row printed within tolerance.
+    // Regenerated on ICE QUEEN, 2026-10-02, for this row alone, twice. The
+    // diffuser's normaliser now follows DENSITY in 0.25 % steps rather than
+    // every block, and each update ramps over up to 2 ms rather than landing
+    // at once. At 0.63 DENSITY sits just past the first stage, so the glide
+    // from an instance's starting 50 % is where both show. Against the row
+    // `main` carried, the peaks moved by up to 6.1e-5 on 0.069 (0.008 dB) and
+    // the RMS figures by up to 0.0014 dB. Every other row printed within
+    // tolerance.
     { "reverb",
-      -29.3104899226, 0.066601023078,
-      -29.3034727024, 0.065762847662, -29.6342913123, 0.064994379878,
-      -29.0899241529, 0.0687897577882, -29.5276567377, 0.0644122809172 },
+      -29.3107797472, 0.0665621832013,
+      -29.3036605172, 0.065762847662, -29.6342359134, 0.064994379878,
+      -29.0903900723, 0.0687288194895, -29.5277643484, 0.0643955394626 },
     { "rack",
       -12.3127888787, 1.16622579098,
       -12.0186864023, 1.15730452538, -11.9707022298, 1.15666925907,

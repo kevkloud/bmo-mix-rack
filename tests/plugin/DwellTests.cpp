@@ -13,9 +13,11 @@
 
 #include "TestUtil.h"
 #include "core/rack/RackProcessor.h"
+#include "modules/dwell/dsp/GainLaws.h"
 #include "modules/dwell/presets/FactoryPresets.h"
 #include "products/dwell/Product.h"
 
+#include <cmath>
 #include <iterator>
 #include <set>
 #include <string>
@@ -150,10 +152,23 @@ int main()
 
         // **Zero is the detent LANE GAIN's whole design rests on**: below it
         // the lane decays, above it builds, and at it the lane holds at exact
-        // unity. It has to be reachable exactly, which is the 0.1 step
-        // dividing a -100..+100 travel evenly about its centre.
+        // unity. It is reachable, the 0.1 step dividing the -100..+100 travel
+        // evenly about its centre -- but **not bit-exactly on every
+        // platform**. The value comes back through the normalised float and
+        // the snap `start + interval . n`, which macOS arm64 fuses into one
+        // multiply-add: -100 + 0.1f . 1000 is about 1.5e-6 there and 0 on
+        // Windows (2026-10-02, macOS CI; core/state/ParamSpec.h's dB readout
+        // met the same family). So the value must be within a hair of zero,
+        // and the DSP's detent rule must take it as the detent -- which is
+        // the promise that matters: the lane holds at a loop peak of 1.000.
         setValue (*proc, P::kLaneGain, 0.0f);
-        check (getValue (*proc, P::kLaneGain) == 0.0f, "LANE GAIN's centre detent is exactly zero");
+        const auto atCentre = getValue (*proc, P::kLaneGain);
+        check (std::abs (atCentre) <= 1.0e-3f,
+               "LANE GAIN's centre detent comes back within a hair of zero (" + juce::String (atCentre, 9) + ")");
+        check (P::laneGainOnDetent (atCentre) == 0.0f,
+               "and the DSP's detent rule takes that value as the detent");
+        check (P::laneGainOnDetent (1.5e-6f) == 0.0f && P::laneGainOnDetent (-1.5e-6f) == 0.0f,
+               "the value macOS hands back for the centre, +-1.5e-6, is the detent");
 
         setValue (*proc, P::kLaneLevel, 0.0f);
         check (param (*proc, P::kLaneLevel).getCurrentValueAsText() == "0.0 dB",

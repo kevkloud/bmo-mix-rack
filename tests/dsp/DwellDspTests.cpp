@@ -4148,8 +4148,21 @@ void testTheFirstTempoLandsTheSyncedTime()
         const auto later = dsp.getCore().getMainEngine().currentDelaySamples();
 
         if (c == 0)
-            check (later == 24000.0 || later == 48000.0,
-                   "a later tempo change on clean crossfades between the two times");
+        {
+            // Clean crossfades over 20 ms -- 960 samples, longer than the
+            // block -- so one block in, the read is still on the old time,
+            // and three blocks later it is on the new one. A later tempo that
+            // landed would already read 48000.
+            check (later == 24000.0,
+                   "a later tempo change on clean is still crossfading one block in ("
+                       + std::to_string (later) + " samples)");
+
+            Block more { 512 * 3 };
+            renderAsHost (dsp, v, more, 512 * 3, 512, [] (int) {}, 60.0, true);
+
+            check (dsp.getCore().getMainEngine().currentDelaySamples() == 48000.0,
+                   "and on clean it has crossfaded to the new time three blocks later");
+        }
         else
             check (later > 24000.0 && later < 48000.0,
                    std::string ("a later tempo change still glides on ") + characterName (c)

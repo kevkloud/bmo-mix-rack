@@ -1164,6 +1164,7 @@ public:
     float smoothedFeedbackGain() const noexcept { return feedback.value(); }
     float smoothedDriveBlend() const noexcept   { return driveBlend.value(); }
     float smoothedDriveCurve() const noexcept   { return driveCurve.value(); }
+    float smoothedFxAmount() const noexcept     { return fxAmount.value(); }
 
     //==========================================================================
     /** One block. Allocates nothing: every buffer and every grid came from
@@ -1218,14 +1219,14 @@ public:
 
         for (int n = 0; n < numSamples; ++n)
         {
-            // These three *land* on their targets (`Smoother::tickLanding`):
+            // These four *land* on their targets (`Smoother::tickLanding`):
             // a plain tick stalls up to 1.7e-4 short at 192 kHz, and near
             // unity a loop gain left that far over its target sits at or past
             // unity (2026-10-01, measured on AURORA).
             const auto gain = (double) feedback.tickLanding();
             const auto blend = (double) driveBlend.tickLanding();
             const auto curve = (double) driveCurve.tickLanding();
-            const auto fxDepth = (double) fxAmount.tick();
+            const auto fxDepth = (double) fxAmount.tickLanding();
 
             advanceTime (glide);
 

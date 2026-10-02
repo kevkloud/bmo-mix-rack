@@ -4626,7 +4626,7 @@ void testCrushEndsInZerosAtEveryRate()
     }
 }
 
-/** **FEEDBACK, DRIVE and LANE LEVEL land exactly on their targets.**
+/** **FEEDBACK, DRIVE, LANE LEVEL and FX AMOUNT land exactly on their targets.**
 
     A float one-pole stalls short of its target once a step is under half an
     ulp: measured on AURORA, the feedback gain sat 4.3e-5 off at 48 kHz and
@@ -4688,6 +4688,22 @@ void testTheSmoothersLandOnTheirTargets()
             check (dsp.getCore().smoothedLaneLevel() == 1.0f,
                    "LANE LEVEL lands on unity from " + std::to_string ((int) from) + " dB at " + rateName
                        + " (off by " + std::to_string (dsp.getCore().smoothedLaneLevel() - 1.0f) + ")");
+        }
+
+        // FX AMOUNT, missed by 3643cfc (sixth round): it is the depth every
+        // in-loop effect runs at, and Crush's hold length is cut from it.
+        for (const auto from : { 100.0f, 0.0f })
+        {
+            P::DwellDsp dsp;
+            auto v = defaults();
+            v[P::Index::fx] = 1.0f;
+            settle (v, P::Index::fxAmount, from, 35.0f, dsp);
+
+            const auto got = dsp.getCore().getMainEngine().smoothedFxAmount();
+
+            check (got == (float) (35.0 * 0.01),
+                   "FX AMOUNT lands on its target from " + std::to_string ((int) from) + " % at " + rateName
+                       + " (off by " + std::to_string (got - (float) (35.0 * 0.01)) + ")");
         }
     }
 }

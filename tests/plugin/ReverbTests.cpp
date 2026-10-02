@@ -86,7 +86,7 @@ namespace
         { P::kModDepth,   "Mod Depth",        0.1f,     0.8f,    0.28f,     0 },
         { P::kModRate,    "Mod Rate",         0.1f,     1.2f,    0.50f,     0 },
         { P::kWidth,      "Width",            0.0f,   200.0f,   100.0f,     0 },
-        { P::kInHiCut,    "In Hi-Cut",     2000.0f, 20000.0f, 20000.0f,     0 },
+        { P::kInHiCut,    "Darken",        2000.0f, 20000.0f, 20000.0f,     0 },
         { P::kErLevel,    "ER",             -40.0f,     0.0f,    -6.0f,     0 },
         { P::kVerbLevel,  "Reverb",         -40.0f,     0.0f,    -6.0f,     0 },
         { P::kMix,        "Mix",              0.0f,   100.0f,    50.0f,     0 },

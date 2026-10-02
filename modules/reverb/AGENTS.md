@@ -195,7 +195,8 @@ DARKEN darkens *what the room is given*; node 3 darkens *the room*. It was
 captioned **IN HI-CUT** until Frosty renamed it on 2026-09-29: a second "HI-CUT"
 beside EQ HIGH read as the same control twice, and a word for what it does keeps
 them apart better than a prefix did. The id stays `inhicut` (permanent), and the
-host-facing name is still "In Hi-Cut". The "EQ" prefix on the nine EQ captions
+host-facing name followed it to "Darken" on 2026-10-02 (free before first
+ship; nobody holds a Linger session yet). The "EQ" prefix on the nine EQ captions
 still marks those as the EQ's, and the EQ screen says it a second way — the
 three EQ nodes are markers and DARKEN is a washed **curtain**, because it is in
 series with the EQ rather than part of it. `checkReverbPanel`'s caption list

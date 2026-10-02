@@ -34,10 +34,11 @@ the same, but it was wasted work. `DspCore` now hands the generator a fixed
 SPREAD in Taps. Test: *"a SPREAD move in Taps starts no crossfade"*, with
 Energy as the control case.
 
-**3. IN HI-CUT is captioned DARKEN** (Frosty, 2026-09-29). This is the panel
-caption only. The id stays `inhicut`, and **the host-facing name is still
-"In Hi-Cut"**, pending Frosty's call. Docs and the layout test's caption list
-follow.
+**3. IN HI-CUT is DARKEN.** The panel caption (Frosty, 2026-09-29) and the
+host-facing name, "In Hi-Cut" → "Darken" (Frosty, 2026-10-02). No tester holds
+a Linger session, so the rename costs nothing. The id stays `inhicut`, which is
+what a session stores. Docs, the layout test's caption list and the schema
+golden in `ReverbTests.cpp` follow.
 
 **4. Automating DENSITY or ER HI-CUT no longer re-runs the diffuser's
 normaliser on every block.** It now runs when DENSITY has moved 0.25 %, or a
@@ -83,4 +84,6 @@ left alone.
 
 - Frosty's look at the renders: ER SPREAD dimmed in Taps and live in Energy,
   and DARKEN on the EQ page. These are in gitignored `snapshots/`.
-- Frosty's call on the host-facing name, and on DEQ's DYN exception.
+- *Answered 2026-10-02:* the host-facing name becomes "Darken" (above), and
+  DEQ's DYN stays undimmed. Frosty: it is the switch that unlocks the
+  dynamics section, and he overrode the dim on purpose.

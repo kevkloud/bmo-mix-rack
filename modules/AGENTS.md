@@ -344,7 +344,9 @@ one thing a panel must not do. The rule is about display only:
   `eqNodeHasGain` (Linger's GAIN on a cut), `erSpreadIsLive` (Linger's ER
   SPREAD in Taps).
 - **The one recorded exception is DEQ's DYN**, kept live on a cut filter by
-  Frosty's call (see `DeqPanel.cpp`). An exception is the owner's to make and
+  Frosty's call (see `DeqPanel.cpp`), and confirmed when this rule was set:
+  it is the switch that unlocks the dynamics section, so it is the way in, and
+  he overrode the dim on purpose. Do not "fix" it. An exception is the owner's to make and
   is written down where the control is wired.
 
 Precedents: BMO Util's WIDTH under MONO, BMO DEQ's gain on a cut, BMO Linger's

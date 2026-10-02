@@ -1118,7 +1118,7 @@ inline const ParamSpecs& specs()
         // 25. DARKEN. Defaults wide open, so a fresh instance is not
         // quietly darker than the signal it was given. See kInHiCut for why
         // this parameter was marked "owner confirm" and kept.
-        S::logParam (kInHiCut, "In Hi-Cut", 2000.0f, 20000.0f, 0.1f,
+        S::logParam (kInHiCut, "Darken",    2000.0f, 20000.0f, 0.1f,
                      roomDefaults::kInHiCutHz, F::Hertz),
 
         //== Output ============================================================

@@ -368,6 +368,15 @@ roughly +4.8 dB typical and +9.5 dB worst (§11.8). And while the output is stil
 never clipped, the lane at the top of LEVEL's travel can legitimately put about
 +24 dBFS on the wet bus, which no path in Dwell could before (§11.6).
 
+**The output level was reviewed and left as it is on 2026-10-01** (Frosty).
+Measured on AURORA, a −18 dBFS RMS 1 kHz sine in, peak out: the defaults
+**−8.5 dBFS**; FEEDBACK 100, MIX 50 **+1.1**; HOLD and SEND on, LANE GAIN +100,
+LANE LEVEL 0, FEEDBACK 100, MIX 50 **+6.7**; the same at LANE LEVEL +24
+**+24.9**. The +6.7 is three signals summed — the dry, the main delay
+self-oscillating, the lane building — each bounded near unity by its own
+in-loop clip, and **nothing limits their sum**: there is no output limiter and
+no gain change, by decision.
+
 The null test asserts bit-exactness for **every m ≤ 0.5**, not just m = 0: with TIME
 beyond the test block so no repeat arrives, output must equal input
 sample-for-sample at m = 0, 0.1, 0.25, 0.4 and 0.5. The dry gain must therefore be

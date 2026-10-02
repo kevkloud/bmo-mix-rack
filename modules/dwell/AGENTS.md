@@ -119,6 +119,14 @@ hold after it.
 - **MIX is smoothed across its 50 % hinge**, and the dry *lands* on exactly 1.0
   below it (`Smoother::tickLanding`), which is when the bit-exact null returns.
   A float one-pole on its own stalls about 3e-5 short of 1.0.
+- **The output level is reviewed and left alone** (Frosty, 2026-10-01). With
+  a -18 dBFS RMS 1 kHz sine in, measured on AURORA, the peak out is -8.5 dBFS
+  at the defaults, +1.1 at FEEDBACK 100 and MIX 50, **+6.7** with HOLD and SEND
+  on, LANE GAIN +100, LANE LEVEL 0, FEEDBACK 100 and MIX 50, and +24.9 with
+  LANE LEVEL +24. The +6.7 is three signals summed -- the dry, the main delay
+  self-oscillating, the lane building -- each bounded near unity by its own
+  in-loop clip; **nothing limits the sum**, and no limiter or gain change is
+  to be added without asking (`docs/delay/10` §9).
 - **There is one SYNC and it governs both engines.** `note` (2) is the main
   delay's division, **`lane_note` (22) is the lane's**, off the same sixteen
   values; there is deliberately **no `lane_sync`** (`docs/delay/10` §11.7).

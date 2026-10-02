@@ -835,6 +835,40 @@ int main()
                         "dwell in a rack with SYNC on renders the same twice at 120 bpm");
                 expect (! identical (run (Host::none, true), synced),
                         "dwell in a rack with SYNC on hears the playhead's tempo through its slot");
+
+                // **The first tempo lands, in a slot too.** On tape, a 1/32 at
+                // 120 bpm (62.5 ms) synced from the 375 ms knob has to sound
+                // exactly like the same slot with TIME set to 62.5 ms: the
+                // first tempo after the slot's DSP is made lands the read
+                // rather than gliding it there over seconds. Without that, the
+                // two renders differ from the first repeat on.
+                const auto onTape = [&] (bool syncedTime)
+                {
+                    auto rack = bmo::products::createRack();
+                    rack->addModule (*util);
+                    rack->addModule (*dwell);
+                    rack->addModule (*eq);
+
+                    auto& params = rack->getEngineAt (1)->params();
+                    params.setReal ("character", 1.0f);
+                    params.setReal ("feedback", 60.0f);
+                    params.setReal ("mix", 50.0f);
+
+                    if (syncedTime)
+                    {
+                        params.setReal ("sync", 1.0f);
+                        params.setReal ("note", 0.0f);   // 1/32
+                    }
+                    else
+                    {
+                        params.setReal ("time", 62.5f);
+                    }
+
+                    return render (*rack, Host::steady);
+                };
+
+                expect (identical (onTape (true), onTape (false)),
+                        "dwell in a rack lands its first tempo: tape synced to 1/32 at 120 bpm renders as TIME 62.5 ms");
             }
         }
 

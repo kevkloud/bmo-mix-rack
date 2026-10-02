@@ -335,7 +335,7 @@ enum FxType
 {
     kDiffuse = 0,      ///< 6-stage allpass chain, delays 7-37 ms scaled by AMOUNT
     kPanTremolo = 1,   ///< one LFO stepped at the delay period; chops on the mono bus
-    kCrush = 2         ///< quantise to 16-3 bits, holding the mean of every 1-32 samples
+    kCrush = 2         ///< quantise to 16-3 bits, holding the energy of every 1-32 samples
 };
 
 //==============================================================================
@@ -358,9 +358,9 @@ enum FxType
     when FX moves. Diffuse is an allpass, so it is exactly unity at every omega;
     Pan/Tremolo is peak-normalised in closed form (see `panGain`); Crush's
     quantiser truncates toward zero, so it can never make a sample larger, and
-    its hold holds a block's mean, which can never carry more energy than the
-    samples it averages (see `crush` -- until 2026-10-01 it rounded and held a
-    single sample, and both expanded).
+    its hold carries exactly the energy of the block it holds (see `crush` --
+    until 2026-10-01 it rounded and held a single sample, and both expanded;
+    for one day after that it held the block's mean, which lost the top end).
 
     **AMOUNT zero is a wire on Diffuse and Pan/Tremolo** -- the allpass lengths
     round to nothing and every stage is skipped, and the pan normalisation
@@ -627,29 +627,42 @@ private:
         lose energy, not be indefinite"). Two choices make it so, and each was
         forced by a measured limit cycle on AURORA:
 
-        - **The hold holds the average, not a sample** (DECIDED, Frosty:
-          "average instead of freeze"). Each held value is the mean of the N
-          samples since the last one, held for the next N. A frozen sample is
-          not energy-bounded: phase-locked to a tone it turns a sine into a
-          square whose fundamental is up to 4/pi of the sine's, and from about
-          FEEDBACK 90 % that grew loops to a steady peak above their input --
-          0.7277 from a 0.5 burst at 44.1 kHz on bucket-brigade, AMOUNT 35,
-          TIME 50 ms, FEEDBACK 95 %. A block mean cannot: N copies of the mean
-          of N samples carry at most their energy (`N . mean^2 <= sum x^2`).
-          It costs some top end -- the mean is a box filter -- which the
-          testing note measures at 300 Hz to 10 kHz.
+        - **The hold matches the block's energy** (DECIDED, Frosty,
+          2026-10-02: "energy match it"). Each held value has the magnitude of
+          the RMS of the N samples since the last hold -- the square root of
+          the mean of `x^2` -- and the sign of the newest of them, the sample a
+          frozen hold would have taken; it is held for the next N. N copies of
+          the RMS of N samples carry exactly their energy, so the hold can
+          neither add energy nor take it away, and the stage keeps its top end.
+          Two holds were built before it and measured on AURORA:
+          - a **frozen sample** (until 2026-10-01) is not energy-bounded:
+            phase-locked to a tone it turns a sine into a square whose
+            fundamental is up to 4/pi of the sine's, and from about FEEDBACK
+            90 % that grew loops to a steady peak above their input -- 0.7277
+            from a 0.5 burst at 44.1 kHz on bucket-brigade, AMOUNT 35, TIME
+            50 ms, FEEDBACK 95 %;
+          - the **block mean** (2026-10-01) is bounded, but it is a box filter:
+            one pass at AMOUNT 60 took 5 and 10 kHz down about 30 dB, and at
+            AMOUNT 100 everything from 1 kHz up truncated to silence.
+          A tone at exactly the hold rate, sampled at its crest every block,
+          comes out of this hold as DC; the loop's 10 Hz blocker after the stage
+          keeps it out of the ring (`testCrushCarriesNoDcOutOfTheLoop`).
         - **The quantiser truncates toward zero, so `|q| <= |x|`.** It rounded
           to the nearest step until 2026-10-01, and rounding expands: at 3
           bits a 0.13 becomes 0.25, and above about 60 % FEEDBACK the loop held
           -7.1 dB forty seconds after a burst. A signal under one step is gone
           on its first crushed lap.
 
-        With both, no dead zone is needed: the 0.35-step one built for the
-        frozen hold's one-step cycle came out again, and on the full grid (six
-        rates, every character, AMOUNT 35-100, FEEDBACK to 96.9 %) nothing is
-        left holding a level. A non-finite input is counted as 0 rather than
-        let into the running sum. Bounded work: one add and, once a hold, one
-        divide.
+        With both, no dead zone is needed (a 0.35-step one was built for the
+        frozen hold's one-step cycle on 2026-10-01 and removed the same day),
+        and on the full grid (six rates, every character, AMOUNT 35-100,
+        FEEDBACK to 96.9 %) nothing is left holding a level. **The hold is
+        causal by one block**: what is held from sample `k` is the block that
+        ends at `k`, so a lap through Crush is about N - 1 samples later than
+        the same lap without it (the first repeat never passes through it). A
+        non-finite input counts as 0, in the sum and in the sign. Bounded work:
+        a multiply-add a sample and, once a hold, one divide and one square
+        root.
 
         The clamp to +-1 stays: a loud lap can still hand this stage more than
         full scale, and the shaper and clip come after it. */
@@ -657,12 +670,15 @@ private:
     {
         const auto divisor = (int) std::ceil (1.0 + amount * kCrushHoldSpan);
 
-        heldSum[ch] += std::isfinite (x) ? x : 0.0;
+        const auto clean = std::isfinite (x) ? x : 0.0;
+
+        heldSum[ch] += clean * clean;
         ++heldCount[ch];
 
         if (holdCounter[ch] <= 0)
         {
-            held[ch] = heldSum[ch] / (double) heldCount[ch];
+            const auto blockRms = std::sqrt (heldSum[ch] / (double) heldCount[ch]);
+            held[ch] = clean > 0.0 ? blockRms : (clean < 0.0 ? -blockRms : 0.0);
             heldSum[ch] = 0.0;
             heldCount[ch] = 0;
             holdCounter[ch] = std::max (1, divisor);
@@ -689,8 +705,8 @@ private:
     std::array<double, kMaxChannels> held {};
     std::array<int, kMaxChannels> holdCounter {};
 
-    /** Crush's running sum and count since the last hold: what the next held
-        value is the mean of. */
+    /** Crush's running sum of squares and count since the last hold: what the
+        next held value is the RMS of. */
     std::array<double, kMaxChannels> heldSum {};
     std::array<int, kMaxChannels> heldCount {};
 

@@ -4734,61 +4734,104 @@ void testMixSnapsAfterReset()
     check (exact, buf);
 }
 
-/** **Crush holds the mean of each block, truncated, and nothing poisons it.**
+/** **Crush holds each block's energy, truncated, and nothing poisons it**
+    (Frosty, 2026-10-02: "energy match it").
 
-    The stage on its own: each held value must be the mean of the samples
-    since the last hold, truncated toward zero onto the grid, held for the
-    next block; a NaN or an infinity counts as 0 rather than entering the
-    sum; and `reset` returns the stage to the state of a fresh one. Then the
-    lane's own Crush, at a setting where the frozen hold grew the main loop,
-    has to end in exact zeros too -- the stage is one per engine. */
-void testCrushHoldsTheBlockMean()
+    The stage on its own, at AMOUNT 35 and 100 (holds of 12 and 32 samples).
+    The hold taken at sample `k` covers samples `k - N + 1 .. k` and is output
+    from `k` for `N` samples. Its value must be the block's RMS -- the square
+    root of the mean of `x^2` -- with the sign of sample `k`, the one a frozen
+    hold would have taken (0 if that sample is 0), truncated toward zero onto
+    the grid. So:
+
+    - **the rule**, sample for sample;
+    - **the energy**: before truncation the held block carries exactly the
+      input block's energy, so after it `N q^2 <= sum x^2 < N (|q| + step)^2`.
+      This is read off the output, not the rule, and the block mean fails it
+      on the first block (its mean of a sine block is far under the RMS);
+    - **the sign**: a block whose hold sample is exactly 0 holds 0, whatever
+      its energy;
+    - **the guard**: a NaN or an infinity counts as 0 in the sum and in the
+      sign, and the output stays finite;
+    - **reset** returns the stage to the state of a fresh one.
+
+    Then the lane's own Crush, at a setting where the frozen hold grew the main
+    loop, has to end in exact zeros too -- the stage is one per engine. */
+void testCrushHoldsTheBlockEnergy()
 {
     constexpr auto rate = 48000.0;
-    constexpr int divisor = 32;   // ceil(1 + 1.0 . 31) at AMOUNT 100
-    const auto step = std::exp2 (1.0 - 3.0);
 
     P::FxStage fresh;
     fresh.prepare (rate, 2);
     const auto restingSignature = fresh.stateSignature();
 
-    P::FxStage fx;
-    fx.prepare (rate, 2);
-
-    // A ramp, and a NaN and an infinity in the first block.
-    std::vector<double> in ((size_t) (divisor * 4)), out (in.size());
-    for (size_t i = 0; i < in.size(); ++i)
-        in[i] = 0.9 * std::sin (0.05 * (double) i);
-    in[3] = std::numeric_limits<double>::quiet_NaN();
-    in[7] = std::numeric_limits<double>::infinity();
-
-    for (size_t i = 0; i < in.size(); ++i)
-        out[i] = fx.process (0, P::kCrush, in[i], 1.0, 2);
-
-    auto finite = true, means = true;
-
-    for (const auto y : out)
-        finite = finite && std::isfinite (y);
-
-    // The hold taken at sample k covers samples k - divisor + 1 .. k and is
-    // output from k on, for `divisor` samples.
-    for (int k = divisor; k + divisor <= (int) in.size(); k += divisor)
+    for (const auto amount : { 0.35, 1.0 })
     {
-        auto sum = 0.0;
-        for (int j = k - divisor + 1; j <= k; ++j)
-            sum += std::isfinite (in[(size_t) j]) ? in[(size_t) j] : 0.0;
+        const auto divisor = (int) std::ceil (1.0 + amount * P::FxStage::kCrushHoldSpan);
+        const auto step = std::exp2 (1.0 - (P::FxStage::kCrushBitsAtZero - amount * P::FxStage::kCrushBitsSpan));
 
-        const auto want = std::clamp (std::trunc ((sum / divisor) / step) * step, -1.0, 1.0);
+        P::FxStage fx;
+        fx.prepare (rate, 2);
 
-        for (int j = k; j < k + divisor; ++j)
-            means = means && out[(size_t) j] == want;
+        // A sine under a slow swell, so blocks differ; a NaN in the second
+        // block, an infinity in the third, an exact zero on the fourth hold.
+        std::vector<double> in ((size_t) (divisor * 10)), out (in.size());
+        for (size_t i = 0; i < in.size(); ++i)
+            in[i] = 0.9 * std::sin (0.37 * (double) i + 0.3) * (0.55 + 0.45 * std::cos (0.013 * (double) i));
+        in[(size_t) divisor + 3] = std::numeric_limits<double>::quiet_NaN();
+        in[(size_t) (2 * divisor + 5)] = std::numeric_limits<double>::infinity();
+        in[(size_t) (4 * divisor)] = 0.0;
+
+        for (size_t i = 0; i < in.size(); ++i)
+            out[i] = fx.process (0, P::kCrush, in[i], amount, 2);
+
+        const auto clean = [&] (int j) { return std::isfinite (in[(size_t) j]) ? in[(size_t) j] : 0.0; };
+
+        auto finite = true, rule = true, energy = true, zeroSign = true;
+        auto worstLow = 0.0;
+
+        for (const auto y : out)
+            finite = finite && std::isfinite (y);
+
+        for (int k = divisor; k + divisor <= (int) in.size(); k += divisor)
+        {
+            auto sumSq = 0.0;
+            for (int j = k - divisor + 1; j <= k; ++j)
+                sumSq += clean (j) * clean (j);
+
+            const auto r = std::sqrt (sumSq / (double) divisor);
+            const auto s = clean (k);
+            const auto held = s > 0.0 ? r : (s < 0.0 ? -r : 0.0);
+            const auto want = std::clamp (std::trunc (held / step) * step, -1.0, 1.0);
+
+            for (int j = k; j < k + divisor; ++j)
+                rule = rule && out[(size_t) j] == want;
+
+            const auto q = std::abs (out[(size_t) k]);
+
+            if (s == 0.0)
+            {
+                zeroSign = zeroSign && q == 0.0 && sumSq > 0.0;
+                continue;
+            }
+
+            energy = energy && (double) divisor * q * q <= sumSq * (1.0 + 1.0e-12)
+                            && (double) divisor * (q + step) * (q + step) > sumSq;
+            worstLow = std::max (worstLow, 1.0 - (double) divisor * q * q / sumSq);
+        }
+
+        const auto at = " at AMOUNT " + std::to_string ((int) std::lround (amount * 100.0)) + " (holds of "
+                        + std::to_string (divisor) + ")";
+
+        check (finite, "Crush's output stays finite with a NaN and an infinity in its input" + at);
+        check (rule, "Crush holds each block's RMS with the sign of its hold sample, truncated, the bad samples counted as 0" + at);
+        check (energy, "each held block carries the input block's energy to within one step"
+                           + at + " (worst block " + std::to_string (100.0 * worstLow) + " % under the input block)");
+        check (zeroSign, "a block whose hold sample is exactly 0 holds 0" + at);
+
+        fx.reset();
+        check (fx.stateSignature() == restingSignature, "reset returns Crush's running sums to a fresh stage's state" + at);
     }
-
-    check (finite, "Crush's output stays finite with a NaN and an infinity in its input");
-    check (means, "Crush holds the truncated mean of each block of 32 samples, the bad ones counted as 0");
-
-    fx.reset();
-    check (fx.stateSignature() == restingSignature, "reset returns Crush's running mean to a fresh stage's state");
 
     // The lane's own Crush, linked off, at the main loop's worst reproduced
     // setting: 44.1 kHz, bucket-brigade, AMOUNT 35, a 50 ms lane at a tail
@@ -4826,6 +4869,130 @@ void testCrushHoldsTheBlockMean()
         check (zeros, "the lane's own Crush ends in exact zeros too (44.1 kHz, bucket-brigade, AMOUNT 35, last second peak "
                           + std::to_string (peakOf (block.left, n - (int) laneRate, (int) laneRate)) + ")");
     }
+}
+
+/** **Crush keeps its top end: what Frosty chose the energy-matched hold for**
+    (2026-10-02).
+
+    One pass through the stage alone, a sine at amplitude 0.5 at 48 kHz, output
+    RMS against input RMS. The block mean this replaced was a box filter: at
+    AMOUNT 60 it took 5 and 10 kHz down about 30 dB, and at AMOUNT 100 it
+    truncated everything from 1 kHz up to silence. A hold that matches energy
+    loses only what truncation takes, so:
+
+    - **AMOUNT 35 and 60: within 0.25 dB of 0 dB** at 300 Hz, 1, 5 and 10 kHz
+      (on AURORA, over 64 start phases: -0.02 to 0.00 dB at 35, -0.16 to
+      -0.01 at 60);
+    - **AMOUNT 100: between -5.5 and -2.5 dB** -- three bits, a step of 0.25,
+      truncate a 0.354 RMS to 0.25: -3.01 dB from 1 kHz up. At 300 Hz, exactly
+      five holds a cycle, it is -3.98 to -5.23 dB depending on where the holds
+      land on the cycle (64 start phases, AURORA).
+
+    The sine starts off a zero crossing, so no hold lands on an exact zero and
+    turns the level into a coin toss. A future change that low-passes Crush
+    fails this; one that expands it fails `testCrushHoldsTheBlockEnergy`. */
+void testCrushKeepsItsTopEnd()
+{
+    constexpr auto rate = 48000.0;
+    const auto n = (int) rate;
+
+    for (const auto amount : { 35, 60, 100 })
+        for (const auto hz : { 300.0, 1000.0, 5000.0, 10000.0 })
+        {
+            P::FxStage fx;
+            fx.prepare (rate, 2);
+
+            auto in = 0.0, out = 0.0;
+
+            for (int i = 0; i < n; ++i)
+            {
+                const auto x = 0.5 * std::sin (2.0 * P::kPiD * hz * (double) i / rate + 0.3);
+                const auto y = fx.process (0, P::kCrush, x, amount * 0.01, 2);
+
+                if (i >= n / 10)
+                {
+                    in += x * x;
+                    out += y * y;
+                }
+            }
+
+            const auto db = out > 0.0 ? 10.0 * std::log10 (out / in) : -999.0;
+            const auto inside = amount < 100 ? std::abs (db) <= 0.25 : (db >= -5.5 && db <= -2.5);
+
+            char buf[200];
+            std::snprintf (buf, sizeof (buf), "Crush at AMOUNT %d passes a 0.5 sine at %.0f Hz at %+.2f dB (want %s)",
+                           amount, hz, db, amount < 100 ? "within 0.25 dB of 0" : "-5.5 to -2.5 dB");
+            check (inside, buf);
+        }
+}
+
+/** **A tone locked to the hold carries no DC out of the loop.**
+
+    The energy-matched hold takes its sign from one sample a block, so a tone at
+    exactly the hold rate, sampled at its crest every time, comes out of the
+    stage as a constant: all of its energy turned into DC. The loop's 10 Hz
+    blocker sits after the stage (10 §4), so that DC must not reach the ring.
+
+    Clean, 48 kHz, AMOUNT 35 (a hold of 12 samples, so the tone is 4 kHz, and
+    TIME 50 ms is 200 of its periods, so every lap lands on the crest again),
+    FEEDBACK 95 %, MIX 100: 3 s of the tone at 0.5, then silence. The output's
+    mean over the last second of the tone must stay under 1e-3 (-60 dBFS),
+    and after it stops the loop must still decay -- the last second exact
+    zeros or quieter than the one before. */
+void testCrushCarriesNoDcOutOfTheLoop()
+{
+    constexpr auto rate = 48000.0;
+    const auto toneEnd = (int) (3.0 * rate);
+    const auto n = toneEnd + (int) (8.0 * rate);
+    const auto second = (int) rate;
+
+    auto v = settings (0, 50.0f, 95.0f, 100.0f);
+    v[P::Index::fx]       = 1.0f;
+    v[P::Index::fxType]   = 2.0f;
+    v[P::Index::fxAmount] = 35.0f;
+
+    // First, that the case is real: the stage alone turns this tone into DC
+    // (0.353 from a 0.354 RMS tone on AURORA), so the loop below is not
+    // passing for want of anything to block.
+    {
+        P::FxStage fx;
+        fx.prepare (rate, 2);
+
+        auto stageMean = 0.0;
+        for (int i = 0; i < (int) rate; ++i)
+            stageMean += fx.process (0, P::kCrush, 0.5 * std::cos (2.0 * P::kPiD * 4000.0 * (double) i / rate), 0.35, 2);
+        stageMean /= rate;
+
+        check (stageMean > 0.3, "a 4 kHz tone locked to Crush's 12-sample hold comes out of the stage as DC ("
+                                    + std::to_string (stageMean) + ")");
+    }
+
+    P::DwellDsp dsp;
+    dsp.prepare (rate, 512, 2);
+
+    Block block { n };
+
+    for (int i = 0; i < toneEnd; ++i)
+        block.left[(size_t) i] = block.right[(size_t) i]
+            = (float) (0.5 * std::cos (2.0 * P::kPiD * 4000.0 * (double) i / rate));
+
+    renderAsHost (dsp, v, block, n, 512, [] (int) {});
+
+    auto mean = 0.0;
+    for (int i = toneEnd - second; i < toneEnd; ++i)
+        mean += (double) block.left[(size_t) i];
+    mean /= (double) second;
+
+    const auto last = rms (block.left, n - second, second);
+    const auto before = rms (block.left, n - 2 * second, second);
+
+    char buf[220];
+    std::snprintf (buf, sizeof (buf),
+                   "a 4 kHz tone locked to Crush's 12-sample hold at FEEDBACK 95 %%: output mean over the tone's last second "
+                   "%.3g (want under 1e-3); after it, last second RMS %.3g against %.3g",
+                   mean, last, before);
+
+    check (allFinite (block.left) && std::abs (mean) < 1.0e-3 && (last == 0.0 || last < before), buf);
 }
 
 /** **Under 100 % FEEDBACK every in-loop effect loses energy** -- the property
@@ -5239,7 +5406,9 @@ int main()
     testCrushEndsInZerosAtEveryRate();
     testTheSmoothersLandOnTheirTargets();
     testMixSnapsAfterReset();
-    testCrushHoldsTheBlockMean();
+    testCrushHoldsTheBlockEnergy();
+    testCrushKeepsItsTopEnd();
+    testCrushCarriesNoDcOutOfTheLoop();
     testEveryInLoopEffectLosesEnergyUnderUnity();
     testTheFirstRepeatIsNotChargedTheFxDelay();
 

@@ -1143,6 +1143,12 @@ public:
         lines and turning its LFO, and would then jump when FX came on. */
     double fxStateSignature() const noexcept { return fx.stateSignature(); }
 
+    /** The smoothed loop gain and DRIVE pair as they stand, for the test
+        that holds them to landing exactly on their targets. */
+    float smoothedFeedbackGain() const noexcept { return feedback.value(); }
+    float smoothedDriveBlend() const noexcept   { return driveBlend.value(); }
+    float smoothedDriveCurve() const noexcept   { return driveCurve.value(); }
+
     //==========================================================================
     /** One block. Allocates nothing: every buffer and every grid came from
         `prepare`.
@@ -1196,9 +1202,13 @@ public:
 
         for (int n = 0; n < numSamples; ++n)
         {
-            const auto gain = (double) feedback.tick();
-            const auto blend = (double) driveBlend.tick();
-            const auto curve = (double) driveCurve.tick();
+            // These three *land* on their targets (`Smoother::tickLanding`):
+            // a plain tick stalls up to 1.7e-4 short at 192 kHz, and near
+            // unity a loop gain left that far over its target sits at or past
+            // unity (2026-10-01, measured on AURORA).
+            const auto gain = (double) feedback.tickLanding();
+            const auto blend = (double) driveBlend.tickLanding();
+            const auto curve = (double) driveCurve.tickLanding();
             const auto fxDepth = (double) fxAmount.tick();
 
             advanceTime (glide);

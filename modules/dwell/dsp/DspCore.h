@@ -411,6 +411,10 @@ public:
         zeros and costs one branch a block (10 §11.8). */
     bool laneIsLive() const noexcept { return laneLive; }
 
+    /** LANE LEVEL's smoothed gain as it stands, for the test that holds it to
+        landing exactly on its target. */
+    float smoothedLaneLevel() const noexcept { return laneLevel.value(); }
+
     /** The longest delay a ring is sized for, in samples at the prepared
         rate. Each engine allocates the next power of two at or above this. */
     int maxDelaySamples() const noexcept
@@ -744,7 +748,7 @@ private:
             // gain has landed. Above the hinge the wet's gain lands on exactly
             // 1.0 too, so the wet is then carried unscaled to the bit.
             const auto dryIsBitExact = d == 1.0f;
-            const auto ll = laneLevel.tick();
+            const auto ll = laneLevel.tickLanding();
 
             const auto level = duckLevelFor (dry, i, nch);
             auto gr = 1.0f;

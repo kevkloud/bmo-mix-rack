@@ -4546,6 +4546,72 @@ void testCrushEndsInZerosAtEveryRate()
     }
 }
 
+/** **FEEDBACK, DRIVE and LANE LEVEL land exactly on their targets.**
+
+    A float one-pole stalls short of its target once a step is under half an
+    ulp: measured on AURORA, the feedback gain sat 4.3e-5 off at 48 kHz and
+    1.7e-4 off at 192 kHz, and approached from above near the unity point it
+    could sit at or past unity -- at FEEDBACK 96.9 % it slowed the decay by up
+    to 22 %. Each smoother is moved from above and from below, rendered two
+    seconds, and its value compared with its target to the bit. */
+void testTheSmoothersLandOnTheirTargets()
+{
+    for (const auto rate : { 44100.0, 48000.0, 192000.0 })
+    {
+        const auto rateName = std::to_string ((int) rate) + " Hz";
+
+        const auto settle = [&] (std::vector<float>& v, int index, float from, float to, P::DwellDsp& dsp)
+        {
+            dsp.prepare (rate, 512, 2);
+            v[index] = from;
+            Block block { (int) (rate * 2.2) };
+            renderAsHost (dsp, v, block, (int) (rate * 2.2), 512, [&] (int offset)
+            {
+                v[index] = offset < (int) (rate * 0.2) ? from : to;
+            });
+        };
+
+        for (const auto from : { 100.0f, 90.0f })
+        {
+            P::DwellDsp dsp;
+            auto v = defaults();
+            settle (v, P::Index::feedback, from, 96.9f, dsp);
+
+            const auto& engine = dsp.getCore().getMainEngine();
+            const auto want = P::feedbackGainFor (96.9f, engine.referenceLoopPeak());
+
+            check (engine.smoothedFeedbackGain() == want,
+                   "the feedback gain lands on its target from " + std::to_string ((int) from) + " % at "
+                       + rateName + " (off by " + std::to_string (engine.smoothedFeedbackGain() - want) + ")");
+        }
+
+        for (const auto from : { 100.0f, 0.0f })
+        {
+            P::DwellDsp dsp;
+            auto v = defaults();
+            settle (v, P::Index::drive, from, 50.0f, dsp);
+
+            const auto lo = (double) bmo::sat::tables::kDriveMin, hi = (double) bmo::sat::tables::kDriveMax;
+            const auto& engine = dsp.getCore().getMainEngine();
+
+            check (engine.smoothedDriveBlend() == 0.5f && engine.smoothedDriveCurve() == (float) (lo * std::pow (hi / lo, 0.5)),
+                   "DRIVE lands on its target from " + std::to_string ((int) from) + " % at " + rateName);
+        }
+
+        for (const auto from : { 6.0f, -6.0f })
+        {
+            P::DwellDsp dsp;
+            auto v = defaults();
+            v[P::Index::hold] = 1.0f;
+            settle (v, P::Index::laneLevel, from, 0.0f, dsp);
+
+            check (dsp.getCore().smoothedLaneLevel() == 1.0f,
+                   "LANE LEVEL lands on unity from " + std::to_string ((int) from) + " dB at " + rateName
+                       + " (off by " + std::to_string (dsp.getCore().smoothedLaneLevel() - 1.0f) + ")");
+        }
+    }
+}
+
 } // namespace
 
 //==============================================================================
@@ -4610,6 +4676,7 @@ int main()
     testTheReportedTailIsNeverShorterThanTheDecay();
     testDuckAutomationIsBlockSizeInvariant();
     testCrushEndsInZerosAtEveryRate();
+    testTheSmoothersLandOnTheirTargets();
 
     std::printf ("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

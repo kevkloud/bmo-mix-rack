@@ -1441,7 +1441,7 @@ void checkReverbPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
     // one set repointed by the LOW / MID / HIGH segments -- BMO DEQ's band
     // selector, the same mechanism -- so the page shows one node's worth at a
     // time and the other six lanes are reached through the row above.
-    const char* const eqPage[] { "FREQ", "GAIN", "Q", "FILTER", "IN HI-CUT", "OUTPUT" };
+    const char* const eqPage[] { "FREQ", "GAIN", "Q", "FILTER", "DARKEN", "OUTPUT" };
 
     // **Every parameter still has a control, and this is the sum that says so.**
     // Twenty-three controls, one of which is a segmented row bound to `ermode`,
@@ -2045,7 +2045,7 @@ void checkReverbPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
 
         //-- Nothing drawn inside the screen is cut off by the screen ---------
         //
-        // **This is the IN HI-CUT failure with a walk round it.** That marker
+        // **This is the DARKEN failure with a walk round it.** That marker
         // was drawn centred on 20 kHz, which is the right-hand end of the axis
         // exactly, so half of it fell outside the plot: the panel shipped a
         // clipped mark that every render showed and no test could see.
@@ -2074,22 +2074,22 @@ void checkReverbPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
             }
 
             // The curtain is the EQ page's and nobody else's, and on that page it
-            // is inside the plot **at the top of IN HI-CUT's travel**, which is
+            // is inside the plot **at the top of DARKEN's travel**, which is
             // the setting that used to clip.
             const auto curtain = screen.inputCutRegion();
 
             if (p == R::Page::eq)
             {
                 check (! curtain.isEmpty() && plot.contains (curtain),
-                       where + " IN HI-CUT's curtain is " + curtain.toString()
+                       where + " DARKEN's curtain is " + curtain.toString()
                              + ", which is not inside the plot " + plot.toString());
                 check (curtain.getWidth() >= R::LingerScreen::kCurtainEdge,
-                       where + " IN HI-CUT's curtain is too narrow to draw its own edge");
+                       where + " DARKEN's curtain is too narrow to draw its own edge");
             }
             else
             {
                 check (curtain.isEmpty(),
-                       where + " draws IN HI-CUT's curtain on a page that has no EQ on it");
+                       where + " draws DARKEN's curtain on a page that has no EQ on it");
             }
 
             // A hard-panned tap draws inside the box at both ends of the
@@ -2276,7 +2276,7 @@ void checkReverbPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
 
             // The direct sound is the ringed dot at t = 0 on the centre line,
             // **inside the box**: centred on the frame it would be half drawn,
-            // which is the fault IN HI-CUT's marker had on the other page.
+            // which is the fault DARKEN's marker had on the other page.
             const auto direct = screen.directDot();
 
             checkNear (direct.centre.y, (double) plot.getCentreY(), 0.5,
@@ -2587,7 +2587,7 @@ void checkReverbPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
 
         // **Flat at the defaults, and flat is the input cut's number alone.**
         // Every node is a unity biquad, so the whole reading at 1 kHz is
-        // IN HI-CUT's one pole at 20 kHz: -10*log10(1 + (1000/20000)^2), which
+        // DARKEN's one pole at 20 kHz: -10*log10(1 + (1000/20000)^2), which
         // is -0.01086 dB. Not "roughly zero" -- the exact figure, because an EQ
         // that had quietly acquired half a dB somewhere would still read as
         // roughly zero.
@@ -2952,7 +2952,7 @@ void checkReverbPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
             checkNear (nodes[0], 120.0, 0.5, who + " node 0 is EQ LOW's corner");
             checkNear (nodes[1], 1500.0, 0.5, who + " node 1 is EQ MID's centre");
             checkNear (nodes[2], 1800.0, 0.5, who + " node 2 is EQ HIGH's corner");
-            checkNear (nodes[3], 9000.0, 0.5, who + " node 3 is IN HI-CUT's corner");
+            checkNear (nodes[3], 9000.0, 0.5, who + " node 3 is DARKEN's corner");
 
             // The three markers land on the curve in frequency order, and inside
             // the plot with their rings on.

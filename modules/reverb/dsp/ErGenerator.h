@@ -52,6 +52,18 @@ struct ErConfig
     bool operator!= (const ErConfig& o) const noexcept { return ! (*this == o); }
 };
 
+/** Whether ER SPREAD reaches the cluster in this ER MODE (0 taps, 1 energy).
+    It is Energy's envelope sigma and nothing else: Taps places the room's own
+    image sources and fills between them on their contour, and never reads it.
+
+    **The panel dims ER SPREAD on this answer**, and `DspCore` stops handing
+    the generator a SPREAD it would not use -- which before 2026-10-02 rebuilt
+    an identical table and ran a 30 ms crossfade between two copies of it on
+    every move of the knob in Taps, and held off any SIZE move meanwhile. One
+    function for both, as `eqNodeHasGain` is for GAIN, so the look and the
+    engine cannot disagree about which knob is live. */
+inline constexpr bool erSpreadIsLive (int mode) noexcept { return mode == 1; }
+
 //==============================================================================
 class ErGenerator
 {
@@ -83,6 +95,14 @@ public:
     /** Diffuser stage thresholds on DENSITY and the width of each fade. */
     static constexpr float kStageAt[kNumStages] { 0.60f, 0.75f, 0.90f };
     static constexpr float kStageWidth = 0.10f;
+
+    /** How far DENSITY (0..1) or a filter coefficient (relative) moves before
+        a moving control re-runs the diffuser's normaliser; see
+        `updateBandCoefs`. A quarter of a percent of DENSITY moves a stage's
+        fade by 0.025 of its width, which is under 0.2 dB on the normaliser at
+        its steepest, and the exact figure lands the block the control stops. */
+    static constexpr float kNormDensityStep = 0.0025f;
+    static constexpr float kNormCoefStep    = 0.02f;
 
     /** VARIATION 0..5: lateral spread of the bearings, and the fraction of
         each tap's energy moved to channel-specific times. Both rise
@@ -323,6 +343,11 @@ public:
     float spanMs() const noexcept { return sets[active].spanMs; }
     int   tapCount() const noexcept { return sets[active].count; }
     bool  isFading() const noexcept { return fading || dipping; }
+
+    /** How many times the diffuser's normaliser has run since construction:
+        what the tests count to show a moving control no longer runs it on
+        every block. */
+    long long normaliserRuns() const noexcept { return normRuns; }
     float bandCutoffHz (int b) const noexcept { return sets[active].cutoffHz[(size_t) b]; }
     const ErConfig& config() const noexcept { return current; }
 
@@ -551,17 +576,42 @@ private:
         const auto& b = sets[1 - active];
         const auto  w = fading ? 0.5f * (1.0f - std::cos ((float) fadePos / (float) fadeLength * 3.14159265f)) : 0.0f;
 
-        bool changed = density != lastNormDensity || hiCutTarget != lastNormHiCut;
+        for (int i = 0; i < kNumBands; ++i)
+            bandCoef[i] = onePoleCoef (a.cutoffHz[(size_t) i] * (1.0f - w) + b.cutoffHz[(size_t) i] * w);
+
+        // **The normaliser runs on a step, not on every block a control is
+        // moving.** It was every block until 2026-10-02, which at 192 kHz / 32
+        // cost 13.0 % of a core under a DENSITY ramp and 36.6 % under an ER
+        // HI-CUT ramp (`measure_reverb bench`, ICE QUEEN; 3.7 % held), for a
+        // figure that moved by hundredths of a dB between blocks. Now 2.9 %
+        // and 4.3 %, inside 10 section 6's 5 %. It runs
+        // when DENSITY has moved kNormDensityStep, or a band's or the hi-cut's
+        // coefficient kNormCoefStep (relative), since the last run -- and once
+        // more, exactly, the block everything has settled, so a held setting
+        // is always normalised for exactly what it is. A negative
+        // `lastNormDensity` is the "now, unconditionally" the rebuild paths
+        // ask for.
+        const auto rel = [] (float x, float ref) { return std::abs (x - ref) > kNormCoefStep * std::max (ref, 1.0e-6f); };
+
+        bool stale = density != lastNormDensity || hiCutTarget != lastNormHiCut;
+        bool far   = lastNormDensity < 0.0f
+                  || std::abs (density - lastNormDensity) > kNormDensityStep
+                  || rel (hiCutTarget, lastNormHiCut);
 
         for (int i = 0; i < kNumBands; ++i)
         {
-            const auto coef = onePoleCoef (a.cutoffHz[(size_t) i] * (1.0f - w) + b.cutoffHz[(size_t) i] * w);
-            changed = changed || coef != bandCoef[i];
-            bandCoef[i] = coef;
+            stale = stale || bandCoef[i] != lastNormBandCoef[i];
+            far   = far   || rel (bandCoef[i], lastNormBandCoef[i]);
         }
 
-        if (changed)
+        const bool moving = density != densityTarget || fading || hiCutTarget != lastBlockHiCut;
+        lastBlockHiCut = hiCutTarget;
+
+        if (far || (stale && ! moving))
+        {
             updateStageNorms();
+            ++normRuns;
+        }
     }
 
     /** The diffuser stage delays, in samples at this rate: a mixed-radix
@@ -598,6 +648,18 @@ private:
     {
         lastNormDensity = density;
         lastNormHiCut   = hiCutTarget;
+        for (int i = 0; i < kNumBands; ++i)
+            lastNormBandCoef[i] = bandCoef[i];
+
+        // Below the first stage's threshold no stage is engaged and every
+        // normaliser is exactly one; skip the filtered reference entirely.
+        if (density <= kStageAt[0])
+        {
+            for (auto& band : stageNorm)
+                for (auto& n : band)
+                    n = 1.0f;
+            return;
+        }
 
         for (int b = 0; b < kNumBands; ++b)
         {
@@ -1134,6 +1196,9 @@ private:
     mutable float bandPower[kNumBands][3] {};   ///< per band: sum of left, right and cross tap energies; written by the const weigh()
     int     stageDelay[kNumStages][4] {};
     float   lastNormDensity = -1.0f, lastNormHiCut = -1.0f;
+    float   lastNormBandCoef[kNumBands] { -1.0f, -1.0f, -1.0f, -1.0f };
+    float   lastBlockHiCut = -1.0f;
+    long long normRuns = 0;
 
     OnePole hiCutL, hiCutL2, hiCutR, hiCutR2;   ///< two poles a side: 12 dB/octave
     float   hiCutCoef = 1.0f, hiCutTarget = 1.0f;

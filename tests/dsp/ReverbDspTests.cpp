@@ -1084,6 +1084,82 @@ int main()
         check (jump.ratio <= 1.5f, "a DENSITY jump does not click");
     }
 
+    //== Automation does not run the normaliser every block ======================
+    //
+    // Until 2026-10-02 the diffuser's normaliser re-ran on every block DENSITY
+    // or ER HI-CUT moved, ~48 % of a core at 192 kHz / 32 under a drawn ramp.
+    // It now runs on a step. Counted, not timed, so the test is the same on
+    // every machine: under 10 % of blocks for a 1 s ramp across each range,
+    // where the old code ran on every one. And the step must not leave a held
+    // setting approximate -- after the ramp stops, the output matches a fresh
+    // instance that was only ever at the final value.
+    {
+        constexpr double rate  = 192000.0;
+        constexpr int    block = 32;
+        const auto blocks = (int) (2.0 * rate / block);
+
+        const auto ramp = [&] (Index which, auto valueAt, float hold)
+        {
+            ReverbDsp dsp;
+            dsp.prepare (rate, block, 2);
+            auto v = defaults();
+            v[Index::erdensity]   = 100.0f;
+            v[Index::ervariation] = 5.0f;
+
+            std::vector<float> l ((size_t) block), r ((size_t) block);
+            float* chans[] { l.data(), r.data() };
+            const auto run = [&] (float in)
+            {
+                std::fill (l.begin(), l.end(), 0.0f);
+                std::fill (r.begin(), r.end(), 0.0f);
+                l[0] = r[0] = in;
+                dsp.setParams (v.data(), (int) v.size());
+                dsp.process (chans, 2, block);
+            };
+
+            const auto before = dsp.getCore().earlyReflections().normaliserRuns();
+            for (int b = 0; b < blocks; ++b)
+            {
+                const auto t = std::fmod ((double) b * block / rate, 2.0);
+                v[which] = valueAt ((float) (t < 1.0 ? t : 2.0 - t));
+                run (0.0f);
+            }
+            const auto runs = dsp.getCore().earlyReflections().normaliserRuns() - before;
+
+            // Hold, settle, then an impulse: its ER energy over 400 ms.
+            v[which] = hold;
+            for (int b = 0; b < (int) (0.5 * rate / block); ++b)
+                run (0.0f);
+            double e = 0.0;
+            for (int b = 0; b < (int) (0.4 * rate / block); ++b)
+            {
+                run (b == 0 ? 1.0f : 0.0f);
+                for (int i = 0; i < block; ++i)
+                    e += (double) l[(size_t) i] * l[(size_t) i] + (double) r[(size_t) i] * r[(size_t) i];
+            }
+            return std::pair<long long, double> { runs, e };
+        };
+
+        const auto fresh = [&] (Index which, float hold)
+        {
+            return ramp (which, [hold] (float) { return hold; }, hold).second;
+        };
+
+        const auto density = ramp (Index::erdensity, [] (float x) { return 100.0f * x; }, 80.0f);
+        const auto hicut   = ramp (Index::erhicut, [] (float x) { return 1000.0f * std::pow (20.0f, x); }, 5000.0f);
+
+        std::cout << "  normaliser runs over " << blocks << " blocks at 192 kHz / 32: DENSITY ramp " << density.first
+                  << ", ER HI-CUT ramp " << hicut.first << "\n";
+        check (density.first > 0 && density.first <= blocks / 10, "a DENSITY ramp runs the normaliser on under 10 % of blocks");
+        check (hicut.first > 0 && hicut.first <= blocks / 10, "an ER HI-CUT ramp runs the normaliser on under 10 % of blocks");
+
+        const auto dDensity = 10.0 * std::log10 (density.second / fresh (Index::erdensity, 80.0f));
+        const auto dHiCut   = 10.0 * std::log10 (hicut.second / fresh (Index::erhicut, 5000.0f));
+        std::cout << "  held after the ramp vs never moved: DENSITY " << dDensity << " dB, ER HI-CUT " << dHiCut << " dB\n";
+        check (std::abs (dDensity) <= 0.01, "DENSITY held after a ramp is exactly where a fresh instance is");
+        check (std::abs (dHiCut) <= 0.01, "ER HI-CUT held after a ramp is exactly where a fresh instance is");
+    }
+
     //== ER hi-cut: -3 dB where it says, and no tap moves =========================
     {
         const auto open = render ([] (auto&) {});
@@ -1567,6 +1643,43 @@ int main()
         }
 
         check (landed, "reset() during a crossfade or a TYPE dip lands on the new setting, not the old one (residual under -80 dB)");
+    }
+
+    //== ER SPREAD is not a table change in Taps =================================
+    //
+    // Taps never reads SPREAD, so moving it there must not rebuild the table
+    // or start a crossfade -- which it did until 2026-10-02, between two
+    // identical sets, holding off any SIZE move for 30 ms each time. The
+    // panel dims the knob on the same `erSpreadIsLive`. Energy is the control
+    // case: the same move there **is** a table change, so the observation is
+    // not vacuous.
+    {
+        const auto spreadMoveFades = [] (int mode)
+        {
+            ReverbDsp dsp;
+            dsp.prepare (48000.0, 512, 2);
+            auto v = defaults();
+            v[Index::ermode] = (float) mode;
+
+            std::vector<float> l (512, 0.0f), r (512, 0.0f);
+            float* chans[] { l.data(), r.data() };
+            const auto run = [&]
+            {
+                dsp.setParams (v.data(), (int) v.size());
+                dsp.process (chans, 2, 512);
+            };
+
+            for (int b = 0; b < 40; ++b)
+                run();
+
+            v[Index::erspread] = 150.0f;
+            run();
+            return dsp.getCore().earlyReflections().isFading();
+        };
+
+        check (! erSpreadIsLive ((int) taps) && erSpreadIsLive ((int) energy), "SPREAD is live in Energy only");
+        check (! spreadMoveFades ((int) taps), "a SPREAD move in Taps starts no crossfade");
+        check (spreadMoveFades ((int) energy), "a SPREAD move in Energy does (the control case)");
     }
 
     //== Energy: finite, and energy-renormalised to the room =====================

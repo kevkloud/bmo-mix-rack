@@ -253,13 +253,13 @@ inline constexpr auto kModRate  = "modrate";
 inline constexpr auto kWidth = "width";
 
 // The input high-cut, ahead of both generators, on top of a fixed 20 Hz
-// high-pass that is not a parameter. **Marked "owner confirm" in 11 section
-// 4**: 10's body reads as 29 parameters plus an internal constant while its
-// own list reads 30, and this is the one it disagrees with itself about. Kept,
+// high-pass that is not a parameter; DARKEN on the panel. **Kept as a parameter
+// by Frosty on 2026-09-26**, closing the "owner confirm" 11 section 4 carried:
+// 10's body reads as 29 parameters plus an internal constant while its own
+// list reads 30, and this is the one it disagrees with itself about. Kept,
 // because section 2 gives it a user range a constant would not need and it is
 // the only way to darken what feeds both generators independently of the EQ
-// shelves. Deleting index 25 is free until first ship and returns a third
-// spare lane; after that it is permanent.
+// shelves. Permanent from first ship.
 inline constexpr auto kInHiCut = "inhicut";
 
 // The two absolute trims. **Not a wet/dry pair**: each is the level of one
@@ -1115,9 +1115,9 @@ inline const ParamSpecs& specs()
         // 200 is the widest the M/S law allows before it stops being one.
         S::floatParam (kWidth, "Width", 0.0f, 200.0f, 1.0f, 100.0f, F::Percent),
 
-        // 25. IN HI-CUT. Defaults wide open, so a fresh instance is not
+        // 25. DARKEN. Defaults wide open, so a fresh instance is not
         // quietly darker than the signal it was given. See kInHiCut for why
-        // this parameter is marked "owner confirm".
+        // this parameter was marked "owner confirm" and kept.
         S::logParam (kInHiCut, "In Hi-Cut", 2000.0f, 20000.0f, 0.1f,
                      roomDefaults::kInHiCutHz, F::Hertz),
 

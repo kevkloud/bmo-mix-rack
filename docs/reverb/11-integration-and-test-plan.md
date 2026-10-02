@@ -282,7 +282,7 @@ knob position.
 | 22 | `moddepth` | MOD DEPTH | 0.1…0.8 ms | *per type* (0.28) | `0.28 ms` | |
 | 23 | `modrate` | MOD RATE | 0.1…1.2 Hz | *per type* (0.50) | Hz | L |
 | 24 | `width` | WIDTH | 0…200 % | 100 | % | |
-| 25 | `inhicut` | IN HI-CUT | 2…20 kHz | *per type* (20 k) | Hz/kHz | L, **owner confirm** |
+| 25 | `inhicut` | DARKEN (was IN HI-CUT until 2026-09-29) | 2…20 kHz | *per type* (20 k) | Hz/kHz | L |
 | 26 | `erlevel` | ER | −40…0 dB | *per type* (−6) | dB, `Off` at −40 | |
 | 27 | `verblevel` | REVERB | −40…0 dB | *per type* (−6) | as `erlevel` | |
 | 28 | `mix` | MIX | 0…100 % | 50 | % | default 50 since 2026-09-24, Frosty: input unchanged, verb heard |
@@ -571,7 +571,7 @@ What follows is what is built.
   SIZE — with ER MODE as the segment row.
 - **TAIL (6, no segments):** PRE-DELAY, WIDTH, MOD RATE, LOW x, HIGH x,
   MOD DEPTH.
-- **EQ (6 + segments):** FREQ, GAIN, Q, FILTER, IN HI-CUT, OUTPUT — with
+- **EQ (6 + segments):** FREQ, GAIN, Q, FILTER, DARKEN, OUTPUT — with
   LOW / MID / HIGH as the segment row, repointing the first three.
 - **Always on, at the foot:** ER, REVERB and MIX as **faders**, then TYPE over
   DECAY in the strip's fourth column. 5 + 6 + 6 + 6 controls is 23, one of which
@@ -694,7 +694,7 @@ the whole component, which is what stops a curve being drawn through the menu.
 - **EQ is log frequency 20 Hz–20 kHz over ±24 dB**, drawn as the Reverb EQ's
   three nodes over one summed curve, through `EqNodes::design` — which is
   `dsp::designMatched`, which is the code the engine will run, so the sketch is
-  a measurement (§4c). **IN HI-CUT is a washed curtain and not a fourth node
+  a measurement (§4c). **DARKEN is a washed curtain and not a fourth node
   marker**: one stroke's difference from three filled markers read as a fourth
   node of the same EQ when it is an *input* filter ahead of the EQ and ahead of
   both generators, and at its own 20 kHz default the old open circle sat half
@@ -881,12 +881,19 @@ same pass. The panel was rebuilt around it on 2026-09-22 (§4e): the page menu
 moved inside the screen, the persistent row dissolved, and the three levels
 became faders.
 
-**Owner confirm, still open:** whether `inhicut` ships as a parameter or becomes
-a constant (§4d); whether ER SPREAD greys out in Taps mode or sits inert — *ER
-SHAPE is no longer part of that question, having lost its knob in the trim*
-(§4a); the MIX law and its default; and **what happens past the 30 s tail
-ceiling** — `decay` 20 s × `damphi` or `damplo` 2.0 rings for 40 s, so §6's tail
-report cannot be both ≥ measured and ≤30 s at that corner, and §6's own
-stability test sits on it. Clamp the effective T60 in the engine, restrict
-"≥ measured" to settings under the ceiling, or accept and record the
-under-report; `HANDOFF-linger-dsp.md` holds M3 until this is chosen.
+**Owner confirm: all four answered, none open.** Each was open here until the
+date given:
+
+- **`inhicut` is a parameter** (2026-09-26), captioned **DARKEN** on the panel
+  (2026-09-29). The id stays `inhicut`; §4d's argument stands.
+- **ER SPREAD dims in Taps mode** (2026-10-02), under a rule Frosty set for
+  every module that day: a control a mode makes inert is dimmed
+  (`modules/AGENTS.md`). *ER SHAPE was never part of it after losing its knob
+  in the trim (§4a).*
+- **The MIX law and its default** (2026-09-24): dry = min(1, 2(1 − mix)), wet =
+  min(1, 2 mix), default 50 %, 100 % is verb only for a send.
+- **The tail ceiling rises to 40 s** (2026-09-26). `decay` 20 s × `damphi` or
+  `damplo` 2.0 rings for 40 s, and §6 asked the report to be both ≥ measured
+  and ≤ 30 s there. `kMaxTailSeconds` in `core/dsp/ModuleDsp.h` goes to 40 in
+  M3, with the tests that prove the corner; §6's "≤30 s" becomes "≤40 s" in
+  the same commit, not before.

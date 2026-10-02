@@ -452,7 +452,9 @@ private:
         c.sizeM     = params.sizeM;
         c.mode      = (int) params.erMode;
         c.variation = params.erVariation;
-        c.spreadMs  = params.erSpreadMs;
+        // Held at the struct's own value in Taps, so a SPREAD move there is
+        // not a table change. See `erSpreadIsLive`.
+        c.spreadMs  = erSpreadIsLive (c.mode) ? params.erSpreadMs : ErConfig {}.spreadMs;
         c.shape     = params.erShape;
         er.setConfig (c);
         er.setDensity (params.erDensity);

@@ -127,7 +127,7 @@ enum class Page { early = 0, tail, eq };
     node.** The three are the Reverb EQ's -- node 1 a low shelf, node 2 a bell,
     node 3 a high shelf, or a low cut and a high cut with FILTER on -- and they
     are designed by `EqNodes::design`, which is `dsp::designMatched`, which is
-    **the code the engine will run**. IN HI-CUT is in the curve, because it is
+    **the code the engine will run**. DARKEN is in the curve, because it is
     in the chain, but it is marked as a region rather than as a fourth node.
 
     ### The four node states, and they compose
@@ -338,7 +338,7 @@ public:
         own radius so no part of it is drawn on the frame. */
     TapDot directDot() const noexcept;
 
-    /** IN HI-CUT's curtain on the EQ page: the washed region from its corner
+    /** DARKEN's curtain on the EQ page: the washed region from its corner
         to the right-hand edge of the axis, **clamped so its bright edge is
         inside the plot at 20 kHz** rather than half-drawn on the frame. Empty
         on the other two pages.
@@ -404,7 +404,7 @@ public:
     float nodeDbAt (EqNode node, float hz) const noexcept;
 
     /** The four corner frequencies the picture marks, in the order it marks
-        them: EQ LOW, EQ MID and EQ HIGH as nodes on the curve, then IN HI-CUT,
+        them: EQ LOW, EQ MID and EQ HIGH as nodes on the curve, then DARKEN,
         which is `inputCutRegion`'s curtain rather than a fourth node. */
     std::array<float, 4> nodeFrequencies() const noexcept;
 
@@ -472,7 +472,7 @@ public:
     static constexpr float kDotMinRadius = 1.6f;
     static constexpr float kDotMaxRadius = 5.4f;
 
-    /** The bright edge on IN HI-CUT's curtain, in pixels. */
+    /** The bright edge on DARKEN's curtain, in pixels. */
     static constexpr float kCurtainEdge = 2.0f;
 
     /** The EQ node markers: the filled disc's radius, and how far outside it
@@ -889,6 +889,11 @@ private:
         `eqGainReachingDesign` is the same decision one folder over, in the
         DSP, and it is the reason the two cannot disagree. */
     void refreshFilterMode();
+
+    /** Dims ER SPREAD in Taps, where it reaches nothing. The same
+        `setKnobEnabled` as GAIN above, for the same reasons, and on
+        `erSpreadIsLive`, the function the engine asks. */
+    void refreshErMode();
 
     /** All of the cluster's controls at once, for the unparenting walk. */
     std::vector<juce::Component*> allPageControls() const;

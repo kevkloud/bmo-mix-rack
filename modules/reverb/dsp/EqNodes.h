@@ -109,7 +109,7 @@ inline constexpr bool eqCutsHigh (EqFilter f) noexcept
     a node is in; GAIN does not, because `dsp::hasGain` is false for a cut and
     the prototype has nowhere to put it -- see `gainReaching`.
 
-    ## IN HI-CUT is not one of these three
+    ## DARKEN is not one of these three
 
     The module has **two** high cuts and they are different controls in
     different places:

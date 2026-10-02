@@ -61,7 +61,7 @@ frequency", and the EQ had to be worth reaching for.
 
 | Control | What it does |
 |---|---|
-| **TYPE** | Room, Chamber, Hall, Cavern, Plate, Ambience. Small to large, then a plate, then Ambience — which is the one with almost no tail. **Picking a type re-sets the controls that belong to it**, every time: a type is a voicing rather than a label, so SIZE, SOURCE, DENSITY, ER SPREAD, the two modulation controls, IN HI-CUT and the ER and REVERB faders all move to what that type is — and so do the five settings that no longer have a knob at all. Everything else stays where you put it. It is a menu rather than a knob, and it sits in the corner rather than in the grid, because a menu is not knob-shaped. |
+| **TYPE** | Room, Chamber, Hall, Cavern, Plate, Ambience. Small to large, then a plate, then Ambience — which is the one with almost no tail. **Picking a type re-sets the controls that belong to it**, every time: a type is a voicing rather than a label, so SIZE, SOURCE, DENSITY, ER SPREAD, the two modulation controls, DARKEN and the ER and REVERB faders all move to what that type is — and so do the five settings that no longer have a knob at all. Everything else stays where you put it. It is a menu rather than a knob, and it sits in the corner rather than in the grid, because a menu is not knob-shaped. |
 | **DECAY** | How long the tail takes to die, 0.1 to 20 s. It is the one knob on the panel that prints its own number, because the three faders beside it print theirs. |
 | **ER** | How loud the early reflections are, or **Off**. |
 | **REVERB** | How loud the tail is, or **Off**. |
@@ -183,7 +183,7 @@ different number.
 | **MID** + FREQ + GAIN + Q | A bell, and the wide one: **20 Hz to 20 kHz**, so it reaches anywhere. Q goes to 40 for a notch. |
 | **HIGH** + FREQ + GAIN + Q | A high shelf, **1 to 20 kHz**, so it reaches air. |
 | **FILTER** | A dial with the four positions written round it — **OFF**, **L**, **H**, **B**. L turns **LOW** into a low cut, H turns **HIGH** into a high cut, and B does both — which is what a low cut plus a high cut is. The frequencies and the Qs mean the same thing whichever shape a band is in — a corner and a resonance — so only that band's GAIN changes, and it greys out when you are on that band, because a cut has no gain to set. **It keeps what you set it to**: come back off the cut and the shelf is where you left it. The MID bell is untouched in all four. |
-| **IN HI-CUT** | Darkens what feeds *both* generators, ahead of the EQ. **This is not the same as EQ HIGH in filter mode**: this one is on the way in, that one is on the reverb. |
+| **DARKEN** | Darkens what feeds *both* generators, ahead of the EQ. **This is not the same as EQ HIGH in filter mode**: this one is on the way in, that one is on the reverb. |
 | **OUTPUT** | Trim. |
 
 At its defaults the EQ does nothing at all — every gain is 0 dB and FILTER is

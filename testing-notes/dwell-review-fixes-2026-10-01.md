@@ -213,3 +213,145 @@ and nothing limits their sum. No gain or limiter change, by decision.
 twenty-six parameters are twenty-seven; `lane_note` is in the wiring test and
 the state round-trip; Dwell has a rack-slot case in `tempo_tests`; the sinc A/B
 note's header says it was answered.
+
+## Third round (the same day): Frosty's two decisions
+
+**The rule** (Frosty): "under 100% feedback should lose energy, not be
+indefinite" — for every in-loop effect.
+
+### Crush holds each block's mean (Frosty: "average instead of freeze")
+
+Each held value is the mean of the samples since the last hold, truncated
+toward zero; the 0.35-step dead zone is removed. A non-finite input counts as 0
+in the running sum; prepare and reset clear it; each engine has its own, so the
+lane gets it too.
+
+Rows the review reproduced on 3e29d90 (peak, a 5 ms 300 Hz burst at 0.5, last
+second of 30 s), now exact zeros:
+
+| rate | character | AMOUNT | TIME | FEEDBACK | 3e29d90 | now |
+|---|---|---|---|---|---|---|
+| 44.1 kHz | bucket-brigade | 35 | 50 ms | 90 % | 0.5651 | 0 |
+| 44.1 kHz | bucket-brigade | 35 | 50 ms | 93 % | 0.6650 | 0 |
+| 44.1 kHz | bucket-brigade | 35 | 50 ms | 95 % | 0.7276 | 0 |
+| 44.1 kHz | bucket-brigade | 80 | 20 ms | 95 % | 0.7399 | 0 |
+| 48 kHz | bucket-brigade | 80 | 20 ms | 95 % | 0.6647 | 0 |
+| 48 kHz | bucket-brigade | 70 | 10 ms | 95 % | 0.5415 | 0 |
+| 44.1 kHz | clean | 35 | 50 ms | 95 % | 0.3585 | 0 |
+
+The five round-1 rows stay silent. The lane's own Crush at the worst setting
+(44.1 kHz, bucket-brigade, AMOUNT 35) held 0.728 on 3e29d90 and is silent now.
+
+**The grids, on the built code** (a 5 ms burst, 30 s; a row cycles if Crush's
+last second is louder than the same loop without FX, and is late if anything
+after the reported tail passes −60 dB of the burst):
+
+| set | rows | cycling | late | not zero by 30 s |
+|---|---|---|---|---|
+| every character, AMOUNT 35/60/100, TIME 20/50/100/375 ms, FEEDBACK 80–96.9 % (9 steps), 44.1/48/88.2/96/176.4/192 kHz | 1,944 | 0 | 0 | 41 |
+| FEEDBACK 92–96.9 % in 10 steps, AMOUNT 60/100, the same rates and characters | 1,440 | 0 | 0 | 0 |
+| AMOUNT 70/80/90, TIME 10/30/200/1000 ms, FEEDBACK 92–96.9 %, the same | 2,160 | 0 | 0 | 0 |
+
+The 41 not yet zero at 30 s are all TIME 375 ms, AMOUNT 35, FEEDBACK 95 % and
+above, on clean and bucket-brigade, and in every one the loop without FX is
+itself still ringing. Last-second peak, with Crush / without FX:
+
+| rate (kHz) | char | 95 % | 96 % | 96.5 % | 96.9 % |
+|---|---|---|---|---|---|
+| 44.1 | clean | — | 0.0120 / 0.0449 | 0.0292 / 0.0755 | 0.0507 / 0.110 |
+| 44.1 | BBD | — | 7.7e-18 / 0.0491 | 0.0066 / 0.0822 | 0.0174 / 0.119 |
+| 48 | clean | — | 0.0134 / 0.0453 | 0.0313 / 0.0760 | 0.0537 / 0.110 |
+| 48 | BBD | — | 0.0014 / 0.0491 | 0.0106 / 0.0823 | 0.0214 / 0.119 |
+| 88.2 | clean | — | 0.0127 / 0.0462 | 0.0300 / 0.0775 | 0.0531 / 0.112 |
+| 88.2 | BBD | — | 0.0162 / 0.0490 | 0.0362 / 0.0822 | 0.0615 / 0.119 |
+| 96 | clean | 0.0028 / 0.0147 | 0.0259 / 0.0463 | 0.0501 / 0.0775 | 0.0816 / 0.112 |
+| 96 | BBD | — | 0.0176 / 0.0490 | 0.0396 / 0.0821 | 0.0662 / 0.119 |
+| 176.4 | clean | 0.0021 / 0.0148 | 0.0227 / 0.0464 | 0.0466 / 0.0778 | 0.0746 / 0.113 |
+| 176.4 | BBD | 0.0021 / 0.0155 | 0.0276 / 0.0490 | 0.0562 / 0.0821 | 0.0894 / 0.119 |
+| 192 | clean | 0.0035 / 0.0148 | 0.0279 / 0.0465 | 0.0566 / 0.0778 | 0.0896 / 0.113 |
+| 192 | BBD | 0.0027 / 0.0155 | 0.0290 / 0.0490 | 0.0575 / 0.0821 | 0.0914 / 0.119 |
+
+**One pass, sine at amplitude 0.5, 48 kHz, output RMS against input, dB** —
+the original sample-and-hold with rounding (d783f59), the frozen hold with
+truncation and the dead zone (3e29d90), and the block mean with truncation (now):
+
+| AMOUNT | version | 300 Hz | 1 kHz | 5 kHz | 10 kHz |
+|---|---|---|---|---|---|
+| 35 | d783f59 | +0.00 | −0.01 | −0.01 | silent |
+| 35 | 3e29d90 | −0.01 | −0.01 | −0.01 | silent |
+| 35 | **now** | **−0.09** | **−0.92** | **−14.82** | **−16.38** |
+| 60 | d783f59 | +0.03 | +0.05 | +0.05 | +0.05 |
+| 60 | 3e29d90 | −0.11 | −0.10 | −0.10 | −0.09 |
+| 60 | **now** | **−0.32** | **−2.74** | **−30.64** | **−30.06** |
+| 100 | d783f59 | −0.00 | +1.25 | +1.25 | +1.25 |
+| 100 | 3e29d90 | −6.99 | −4.77 | −4.77 | −4.77 |
+| 100 | **now** | **−3.98** | **silent** | **silent** | **silent** |
+
+"Silent" means the pass truncates every sample to zero. At AMOUNT 35 the frozen
+hold takes every 12th value, so a 10 kHz sine lands on the same two phases and
+reads zero: aliasing, not level. At AMOUNT 100 the mean of 32 samples of a 0.5
+sine at 1 kHz and above stays under one step (0.25), so it is gone on the
+first pass; d783f59's +1.25 dB is the expanding rounding.
+
+**Cost**, best of seven: the Crush stage alone 6.53 ns per sample per channel on
+3e29d90, 7.83 now; the whole module with Crush on (FEEDBACK 80, 48 kHz,
+stereo) 163.6 ns per stereo sample on 3e29d90, 165.7 now (+1.3 %). One add per
+sample and one divide per hold; no allocation.
+
+### Every in-loop effect loses energy: the property test
+
+`testEveryInLoopEffectLosesEnergyUnderUnity`: Diffuse, Pan/Tremolo and Crush ×
+three characters × AMOUNT 0/35/60/100 × 44.1/48/96 kHz × (TIME 50 ms, FEEDBACK
+93 %) and (TIME 20 ms, FEEDBACK 96.9 %). Each row must end in exact zeros or be
+quieter in its last second than the one before, and be under −60 dB of the
+burst after the reported tail. **216 rows, 16 s, all pass**; no Diffuse or
+Pan/Tremolo row fails. On 3e29d90's Crush it fails (AMOUNT 35, bucket-brigade,
+44.1 kHz, TIME 50 ms, FEEDBACK 93 %: last second RMS 0.866 against 0.83).
+
+### The tail: the first repeat is not charged the FX delay ("keep it safe")
+
+The per-lap bound is unchanged; the FX delay is now charged to every lap but
+the first, which is tapped before the loop's effects:
+
+| Diffuse 100 | before | after | measured |
+|---|---|---|---|
+| FEEDBACK 80 %, TIME 100 ms | 21.993 s | 21.279 s | 6.20 s |
+| FEEDBACK 35 %, TIME 20 ms | 3.685 s | 2.970 s | 1.12 s |
+| FEEDBACK 35 %, TIME 375 ms | 5.460 s | 4.745 s | 2.62 s |
+
+(The first round's 18.73 s for the first row was before the build-up term.)
+
+Never-shorter grid on the corrected figure: every character, FEEDBACK
+35–96.9 %, TIME 1–2000 ms, Diffuse 35/60/100, Crush 0/60/100 and Pan/Tremolo
+100, four inputs, at 44.1, 48 and 96 kHz, plus FX off at 44.1: **14,952 rows,
+12 short, every one the exception below**; none at 48 or 96 kHz, none on clean
+or tape, none with a burst or a held tone.
+
+### The bucket-brigade impulse exception, re-measured
+
+Bucket-brigade, 44.1 kHz, a one-sample impulse, TIME at a fractional sample
+count. Figure in seconds, before this round's first-lap fix / after / measured:
+
+| FX | FEEDBACK | TIME | before | after | measured | past the figure now |
+|---|---|---|---|---|---|---|
+| off | 35 % | 375 ms | 1.889 | 1.889 | 1.909 | +1.1 % |
+| off | 60 % | 375 ms | 3.765 | 3.765 | 3.778 | +0.3 % |
+| Diffuse 60 | 35 % | 1 ms | 0.944 | 0.759 | 0.954 | +25.7 % |
+| Diffuse 60 | 35 % | 5 ms | 0.964 | 0.779 | 0.980 | +25.8 % |
+| Diffuse 60 | 35 % | 375 ms | 2.815 | 2.630 | 2.643 | +0.5 % |
+| Diffuse 60 | 60 % | 1 ms | 1.875 | 1.689 | 1.922 | +13.8 % |
+| Diffuse 60 | 60 % | 5 ms | 1.915 | 1.729 | 1.978 | +14.4 % |
+| Diffuse 100 | 35 % | 1 ms | 3.590 | 2.875 | 3.803 | +32.3 % |
+| Diffuse 100 | 35 % | 5 ms | 3.610 | 2.895 | 3.873 | +33.8 % |
+| Diffuse 100 | 35 % | 375 ms | 5.461 | 4.747 | 5.281 | +11.3 % |
+| Diffuse 100 | 60 % | 1 ms | 7.166 | 6.452 | 7.520 | +16.6 % |
+| Diffuse 100 | 60 % | 5 ms | 7.206 | 6.492 | 7.622 | +17.4 % |
+
+Ten were short before the first-lap fix (by 0.3–7.3 %); the two Diffuse rows
+at 375 ms were inside (−3.3 %, −6.1 %) and the fix exposed them. Not fixed;
+for Frosty.
+
+### Also
+
+docs/delay/15 has no 2026-09-23 date left (lane_note and stage 2b were
+committed on 2026-09-22, 1d5b5bd and c4d2d33).

@@ -511,11 +511,15 @@ void testTheTailIsTheLongerEngine()
     v[P::Index::sync] = 1.0f;
     checkLaps (tailOf (v), 5, 2.0, "with SYNC on the tail assumes the longest division");
 
-    // And the adapter reports exactly this.
+    // And the adapter -- which is what a host's engine asks -- reports the
+    // hand-worked figure, and nothing at all for a short array rather than
+    // reading past its end.
     P::DwellDsp dsp;
     const auto d = defaults();
-    check (dsp.tailSecondsForParams (d.data(), (int) d.size()) == tailOf (d),
-           "the adapter reports the same tail");
+    checkLaps (dsp.tailSecondsForParams (d.data(), (int) d.size()), 5, 0.375,
+               "the adapter reports 5 laps of 375 ms at the defaults");
+    check (dsp.tailSecondsForParams (d.data(), (int) d.size() - 1) == 0.0,
+           "the adapter reports no tail for a parameter array one short");
 }
 
 /** Zero, everywhere, including at the settings that tempt a delay to report

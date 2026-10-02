@@ -273,8 +273,11 @@ int main()
         const auto atDefaults = tailAfter ({});
         check (laps (atDefaults, 5, 0.375),
                "dwell tells the host 5 laps of 375 ms at its defaults, got " + juce::String (atDefaults, 6));
-        check (proc->getEngine().tailSeconds() == atDefaults,
-               "dwell's engine agrees with the host-facing figure");
+        // The engine read on its own -- live parameters, not the host-facing
+        // cache -- against the same hand-worked window, so a cache that went
+        // stale and an engine that read the wrong values both fail here.
+        check (laps (proc->getEngine().tailSeconds(), 5, 0.375),
+               "dwell's engine, read directly, is 5 laps of 375 ms at its defaults");
 
         checkClose (tailAfter ({ { "feedback", 0.0f } }), 0.5, 1.0e-9,
                     "dwell with no feedback floors at 0.5 s");

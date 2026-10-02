@@ -325,7 +325,7 @@ double DwellScreen::loopGain() const
 {
     // `P_c` = 1: the loop's magnitude at its own peak. See the class comment.
     if (page == Page::lane)
-        return (double) laneGainFor (params.getReal (Index::laneGain), 1.0);
+        return (double) laneGainFor (laneGainOnDetent (params.getReal (Index::laneGain)), 1.0);
 
     return (double) feedbackGainFor (params.getReal (Index::feedback), 1.0);
 }

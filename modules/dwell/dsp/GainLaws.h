@@ -35,6 +35,33 @@ inline float feedbackGainFor (float feedbackPercent, double loopPeak) noexcept
 }
 
 //==============================================================================
+/** **A centre a host hands back a hair off is still the centre** (eighth
+    round, 2026-10-02).
+
+    A stepped parameter's value comes back from a host through its normalised
+    float and the snap `start + interval . n`, and on macOS arm64 that is
+    fused into one multiply-add: LANE GAIN's 0 comes back as
+    -100 + 0.1f . 1000 = about 1.5e-6 there and as 0 on Windows, and LANE
+    LEVEL's 0 dB as a few parts in 1e7 off (core/state/ParamSpec.h met the same
+    family). A detent compared with `==` then misses on one platform -- LANE
+    GAIN's FREEZE quietly decayed on macOS. So anything within half a step of
+    the centre **is** the centre, exactly. The widths are half the schema's
+    steps, which the DSP tests hold them to. The panel's FREEZE label already
+    read half a step either side as the centre; now the sound agrees. */
+inline constexpr float kLaneGainDetentHalfWidth = 0.05f;   ///< lane_gain: 0.1 step
+inline constexpr float kLaneLevelUnityHalfWidth = 0.005f;  ///< lane_level: 0.01 step
+
+inline float laneGainOnDetent (float laneGainPercent) noexcept
+{
+    return std::abs (laneGainPercent) < kLaneGainDetentHalfWidth ? 0.0f : laneGainPercent;
+}
+
+inline float laneLevelOnUnity (float laneLevelDb) noexcept
+{
+    return std::abs (laneLevelDb) < kLaneLevelUnityHalfWidth ? 0.0f : laneLevelDb;
+}
+
+//==============================================================================
 /** **`g_max`, the lane's build ceiling -- CALIBRATE** (10 §11.2, §12).
 
     Frosty settles this by ear in `14` §3, and it is **not** settled here. 1.10

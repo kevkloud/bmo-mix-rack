@@ -505,9 +505,12 @@ private:
         // and a smoothed approach leaves 0.9999 circulating -- a hold that
         // quietly decays. That is the same rule §9 already imposes on the dry
         // gain below 50 % MIX, for the same reason.
-        const auto atDetent = params.laneGain == 0.0f;
+        // Within half a step of the detent is the detent, exactly: a host can
+        // hand back 1.5e-6 for 0 (`laneGainOnDetent`, eighth round).
+        const auto laneGain = laneGainOnDetent (params.laneGain);
+        const auto atDetent = laneGain == 0.0f;
 
-        laneEngine.setFeedbackGain (laneGainFor (params.laneGain,
+        laneEngine.setFeedbackGain (laneGainFor (laneGain,
                                                  laneEngine.referenceLoopPeak()),
                                     snapNow || atDetent);
 
@@ -536,7 +539,7 @@ private:
 
         const auto wetTarget = belowHinge ? std::sin (kPiD * m) : 1.0;
         const auto dryTarget = belowHinge ? 1.0 : std::cos (kPiD * (m - 0.5));
-        const auto laneTarget = std::pow (10.0, (double) params.laneLevelDb / 20.0);
+        const auto laneTarget = std::pow (10.0, (double) laneLevelOnUnity (params.laneLevelDb) / 20.0);
 
         if (! gainsPrimed || snapNow)
         {

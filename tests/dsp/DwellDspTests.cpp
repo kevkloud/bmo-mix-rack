@@ -5589,6 +5589,99 @@ void testANoFeedbackRepeatIsChargedItsSwing()
 }
 
 //==============================================================================
+// Eighth round (2026-10-02): a host can hand back a stepped value a hair off.
+// A parameter's snap, `start + interval . n`, is fused into a multiply-add on
+// macOS arm64, so a centre reached through the normalised path comes back as
+// -100 + 0.1f . 1000 = 1.5e-6 there and 0 on Windows (core/state/ParamSpec.h
+// met the same family). Every exact comparison on such a value has to take
+// the step's half-width as the value.
+//==============================================================================
+
+/** Renders a lane through 1 s of a held tone and 2 s after it, HOLD and SEND
+    on, at the given LANE GAIN and LANE LEVEL, and returns the module's output
+    with the lane engine's loop gain and the core's lane level appended. */
+std::vector<float> laneRender (float laneGain, float laneLevel)
+{
+    constexpr auto rate = 48000.0;
+    const auto n = (int) (3.0 * rate);
+
+    P::DwellDsp dsp;
+    dsp.prepare (rate, 512, 2);
+
+    auto v = laneSettings (0, 250.0f, laneGain, laneLevel);
+    v[P::Index::send]     = 1.0f;
+    v[P::Index::feedback] = 0.0f;
+
+    Block block { n };
+    for (int i = 0; i < (int) rate; ++i)
+        block.left[(size_t) i] = block.right[(size_t) i] = (float) (0.1 * std::sin (2.0 * P::kPiD * 400.0 * (double) i / rate));
+
+    renderAsHost (dsp, v, block, n, 512, [] (int) {});
+
+    auto out = block.left;
+    out.push_back (dsp.getCore().getLaneEngine().smoothedFeedbackGain());
+    out.push_back (dsp.getCore().smoothedLaneLevel());
+    return out;
+}
+
+/** **LANE GAIN's detent and LANE LEVEL's unity survive a value a hair off.**
+
+    On macOS CI the plugin test that sets LANE GAIN to 0 read back about
+    1.5e-6, and the DSP's `laneGain == 0.0f` then missed the detent: the lane
+    sat a few parts in 1e8 off unity and a FREEZE quietly decayed (or built).
+    LANE LEVEL's 0 dB is the centre of -24..+24 in 0.01 steps and comes back
+    off the same way, a level a few parts in 1e7 off unity. Within half a step
+    of the centre the DSP now takes the centre exactly: the renders, the loop
+    gain, the lane level and the reported tail must equal the exact-centre
+    case bit for bit, and a value just past half a step must not. */
+void testTheLaneDetentsTakeAValueAHairOff()
+{
+    const auto exactGain = laneRender (0.0f, 0.0f);
+    const auto tailOf = [] (float laneGain, float laneLevel)
+    {
+        auto v = laneSettings (0, 250.0f, laneGain, laneLevel);
+        v[P::Index::send] = 1.0f;
+        v[P::Index::feedback] = 0.0f;
+        return P::tailSecondsFor (v.data(), (int) v.size());
+    };
+
+    for (const auto off : { 1.5e-6f, -1.5e-6f, 0.049f, -0.049f })
+    {
+        const auto got = laneRender (off, 0.0f);
+        char buf[200];
+        std::snprintf (buf, sizeof (buf), "LANE GAIN %+.7f is the detent: the render, the loop gain (%.9f against %.9f) and "
+                                          "the tail (%.4f against %.4f) are the exact-zero case's",
+                       (double) off, (double) got[got.size() - 2], (double) exactGain[exactGain.size() - 2],
+                       tailOf (off, 0.0f), tailOf (0.0f, 0.0f));
+        check (got == exactGain && tailOf (off, 0.0f) == tailOf (0.0f, 0.0f), buf);
+    }
+
+    for (const auto off : { 5.4e-7f, -5.4e-7f, 0.0049f, -0.0049f })
+    {
+        const auto got = laneRender (0.0f, off);
+        char buf[200];
+        std::snprintf (buf, sizeof (buf), "LANE LEVEL %+.7f dB is unity: the render and the level (%.9f) are the exact-0 dB case's",
+                       (double) off, (double) got.back());
+        check (got == exactGain && got.back() == 1.0f, buf);
+    }
+
+    // Past half a step on the THROW side. (On the BUILD side the law leaves the
+    // detent with zero slope by design, so +0.051 rounds to the same float gain
+    // either way and cannot tell the two apart.)
+    check (laneRender (-0.051f, 0.0f) != exactGain, "LANE GAIN -0.051, past half a step, is not the detent");
+    check (laneRender (0.0f, 0.0051f) != exactGain, "LANE LEVEL 0.0051 dB, past half a step, is not unity");
+
+    // The half-steps are the schema's: a step that changes moves them too.
+    for (const auto& s : P::specs())
+    {
+        if (std::string (s.id) == P::kLaneGain)
+            check (s.step == 2.0f * P::kLaneGainDetentHalfWidth, "LANE GAIN's detent width is half its step");
+        if (std::string (s.id) == P::kLaneLevel)
+            check (s.step == 2.0f * P::kLaneLevelUnityHalfWidth, "LANE LEVEL's unity width is half its step");
+    }
+}
+
+//==============================================================================
 // The expander's boundary, 2026-10-01 (fourth round). Bucket-brigade's gain
 // ring holds 1.0 wherever nothing was companded -- after `prepare`, after
 // `reset`, and over everything written on clean or tape -- beside compressor
@@ -5933,6 +6026,7 @@ int main()
     testALouderLaneCountsDownFurther();
     testTwoEnginesRingingTogetherCountDownFurther();
     testANoFeedbackRepeatIsChargedItsSwing();
+    testTheLaneDetentsTakeAValueAHairOff();
 
     // The fourth round, 2026-10-01: the expander's boundary.
     testABucketBrigadeBoundaryNeverSpikes();

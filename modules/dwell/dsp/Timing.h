@@ -457,7 +457,10 @@ inline double tailSecondsFor (const float* v, int count) noexcept
     // counted down to half the line -- 6.02 dB further -- and the sum is
     // under it once both are. A lane that holds or builds reports the
     // ceiling anyway.
-    const auto laneRings = v[Index::hold] > 0.5f && v[Index::laneGain] < 0.0f;
+    // A host can hand back LANE GAIN's detent a hair off (`laneGainOnDetent`).
+    const auto laneGain = laneGainOnDetent (v[Index::laneGain]);
+
+    const auto laneRings = v[Index::hold] > 0.5f && laneGain < 0.0f;
     const auto sharedDb = laneRings ? 20.0 * std::log10 (2.0) : 0.0;
 
     auto tail = engineTailSeconds (mainT, (double) feedbackGainFor (v[Index::feedback], 1.0),
@@ -476,12 +479,12 @@ inline double tailSecondsFor (const float* v, int count) noexcept
         // The detent is a literal: lane_gain at 0 is FREEZE (laneGainFor).
         // A lane LEVEL above 0 dB starts the lane that far above its input,
         // so it has that much further to fall (sixth round).
-        const auto laneTail = v[Index::laneGain] >= 0.0f
+        const auto laneTail = laneGain >= 0.0f
                                 ? kTailCeilingSeconds
-                                : engineTailSeconds (laneT, (double) laneGainFor (v[Index::laneGain], 1.0),
+                                : engineTailSeconds (laneT, (double) laneGainFor (laneGain, 1.0),
                                                      character, lowCut, highCut,
                                                      laneFx + modLapSeconds (character, laneT, modDepth),
-                                                     std::max (0.0, (double) v[Index::laneLevel]) + sharedDb);
+                                                     std::max (0.0, (double) laneLevelOnUnity (v[Index::laneLevel])) + sharedDb);
         tail = std::max (tail, laneTail);
     }
 

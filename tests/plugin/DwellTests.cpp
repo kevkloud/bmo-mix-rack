@@ -17,6 +17,7 @@
 #include "products/dwell/Product.h"
 
 #include <iterator>
+#include <set>
 #include <string>
 
 using namespace test;
@@ -219,10 +220,22 @@ int main()
             { P::kFxLink,         0.0f },
         };
 
-        // Every row, so a parameter appended later and left out here fails
-        // instead of going unchecked, as `lane_note` did until 2026-10-01.
-        check (std::size (settings) == P::specs().size(),
-               "the state round-trip sets every one of BMO Dwell's parameters");
+        // Every row, by id and not by count, so a parameter appended later and
+        // left out here fails instead of going unchecked, as `lane_note` did
+        // until 2026-10-01 -- and a row listed twice cannot stand in for one
+        // left out.
+        {
+            std::set<std::string> listed;
+            for (const auto& s : settings)
+                listed.insert (s.id);
+
+            auto everySpec = listed.size() == std::size (settings);
+            for (const auto& spec : P::specs())
+                everySpec = everySpec && listed.count (spec.id) == 1;
+
+            check (everySpec && listed.size() == P::specs().size(),
+                   "the state round-trip sets every one of BMO Dwell's parameters, each once");
+        }
 
         {
             auto proc = createDwell();

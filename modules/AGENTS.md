@@ -22,6 +22,12 @@ belongs there is what a contributor would otherwise have to re-derive -- the
 invariant a module is built on, the laws it rejected and why, the faults its
 own tests could not see. What belongs *here* is anything every module shares.
 
+- [`opto/AGENTS.md`](opto/AGENTS.md) -- BMO Opto, the levelling compressor.
+  Why its two modes are two circuits and why a feedback cell cannot be handed
+  a ratio, why both cells listen whichever one is heard, what makes its three
+  switches cross over without a step, the attack that was tested blind and
+  refused, the reduction meter that pins at 24 dB on purpose, and five faults
+  its own tests passed straight over.
 - [`dim/AGENTS.md`](dim/AGENTS.md) -- BMO Dimension. Side-only topology,
   Gerzon's asymmetry shear and its named fallback, and the width throb that
   is still open.

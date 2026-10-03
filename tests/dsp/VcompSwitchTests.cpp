@@ -10,6 +10,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <cstring>
 #include <cstdio>
 #include <functional>
 #include <iostream>
@@ -23,11 +25,19 @@ namespace
 {
     int failures = 0;
     constexpr double kPi = 3.14159265358979323846;
-    constexpr double kRates[] { 44100.0, 48000.0, 96000.0 };
+    std::vector<double> kRates { 44100.0, 48000.0, 96000.0, 192000.0 };
+
+    // How the sections are run: mono, or stereo with the right channel a
+    // different signal from the left and one of the two judged; and whether
+    // the sections that only a mono pass needs are run.
+    int  gChannels = 1;
+    bool gTakeRight = false;
+    bool gHeavy = true;
+    std::string gMode;
 
     void check (bool ok, const std::string& what)
     {
-        if (! ok) { std::cerr << "FAIL: " << what << '\n'; ++failures; }
+        if (! ok) { std::cerr << "FAIL: " << what << gMode << '\n'; ++failures; }
     }
 
     std::string rateName (double fs)
@@ -76,17 +86,24 @@ namespace
     {
         DspCore core;
         core.setParams (paramsAt (0));
-        core.prepare (fs, block, 1);
+        core.prepare (fs, block, gChannels);
+
+        // In stereo the right channel carries the same signal half a cycle
+        // of nothing in particular away -- delayed 37 samples and at half
+        // the level -- so the two channels' splits see different audio.
+        std::vector<float> right (signal.size(), 0.0f);
+        for (size_t i = 37; i < signal.size(); ++i)
+            right[i] = 0.5f * signal[i - 37];
 
         for (size_t start = 0; start < signal.size(); start += (size_t) block)
         {
             const auto n = (int) std::min ((size_t) block, signal.size() - start);
             core.setParams (paramsAt (start));
-            auto* p = signal.data() + start;
-            core.process (&p, 1, n);
+            float* channels[2] { signal.data() + start, right.data() + start };
+            core.process (channels, gChannels, n);
         }
 
-        return signal;
+        return gTakeRight ? right : signal;
     }
 
     /** A tone whose level changes at given times: `segments` is a list of
@@ -277,7 +294,7 @@ namespace
     }
 }
 
-int main()
+void sections()
 {
     //== 1. A stage out of use does not bring back what it heard before ======
     //
@@ -658,6 +675,9 @@ int main()
             }
     }
 
+    if (! gHeavy)
+        return;
+
     //== 4. A smoothed parameter lands on its setting, exactly ==============
     //
     // AMOUNT and OUTPUT are smoothed, and the smoother used to stall short
@@ -840,6 +860,307 @@ int main()
                 }
             }
     }
+
+}
+
+//== 6. The split stays flat while a crossover glides ==========================
+//
+// A crossover in circuit glides rather than jumps, and a gliding allpass is not
+// quite an allpass: how far a tone's level wobbles while one sweeps past it
+// depends on how many of the tone's cycles the sweep takes per octave (see
+// kCrossoverGlideCycles). Full-range glides of each side, alone and with the
+// other side in, at AMOUNT 0 so the split is all that acts, for tones across
+// the band and white noise: the worst 2 ms level is held to within 1 dB of the
+// input's either way. The worst figure is printed.
+void glideFlatness()
+{
+    auto at = [] (float lowHz, float highHz)
+    {
+        return complexMode (0.0f, 5.0f, 200.0f, true, kStandardSidechainHz, lowHz, highHz);
+    };
+
+    constexpr float lo = kLowThruOffHz, hi = kHighThruOffHz;
+
+    struct Move { const char* name; Params from, to; };
+    const Move moves[] {
+        { "LOW THRU 21 -> 500",                  at (21, hi),     at (500, hi) },
+        { "LOW THRU 500 -> 21",                  at (500, hi),    at (21, hi) },
+        { "HIGH THRU 2k -> 19999",               at (lo, 2000),   at (lo, 19999) },
+        { "HIGH THRU 19999 -> 2k",               at (lo, 19999),  at (lo, 2000) },
+        { "LOW THRU 21 -> 500, HIGH THRU 6k",    at (21, 6000),   at (500, 6000) },
+        { "HIGH THRU 2k -> 19999, LOW THRU 200", at (200, 2000),  at (200, 19999) },
+    };
+
+    double worst = 0.0;
+    std::string where;
+
+    for (const auto fs : { 48000.0, 192000.0 })
+        for (const auto& m : moves)
+            for (const auto hz : { 30.0, 60.0, 150.0, 400.0, 1000.0, 3000.0, 8000.0, 15000.0, 0.0 })
+            {
+                const auto sw = (size_t) (0.5 * fs) / 64 * 64;
+                const auto s = levelSwing (fs, hz, 8, [&] (size_t i) { return i < sw ? m.from : m.to; },
+                                           2.0, (double) sw / fs, (double) sw / fs + 1.2);
+
+                const auto what = std::string (m.name) + ", " + (hz > 0.0 ? fixed (hz, 0) + " Hz" : std::string ("noise"))
+                                + ", at " + rateName (fs);
+
+                check (s.low >= -1.0 && s.high <= 1.0,
+                       what + ": the level moves " + fixed (s.low) + " / +" + fixed (s.high) + " dB while it glides");
+
+                if (std::max (-s.low, s.high) > worst)
+                {
+                    worst = std::max (-s.low, s.high);
+                    where = what;
+                }
+            }
+
+    std::cout << "glide flatness: worst " << fixed (worst) << " dB (" << where << ")\n";
+}
+
+//== 7. COMPLEX back on agrees with an instance that never left it =============
+//
+// COMPLEX off for a second under a steady programme, then on again, against an
+// instance that had it on throughout. Everything the module keeps listening
+// while unused (ARC's three branches, the gate) lands where the other has it;
+// what has to catch up is the split coming back in by its edges (up to about
+// 1 s for LOW THRU, see BandSplit) and the release branches settling from
+// standard mode's times to the knobs'. Held to: within 0.1 dB, in 10 ms
+// windows, from 1.5 s after COMPLEX comes back. The time it takes is printed.
+void complexReturn()
+{
+    const auto on = complexMode (55.0f, 5.0f, 150.0f, false, 120.0f, 160.0f, 6000.0f);
+    auto off = on;
+    off.complex = false;
+
+    for (const auto fs : kRates)
+    {
+        std::vector<float> x ((size_t) (8.0 * fs));
+
+        for (size_t i = 0; i < x.size(); ++i)
+        {
+            const auto t = (double) i / fs;
+            const auto env = dbToLin (-20.0 + 8.0 * std::sin (2.0 * kPi * 3.0 * t));
+            x[i] = (float) (env * 0.5 * (std::sin (2.0 * kPi * 110.0 * t) + std::sin (2.0 * kPi * 440.0 * t)
+                                         + 0.5 * std::sin (2.0 * kPi * 2500.0 * t) + 0.3 * std::sin (2.0 * kPi * 9000.0 * t)));
+        }
+
+        const auto offAt = (size_t) (2.0 * fs) / 64 * 64;
+        const auto onAt  = (size_t) (3.0 * fs) / 64 * 64;
+
+        const auto y   = render (fs, x, 64, [&] (size_t s) { return s >= offAt && s < onAt ? off : on; });
+        const auto ref = render (fs, x, 64, [&] (size_t) { return on; });
+
+        const auto w = (size_t) (0.01 * fs);
+        auto lastApart = onAt;
+
+        for (auto a = onAt; a + w <= y.size(); a += w)
+        {
+            double ey = 0.0, er = 0.0;
+            for (size_t i = a; i < a + w; ++i) { ey += (double) y[i] * y[i]; er += (double) ref[i] * ref[i]; }
+
+            if (std::abs (10.0 * std::log10 (std::max (ey, 1.0e-300) / std::max (er, 1.0e-300))) > 0.1)
+                lastApart = a + w;
+        }
+
+        const auto agreeAfter = (double) (lastApart - onAt) / fs;
+        check (agreeAfter <= 1.5, "COMPLEX back on at " + rateName (fs) + " agrees with an instance that never left it within 0.1 dB only "
+                                      + fixed (agreeAfter) + " s later");
+
+        std::cout << "COMPLEX back on at " << rateName (fs) << ": within 0.1 dB of an instance that never left it after "
+                  << fixed (agreeAfter) << " s\n";
+    }
+}
+
+//== 8. A gate back off its rail closes at its own closing rate ================
+//
+// At its rail the gate is off and has no envelope, so a gate moved back off it
+// in silence starts open and closes the way any gate does when its threshold
+// rises over a quiet signal: no hold (an off gate holds nothing), then the
+// 150 ms closing pole towards the 60 dB floor -- 4.1 dB in the first 512
+// samples at 48 kHz, 40 dB at 165 ms, 58.9 dB at 0.6 s. Returning shut
+// instead would drop whatever is under the threshold by up to 60 dB in one
+// sample, the step section 2 exists to forbid, and would make a gate's state
+// depend on a threshold it did not have while it was off.
+void gateReturn()
+{
+    for (const auto fs : kRates)
+    {
+        Gate gate;
+        gate.prepare (fs);
+        gate.setThreshold (-30.0f);
+
+        for (int i = 0; i < (int) (0.5 * fs); ++i) gate.process (-10.0f);
+        for (int i = 0; i < (int) (2.0 * fs); ++i) gate.process (-140.0f);
+
+        const auto shut = gate.currentAttenuationDb();
+
+        gate.setThreshold (kGateOffDb);
+        for (int i = 0; i < (int) (0.5 * fs); ++i) gate.process (-140.0f);
+
+        check (gate.currentAttenuationDb() == 0.0f, "GATE at its rail at " + rateName (fs) + " is all the way open");
+
+        gate.setThreshold (-30.0f);
+
+        const auto pole = std::exp (-1.0 / (fs * (double) kGateCloseMs * 0.001));
+        auto expected = 0.0, worst = 0.0;
+
+        for (int n = 1; n <= (int) (0.6 * fs); ++n)
+        {
+            gate.process (-140.0f);
+            expected = pole * expected + (1.0 - pole) * (double) kGateRangeDb;
+            worst = std::max (worst, std::abs ((double) gate.currentAttenuationDb() - expected));
+        }
+
+        check (shut > 59.9f, "the gate was shut before its rail at " + rateName (fs));
+        check (worst <= 0.1, "GATE back off its rail in silence at " + rateName (fs) + " closes "
+                                  + fixed (worst, 4) + " dB away from its own closing curve");
+
+        if (fs == 48000.0)
+        {
+            Gate g;
+            g.prepare (fs);
+            g.setThreshold (-30.0f);
+            double at512 = 0.0, at165 = 0.0, at600 = 0.0;
+
+            for (int n = 1; n <= (int) (0.6 * fs); ++n)
+            {
+                g.process (-140.0f);
+                if (n == 512)                    at512 = g.currentAttenuationDb();
+                if (n == (int) (0.165 * fs))     at165 = g.currentAttenuationDb();
+                if (n == (int) (0.6 * fs))       at600 = g.currentAttenuationDb();
+            }
+
+            check (std::abs (at512 - 4.12) < 0.05 && std::abs (at165 - 40.0) < 0.1 && std::abs (at600 - 58.9) < 0.1,
+                   "a gate leaving its rail in silence at 48 kHz is down " + fixed (at512) + " / " + fixed (at165)
+                       + " / " + fixed (at600) + " dB at 512 samples / 165 ms / 0.6 s, not 4.12 / 40.0 / 58.9");
+        }
+    }
+}
+
+//== 9. Held settings render exactly as they did before any of this ============
+//
+// Every change in this file's sections had to leave a held setting's output
+// bit for bit what it was at 6f6b8c3, the commit before the first of them.
+// These hashes were printed by this file built against 6f6b8c3 (MSVC x64,
+// Release, /fp:precise, on ICE QUEEN): `vcomp_switch_tests --print-hashes`.
+// Floating-point results are only promised bit-identical within one compiler
+// and maths library, so they are pinned there and printed elsewhere.
+uint64_t heldRenderHash (double fs, int mode)
+{
+    Params p;
+
+    if (mode == 0)
+    {
+        p = standard (80.0f, 6.0f);         // compressing hard, into the limiter
+        p.gateDb = -40.0f;
+    }
+    else
+    {
+        p = complexMode (70.0f, 3.0f, 150.0f, true, 120.0f, 160.0f, 6000.0f, 6.0f);
+        p.gateDb = -40.0f;
+    }
+
+    const auto n = (size_t) (2.0 * fs);
+    std::vector<float> left (n), right (n);
+
+    for (size_t i = 0; i < n; ++i)
+    {
+        const auto t = (double) i / fs;
+        const auto env = std::fmod (t, 0.5) < 0.3 ? dbToLin (-8.0 + 6.0 * std::sin (2.0 * kPi * 2.0 * t)) : dbToLin (-55.0);
+        left[i]  = (float) (env * (0.6 * std::sin (2.0 * kPi * 140.0 * t) + 0.3 * std::sin (2.0 * kPi * 1300.0 * t)
+                                   + 0.1 * std::sin (2.0 * kPi * 9500.0 * t)));
+        right[i] = (float) (0.7 * env * std::sin (2.0 * kPi * 230.0 * t + 0.4));
+    }
+
+    DspCore core;
+    core.setParams (p);
+    core.prepare (fs, 512, 2);
+
+    for (size_t at = 0; at < n; at += 512)
+    {
+        const auto count = (int) std::min<size_t> (512, n - at);
+        core.setParams (p);
+        float* channels[2] { left.data() + at, right.data() + at };
+        core.process (channels, 2, count);
+    }
+
+    uint64_t h = 1469598103934665603ull;
+
+    for (const auto* side : { &left, &right })
+        for (const auto v : *side)
+        {
+            uint32_t u;
+            std::memcpy (&u, &v, 4);
+            for (int k = 0; k < 4; ++k) { h ^= (u >> (8 * k)) & 0xffu; h *= 1099511628211ull; }
+        }
+
+    return h;
+}
+
+struct Pinned { double fs; int mode; uint64_t hash; };
+
+const Pinned kPinned[] {
+    { 44100.0, 0, 0xd2a8a38afda2dae0ull }, { 44100.0, 1, 0xc7613ccfa6001f25ull },
+    { 48000.0, 0, 0xd3f393ebd20ffad2ull }, { 48000.0, 1, 0x18f0437f7442e53cull },
+    { 96000.0, 0, 0x424735c13e660a0eull }, { 96000.0, 1, 0xb46e7a59b3d2e1beull },
+};
+
+void heldIsUnchanged (bool print)
+{
+    for (const auto& p : kPinned)
+    {
+        const auto h = heldRenderHash (p.fs, p.mode);
+
+        if (print)
+        {
+            std::printf ("    { %.1f, %d, 0x%016llxull },\n", p.fs, p.mode, (unsigned long long) h);
+            continue;
+        }
+
+#if defined (_MSC_VER) && defined (_M_X64)
+        check (h == p.hash, std::string (p.mode == 0 ? "standard" : "COMPLEX, both sides in") + " held at "
+                                + rateName (p.fs) + " renders as at 6f6b8c3");
+#else
+        std::printf ("held render, mode %d at %s: %016llx (pinned only for MSVC x64)\n", p.mode,
+                     rateName (p.fs).c_str(), (unsigned long long) h);
+#endif
+    }
+}
+
+int main (int argc, char** argv)
+{
+    if (argc > 1 && std::string (argv[1]) == "--print-hashes")
+    {
+        heldIsUnchanged (true);
+        return 0;
+    }
+
+    // Mono at every rate the suite runs at; then the step and silence
+    // sections again in stereo, each channel judged, where every channel's
+    // split has to move in step with the first's.
+    sections();
+
+    gChannels = 2;
+    gHeavy = false;
+    kRates = { 48000.0, 192000.0 };
+
+    for (const auto right : { false, true })
+    {
+        gTakeRight = right;
+        gMode = right ? " (stereo, right)" : " (stereo, left)";
+        sections();
+    }
+
+    gChannels = 1;
+    gTakeRight = false;
+    gMode.clear();
+    kRates = { 44100.0, 48000.0, 96000.0, 192000.0 };
+
+    glideFlatness();
+    complexReturn();
+    gateReturn();
+    heldIsUnchanged (false);
 
     if (failures == 0)
         std::cout << "All LTV Comp switch tests passed.\n";

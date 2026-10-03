@@ -135,7 +135,12 @@ inline double collapsedGain (const Sidechain& s, double envelopeDemand) noexcept
     if (s.plateau <= 0.0 || ! (envelopeDemand > 0.0))
         return s.gain;
 
-    const auto excess = std::pow (envelopeDemand / allButtonsPlateauDemand(),
+    // The breakpoint is derived from constants, so it is derived once: it is
+    // two `pow` calls, and this runs every oversampled frame under
+    // all-buttons. Same value, same bits.
+    static const double plateauDemand = allButtonsPlateauDemand();
+
+    const auto excess = std::pow (envelopeDemand / plateauDemand,
                                   kAllButtonsPlateauExponent);
 
     return s.gain / (1.0 + s.plateau * excess);

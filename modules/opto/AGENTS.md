@@ -96,8 +96,8 @@ touching `DspCore`:
   36 dB at the deepest setting. That was accepted when BMO FET was designed
   (`modules/fetcomp/AGENTS.md`): the needle says "a lot" and
   `currentGainReductionDb()` still reports the true figure. It was raised
-  again in the October 2026 review and is the owner's decision, not a defect
-  to fix in passing: changing it moves every panel that uses the meter.
+  again in the October 2026 review and decided again on 2026-10-04: it stays
+  pinned. Changing it would move every panel that uses the meter.
 
 ## Faults the tests could not see
 

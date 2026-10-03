@@ -296,18 +296,29 @@ public:
         }
 
         if (switchNow)
-        {
-            switchNow = false;
             activeComplex = p.complex;
-            applyTimings();
+
+        applyTimings();
+
+        // **Nothing heard since prepare() or reset(), nothing to move.** A
+        // setting that arrives before any audio -- a preset loaded and the
+        // processor reset, the order a host and VcompTests' preset check both
+        // use -- lands at once, as it would in a fresh instance: the smoothers
+        // snap, ARC's crossover snaps, and the split is put where it is asked
+        // to be rather than walked there by its knobs' edges. Until 2026-10-03
+        // only COMPLEX did, and a preset loaded after reset() spent its first
+        // 175 ms at the previous preset's AMOUNT, which ARC's slow branch then
+        // remembered for the best part of a second: Fast Vocal came out 2.3 dB
+        // under where a fresh instance puts it.
+        if (! heard)
+        {
+            amountSmoother.snap (p.amountPercent);
+            outputSmoother.snap (p.outputDb);
+            release.reset();
 
             for (auto& ch : channels)
                 ch.bands.reset();
-
-            return;
         }
-
-        applyTimings();
     }
 
     void process (float* const* channelData, int numChannels, int numSamples) noexcept

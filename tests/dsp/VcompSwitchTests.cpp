@@ -189,7 +189,8 @@ namespace
         and straight back opens part of the way and closes again -- the
         signal at its loudest is the one to compare a step with. */
     double stepRatio (double fs, double hz, const std::vector<std::pair<double, Params>>& moves,
-                      const Params* widest = nullptr, double seconds = 1.2, double firstMove = 0.4)
+                      const Params* widest = nullptr, double seconds = 1.2, double firstMove = 0.4,
+                      double judgeFor = 0.25)
     {
         constexpr double amplitude = 0.17782794 * 1.41421356;   // -18 dBFS RMS
         double worst = 0.0;
@@ -217,7 +218,7 @@ namespace
             const auto last   = at.back().first;
             const auto before = largestStep (y, sw - (size_t) (0.15 * fs), sw);
             const auto after  = largestStep (y, y.size() - (size_t) (0.2 * fs), y.size());
-            const auto during = largestStep (y, sw, last + (size_t) (0.25 * fs));
+            const auto during = largestStep (y, sw, last + (size_t) (judgeFor * fs));
 
             auto own = std::max (before, after);
 
@@ -639,7 +640,11 @@ void sections()
                     auto inTransit = knobs;
                     inTransit.lowThruHz = lo;
                     const auto widest = std::string (m.name) == "COMPLEX off -> on (knobs moved)" ? &inTransit : nullptr;
-                    const auto ratio = stepRatio (fs, hz, m.moves, widest, 1.6);
+                    // Judged over the whole transition, not the first 0.25 s: a
+                    // knob's glide, and the low side's way in by its edge, take
+                    // up to a second, and until 2026-10-03 nothing after the
+                    // first quarter of it was looked at.
+                    const auto ratio = stepRatio (fs, hz, m.moves, widest, 2.6, 0.4, 1.95);
                     check (ratio < 1.5, std::string (m.name) + ", " + fixed (hz, 0) + " Hz, at " + rateName (fs)
                                             + " steps " + fixed (ratio) + "x the signal's own");
                 }
@@ -1042,11 +1047,21 @@ void gateReturn()
 //
 // Every change in this file's sections had to leave a held setting's output
 // bit for bit what it was at 6f6b8c3, the commit before the first of them.
-// These hashes were printed by this file built against 6f6b8c3 (MSVC x64,
-// Release, /fp:precise, on ICE QUEEN): `vcomp_switch_tests --print-hashes`.
-// Floating-point results are only promised bit-identical within one compiler
-// and maths library, so they are pinned there and printed elsewhere.
-uint64_t heldRenderHash (double fs, int mode)
+// Two pins per row, both printed by this file built against 6f6b8c3 (MSVC
+// x64, Release, /fp:precise, on ICE QUEEN): `vcomp_switch_tests
+// --print-hashes`.
+//
+// - **The RMS and peak of each channel, held to 1e-4 dB on every compiler.**
+//   The Linux and macOS jobs cannot hold a hash -- float results are promised
+//   bit-identical only within one compiler and maths library -- and until
+//   2026-10-03 they printed it and asserted nothing. A level this close is
+//   far tighter than any change that matters and far looser than a library's
+//   last-bit differences.
+// - **The exact hash, on MSVC x64**, where the pins were made: there it is
+//   bit for bit or nothing.
+struct HeldRender { uint64_t hash; double rmsDb[2], peakDb[2]; };
+
+HeldRender heldRender (double fs, int mode)
 {
     Params p;
 
@@ -1085,45 +1100,67 @@ uint64_t heldRenderHash (double fs, int mode)
         core.process (channels, 2, count);
     }
 
-    uint64_t h = 1469598103934665603ull;
+    HeldRender r { 1469598103934665603ull, {}, {} };
+    int c = 0;
 
     for (const auto* side : { &left, &right })
+    {
+        double sum = 0.0, peak = 0.0;
+
         for (const auto v : *side)
         {
             uint32_t u;
             std::memcpy (&u, &v, 4);
-            for (int k = 0; k < 4; ++k) { h ^= (u >> (8 * k)) & 0xffu; h *= 1099511628211ull; }
+            for (int k = 0; k < 4; ++k) { r.hash ^= (u >> (8 * k)) & 0xffu; r.hash *= 1099511628211ull; }
+
+            sum += (double) v * v;
+            peak = std::max (peak, (double) std::abs (v));
         }
 
-    return h;
+        r.rmsDb[c]  = 10.0 * std::log10 (sum / (double) side->size());
+        r.peakDb[c] = 20.0 * std::log10 (peak);
+        ++c;
+    }
+
+    return r;
 }
 
-struct Pinned { double fs; int mode; uint64_t hash; };
+struct Pinned { double fs; int mode; uint64_t hash; double rmsDb[2], peakDb[2]; };
 
 const Pinned kPinned[] {
-    { 44100.0, 0, 0xd2a8a38afda2dae0ull }, { 44100.0, 1, 0xc7613ccfa6001f25ull },
-    { 48000.0, 0, 0xd3f393ebd20ffad2ull }, { 48000.0, 1, 0x18f0437f7442e53cull },
-    { 96000.0, 0, 0x424735c13e660a0eull }, { 96000.0, 1, 0xb46e7a59b3d2e1beull },
+    { 44100.0, 0, 0xd2a8a38afda2dae0ull, { -9.694980, -9.410685 }, { -0.099999, -0.099999 } },
+    { 44100.0, 1, 0xc7613ccfa6001f25ull, { -8.301412, -9.991611 }, { -0.099999, -0.099999 } },
+    { 48000.0, 0, 0xd3f393ebd20ffad2ull, { -9.689943, -9.405692 }, { -0.099999, -0.099999 } },
+    { 48000.0, 1, 0x18f0437f7442e53cull, { -8.306237, -9.997872 }, { -0.099999, -0.099999 } },
+    { 96000.0, 0, 0x424735c13e660a0eull, { -9.725237, -9.441162 }, { -0.099999, -0.099999 } },
+    { 96000.0, 1, 0xb46e7a59b3d2e1beull, { -8.335780, -10.037542 }, { -0.099999, -0.099999 } },
 };
 
 void heldIsUnchanged (bool print)
 {
     for (const auto& p : kPinned)
     {
-        const auto h = heldRenderHash (p.fs, p.mode);
+        const auto r = heldRender (p.fs, p.mode);
 
         if (print)
         {
-            std::printf ("    { %.1f, %d, 0x%016llxull },\n", p.fs, p.mode, (unsigned long long) h);
+            std::printf ("    { %.1f, %d, 0x%016llxull, { %.6f, %.6f }, { %.6f, %.6f } },\n", p.fs, p.mode,
+                         (unsigned long long) r.hash, r.rmsDb[0], r.rmsDb[1], r.peakDb[0], r.peakDb[1]);
             continue;
         }
 
+        const auto what = std::string (p.mode == 0 ? "standard" : "COMPLEX, both sides in") + " held at " + rateName (p.fs);
+
+        for (int c = 0; c < 2; ++c)
+        {
+            check (std::abs (r.rmsDb[c] - p.rmsDb[c]) <= 1.0e-4,
+                   what + ", channel " + std::to_string (c) + ": RMS " + fixed (r.rmsDb[c], 6) + " dB, at 6f6b8c3 " + fixed (p.rmsDb[c], 6));
+            check (std::abs (r.peakDb[c] - p.peakDb[c]) <= 1.0e-4,
+                   what + ", channel " + std::to_string (c) + ": peak " + fixed (r.peakDb[c], 6) + " dB, at 6f6b8c3 " + fixed (p.peakDb[c], 6));
+        }
+
 #if defined (_MSC_VER) && defined (_M_X64)
-        check (h == p.hash, std::string (p.mode == 0 ? "standard" : "COMPLEX, both sides in") + " held at "
-                                + rateName (p.fs) + " renders as at 6f6b8c3");
-#else
-        std::printf ("held render, mode %d at %s: %016llx (pinned only for MSVC x64)\n", p.mode,
-                     rateName (p.fs).c_str(), (unsigned long long) h);
+        check (r.hash == p.hash, what + " renders bit for bit as at 6f6b8c3");
 #endif
     }
 }
@@ -1568,6 +1605,204 @@ void complexSwitchLifecycle()
             }
 }
 
+//== 11. Knob moves at AMOUNT 55, a side from rest, and settings before audio ===
+
+/** A side of the split coming in from rest by its knob, under the lowest
+    tones, where a sine's own sample step is smallest and so a fixed
+    start-up transient counts for most. At AMOUNT 0, so the split is all that
+    acts. The reviewer measured HIGH THRU 20k -> 2k stepping 1.60x on a 20 Hz
+    tone at 48 kHz: the high side's crossover, parked at the top of its range,
+    started from rest and faded in at once, and its start-up transient was
+    heard under the fade. */
+void sideFromRest()
+{
+    double worst = 0.0;
+    std::string where;
+
+    auto at = [] (float lowHz, float highHz)
+    {
+        return complexMode (0.0f, 5.0f, 200.0f, true, kStandardSidechainHz, lowHz, highHz);
+    };
+
+    struct Move { const char* name; Params from, to; };
+    const Move moves[] {
+        { "HIGH THRU 20k -> 2k",  at (kLowThruOffHz, kHighThruOffHz), at (kLowThruOffHz, 2000.0f) },
+        { "HIGH THRU 20k -> 15k", at (kLowThruOffHz, kHighThruOffHz), at (kLowThruOffHz, 15000.0f) },
+        { "LOW THRU 20 -> 200",   at (kLowThruOffHz, kHighThruOffHz), at (200.0f, kHighThruOffHz) },
+    };
+
+    for (const auto fs : kRates)
+        for (const auto& m : moves)
+            for (const auto hz : { 20.0, 30.0, 50.0, 100.0 })
+            {
+                const auto ratio = stepRatio (fs, hz, { { 0.0, m.from }, { 0.4, m.to } }, nullptr, 2.6, 0.4, 1.95);
+                const auto name = std::string (m.name) + " from rest, " + fixed (hz, 0) + " Hz, at " + rateName (fs);
+
+                check (ratio < 1.5, name + " steps " + fixed (ratio) + "x the signal's own");
+
+                if (ratio > worst) { worst = ratio; where = name; }
+            }
+
+    std::cout << "A side from rest: largest step " << fixed (worst) << "x the signal's own (" << where << ")\n";
+}
+
+/** Sections 5 and 6 judge a knob's moves at AMOUNT 0, where the split is the
+    only thing acting and the level can be read against the input. With the
+    compressor working the two bands take different gains, so there is no
+    one right level -- but the move has no business being outside the two it
+    goes between. Every 2 ms window of the ensemble level has to sit within
+    1 dB of the span of the two held settings, through the whole transition,
+    at AMOUNT 55. */
+void knobLevelsCompressing()
+{
+    auto at = [] (float lowHz, float highHz)
+    {
+        return complexMode (55.0f, 5.0f, 200.0f, true, kStandardSidechainHz, lowHz, highHz);
+    };
+
+    constexpr float lo = kLowThruOffHz, hi = kHighThruOffHz;
+
+    struct Move { const char* name; Params from, to; };
+    const Move moves[] {
+        { "LOW THRU 20 -> 200",     at (lo, hi),    at (200, hi) },
+        { "LOW THRU 200 -> 20",     at (200, hi),   at (lo, hi) },
+        { "LOW THRU 21 -> 500",     at (21, hi),    at (500, hi) },
+        { "LOW THRU 500 -> 21",     at (500, hi),   at (21, hi) },
+        { "HIGH THRU 20k -> 6k",    at (lo, hi),    at (lo, 6000) },
+        { "HIGH THRU 6k -> 20k",    at (lo, 6000),  at (lo, hi) },
+        { "HIGH THRU 2k -> 19999",  at (lo, 2000),  at (lo, 19999) },
+        { "HIGH THRU 19999 -> 2k",  at (lo, 19999), at (lo, 2000) },
+    };
+
+    double worst = 0.0;
+    std::string where;
+
+    for (const auto fs : { 48000.0, 192000.0 })
+        for (const auto& m : moves)
+            for (const auto hz : { 60.0, 150.0, 400.0, 1000.0, 3000.0, 8000.0, 0.0 })
+            {
+                const auto n = (size_t) (2.2 * fs);
+                const auto sw = (size_t) (0.5 * fs) / 64 * 64;
+                const auto members = hz > 0.0 ? 4 : 8;
+                std::vector<double> ey (n, 0.0), ea (n, 0.0), eb (n, 0.0);
+
+                for (int k = 0; k < members; ++k)
+                {
+                    std::vector<float> x (n);
+                    unsigned state = 12345u + 7919u * (unsigned) k;
+
+                    for (size_t i = 0; i < n; ++i)
+                    {
+                        if (hz > 0.0)
+                        {
+                            x[i] = (float) (0.25 * std::sin (2.0 * kPi * hz * (double) i / fs + k * kPi / 4.0));
+                        }
+                        else
+                        {
+                            state = state * 1664525u + 1013904223u;
+                            x[i] = (float) (0.25 * ((double) (state >> 8) / 8388608.0 - 1.0));
+                        }
+                    }
+
+                    const auto y = render (fs, x, 64, [&] (size_t s) { return s < sw ? m.from : m.to; });
+                    const auto a = render (fs, x, 64, [&] (size_t) { return m.from; });
+                    const auto b = render (fs, x, 64, [&] (size_t) { return m.to; });
+
+                    for (size_t i = 0; i < n; ++i)
+                    {
+                        ey[i] += (double) y[i] * y[i];
+                        ea[i] += (double) a[i] * a[i];
+                        eb[i] += (double) b[i] * b[i];
+                    }
+                }
+
+                const auto w = std::max<size_t> (1, (size_t) (0.002 * fs));
+                double outside = 0.0;
+
+                for (auto s = sw; s + w <= n; s += w / 2)
+                {
+                    double sy = 0.0, sa = 0.0, sb = 0.0;
+                    for (size_t i = s; i < s + w; ++i) { sy += ey[i]; sa += ea[i]; sb += eb[i]; }
+
+                    const auto ly = 10.0 * std::log10 (sy), la = 10.0 * std::log10 (sa), lb = 10.0 * std::log10 (sb);
+                    outside = std::max ({ outside, std::min (la, lb) - ly, ly - std::max (la, lb) });
+                }
+
+                const auto name = std::string (m.name) + " at AMOUNT 55, " + (hz > 0.0 ? fixed (hz, 0) + " Hz" : std::string ("noise"))
+                                + ", at " + rateName (fs);
+
+                check (outside <= 1.0, name + ": the level strays " + fixed (outside) + " dB outside the two settings held");
+
+                if (outside > worst) { worst = outside; where = name; }
+            }
+
+    std::cout << "Knob moves at AMOUNT 55: the level strays at most " << fixed (worst) << " dB outside the two settings held ("
+              << where << ")\n";
+}
+
+/** A setting that arrives before any audio after prepare() or reset() --
+    a preset loaded and the processor reset, which is how a host loads one and
+    how VcompTests checks presets -- lands where a fresh instance at that
+    setting is, sample for sample: no smoother moving from the old AMOUNT, no
+    side walked in by its knob's edge, no ARC crossover. */
+void unheardSettingsLand()
+{
+    const double fs = 48000.0;
+    const auto n = (size_t) (2.0 * fs);
+    const auto x = suiteVoice (fs, n);
+
+    auto before = complexMode (80.0f, 5.0f, 200.0f, true, kStandardSidechainHz, kLowThruOffHz, kHighThruOffHz, 3.0f);
+    auto after  = complexMode (35.0f, 0.8f, 90.0f, false, 120.0f, 160.0f, 6000.0f, -4.0f);
+
+    struct Case { const char* name; Params from, to; };
+    auto offFrom = before;
+    offFrom.complex = false;
+
+    const Case cases[] {
+        { "every control moved", before, after },
+        { "COMPLEX off to on with the split", offFrom, after },
+    };
+
+    for (const auto& c : cases)
+        for (const auto prepareAgain : { false, true })
+        {
+            DspCore core;
+            core.setParams (c.from);
+            core.prepare (fs, 512, 1);
+
+            auto first = std::vector<float> (x.begin(), x.begin() + (long) (n / 2));
+            for (size_t at = 0; at < first.size(); at += 512)
+            {
+                core.setParams (c.from);
+                auto* p = first.data() + at;
+                core.process (&p, 1, (int) std::min<size_t> (512, first.size() - at));
+            }
+
+            if (prepareAgain) core.prepare (fs, 512, 1);
+            else              core.reset();
+
+            const std::vector<float> rest (x.begin() + (long) (n / 2), x.end());
+            auto y = rest;
+
+            for (size_t at = 0; at < y.size(); at += 512)
+            {
+                core.setParams (c.to);
+                auto* p = y.data() + at;
+                core.process (&p, 1, (int) std::min<size_t> (512, y.size() - at));
+            }
+
+            const auto fresh = renderBlocks (fs, rest, 512, [&] (size_t) { return c.to; });
+
+            size_t differ = 0;
+            for (size_t i = 0; i < y.size(); ++i)
+                differ += y[i] != fresh[i] ? 1 : 0;
+
+            check (differ == 0, std::string (c.name) + ", set after " + (prepareAgain ? "prepare()" : "reset()")
+                                    + " and before any audio: " + std::to_string (differ)
+                                    + " samples differ from a fresh instance at that setting");
+        }
+}
+
 int main (int argc, char** argv)
 {
     if (argc > 1 && std::string (argv[1]) == "--print-hashes")
@@ -1604,6 +1839,9 @@ int main (int argc, char** argv)
     complexSwitchSteps();
     complexToggled();
     complexSwitchLifecycle();
+    sideFromRest();
+    knobLevelsCompressing();
+    unheardSettingsLand();
     heldIsUnchanged (false);
 
     if (failures == 0)

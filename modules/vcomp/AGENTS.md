@@ -313,20 +313,23 @@ Two things this changed that are worth knowing:
 - **`kThruBodyOffsetDb` is 6 dB, and that one *is* a number somebody picked.**
   It says how far under the peaks the detector reads the chest and the air
   actually sit. Larger means more thru lift, smaller means less.
-- **The band split comes in and goes out without a step or a dip**
+- **A knob brings a side of the split in and out without a step or a dip**
   (2026-10-03). A side enters with its crossover parked at the edge of its
   range -- 5 Hz for LOW THRU, 0.98 of Nyquist for HIGH THRU -- where its
-  allpass is a wire across the audio band; the low side runs there unheard
-  for 250 ms so its start-up transient dies, fades in over 10 ms, then glides
-  to its setting; going out it glides back to the edge and fades there. The
+  allpass is a wire across the audio band; it runs there unheard until its
+  start-up transient dies (250 ms low, 5 ms high), fades in (30 ms low, 10
+  ms high), then glides to its setting; going out it glides back to the edge
+  and fades there. The
   first version faded from the dry signal to the allpass where the side
   stood, and half way through the two are in anti-phase at the crossover: a
   tone there cancelled completely. Glides move the crossover's period in a
   straight line, 2.5 of its own cycles per octave, because how far a tone's
   level wobbles while an allpass sweeps past it depends only on that figure
   (half a cycle: -3.1 / +5.1 dB; 2.5: under 1 dB). So the low side takes up
-  to about 1 s to come all the way in at LOW THRU 500 and the high side
-  30 ms. `vcomp_switch_tests` sections 3 and 5 hold steps and level.
+  to 0.97 s to come all the way in (LOW THRU 500) and the high side 35 ms and
+  a glide of at least 20 ms. Worst pole radius on the way: 0.999884, at the
+  5 Hz edge and 192 kHz. `vcomp_switch_tests` sections 3, 5, 6 and 11 hold
+  steps and level, at AMOUNT 0 and 55.
 - **COMPLEX is a switch, and switches through a dip** (Frosty, 2026-10-03).
   Taken the knobs' way, both sides in by their edges and a glide, the band in
   transit sat at the wrong gain for up to a second (+8.4 dB on the voice).

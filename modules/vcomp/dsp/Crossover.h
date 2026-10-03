@@ -159,7 +159,8 @@ public:
         bilinear transform of a Butterworth pair, so at every cutoff along the
         way they sit inside the unit circle: the radius is
         sqrt ((1 - k g + g^2) / (1 + k g + g^2)), largest where the low side
-        parks, 0.99977 at 5 Hz and 96 kHz and 0.99988 at 192. And the state is
+        parks at 5 Hz: 0.999884 at 192 kHz, the worst of any rate. And the
+        state is
         trapezoidal integrator memory, not past outputs, so a coefficient
         that changes does not turn old output into a new click -- which is
         why this module uses TPT sections at all. A second split to fade
@@ -293,12 +294,13 @@ public:
         lower.prepare (rate);
         upper.prepare (rate);
         lowAlign.prepare (rate);
-        lowMix.prepare (rate, kBandSwitchMs);
+        lowMix.prepare (rate, kLowFadeMs);
         highMix.prepare (rate, kBandSwitchMs);
 
         lowEdge  = std::tan (3.14159265358979323846f * kLowSplitEdgeHz / (float) std::max (rate, 1.0));
         highEdge = upper.warpedFor (1.0e9f);
-        lowWarmLength = (int) std::lround (std::max (rate, 1.0) * kLowWarmUpMs * 0.001);
+        lowWarmLength  = (int) std::lround (std::max (rate, 1.0) * kLowWarmUpMs * 0.001);
+        highWarmLength = (int) std::lround (std::max (rate, 1.0) * kHighWarmUpMs * 0.001);
         reset();
     }
 
@@ -500,15 +502,20 @@ public:
         anti-phase at the crossover, so a tone there cancelled completely and
         anything within an octave of it dipped more than 3 dB.
 
-        So a side coming in starts with its crossover parked at the edge --
-        kLowSplitEdgeHz for the low side, the top of the range for the high
-        one -- where its allpass is a wire across the audio band, fades in
-        there over kBandSwitchMs, and then glides to its setting; going out,
-        it glides to the edge first and fades out there. Fading at the edge
-        costs nothing anybody can hear, and a crossover in circuit gliding is
-        an allpass all the way, so the level does not move. A whole entry or
-        exit takes the fade plus one glide: at most 10 + 36 ms for the low
-        side and 10 + 45 ms for the high one, at any rate up to 192 kHz.
+        So a side its *knob* brings in starts with its crossover parked at the
+        edge -- kLowSplitEdgeHz for the low side, the top of the range for the
+        high one -- where its allpass is a wire across the audio band, runs
+        there unheard until its start-up transient has gone, fades in there,
+        and then glides to its setting; going out, it glides to the edge first
+        and fades out there. Fading at the edge costs nothing anybody can
+        hear, and a crossover in circuit gliding stays within 1 dB of an
+        allpass at kCrossoverGlideCycles. The time it all takes, at any rate up
+        to 192 kHz: the low side in at most 250 + 30 ms and a glide of up to
+        0.69 s (LOW THRU 500), 0.97 s in all, and out in a glide and 30 ms;
+        the high side in 5 + 10 ms and a glide of at least 20 ms, out in a
+        glide and 10 ms. A *switch* -- COMPLEX -- does not come this way: see
+        primeFor() and DspCore.
+
         With nothing moving the arithmetic is exactly what it always was. */
     void process (float x, float& mid, float& thru) noexcept
     {
@@ -615,15 +622,22 @@ private:
         thru = lowBand + highBand;
     }
 
-    /** How long a side of the split takes to fade in or out at its edge, in
-        ms: the suite's switch time. */
+    /** How long the high side takes to fade in or out at its edge, in ms: the
+        suite's switch time. */
     static constexpr double kBandSwitchMs = 10.0;
+
+    /** The low side's fade at its edge, in ms. Longer than the high side's
+        because its edge is 5 Hz, not above the audio band: a 20 Hz tone is
+        39 degrees out of phase with that allpass, and a 10 ms fade between
+        the two stepped 1.52x the tone's own largest step. */
+    static constexpr double kLowFadeMs = 30.0;
 
     /** Where the low side's crossover is parked while it fades in or out.
         Below the bottom of LOW THRU's range by more than three octaves, so
         that fading the dry signal into its allpass there moves the level of
-        nothing a voice has: at 10 Hz, the lowest frequency the dip is
-        measured at, the fade costs 0.3 dB. The high side parks at the top of
+        nothing a voice has: -0.5 dB at 20 Hz, the bottom of what the dip is
+        measured at; below it, at 10 Hz, the reviewer measured -2.68 dB. The
+        high side parks at the top of
         the range a crossover can be placed in, 0.98 of Nyquist, which is as
         far above 20 kHz as each rate allows. */
     static constexpr float kLowSplitEdgeHz = 5.0f;
@@ -633,9 +647,15 @@ private:
         not yet the allpass it settles into: at 5 Hz its start-up transient
         takes about 45 ms per time constant to die away, and faded in at once
         it moved a 30 Hz tone by -1.9 to -2.7 dB. Five time constants and
-        more. The high side parks at the top of the range, where the same
-        transient is over in microseconds, and needs none. */
+        more. */
     static constexpr double kLowWarmUpMs = 250.0;
+
+    /** The same for the high side, in ms. Its edge is near Nyquist, where a
+        section started from rest rings at Nyquist for a few samples; heard
+        under the fade, that stepped a 20 Hz tone 1.60x its own largest step
+        (the reviewer, 48 kHz). The ringing decays by 0.69 a sample at its
+        slowest, so 5 ms leaves nothing. */
+    static constexpr double kHighWarmUpMs = 5.0;
 
     bool lowRunning() const noexcept  { return lowWarm > 0 || lowMix.isMoving()  || lowMix.value()  > 0.0f; }
     bool highRunning() const noexcept { return highWarm > 0 || highMix.isMoving() || highMix.value() > 0.0f; }
@@ -715,12 +735,12 @@ private:
     }
 
     void steerLow() noexcept  { steer (wantLow,  lowTarget,  lowEdge,  lowMix,  lowWarm,  lowWarmLength, lower, nullptr); }
-    void steerHigh() noexcept { steer (wantHigh, highTarget, highEdge, highMix, highWarm, 0,             upper, &lowAlign); }
+    void steerHigh() noexcept { steer (wantHigh, highTarget, highEdge, highMix, highWarm, highWarmLength, upper, &lowAlign); }
 
     LinkwitzRiley4 lower, upper, lowAlign;
     dsp::Ramp lowMix, highMix;
     bool  wantLow = false, wantHigh = false;
-    int   lowWarm = 0, highWarm = 0, lowWarmLength = 0;
+    int   lowWarm = 0, highWarm = 0, lowWarmLength = 0, highWarmLength = 0;
     bool  primeLow = false, primeHigh = false;
     float lowTarget = 0.0f, highTarget = 0.0f, lowEdge = 0.0f, highEdge = 0.0f;
     float lowCutoffHz = kLowThruOffHz, highCutoffHz = kHighThruOffHz;

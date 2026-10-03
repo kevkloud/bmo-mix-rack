@@ -198,6 +198,13 @@ add_test(NAME snapshot_io COMMAND snapshot_io_tests)
 
 endif()
 
+# No juce::Image with static storage in the UI code: a source scan, because the
+# fault it holds (an image outliving every editor hangs the host at unload)
+# needs a loaded plugin to show. JUCE-free, and outside the rack switch, since
+# it reads products/ and every module's panel whatever this build compiles.
+bmo_add_dsp_tool(ui_static_image_tests ui/StaticImageTests.cpp)
+add_test(NAME ui_static_image COMMAND ui_static_image_tests ${BMO_ROOT})
+
 # Tune's real panel, laid out with no display. Its layout is asserted here
 # rather than in ui/LayoutTests.cpp, which walks the rack's registry.
 if(BMO_BUILD_TUNE)

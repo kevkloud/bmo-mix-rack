@@ -186,6 +186,15 @@ inline double allButtonsPlateauDemand() noexcept
     return std::max (target, 1.0e-9) / std::max (peak, 1.0e-6);
 }
 
+/** The same breakpoint, evaluated once when the program loads, which is what
+    the audio thread reads. `std::pow` is not constexpr, so this cannot be a
+    compile-time constant; a namespace-scope constant is the next best thing,
+    because reading it takes no guard. A function-local static would be
+    initialised on the first audio callback that reached the collapse, behind
+    the one-time initialisation guard -- the audio thread is the wrong place
+    for that. Same function, same value, same bits. */
+inline const double kAllButtonsPlateauDemand = allButtonsPlateauDemand();
+
 /** The one-pole lag in the control path. The spec's range is 1-5 ms.
     **CALIBRATE.** */
 inline constexpr double kAllButtonsLagMs = 2.5;

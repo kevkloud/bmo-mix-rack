@@ -690,6 +690,178 @@ void testCrushZeroAtProperGainStaging()
              + std::to_string (atBusLevel) + " dB)");
 }
 
+//==============================================================================
+// A spike on top of programme. Everything above reads the release across a
+// gap into silence; these read it where the programme carries on underneath,
+// which is the case the gap tests cannot see: with 15 to 20 dB already
+// standing, the charge sits at its ceiling and anything a spike adds used to
+// inherit the slowest release the cell has.
+
+constexpr double kProgrammeHz  = 220.0;
+constexpr double kProgrammeAmp = 0.17825;   // -18 dBFS RMS, the level a track arrives at
+constexpr double kPrerollSec   = 15.0;      // long enough for the charge and the dosage to settle
+
+/** The programme tone, `burstDb` hotter for `burstSec` from each onset. The
+    phase runs straight through, so a burst is a change of level and nothing
+    else. */
+std::vector<float> programmeWithBursts (double seconds, double burstDb, double burstSec,
+                                        const std::vector<double>& onsets)
+{
+    const auto n = (size_t) (seconds * kSampleRate);
+    const auto hot = std::pow (10.0, burstDb / 20.0);
+    std::vector<float> out (n);
+
+    for (size_t i = 0; i < n; ++i)
+    {
+        const auto t = (double) i / kSampleRate;
+        auto amplitude = kProgrammeAmp;
+
+        for (const auto onset : onsets)
+            if (t >= onset && t < onset + burstSec)
+                amplitude *= hot;
+
+        out[i] = (float) (amplitude * std::sin (2.0 * kPi * kProgrammeHz * t));
+    }
+
+    return out;
+}
+
+/** Reduction against time, one figure per millisecond: the core run in 1 ms
+    blocks and its meter read after each. */
+std::vector<float> reductionTrace (const std::vector<float>& input, Mode mode, float crushPercent)
+{
+    constexpr int block = 48;
+
+    DspCore core;
+    DspCore::Params p;
+    p.crushPercent = crushPercent;
+    p.mode = mode;
+    core.prepare (kSampleRate, block, 1);
+    core.setParams (p);
+
+    auto signal = input;
+    std::vector<float> trace;
+    trace.reserve (signal.size() / block + 1);
+
+    for (size_t at = 0; at < signal.size(); at += block)
+    {
+        auto* pp = signal.data() + at;
+        core.process (&pp, 1, (int) std::min<size_t> (block, signal.size() - at));
+        trace.push_back (core.currentGainReductionDb());
+    }
+
+    return trace;
+}
+
+/** Mean of the trace over `lengthSec` starting at `atSec`. */
+double meanReduction (const std::vector<float>& trace, double atSec, double lengthSec)
+{
+    const auto from = (size_t) std::llround (atSec * 1000.0);
+    const auto to   = std::min (trace.size(), from + (size_t) std::llround (lengthSec * 1000.0));
+
+    double sum = 0.0;
+    for (size_t i = from; i < to; ++i) sum += trace[i];
+    return to > from ? sum / (double) (to - from) : 0.0;
+}
+
+/** A 20 ms spike must not leave the programme turned down behind it.
+
+    Both bounds are absolute dB above the reduction the programme was holding
+    before the spike, at the deepest setting, where it measured worst. Before
+    this was fixed a single 18 dB spike left 10.3 dB (Tele) and 12.4 dB
+    (Stressed) of extra reduction a quarter of a second later, and 7.5 and
+    10.8 dB a full second later; the level took 3.5 and 7.2 s to come back. */
+void testASpikeDoesNotLeaveADip()
+{
+    for (const auto mode : { Mode::La2a, Mode::Distressor })
+    {
+        const auto name = std::string (mode == Mode::La2a ? "Tele" : "Stressed");
+        constexpr double burstSec = 0.020;
+
+        const auto trace = reductionTrace (programmeWithBursts (kPrerollSec + 3.0, 18.0, burstSec, { kPrerollSec }),
+                                           mode, 100.0f);
+
+        const auto before  = meanReduction (trace, kPrerollSec - 0.5, 0.5);
+        const auto end     = kPrerollSec + burstSec;
+        const auto quarter = meanReduction (trace, end + 0.25, 0.01) - before;
+        const auto second  = meanReduction (trace, end + 1.0, 0.01) - before;
+
+        check (before > 10.0, name + " is holding heavy reduction before the spike (" + std::to_string (before) + " dB)");
+        check (quarter < 2.5,
+               name + ": 250 ms after an 18 dB, 20 ms spike the programme is back within 2.5 dB ("
+                 + std::to_string (quarter) + " dB of extra reduction)");
+        check (second < 1.25,
+               name + ": 1 s after the spike little of it is left (" + std::to_string (second) + " dB of extra reduction)");
+    }
+}
+
+/** Spikes a second apart must not walk the programme down.
+
+    Ten of them, the programme running between. Read just before each next
+    spike, the level used to sink 7.7 dB (Tele) and 12.2 dB (Stressed) below
+    where it started, because each gap gave back a third of what the spike
+    before it had added, or less. */
+void testRepeatedSpikesDoNotRatchet()
+{
+    for (const auto mode : { Mode::La2a, Mode::Distressor })
+    {
+        const auto name = std::string (mode == Mode::La2a ? "Tele" : "Stressed");
+
+        std::vector<double> onsets;
+        for (int k = 0; k < 10; ++k) onsets.push_back (kPrerollSec + k);
+
+        const auto trace = reductionTrace (programmeWithBursts (kPrerollSec + 10.0, 18.0, 0.020, onsets), mode, 100.0f);
+
+        const auto before = meanReduction (trace, kPrerollSec - 0.5, 0.5);
+        const auto sunk   = meanReduction (trace, kPrerollSec + 9.0 - 0.01, 0.01) - before;
+
+        check (sunk < 6.5,
+               name + ": before the tenth spike the programme sits within 6.5 dB of where it started ("
+                 + std::to_string (sunk) + " dB lower)");
+    }
+}
+
+/** What the fix above must not cost.
+
+    First, a level that is *held* is programme, not a spike, and its reduction
+    has to arrive as quickly as it always did: the time to come within 1 dB of
+    the settled figure when the programme steps up 18 dB and stays there. A
+    release that speeds up on every reduction the charge has not caught up
+    with, held or not, makes the envelope sag between the crests of the very
+    signal that is holding it up, and that pushed Stressed's figure from 56 ms
+    to 520 ms when it was tried.
+
+    Second, a hit that lasted counts. A full second at the louder level is
+    exposure, and the cell must still be holding some of it a second after the
+    level drops back, or this is a fast compressor with a slow one's name. */
+void testAHeldLevelIsStillProgramme()
+{
+    for (const auto mode : { Mode::La2a, Mode::Distressor })
+    {
+        const auto name = std::string (mode == Mode::La2a ? "Tele" : "Stressed");
+
+        const auto held    = reductionTrace (programmeWithBursts (kPrerollSec + 5.0, 18.0, 5.0, { kPrerollSec }), mode, 100.0f);
+        const auto settled = meanReduction (held, kPrerollSec + 4.9, 0.1);
+
+        auto arrivedMs = -1.0;
+        for (auto i = (size_t) std::llround (kPrerollSec * 1000.0); i < held.size(); ++i)
+            if (held[i] >= settled - 1.0) { arrivedMs = (double) i - kPrerollSec * 1000.0; break; }
+
+        const auto limitMs = mode == Mode::La2a ? 20.0 : 65.0;
+        check (arrivedMs >= 0.0 && arrivedMs <= limitMs,
+               name + ": a held 18 dB step is within 1 dB of its settled reduction in "
+                 + std::to_string (arrivedMs) + " ms (limit " + std::to_string (limitMs) + ")");
+
+        const auto hit    = reductionTrace (programmeWithBursts (kPrerollSec + 4.0, 18.0, 1.0, { kPrerollSec }), mode, 100.0f);
+        const auto before = meanReduction (hit, kPrerollSec - 0.5, 0.5);
+        const auto after  = meanReduction (hit, kPrerollSec + 2.0, 0.01) - before;
+
+        check (after > 1.0,
+               name + ": a second after a 1 s louder passage the cell is still holding some of it ("
+                 + std::to_string (after) + " dB)");
+    }
+}
+
 } // namespace
 
 //==============================================================================
@@ -710,6 +882,9 @@ int main()
     testStability();
     testReductionIsTheSameAtEverySampleRate();
     testLatencyIsAlwaysZero();
+    testASpikeDoesNotLeaveADip();
+    testRepeatedSpikesDoNotRatchet();
+    testAHeldLevelIsStillProgramme();
 
     std::printf ("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

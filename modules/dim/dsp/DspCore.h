@@ -72,7 +72,7 @@ public:
     {
         std::fill (buffer.begin(), buffer.end(), 0.0f);
         writeIdx = 0;
-        phase = 0.0f;
+        phase = 0.0;
     }
 
     /** Back to the start of the sweep, keeping what the buffer holds. Two
@@ -80,15 +80,25 @@ public:
         produce identical output until their opposite detunes pull them apart
         -- which is what lets DETUNE come back in instantly. See
         DspCore::setParams. */
-    void restart() noexcept { phase = 0.0f; }
+    void restart() noexcept { phase = 0.0; }
 
     /** cents > 0 shifts up, < 0 down. */
     void setCents (float cents) noexcept
     {
         // A pitch ratio is 2^(cents/1200); the read pointer has to drift by the
         // difference from unity, so that is what the phase accumulates.
-        const auto ratio = std::pow (2.0f, cents / 1200.0f);
-        phaseInc = (1.0f - ratio) / (float) std::max (window, 1);
+        //
+        // In double, and so is the phase. The increment is tiny -- 4.0e-8 per
+        // sample at DETUNE 0.1 and 48 kHz, a quarter of that at 192 kHz --
+        // and a float phase near the top of [0, 1) resolves only 6e-8, so in
+        // single precision every sample's increment was rounded to whole steps
+        // of that. The up voice ran 49 % fast at 0.1 cents and 48 kHz, did not
+        // sweep at all at 0.1 (96 kHz) and 0.1-0.2 (192 kHz), and at 1 cent
+        // swung between 0.89 and 1.19 as the sweep moved through ranges of
+        // different resolution. In double every step of the knob lands within
+        // 0.001 cents at every rate; DimDspTests holds it to 0.01.
+        const auto ratio = std::pow (2.0, (double) cents / 1200.0);
+        phaseInc = (1.0 - ratio) / (double) std::max (window, 1);
     }
 
     float process (float x) noexcept
@@ -102,13 +112,17 @@ public:
 
         // Two taps, half a window apart, each faded by a raised cosine. The two
         // windows sum to exactly one, so a steady input comes out steady.
-        auto tap = [this, len] (float ph) noexcept
+        // The read position is worked out in double too: it is the phase times
+        // the window, and a float holding a position near the end of the
+        // buffer rounds it to a thousandth of a sample at 192 kHz, which
+        // would quantise the sweep the double phase has just made smooth.
+        // Only the fractional part, which is in [0, 1), goes back to float.
+        auto tap = [this, len] (double ph) noexcept
         {
-            const auto delay = ph * (float) window;
-            const auto rd    = (float) writeIdx - delay;
+            const auto rd = (double) writeIdx - ph * (double) window;
 
             auto i0 = (int) std::floor (rd);
-            const auto frac = rd - (float) i0;
+            const auto frac = (float) (rd - (double) i0);
 
             i0 %= len; if (i0 < 0) i0 += len;
             auto i1 = i0 + 1; if (i1 >= len) i1 -= len;
@@ -116,15 +130,15 @@ public:
             return buffer[(size_t) i0] + frac * (buffer[(size_t) i1] - buffer[(size_t) i0]);
         };
 
-        const auto ph2 = phase >= 0.5f ? phase - 0.5f : phase + 0.5f;
-        const auto g1  = 0.5f * (1.0f - std::cos (2.0f * kPi * phase));
-        const auto g2  = 0.5f * (1.0f - std::cos (2.0f * kPi * ph2));
+        const auto ph2 = phase >= 0.5 ? phase - 0.5 : phase + 0.5;
+        const auto g1  = 0.5f * (1.0f - std::cos (2.0f * kPi * (float) phase));
+        const auto g2  = 0.5f * (1.0f - std::cos (2.0f * kPi * (float) ph2));
 
         const auto out = g1 * tap (phase) + g2 * tap (ph2);
 
         phase += phaseInc;
-        while (phase >= 1.0f) phase -= 1.0f;
-        while (phase <  0.0f) phase += 1.0f;
+        while (phase >= 1.0) phase -= 1.0;
+        while (phase <  0.0) phase += 1.0;
 
         if (++writeIdx >= len)
             writeIdx = 0;
@@ -134,8 +148,8 @@ public:
 
 private:
     std::vector<float> buffer;
-    int   window = 0, writeIdx = 0;
-    float phase = 0.0f, phaseInc = 0.0f;
+    int    window = 0, writeIdx = 0;
+    double phase = 0.0, phaseInc = 0.0;
 };
 
 //==============================================================================

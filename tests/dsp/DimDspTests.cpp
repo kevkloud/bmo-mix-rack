@@ -113,6 +113,60 @@ namespace
 
         return peak;
     }
+
+    /** The pitch shift one voice really delivers, in cents.
+
+        Two identical voices, one fed a 1 kHz cosine and one the matching
+        sine. A voice is linear and both follow the same sweep, so their
+        outputs are the real and imaginary parts of one complex tone, and its
+        phase can be read at any single sample with nothing to average and no
+        image to leak in. 1 kHz because the two taps of a voice sit half a
+        30 ms window apart, fifteen whole periods at every sample rate, so the
+        crossfade between them cannot move that phase either: its slope is
+        the shift and nothing else. Read every millisecond to unwrap it, and
+        the slope taken from the end of the first window, when the buffer is
+        full of signal, to 100 ms later. */
+    double deliveredCents (double sampleRate, float cents)
+    {
+        DetuneVoice re, im;
+        re.prepare (sampleRate);
+        im.prepare (sampleRate);
+        re.setCents (cents);
+        im.setCents (cents);
+
+        constexpr double twoPi = 6.283185307179586;
+        constexpr double hz    = 1000.0;
+
+        const auto from  = (int) std::lround (sampleRate * 0.040);
+        const auto to    = from + (int) std::lround (sampleRate * 0.100);
+        const auto every = (int) std::lround (sampleRate * 0.001);
+
+        double first = 0.0, last = 0.0;
+        bool   started = false;
+
+        for (int n = 0; n <= to; ++n)
+        {
+            const auto w = twoPi * hz * n / sampleRate;
+            const auto x = (double) re.process ((float) std::cos (w));
+            const auto y = (double) im.process ((float) std::sin (w));
+
+            if (n < from || ((n - from) % every != 0 && n != to))
+                continue;
+
+            // The tone's phase against the unshifted input's: the shift alone.
+            auto ph = std::atan2 (y, x) - std::fmod (w, twoPi);
+
+            if (! started) { first = last = ph; started = true; continue; }
+
+            while (ph - last >  0.5 * twoPi) ph -= twoPi;
+            while (ph - last < -0.5 * twoPi) ph += twoPi;
+            last = ph;
+        }
+
+        const auto seconds = (double) (to - from) / sampleRate;
+        const auto shiftHz = (last - first) / twoPi / seconds;
+        return 1200.0 * std::log2 (1.0 + shiftHz / hz);
+    }
 }
 
 int main()
@@ -603,6 +657,42 @@ int main()
             dsp.setParams (on, Index::count);
             check (dsp.getCore().detuneLevel() == 1.0f,
                    "switching detune on from fully off is instant");
+        }
+    }
+
+    //== DETUNE delivers the cents it is set to, at every rate =================
+    // The sweep's phase was a float accumulating an increment of
+    // (1 - ratio) / window per sample, and near the top of [0, 1) a float has
+    // only 6e-8 of resolution. At DETUNE 0.1 the increment is 4.0e-8 at
+    // 48 kHz, and smaller the higher the rate, so it was rounded to whole
+    // steps of that resolution: the up voice ran 49 % fast at 48 kHz and did
+    // not sweep at all at 96 kHz (0.1) and 192 kHz (0.1 and 0.2), and at 1
+    // cent it swung between 0.89 and 1.19 depending on where the sweep was.
+    // Every step of the knob, both voices, every rate the suite supports; the
+    // bound is a hundredth of a cent, a tenth of the knob's smallest step.
+    {
+        for (double sr : { 44100.0, 48000.0, 96000.0, 192000.0 })
+        {
+            double worst = 0.0;
+            float  worstAt = 0.0f;
+
+            for (int step = 1; step <= 250; ++step)
+            {
+                const auto cents = 0.1f * (float) step;
+
+                for (float sign : { 1.0f, -1.0f })
+                {
+                    const auto err = std::abs (deliveredCents (sr, sign * cents) - (double) (sign * cents));
+
+                    if (err > worst) { worst = err; worstAt = sign * cents; }
+                }
+            }
+
+            if (worst >= 0.01)
+                std::cerr << "  at " << sr << " Hz: worst " << worst << " cents off, at DETUNE "
+                          << worstAt << '\n';
+
+            check (worst < 0.01, "every DETUNE step delivers its cents within 0.01, both voices, at this rate");
         }
     }
 

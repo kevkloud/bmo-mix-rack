@@ -498,10 +498,20 @@ const Golden kSwept[]
       -20.0948769542, 0.336609631777,
       -21.2901275396, 0.277803987265, -21.1450327082, 0.417769670486,
       -20.0948769542, 0.336609631777, -20.0948769542, 0.336609631777 },
+    // BMO Dimension at 0.63 has GENERATE on and DETUNE at 0.63 of its travel,
+    // so this row hears the detune voices. Regenerated on ICE QUEEN,
+    // 2026-10-03, for this row alone, when the voices' sweep phase went to
+    // double precision. In single precision the up voice was 0.02 to 0.03
+    // cents off at either step beside 15.75 (+15.68 for 15.7, +15.83 for
+    // 15.8, measured at 48 kHz) and the read position was rounded to a
+    // thousandth of a sample; now both voices deliver their setting to 0.001.
+    // Against the row before, the RMS figures moved by up to 0.0059 dB and the
+    // peaks by up to 2.4e-3 on 0.53 (0.04 dB). The mono figures did not move,
+    // and the rack's swept row moved by 1e-4 dB, inside its tolerance.
     { "dim",
       -18.0000001899, 0.237879320979,
-      -12.0777680029, 0.615875780582, -15.4762951629, 0.465581327677,
-      -23.1036245406, 0.199254766107, -12.8562159113, 0.526588916779 },
+      -12.0786750775, 0.616845369339, -15.4782968843, 0.465581327677,
+      -23.1095590909, 0.200089350343, -12.858309682, 0.524151325226 },
     { "deq",
       89.7000479803, 67366,
       84.7421622782, 53060.8125, 84.7421621754, 53060.8398438,

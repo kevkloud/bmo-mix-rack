@@ -29,6 +29,7 @@
 #include <vector>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 
 using namespace bmo::deesser;
 
@@ -1202,8 +1203,120 @@ void testQIsInertInShelfShape()
     check (! qIsLive (highShelf) && qIsLive (bell), "qIsLive says the same as the renders");
 }
 
+/** The largest sample-to-sample step in [from, to). */
+double largestStep (const std::vector<float>& v, size_t from, size_t to)
+{
+    auto worst = 0.0;
+
+    for (auto i = std::max<size_t> (from, 1); i < std::min (to, v.size()); ++i)
+        worst = std::max (worst, (double) std::abs (v[i] - v[i - 1]));
+
+    return worst;
+}
+
+/** Renders `source` in blocks of `block`, calling `before` at the start of
+    every block with the index of its first sample -- which is where a host
+    moves a parameter or a panel sets the listen flag. */
+std::vector<float> renderWith (double rate, const std::vector<float>& source, std::vector<float> v,
+                               int block, const std::function<void (size_t, std::vector<float>&, DeesserDsp&)>& before)
+{
+    DeesserDsp dsp;
+    dsp.prepare (rate, block, 2);
+    dsp.setParams (v.data(), (int) v.size());
+
+    auto left = source, right = source;
+
+    for (size_t n = 0; n < source.size(); n += (size_t) block)
+    {
+        if (before)
+            before (n, v, dsp);
+
+        dsp.setParams (v.data(), (int) v.size());
+
+        const auto count = (int) std::min ((size_t) block, source.size() - n);
+        float* ch[2] { left.data() + n, right.data() + n };
+        dsp.process (ch, 2, count);
+    }
+
+    return left;
+}
+
+/** **LISTEN crosses over in 10 ms instead of switching.** It went from the
+    whole signal to `H(x) - x` in one sample, which put a step the size of the
+    signal itself into the output: 7.1 times the steady signal's own largest
+    step switching on and 6.6 switching off, at 48 kHz on a 1 kHz tone, and
+    12.7 / 13.2 at 96 kHz. The bound is 1.5 times the larger of the two steady
+    states' own largest steps, on a sustained tone with nothing being taken
+    out (so listen is silence), on one with the cut at RANGE, and inside a
+    sibilant burst, at three rates. Once the fade has finished, listen off is
+    still bit-identical to never having listened. */
+void testListenCrossesOverWithoutAStep()
+{
+    const auto block = 64;
+
+    for (const auto rate : { 44100.0, 48000.0, 96000.0 })
+    {
+        const auto ms = [rate] (double m) { return (size_t) std::lround (m * 1.0e-3 * rate); };
+        const auto onBlock = [rate, block] (double seconds) { return (size_t) block * ((size_t) (seconds * rate / block) + 1); };
+
+        struct Case { const char* name; std::vector<float> source; std::vector<float> v; size_t on, off; bool burst; };
+        std::vector<Case> cases;
+
+        const auto tone = [rate] (double hz)
+        {
+            std::vector<float> out ((size_t) (1.5 * rate));
+            for (size_t i = 0; i < out.size(); ++i)
+                out[i] = (float) (0.18 * std::sin (2.0 * kPi * hz * (double) i / rate));
+            return out;
+        };
+
+        auto eager = defaults();
+        eager[thresh] = -24.0f;
+        eager[range]  = 18.0f;
+
+        cases.push_back ({ "a 1 kHz tone at defaults", tone (1000.0), defaults(), onBlock (0.5), onBlock (1.0), false });
+        cases.push_back ({ "a 6.5 kHz tone cut to RANGE", tone (6500.0), eager, onBlock (0.5), onBlock (1.0), false });
+        cases.push_back ({ "a sibilant burst", essAt (rate, 1.0), defaults(), onBlock (0.56), onBlock (0.64), true });
+
+        for (const auto& c : cases)
+        {
+            const auto y = renderWith (rate, c.source, c.v, block, [&c] (size_t n, std::vector<float>&, DeesserDsp& d)
+            {
+                if (n == c.on)  d.setSolo (0);
+                if (n == c.off) d.setSolo (-1);
+            });
+
+            // Steady references either side of each switch, after any fade.
+            const auto beforeOn  = c.burst ? largestStep (y, ms (520), c.on) : largestStep (y, c.on - ms (100), c.on);
+            const auto during    = largestStep (y, c.on + ms (12), c.off);
+            const auto afterOff  = c.burst ? largestStep (y, c.off + ms (12), ms (680)) : largestStep (y, c.off + ms (12), c.off + ms (112));
+
+            const auto onRatio  = largestStep (y, c.on,  c.on  + ms (12)) / std::max ({ beforeOn, during, 1.0e-30 });
+            const auto offRatio = largestStep (y, c.off, c.off + ms (12)) / std::max ({ during, afterOff, 1.0e-30 });
+
+            const auto tag = std::string (c.name) + " at " + std::to_string ((int) rate) + " Hz";
+
+            check (onRatio < 1.5, "listen on steps " + std::to_string (onRatio) + "x on " + tag);
+            check (offRatio < 1.5, "listen off steps " + std::to_string (offRatio) + "x on " + tag);
+
+            // After the fade out, exactly as if listen had never been pressed.
+            if (! c.burst)
+            {
+                const auto plain = renderWith (rate, c.source, c.v, block, {});
+                auto same = true;
+
+                for (auto i = c.off + ms (11); i < y.size(); ++i)
+                    same = same && std::memcmp (&y[i], &plain[i], sizeof (float)) == 0;
+
+                check (same, "once listen has faded out the output is bit-identical to never listening, " + tag);
+            }
+        }
+    }
+}
+
 int main()
 {
+    testListenCrossesOverWithoutAStep();
     testRePrepareMatchesAFreshInstance();
     testResetLeavesNoStaleDesign();
     testTheShelfNeverBoosts();

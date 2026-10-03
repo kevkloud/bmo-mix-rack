@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/dsp/AnalyserTap.h"
+#include "core/dsp/SwitchFade.h"
 #include "modules/deesser/dsp/Band.h"
 #include "modules/deesser/dsp/Detector.h"
 #include "modules/deesser/params.h"
@@ -149,6 +150,11 @@ public:
         modulation behaviour changes with the sample rate (10 section 7). */
     static constexpr int kControlInterval = 8;
 
+    /** How long LISTEN takes to cross from the whole signal to what is being
+        taken out, and back. Long enough that the step bound holds on a
+        sustained tone at every rate; short enough to read as momentary. */
+    static constexpr double kListenFadeMs = 10.0;
+
 
     /** Where the high-frequency energy actually sits, in Hz, estimated with a
         handful of filters rather than a transform.
@@ -273,6 +279,8 @@ public:
             detectorDesign (Shape::highShelf, kRefHighPassHz, 0.707, rate));
         refTaps = dsp::SvfTaps::of (refCoeffs.g, refCoeffs.k);
 
+        listenMix.prepare (rate, kListenFadeMs);
+
         reset();
     }
 
@@ -301,6 +309,10 @@ public:
         for (auto& s : pitchState)
             s.reset();
         reportedDb.store (0.0f, std::memory_order_relaxed);
+
+        // Nothing has been heard yet, so there is nothing to fade from: the
+        // first block after this snaps to whatever listen says then.
+        listenMix.snap (isListening() ? 1.0f : 0.0f);
     }
 
     void setParams (const Params& p) noexcept { params = p; }
@@ -323,7 +335,17 @@ public:
             return;
 
         const auto chans = std::clamp (numChannels, 1, kMaxChannels);
-        const auto listening = isListening();   // once a block, so block size cannot change it
+
+        // Read once a block, so block size cannot change it, and **faded
+        // rather than switched**: the whole signal and the band's contribution
+        // are the same input through two paths, and swapping one for the other
+        // in a sample put a step the size of the signal into the output. A
+        // core that has not yet processed anything since prepare() or reset()
+        // has nothing to fade from, so it starts where listen already is.
+        if (primed)
+            listenMix.setTarget (isListening() ? 1.0f : 0.0f);
+        else
+            listenMix.snap (isListening() ? 1.0f : 0.0f);
 
         // Hosts send anything, so every one of these is clamped rather than
         // trusted. `freqHz` additionally clamps to a fraction of Fs, so a
@@ -463,6 +485,8 @@ public:
             }
 
             //== Cut ==========================================================
+            const auto listenAt = listenMix.next();
+
             for (int c = 0; c < chans; ++c)
             {
                 const auto x = (double) channels[c][n];
@@ -477,7 +501,10 @@ public:
                 // sibilance being taken out. The filtered output would be the
                 // whole signal with a dip in it, which is not the thing worth
                 // auditioning. BMO DEQ's band solo does exactly this.
-                channels[c][n] = (float) (listening ? y - x : y);
+                //
+                // At rest `crossfade` returns one side bit for bit, so a held
+                // listen, on or off, renders exactly as the hard switch did.
+                channels[c][n] = dsp::crossfade ((float) y, (float) (y - x), listenAt);
             }
         }
 
@@ -525,10 +552,10 @@ public:
         which is not. Two things the DSP test pins: soloed output nulls against
         `H(x) - x` to -100 dB, and -1 restores **bit-identical** output.
 
-        **Placeholder: audio passes through unchanged in either state**, so
-        what is proven here today is the hook and the momentary lifecycle, not
-        the path. Read once per block by the real core, so it cannot break
-        block-size invariance. */
+        Read once per block, so it cannot break block-size invariance, and
+        **crossed over in `kListenFadeMs`** rather than switched: the hard
+        switch stepped 7.1x the steady signal's own largest step at 48 kHz.
+        Held on or held off it renders exactly what the switch did. */
     void setSolo (int index) noexcept { listening.store (index >= 0, std::memory_order_relaxed); }
     bool isListening() const noexcept { return listening.load (std::memory_order_relaxed); }
 
@@ -585,6 +612,11 @@ private:
         thread's: no allocation and no lock, which is the whole of the
         `setSolo` contract. */
     std::atomic<bool> listening { false };
+
+    /** Where the output sits between the whole signal (0) and the band's
+        contribution (1). Driven from `listening` once a block, moved a
+        sample at a time. */
+    dsp::Ramp listenMix;
 };
 
 } // namespace bmo::deesser

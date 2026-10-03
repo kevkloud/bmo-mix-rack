@@ -240,8 +240,10 @@ filters each under one, is held by measurement, and the code says so.
 
 Growing a room opens a gap in the tail, because nothing is replayed to fill
 it. Shrinking one is nearly seamless. A move lasts the longest line plus
-30 ms, and the next move waits for it. **This is a trade-off for Frosty to
-confirm**; the alternatives are in the PR comment.
+30 ms, and the next move waits for it. **Frosty accepted this on
+2026-10-04**, and named the fallback if the gap ever matters in use: glide
+the line lengths, which has no gap and no replay but pitch-bends the tail
+during the move. It is not built. `10` §4's as-built list has both.
 
 **One test criterion changed with it.** The single SIZE 12 → 30 m move is
 held to the step ratio again (1.00), not the 1 ms energy jump (3.8 dB). The

@@ -479,6 +479,15 @@ where it is coded. Everything else above stands.
   feed-forward, has no loop to feed, and so cannot grow. "ER and late
   sharing the scheme" (§5) no longer holds, on purpose.
 
+  **Frosty accepted this trade-off on 2026-10-04, with a fallback named.**
+  If the gap on a growing SIZE move turns out to matter in use, the
+  fallback is to **glide the line lengths** instead: no gap and no replay,
+  at the price §5 refused it for, a pitch bend across the whole tail for as
+  long as the move lasts ("a chorus and not a room"). It is not built. A
+  third option was set aside: letting the old room ring out beside the new
+  one, which has no gap and cannot grow but doubles the tail's memory and
+  its cost during a move.
+
 Four more, from QA's two passes on PR #38 (2026-10-03):
 
 - **The absorbent filters run in double.** In float, at 96 and 192 kHz, the

@@ -581,12 +581,20 @@ double DspCore::currentGainReductionDb() const noexcept
     // so the band moving the signal furthest wins whichever way it is moving
     // it, and ties go to the first one reached -- the same arbitrary but
     // stable choice `std::max` was already making.
+    //
+    // **The move is the one the band's design makes, clamp included**, not
+    // the offset the detector asked for. A design is clamped at +-30 dB
+    // (DesignLimits), so a -24 dB bell asked for 24 dB more cut cuts 6 dB
+    // more, and until the 2026-10-03 review this read 24. For a bell that is
+    // the move at its frequency; for a shelf it is the move of its plateau,
+    // which is what its GAIN knob means.
     double deepest = 0.0;
 
     for (const auto& b : bands)
         if (b.live)
         {
-            const auto moved = -b.offsetDb * b.enable.tick;
+            const auto applied = hasGain (b.designedShape) ? b.appliedGainDb - clampGainDb (b.designedStatic) : 0.0;
+            const auto moved = -applied * b.enable.tick;
 
             if (std::abs (moved) > std::abs (deepest))
                 deepest = moved;

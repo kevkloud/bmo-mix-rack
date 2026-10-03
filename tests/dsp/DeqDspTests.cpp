@@ -1781,6 +1781,62 @@ namespace
             checkAtMost (peakDb (swept->engine()), 0.1, "Cut Q: twelve stacked cuts at Q 4.36 do not resonate");
         }
     }
+
+    /** The gain meter reads the gain the band is actually moving, clamp
+        included. Review of 2026-10-03: it read the detector's offset, so a
+        -24 dB bell asked for 24 dB more cut read 24 dB of cut while the
+        +-30 dB design clamp let 6 dB through.
+
+        Measured on the audio: a bell at 1 kHz, a steady 1 kHz tone, and the
+        band's move read as the output's level over the input's less the
+        bell's static gain, against the meter's figure (positive is cut). */
+    void testMeterReadsWhatIsApplied()
+    {
+        const double rate = 48000.0;
+        struct Case { float gain, range; bool below; float ratio; };
+        const Case cases[] {
+            { 0.0f, -24.0f, false, 20.0f },  { -24.0f, -24.0f, false, 20.0f }, { -12.0f, -24.0f, false, 20.0f },
+            { 24.0f, 24.0f, true, 20.0f },   { 12.0f, 24.0f, true, 20.0f },    { 20.0f, 12.0f, true, 20.0f },
+            { 0.0f, 24.0f, true, 20.0f },    { 24.0f, -12.0f, false, 2.0f },   { -24.0f, 12.0f, true, 2.0f },
+            { 6.0f, -6.0f, false, 4.0f },    { -20.0f, -18.0f, false, 20.0f },
+        };
+
+        for (const auto& c : cases)
+        {
+            Values p;
+            p.at (0, Control::on) = 1.0f;      p.at (0, Control::shape) = 0.0f;
+            p.at (0, Control::freq) = 1000.0f; p.at (0, Control::gain) = c.gain; p.at (0, Control::q) = 1.0f;
+            p.at (0, Control::dyn) = 1.0f;     p.at (0, Control::dir) = c.below ? 1.0f : 0.0f;
+            p.at (0, Control::thr) = c.below ? 0.0f : -60.0f;
+            p.at (0, Control::range) = c.range; p.at (0, Control::ratio) = c.ratio;
+            p.at (0, Control::attack) = 5.0f;  p.at (0, Control::release) = 200.0f;
+
+            DeqDsp d;
+            d.setParams (p.v.data(), (int) p.v.size());
+            d.prepare (rate, 512, 1);
+
+            const auto n = (size_t) rate;
+            std::vector<float> x (n);
+            for (size_t i = 0; i < n; ++i)
+                x[i] = (float) (0.5 * std::sin (2.0 * kPi * 1000.0 * (double) i / rate));
+
+            auto y = x;
+            for (size_t pos = 0; pos < n; pos += 512)
+            {
+                d.setParams (p.v.data(), (int) p.v.size());
+                float* ch[1] { y.data() + pos };
+                d.process (ch, 1, (int) std::min ((size_t) 512, n - pos));
+            }
+
+            const auto tail = n - (size_t) (0.25 * rate);
+            const auto movedDb = rmsDb (y, tail, n) - rmsDb (x, tail, n) - (double) c.gain;
+            const auto meter = (double) d.currentGainReductionDb();
+
+            checkClose (-meter, movedDb, 0.1, "Meter: reads the move applied, static " + std::to_string ((int) c.gain)
+                        + " range " + std::to_string ((int) c.range) + (c.below ? " below" : " above")
+                        + " ratio " + std::to_string ((int) c.ratio));
+        }
+    }
 }
 
 int main()
@@ -1801,6 +1857,7 @@ int main()
     testAutoFromTheFirstBlock();
     testSwitchesFade();
     testCutQIsCapped();
+    testMeterReadsWhatIsApplied();
 
     if (failures == 0)
         std::cout << "deq_dsp: all passed\n";

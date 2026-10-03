@@ -169,6 +169,11 @@ public:
         return std::pow (10.0f, -attenuationDb / 20.0f);
     }
 
+    /** At its rail, all the way open and holding nothing: process() would
+        return exactly 1 and change nothing, whatever it was handed, so a
+        caller may skip it and the level it would have been handed. */
+    bool isIdle() const noexcept { return ! active && attenuationDb <= 0.0f && held == 0; }
+
     float currentAttenuationDb() const noexcept { return attenuationDb; }
 
 private:

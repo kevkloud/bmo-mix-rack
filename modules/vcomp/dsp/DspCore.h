@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 
 namespace bmo::vcomp
 {
@@ -206,6 +207,7 @@ public:
         amountSmoother.prepare (rate, 15.0);
         outputSmoother.prepare (rate, 15.0);
         amountSmoother.snap (params.amountPercent);
+        cachedAmount = cachedOutputDb = kNotYet;
         outputSmoother.snap (params.outputDb);
 
         applyTimings();
@@ -262,7 +264,21 @@ public:
             // the fade ends wherever in a block it ends. Every channel's split
             // is moved by the same calls, so the first speaks for all.
             const auto split = channels[0].bands.inCircuit();
-            const auto curve = curveFor (amountSmoother.tick());
+            // The curve and the two gains read off the smoothers are worked
+            // out again only when the smoothed value moves. Each is a pure
+            // function of that value, so with a setting held the cached figure
+            // is the figure, bit for bit, and the pow() is the cost saved.
+            const auto amountNow = amountSmoother.tick();
+
+            if (! (amountNow == cachedAmount))
+            {
+                cachedAmount    = amountNow;
+                cachedCurve     = curveFor (amountNow);
+                cachedMakeupLin = std::pow (10.0f, autoMakeupDb (cachedCurve) / 20.0f);
+                thruMakeupValid = false;
+            }
+
+            const auto& curve = cachedCurve;
 
             // **The automatic makeup applies to the whole sum, including the
             // bands the compressor did not touch.** Frosty's spec, 2026-09-14:
@@ -289,16 +305,27 @@ public:
             //
             // OUTPUT multiplies the sum either way: it is the user's trim on
             // the whole module.
-            const auto autoMakeupLin = std::pow (10.0f, autoMakeupDb (curve) / 20.0f);
+            const auto autoMakeupLin = cachedMakeupLin;
 
             // Only when the split is in circuit is there a thru band to give
-            // it to, and the ternary keeps the second std::pow out of the
-            // per-sample path in the ordinary case where there is not.
-            const auto thruMakeupLin = split
-                                     ? std::pow (10.0f, thruMakeupDbFor (curve) / 20.0f)
-                                     : autoMakeupLin;
+            // it to, so the second figure is worked out only then.
+            if (split && ! thruMakeupValid)
+            {
+                cachedThruMakeupLin = std::pow (10.0f, thruMakeupDbFor (curve) / 20.0f);
+                thruMakeupValid = true;
+            }
 
-            const auto outputLin     = std::pow (10.0f, outputSmoother.tick() / 20.0f);
+            const auto thruMakeupLin = split ? cachedThruMakeupLin : autoMakeupLin;
+
+            const auto outputNow = outputSmoother.tick();
+
+            if (! (outputNow == cachedOutputDb))
+            {
+                cachedOutputDb  = outputNow;
+                cachedOutputLin = std::pow (10.0f, outputNow / 20.0f);
+            }
+
+            const auto outputLin = cachedOutputLin;
 
             // The gate is keyed off the raw input, before anything else.
             // The IN meter the gate handle sits on is the engine's own input
@@ -311,7 +338,9 @@ public:
 
             // One gate for both channels, off the louder of the two: a gate
             // that opened on one channel only would swing the image.
-            const auto gateGain = gate.process (levelDbOf (inputPeak));
+            // A gate at its rail and all the way open is exactly 1, and then
+            // the input's level -- a log10 a sample -- is not needed.
+            const auto gateGain = gate.isIdle() ? 1.0f : gate.process (levelDbOf (inputPeak));
 
             // One detector for both channels, off the louder after each
             // channel's own sidechain high-pass.
@@ -335,7 +364,9 @@ public:
 
             blockMaxReduction = std::max (blockMaxReduction, envelopeDb);
 
-            const auto compressorGain = std::pow (10.0f, -envelopeDb / 20.0f);
+            // No reduction is a gain of exactly 1, which is what the pow()
+            // would return for it.
+            const auto compressorGain = envelopeDb == 0.0f ? 1.0f : std::pow (10.0f, -envelopeDb / 20.0f);
 
             // Both channels are worked out before either is written, because
             // the limiter needs the peak of the pair to decide one gain for
@@ -372,7 +403,7 @@ public:
             // drives into it rather than sitting past it. A trim that could
             // push the output over the ceiling would make the ceiling a
             // suggestion.
-            const auto limiterGain = limiter.process (pendingPeak);
+            const auto limiterGain = limiter.isIdleFor (pendingPeak) ? 1.0f : limiter.process (pendingPeak);
 
             for (int ch = 0; ch < active; ++ch)
                 channelData[ch][i] = pending[(size_t) ch] * limiterGain;
@@ -433,6 +464,14 @@ private:
     Limiter limiter;
     ReleaseStage release;
     Smoother amountSmoother, outputSmoother;
+
+    // What the smoothers' values were last turned into. NaN to begin with,
+    // so the first sample after construction or prepare() works them out.
+    static constexpr float kNotYet = std::numeric_limits<float>::quiet_NaN();
+    float cachedAmount = kNotYet, cachedOutputDb = kNotYet;
+    Curve cachedCurve {};
+    float cachedMakeupLin = 1.0f, cachedThruMakeupLin = 1.0f, cachedOutputLin = 1.0f;
+    bool  thruMakeupValid = false;
 
     float attackPole = 0.0f;
     float envelopeDb = 0.0f;

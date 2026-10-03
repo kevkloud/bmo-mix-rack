@@ -904,6 +904,23 @@ void testLimiterIsInertBelowItsKnee()
                "a tone just below the limiter's knee passes through untouched");
 }
 
+/** The line under which the limiter may be skipped really is under its knee.
+    DspCore skips Limiter::process() for a peak below kIdleBelowLin while
+    the limiter holds nothing back, which is only the same thing as running
+    it if a peak there asks for no reduction at all. A constant rather than
+    a computed figure, so it is checked against the ceiling and the knee it
+    was worked out from: under the knee, and by no more than 0.02 dB. */
+void testLimiterIdleLineIsUnderItsKnee()
+{
+    const auto line = Limiter::kIdleBelowLin;
+    const auto kneeEdgeDb = (double) kLimiterCeilingDb - 0.5 * (double) kLimiterKneeDb;
+
+    check (limiterReductionDb (levelDbOf (line)) == 0.0f,
+           "a peak at the limiter's idle line asks for no reduction");
+    checkNear (linToDb ((double) line), kneeEdgeDb - 0.01, 0.01,
+               "the idle line sits just under the knee's lower edge");
+}
+
 /** Nothing blows up, goes NaN or sticks, over a level sweep that crosses the
     whole curve at the most aggressive setting.
 
@@ -1072,6 +1089,7 @@ int main()
     testRailsAreExactlyOff();
     testLimiterHoldsTheCeiling();
     testLimiterIsInertBelowItsKnee();
+    testLimiterIdleLineIsUnderItsKnee();
     testStability();
     testLatencyIsAlwaysZero();
 

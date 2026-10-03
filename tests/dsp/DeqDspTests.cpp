@@ -1406,6 +1406,79 @@ namespace
             check (a == renderValues (noRange), "Dynamics back in use: DYN on with no range is the static EQ to the bit");
         }
     }
+
+    /** AUTO is at its level from the first block after prepare() or reset(),
+        a fresh instance included.
+
+        Review of 2026-10-03: ModuleEngine calls setParams before prepare(),
+        when there is no sample rate to design with, so AUTO stayed at unity
+        and glided to its level over the first blocks. Settled at -18 dB, the
+        first 10 ms peaked at +4.6 dBFS against -9.3 settled. AUTO's figure
+        comes from the EQ's settings, not from the input, so it can be known
+        before the first sample.
+
+        Measured as the trim alone: the same instance's output with AUTO on
+        over the output with AUTO off, block by block, which takes the bands'
+        own start from rest out of it. */
+    void testAutoFromTheFirstBlock()
+    {
+        Values p;
+        p.at (0, Control::on) = 1.0f;      p.at (0, Control::shape) = 1.0f;   // a +24 dB low shelf
+        p.at (0, Control::freq) = 1000.0f; p.at (0, Control::gain) = 24.0f;   p.at (0, Control::q) = 0.5f;
+
+        for (double rate : { 44100.0, 48000.0, 96000.0 })
+        {
+            const auto n = (size_t) (0.3 * rate);
+            std::vector<float> tone (n);
+            for (size_t i = 0; i < n; ++i)
+                tone[i] = (float) (0.18 * std::sin (2.0 * kPi * 100.0 * (double) i / rate));
+
+            // Renders `tone` in 512-sample blocks; `before` runs on the
+            // instance first, and reset() follows it when asked.
+            auto render = [&] (bool autoOn, bool viaReset)
+            {
+                auto q = p;
+                q.at (kAutoGain) = autoOn ? 1.0f : 0.0f;
+
+                DeqDsp d;
+                d.setParams (q.v.data(), (int) q.v.size());
+                d.prepare (rate, 512, 1);
+
+                auto play = [&] (std::vector<float>& x)
+                {
+                    for (size_t pos = 0; pos < x.size(); pos += 512)
+                    {
+                        d.setParams (q.v.data(), (int) q.v.size());
+                        float* ch[1] { x.data() + pos };
+                        d.process (ch, 1, (int) std::min ((size_t) 512, x.size() - pos));
+                    }
+                };
+
+                if (viaReset)
+                {
+                    auto warmUp = tone;
+                    play (warmUp);
+                    d.reset();
+                }
+
+                auto y = tone;
+                play (y);
+                return std::pair<std::vector<float>, double> { y, d.autoGainNow() };
+            };
+
+            for (bool viaReset : { false, true })
+            {
+                const auto on = render (true, viaReset), off = render (false, viaReset);
+                const auto settledDb = 20.0 * std::log10 (on.second);
+                check (settledDb < -12.0, "AUTO: the +24 dB shelf asks for a deep trim, " + std::to_string ((int) rate) + " Hz");
+
+                const auto firstDb = rmsDb (on.first, 0, 512) - rmsDb (off.first, 0, 512);
+                checkClose (firstDb, settledDb, 0.5, std::string ("AUTO: the first block after ")
+                            + (viaReset ? "reset()" : "prepare() on a fresh instance") + " is at its level, "
+                            + std::to_string ((int) rate) + " Hz");
+            }
+        }
+    }
 }
 
 int main()
@@ -1423,6 +1496,7 @@ int main()
     testTopologyBehaviour();
     testSoloAndTap();
     testDynamicsComeBackCurrent();
+    testAutoFromTheFirstBlock();
 
     if (failures == 0)
         std::cout << "deq_dsp: all passed\n";

@@ -42,6 +42,17 @@ public:
         const auto tau = 0.005;
         smoothCoeff = 1.0 - std::exp (-1.0 / (std::max (sampleRate, 1.0) * tau));
         autoDirty = true;
+
+        // AUTO is worked out from the settings, not from the input, so it can
+        // be known before the first sample. ModuleEngine calls setParams
+        // before prepare(), when there was no rate to design with, and AUTO
+        // used to start at unity and glide to its level over the first blocks
+        // -- 13 dB too loud for the first 10 ms behind a +24 dB shelf. Now
+        // the settings already given are designed here, and reset() starts
+        // the output at that level.
+        if (primed)
+            updateTarget();
+
         reset();
     }
 
@@ -96,18 +107,9 @@ public:
 
         core.setSettings (settings);
 
-        const auto autoOn = v[kAutoGain] > 0.5f;
-
-        if (autoOn && autoDirty && grid.sampleRate > 0.0)
-        {
-            // Clamped, so a curve that is nearly all cut (a pair of steep
-            // filters closing on each other) cannot ask for 40 dB of makeup.
-            const auto mean = staticBroadbandGain (settings, grid);
-            autoGain = std::clamp (1.0 / std::max (mean, 1.0e-6), kAutoMin, kAutoMax);
-            autoDirty = false;
-        }
-
-        gainTarget = std::pow (10.0, (double) v[kOutput] / 20.0) * (autoOn ? autoGain : 1.0);
+        autoOn = v[kAutoGain] > 0.5f;
+        outputDb = (double) v[kOutput];
+        updateTarget();
 
         if (! primed)
         {
@@ -169,11 +171,28 @@ public:
     }
 
 private:
+    /** The output's target: the trim, times AUTO when it is on. AUTO is
+        redesigned only when a static setting has moved, and only once there
+        is a rate to design at. */
+    void updateTarget() noexcept
+    {
+        if (autoOn && autoDirty && grid.sampleRate > 0.0)
+        {
+            // Clamped, so a curve that is nearly all cut (a pair of steep
+            // filters closing on each other) cannot ask for 40 dB of makeup.
+            const auto mean = staticBroadbandGain (settings, grid);
+            autoGain = std::clamp (1.0 / std::max (mean, 1.0e-6), kAutoMin, kAutoMax);
+            autoDirty = false;
+        }
+
+        gainTarget = std::pow (10.0, outputDb / 20.0) * (autoOn ? autoGain : 1.0);
+    }
+
     DspCore core;
     Settings settings;
     DesignGrid grid;
-    double smoothCoeff = 1.0, gainTarget = 1.0, gainNow = 1.0, autoGain = 1.0;
-    bool primed = false, autoDirty = true;
+    double smoothCoeff = 1.0, gainTarget = 1.0, gainNow = 1.0, autoGain = 1.0, outputDb = 0.0;
+    bool primed = false, autoDirty = true, autoOn = false;
 };
 
 inline std::unique_ptr<ModuleDsp> createDsp() { return std::make_unique<DeqDsp>(); }

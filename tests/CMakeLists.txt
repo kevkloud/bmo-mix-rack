@@ -183,6 +183,18 @@ if(BMO_BUILD_TUNE)
 endif()
 add_test(NAME finite COMMAND finite_tests)
 
+# reset(), latency and tail before any prepare, and release twice, for every
+# module, in the standalone processor and in a rack slot. A call that does not
+# return fails the suite within seconds rather than stalling ctest. Linked like
+# finite_tests, Tune included.
+bmo_add_tool(lifecycle_tests plugin/LifecycleTests.cpp ${BMO_ROOT}/products/rack/Registry.cpp)
+target_link_libraries(lifecycle_tests PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp bmo_deesser bmo_fetcomp bmo_dwell bmo_reverb)
+if(BMO_BUILD_TUNE)
+    target_link_libraries(lifecycle_tests PRIVATE bmo_tune)
+    target_compile_definitions(lifecycle_tests PRIVATE BMO_LIFECYCLE_TESTS_TUNE=1)
+endif()
+add_test(NAME lifecycle COMMAND lifecycle_tests)
+
 # Layout assertions on the real panels. JUCE, not bmo_add_dsp_tool: no
 # rendering happens, but Tokens.h includes juce_gui_basics, so a UI assertion
 # cannot run in the DSP-only job whatever docs/ui-workflow-brief.md §4 says.

@@ -10,6 +10,7 @@
 
 #include "modules/opto/dsp/DspCore.h"
 #include "modules/opto/dsp/OptoDsp.h"
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <string>
@@ -526,6 +527,79 @@ void testLatencyIsAlwaysZero()
     check (dsp.latencyForParams (loud, 5) == 0, "Crush 100, Stressed, Link, Color also reports zero latency");
 }
 
+/** The same programme gives the same reduction at every sample rate.
+
+    Every constant in the cells is a time, turned into a coefficient from the
+    rate in use, and until this test nothing checked that at any rate but
+    48 kHz. A constant written as a per-sample figure would pass everything
+    here and run twice as fast at 96 kHz; that is what this is for. The DC
+    blocker in the drive stage did exactly that until 0.2.0.
+
+    Three readings per rate, both modes, deep: the reduction the programme
+    settles to, the reduction at the end of a 100 ms passage 18 dB hotter,
+    and what is left a second later. Each within 0.1 dB of 48 kHz. */
+void testReductionIsTheSameAtEverySampleRate()
+{
+    const auto readings = [] (double rate, Mode mode)
+    {
+        const auto block = (int) std::lround (rate / 1000.0);   // 1 ms
+        const auto n = (size_t) (7.0 * rate);
+        std::vector<float> signal (n);
+
+        for (size_t i = 0; i < n; ++i)
+        {
+            const auto t = (double) i / rate;
+            const auto amplitude = t >= 4.0 && t < 4.1 ? 0.178 * 7.943282 : 0.178;
+            signal[i] = (float) (amplitude * std::sin (2.0 * kPi * 220.0 * t));
+        }
+
+        DspCore core;
+        DspCore::Params p;
+        p.crushPercent = 100.0f;
+        p.mode = mode;
+        core.prepare (rate, block, 1);
+        core.setParams (p);
+
+        std::vector<float> trace;
+
+        for (size_t at = 0; at < n; at += (size_t) block)
+        {
+            auto* pp = signal.data() + at;
+            core.process (&pp, 1, (int) std::min<size_t> ((size_t) block, n - at));
+            trace.push_back (core.currentGainReductionDb());
+        }
+
+        const auto mean = [&trace] (size_t fromMs, size_t count)
+        {
+            double sum = 0.0;
+            for (size_t i = fromMs; i < fromMs + count; ++i) sum += trace[i];
+            return sum / (double) count;
+        };
+
+        return std::array<double, 3> { mean (3500, 500), mean (4090, 10), mean (5100, 10) };
+    };
+
+    const char* const what[] { "settled reduction", "reduction at the end of a loud passage", "reduction a second after it" };
+
+    for (const auto mode : { Mode::La2a, Mode::Distressor })
+    {
+        const auto name = std::string (mode == Mode::La2a ? "Tele" : "Stressed");
+        const auto reference = readings (48000.0, mode);
+
+        check (reference[0] > 10.0 && reference[1] > reference[0] + 3.0,
+               name + " at 48 kHz is reducing, and reducing more in the loud passage");
+
+        for (const auto rate : { 44100.0, 96000.0, 192000.0 })
+        {
+            const auto here = readings (rate, mode);
+
+            for (size_t k = 0; k < 3; ++k)
+                checkNear (here[k], reference[k], 0.1,
+                           name + " at " + std::to_string ((int) rate) + " Hz, " + what[k] + ", against 48 kHz");
+        }
+    }
+}
+
 //==============================================================================
 /** Each mode delivers the ratio it claims -- measured, not assumed.
 
@@ -616,6 +690,281 @@ void testCrushZeroAtProperGainStaging()
              + std::to_string (atBusLevel) + " dB)");
 }
 
+//==============================================================================
+// A spike on top of programme. Everything above reads the release across a
+// gap into silence; these read it where the programme carries on underneath,
+// which is the case the gap tests cannot see: with 15 to 20 dB already
+// standing, the charge sits at its ceiling and anything a spike adds used to
+// inherit the slowest release the cell has.
+
+constexpr double kProgrammeHz  = 220.0;
+constexpr double kProgrammeAmp = 0.17825;   // -18 dBFS RMS, the level a track arrives at
+constexpr double kPrerollSec   = 15.0;      // long enough for the charge and the dosage to settle
+
+/** The programme tone, `burstDb` hotter for `burstSec` from each onset. The
+    phase runs straight through, so a burst is a change of level and nothing
+    else. */
+std::vector<float> programmeWithBursts (double seconds, double burstDb, double burstSec,
+                                        const std::vector<double>& onsets)
+{
+    const auto n = (size_t) (seconds * kSampleRate);
+    const auto hot = std::pow (10.0, burstDb / 20.0);
+    std::vector<float> out (n);
+
+    for (size_t i = 0; i < n; ++i)
+    {
+        const auto t = (double) i / kSampleRate;
+        auto amplitude = kProgrammeAmp;
+
+        for (const auto onset : onsets)
+            if (t >= onset && t < onset + burstSec)
+                amplitude *= hot;
+
+        out[i] = (float) (amplitude * std::sin (2.0 * kPi * kProgrammeHz * t));
+    }
+
+    return out;
+}
+
+/** Reduction against time, one figure per millisecond: the core run in 1 ms
+    blocks and its meter read after each. */
+std::vector<float> reductionTrace (const std::vector<float>& input, Mode mode, float crushPercent)
+{
+    constexpr int block = 48;
+
+    DspCore core;
+    DspCore::Params p;
+    p.crushPercent = crushPercent;
+    p.mode = mode;
+    core.prepare (kSampleRate, block, 1);
+    core.setParams (p);
+
+    auto signal = input;
+    std::vector<float> trace;
+    trace.reserve (signal.size() / block + 1);
+
+    for (size_t at = 0; at < signal.size(); at += block)
+    {
+        auto* pp = signal.data() + at;
+        core.process (&pp, 1, (int) std::min<size_t> (block, signal.size() - at));
+        trace.push_back (core.currentGainReductionDb());
+    }
+
+    return trace;
+}
+
+/** Mean of the trace over `lengthSec` starting at `atSec`. */
+double meanReduction (const std::vector<float>& trace, double atSec, double lengthSec)
+{
+    const auto from = (size_t) std::llround (atSec * 1000.0);
+    const auto to   = std::min (trace.size(), from + (size_t) std::llround (lengthSec * 1000.0));
+
+    double sum = 0.0;
+    for (size_t i = from; i < to; ++i) sum += trace[i];
+    return to > from ? sum / (double) (to - from) : 0.0;
+}
+
+/** A 20 ms spike must not leave the programme turned down behind it.
+
+    Both bounds are absolute dB above the reduction the programme was holding
+    before the spike, at the deepest setting, where it measured worst. Before
+    this was fixed a single 18 dB spike left 10.3 dB (Tele) and 12.4 dB
+    (Stressed) of extra reduction a quarter of a second later, and 7.5 and
+    10.8 dB a full second later; the level took 3.5 and 7.2 s to come back. */
+void testASpikeDoesNotLeaveADip()
+{
+    for (const auto mode : { Mode::La2a, Mode::Distressor })
+    {
+        const auto name = std::string (mode == Mode::La2a ? "Tele" : "Stressed");
+        constexpr double burstSec = 0.020;
+
+        const auto trace = reductionTrace (programmeWithBursts (kPrerollSec + 3.0, 18.0, burstSec, { kPrerollSec }),
+                                           mode, 100.0f);
+
+        const auto before  = meanReduction (trace, kPrerollSec - 0.5, 0.5);
+        const auto end     = kPrerollSec + burstSec;
+        const auto quarter = meanReduction (trace, end + 0.25, 0.01) - before;
+        const auto second  = meanReduction (trace, end + 1.0, 0.01) - before;
+
+        check (before > 10.0, name + " is holding heavy reduction before the spike (" + std::to_string (before) + " dB)");
+        check (quarter < 1.5,
+               name + ": 250 ms after an 18 dB, 20 ms spike the programme is back within 1.5 dB ("
+                 + std::to_string (quarter) + " dB of extra reduction)");
+        check (second < 0.25,
+               name + ": 1 s after the spike nothing of it is left (" + std::to_string (second) + " dB of extra reduction)");
+    }
+}
+
+/** Spikes a second apart must not walk the programme down.
+
+    Ten of them, the programme running between. Read just before each next
+    spike, the level used to sink 7.7 dB (Tele) and 12.2 dB (Stressed) below
+    where it started, because each gap gave back a third of what the spike
+    before it had added, or less. */
+void testRepeatedSpikesDoNotRatchet()
+{
+    for (const auto mode : { Mode::La2a, Mode::Distressor })
+    {
+        const auto name = std::string (mode == Mode::La2a ? "Tele" : "Stressed");
+
+        std::vector<double> onsets;
+        for (int k = 0; k < 10; ++k) onsets.push_back (kPrerollSec + k);
+
+        const auto trace = reductionTrace (programmeWithBursts (kPrerollSec + 10.0, 18.0, 0.020, onsets), mode, 100.0f);
+
+        const auto before = meanReduction (trace, kPrerollSec - 0.5, 0.5);
+        const auto sunk   = meanReduction (trace, kPrerollSec + 9.0 - 0.01, 0.01) - before;
+
+        check (sunk < 0.5,
+               name + ": before the tenth spike the programme sits within 0.5 dB of where it started ("
+                 + std::to_string (sunk) + " dB lower)");
+    }
+}
+
+/** What the fix above must not cost.
+
+    First, a level that is *held* is programme, not a spike, and its reduction
+    has to arrive as quickly as it always did: the time to come within 1 dB of
+    the settled figure when the programme steps up 18 dB and stays there. A
+    release that speeds up on every reduction the charge has not caught up
+    with, held or not, makes the envelope sag between the crests of the very
+    signal that is holding it up, and that pushed Stressed's figure from 56 ms
+    to 520 ms when it was tried.
+
+    Second, a hit that lasted counts. A full second at the louder level is
+    exposure, and the cell must still be holding most of it a second after
+    the level drops back, or this is a fast compressor with a slow one's name.
+    The cells hold 7.85 dB (Tele) and 13.40 dB (Stressed) there; the bounds
+    are set so that half of either going missing fails. */
+void testAHeldLevelIsStillProgramme()
+{
+    for (const auto mode : { Mode::La2a, Mode::Distressor })
+    {
+        const auto name = std::string (mode == Mode::La2a ? "Tele" : "Stressed");
+
+        const auto held    = reductionTrace (programmeWithBursts (kPrerollSec + 5.0, 18.0, 5.0, { kPrerollSec }), mode, 100.0f);
+        const auto settled = meanReduction (held, kPrerollSec + 4.9, 0.1);
+
+        auto arrivedMs = -1.0;
+        for (auto i = (size_t) std::llround (kPrerollSec * 1000.0); i < held.size(); ++i)
+            if (held[i] >= settled - 1.0) { arrivedMs = (double) i - kPrerollSec * 1000.0; break; }
+
+        const auto limitMs = mode == Mode::La2a ? 20.0 : 65.0;
+        check (arrivedMs >= 0.0 && arrivedMs <= limitMs,
+               name + ": a held 18 dB step is within 1 dB of its settled reduction in "
+                 + std::to_string (arrivedMs) + " ms (limit " + std::to_string (limitMs) + ")");
+
+        const auto hit    = reductionTrace (programmeWithBursts (kPrerollSec + 4.0, 18.0, 1.0, { kPrerollSec }), mode, 100.0f);
+        const auto before = meanReduction (hit, kPrerollSec - 0.5, 0.5);
+        const auto after  = meanReduction (hit, kPrerollSec + 2.0, 0.01) - before;
+
+        const auto holdsAtLeast = mode == Mode::La2a ? 5.5 : 9.5;
+        check (after > holdsAtLeast,
+               name + ": a second after a 1 s louder passage the cell is still holding "
+                 + std::to_string (after) + " dB of it (more than " + std::to_string (holdsAtLeast) + ")");
+    }
+}
+
+//==============================================================================
+// The attack. Nothing pinned it before: the suite passed unchanged with the
+// attack rewritten in both cells, which is how that was found out.
+
+/** Milliseconds from a step in the programme's level to the reduction having
+    covered `fraction` of the way to where it settles. */
+double attackMs (Mode mode, float crushPercent, double stepDb, double fraction)
+{
+    const auto trace   = reductionTrace (programmeWithBursts (kPrerollSec + 3.0, stepDb, 3.0, { kPrerollSec }), mode, crushPercent);
+    const auto before  = meanReduction (trace, kPrerollSec - 0.5, 0.5);
+    const auto settled = meanReduction (trace, kPrerollSec + 2.9, 0.1);
+    const auto target  = before + fraction * (settled - before);
+
+    for (auto i = (size_t) std::llround (kPrerollSec * 1000.0); i < trace.size(); ++i)
+        if (trace[i] >= target)
+            return (double) i - kPrerollSec * 1000.0;
+
+    return -1.0;
+}
+
+/** A small move is met at the pace it always was.
+
+    The programme steps up 3 dB and stays. That asks each cell for well under
+    6 dB more than it is giving, so the quick stage of the attack has no part
+    in it, and the figures are the 10 ms attack's own as it measures on a
+    220 Hz tone: 12 ms for Tele, whose loop shortens it, and 30 ms for
+    Stressed, which also has to wait for its charge before the envelope stops
+    sagging between crests. They are absolute, and they are the same before
+    and after the quick stage existed. */
+void testASmallStepKeepsTheTenMillisecondAttack()
+{
+    const auto tele     = attackMs (Mode::La2a, 60.0f, 3.0, 0.63);
+    const auto stressed = attackMs (Mode::Distressor, 60.0f, 3.0, 0.63);
+
+    check (tele >= 9.0 && tele <= 15.0,
+           "Tele covers 63% of a 3 dB step in " + std::to_string (tele) + " ms (9 to 15)");
+    check (stressed >= 24.0 && stressed <= 36.0,
+           "Stressed covers 63% of a 3 dB step in " + std::to_string (stressed) + " ms (24 to 36)");
+}
+
+/** How far the loudest sample of an 18 dB, 20 ms spike comes out above the
+    peak the output settles to when that level is held. */
+double letThroughDb (Mode mode)
+{
+    DspCore::Params p;
+    p.crushPercent = 100.0f;
+    p.mode = mode;
+
+    const auto peakBetween = [] (const std::vector<float>& v, double fromSec, double toSec)
+    {
+        auto peak = 0.0;
+        for (auto i = (size_t) (fromSec * kSampleRate); i < std::min (v.size(), (size_t) (toSec * kSampleRate)); ++i)
+            peak = std::max (peak, (double) std::abs (v[i]));
+        return peak;
+    };
+
+    const auto held  = render (programmeWithBursts (kPrerollSec + 5.0, 18.0, 5.0, { kPrerollSec }), p);
+    const auto spike = render (programmeWithBursts (kPrerollSec + 1.0, 18.0, 0.020, { kPrerollSec }), p);
+
+    return 20.0 * std::log10 (peakBetween (spike, kPrerollSec, kPrerollSec + 0.020)
+                                / peakBetween (held, kPrerollSec + 4.95, kPrerollSec + 5.0));
+}
+
+/** A loud spike on top of heavy reduction must not come through whole.
+
+    With no lookahead the first crest always gets some of the way out; what
+    can be held is how much, and only Stressed holds it: on the 10 ms attack
+    alone the spike's peak came
+    out 7.8 dB (Tele) and 13.6 dB (Stressed) above where a held level
+    settles. */
+void testASpikeIsCaught()
+{
+    const auto stressed = letThroughDb (Mode::Distressor);
+    const auto tele     = letThroughDb (Mode::La2a);
+
+    check (stressed < 9.5, "Stressed lets an 18 dB spike through by " + std::to_string (stressed) + " dB (under 9.5)");
+
+    // Tele has no quick stage (see testTeleKeepsItsAttackOnALargeStep), so
+    // its figure is the 10 ms attack's, held here so that it is a choice and
+    // not an accident if it ever moves.
+    check (tele > 7.0 && tele < 8.6, "Tele lets an 18 dB spike through by " + std::to_string (tele) + " dB (7.0 to 8.6, the 10 ms attack)");
+}
+
+/** Tele's attack is the 10 ms attack at every size of step.
+
+    The quick stage was built for both cells and heard in both on
+    2026-10-04, blind, each build entered twice. In Stressed both copies with
+    it were ranked above both without. In Tele both copies with it were ranked
+    below both without, so Tele does not have it, and this holds that: the
+    time to cover 63 % of the way on an 18 dB step is the figure the 10 ms
+    attack gives through this cell's loop, 3 ms, where the quick stage made
+    it under 1. */
+void testTeleKeepsItsAttackOnALargeStep()
+{
+    const auto tele = attackMs (Mode::La2a, 100.0f, 18.0, 0.63);
+
+    check (tele >= 2.0 && tele <= 5.0,
+           "Tele covers 63% of an 18 dB step in " + std::to_string (tele) + " ms (2 to 5)");
+}
+
 } // namespace
 
 //==============================================================================
@@ -634,7 +983,14 @@ int main()
     testColorTogglesHarmonics();
     testTeleColorIsLocked();
     testStability();
+    testReductionIsTheSameAtEverySampleRate();
     testLatencyIsAlwaysZero();
+    testASpikeDoesNotLeaveADip();
+    testRepeatedSpikesDoNotRatchet();
+    testAHeldLevelIsStillProgramme();
+    testASmallStepKeepsTheTenMillisecondAttack();
+    testASpikeIsCaught();
+    testTeleKeepsItsAttackOnALargeStep();
 
     std::printf ("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

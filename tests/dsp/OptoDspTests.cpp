@@ -10,6 +10,7 @@
 
 #include "modules/opto/dsp/DspCore.h"
 #include "modules/opto/dsp/OptoDsp.h"
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <string>
@@ -526,6 +527,79 @@ void testLatencyIsAlwaysZero()
     check (dsp.latencyForParams (loud, 5) == 0, "Crush 100, Stressed, Link, Color also reports zero latency");
 }
 
+/** The same programme gives the same reduction at every sample rate.
+
+    Every constant in the cells is a time, turned into a coefficient from the
+    rate in use, and until this test nothing checked that at any rate but
+    48 kHz. A constant written as a per-sample figure would pass everything
+    here and run twice as fast at 96 kHz; that is what this is for. The DC
+    blocker in the drive stage did exactly that until 0.2.0.
+
+    Three readings per rate, both modes, deep: the reduction the programme
+    settles to, the reduction at the end of a 100 ms passage 18 dB hotter,
+    and what is left a second later. Each within 0.1 dB of 48 kHz. */
+void testReductionIsTheSameAtEverySampleRate()
+{
+    const auto readings = [] (double rate, Mode mode)
+    {
+        const auto block = (int) std::lround (rate / 1000.0);   // 1 ms
+        const auto n = (size_t) (7.0 * rate);
+        std::vector<float> signal (n);
+
+        for (size_t i = 0; i < n; ++i)
+        {
+            const auto t = (double) i / rate;
+            const auto amplitude = t >= 4.0 && t < 4.1 ? 0.178 * 7.943282 : 0.178;
+            signal[i] = (float) (amplitude * std::sin (2.0 * kPi * 220.0 * t));
+        }
+
+        DspCore core;
+        DspCore::Params p;
+        p.crushPercent = 100.0f;
+        p.mode = mode;
+        core.prepare (rate, block, 1);
+        core.setParams (p);
+
+        std::vector<float> trace;
+
+        for (size_t at = 0; at < n; at += (size_t) block)
+        {
+            auto* pp = signal.data() + at;
+            core.process (&pp, 1, (int) std::min<size_t> ((size_t) block, n - at));
+            trace.push_back (core.currentGainReductionDb());
+        }
+
+        const auto mean = [&trace] (size_t fromMs, size_t count)
+        {
+            double sum = 0.0;
+            for (size_t i = fromMs; i < fromMs + count; ++i) sum += trace[i];
+            return sum / (double) count;
+        };
+
+        return std::array<double, 3> { mean (3500, 500), mean (4090, 10), mean (5100, 10) };
+    };
+
+    const char* const what[] { "settled reduction", "reduction at the end of a loud passage", "reduction a second after it" };
+
+    for (const auto mode : { Mode::La2a, Mode::Distressor })
+    {
+        const auto name = std::string (mode == Mode::La2a ? "Tele" : "Stressed");
+        const auto reference = readings (48000.0, mode);
+
+        check (reference[0] > 10.0 && reference[1] > reference[0] + 3.0,
+               name + " at 48 kHz is reducing, and reducing more in the loud passage");
+
+        for (const auto rate : { 44100.0, 96000.0, 192000.0 })
+        {
+            const auto here = readings (rate, mode);
+
+            for (size_t k = 0; k < 3; ++k)
+                checkNear (here[k], reference[k], 0.1,
+                           name + " at " + std::to_string ((int) rate) + " Hz, " + what[k] + ", against 48 kHz");
+        }
+    }
+}
+
 //==============================================================================
 /** Each mode delivers the ratio it claims -- measured, not assumed.
 
@@ -634,6 +708,7 @@ int main()
     testColorTogglesHarmonics();
     testTeleColorIsLocked();
     testStability();
+    testReductionIsTheSameAtEverySampleRate();
     testLatencyIsAlwaysZero();
 
     std::printf ("%d checks, %d failures\n", checks, failures);

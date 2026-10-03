@@ -197,6 +197,14 @@ public:
         network level, before the REVERB fader. */
     void process (const float* in, float* outLeft, float* outRight, int numSamples) noexcept
     {
+        // Never prepared: there are no lines to read, so the tail is silence.
+        if (lineLength <= 0)
+        {
+            std::fill (outLeft, outLeft + numSamples, 0.0f);
+            std::fill (outRight, outRight + numSamples, 0.0f);
+            return;
+        }
+
         applyPendingConfig();
         smoothCoefficients (numSamples);
 
@@ -479,38 +487,67 @@ private:
         multiplied (10 section 4): each the nearest unused prime to its target
         time. Primes are mutually prime by construction, and 11 section 6 asks
         for primes. */
+    /** **The search cannot spin, whatever it is given** (QA, 2026-10-03). It
+        ran `for (;;)` until a prime turned up, and on a network that was
+        never prepared the buffer is empty, the ceiling negative, and no
+        candidate can pass: reset() before prepare() never returned.
+
+        - **Unprepared, there are no lengths**: every line is 0, and
+          `process` writes zeros rather than read a line that does not exist.
+        - The walk outwards from the target stops when both sides have left
+          [3, maxLen], which is at most maxLen steps.
+        - If no unused prime is in range -- a buffer too small to hold N of
+          them -- the line takes the nearest unused length instead. Mutual
+          primality is lost there and the network still runs inside its
+          buffer; no rate or SIZE in the schema reaches it. */
     void primeLengths (const LateConfig& c, std::array<int, N>& out) const noexcept
     {
-        const auto tau = meanDelayMsFor (c.type, c.sizeM);
         const auto maxLen = lineLength - 4 - (int) std::ceil (kModHeadroomMs * 0.001 * sampleRate);
+
+        if (lineLength <= 0 || maxLen < 3)
+        {
+            out.fill (0);
+            return;
+        }
+
+        const auto tau = meanDelayMsFor (c.type, c.sizeM);
+
+        const auto unused = [&out] (int n, int upTo)
+        {
+            for (int k = 0; k < upTo; ++k)
+                if (out[(size_t) k] == n)
+                    return false;
+            return true;
+        };
 
         for (int i = 0; i < N; ++i)
         {
-            const auto u   = N > 1 ? 2.0f * (float) i / (float) (N - 1) - 1.0f : 0.0f;
-            const auto ms  = tau * std::pow (kSpread, u);
-            auto target    = std::clamp ((int) std::lround (ms * 0.001 * sampleRate), 3, std::max (3, maxLen));
+            const auto u      = N > 1 ? 2.0f * (float) i / (float) (N - 1) - 1.0f : 0.0f;
+            const auto ms     = tau * std::pow (kSpread, u);
+            const auto target = std::clamp ((int) std::lround (ms * 0.001 * sampleRate), 3, maxLen);
 
-            for (int step = 0; ; ++step)
-            {
-                const int candidates[2] { target + step, target - step };
-                bool done = false;
-                for (auto n : candidates)
+            int found = 0, fallback = 0;
+
+            for (int step = 0; found == 0 && (target + step <= maxLen || target - step >= 3); ++step)
+                for (auto n : { target + step, target - step })
                 {
-                    if (n < 3 || n > maxLen || ! isPrime (n))
+                    if (n < 3 || n > maxLen || ! unused (n, i))
                         continue;
-                    bool used = false;
-                    for (int k = 0; k < i; ++k)
-                        used = used || out[(size_t) k] == n;
-                    if (! used) { out[(size_t) i] = n; done = true; break; }
+                    if (fallback == 0)
+                        fallback = n;
+                    if (isPrime (n)) { found = n; break; }
                 }
-                if (done) break;
-            }
+
+            // `fallback` is 0 only if every length in range is taken, which
+            // needs N > maxLen - 2; the target is then as good as any.
+            out[(size_t) i] = found != 0 ? found : fallback != 0 ? fallback : target;
         }
     }
 
     int preDelayFor (float ms) const noexcept
     {
-        return std::clamp ((int) std::lround (std::clamp (ms, 0.0f, kMaxPreDelayMs) * 0.001 * sampleRate), 0, preLength - 2);
+        return std::clamp ((int) std::lround (std::clamp (ms, 0.0f, kMaxPreDelayMs) * 0.001 * sampleRate),
+                           0, std::max (0, preLength - 2));
     }
 
     float readPre (int delay) const noexcept

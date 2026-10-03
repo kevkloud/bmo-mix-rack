@@ -3033,6 +3033,49 @@ int main (int argc, char** argv)
             check (silent, "and after 280 s every one of them is exactly silent");
     }
 
+    //== reset() before prepare() returns, and an unprepared network is silent ==
+    //
+    // QA, 2026-10-03, PR #38, second pass. Both processors' releaseResources()
+    // call the engine's reset() unconditionally, so a host that releases a
+    // plugin it never prepared, or a rack slot filled before the rack is
+    // prepared, resets a DSP with no buffers. Since 0911af7 reset() rebuilt
+    // the line lengths, and with a zero-length buffer the prime search had no
+    // candidate and no way out: it never returned. **On that commit this
+    // block hangs**, which is how it fails. An unprepared network holds no
+    // lengths at all, and processing it gives zeros.
+    {
+        DspCore::Late late;
+        late.reset();
+        bool empty = true;
+        for (int i = 0; i < DspCore::kNumLines; ++i)
+            empty = empty && late.lineLengthSamples (i) == 0;
+        check (empty, "a never-prepared late network holds no line lengths after reset()");
+
+        float in[64] {}, l[64], r[64];
+        for (auto& x : in) x = 0.5f;
+        std::fill (std::begin (l), std::end (l), 1.0f);
+        std::fill (std::begin (r), std::end (r), 1.0f);
+        late.process (in, l, r, 64);
+        bool zeros = true;
+        for (int i = 0; i < 64; ++i) zeros = zeros && l[i] == 0.0f && r[i] == 0.0f;
+        check (zeros, "and processing it unprepared writes zeros, not out of bounds");
+
+        DspCore core;
+        core.reset();
+        ReverbDsp dsp;
+        dsp.reset();
+        check (true, "reset() on a never-prepared DspCore and ReverbDsp returns");
+
+        // And prepared afterwards, it is an ordinary instance.
+        core.prepare (48000.0, 512, 2);
+        DspCore reference;
+        reference.prepare (48000.0, 512, 2);
+        bool same = true;
+        for (int i = 0; i < DspCore::kNumLines; ++i)
+            same = same && core.lateNetwork().lineLengthSamples (i) == reference.lateNetwork().lineLengthSamples (i);
+        check (same, "and prepare() after an early reset() gives a fresh instance's lengths");
+    }
+
     //== prepare() and reset() in the middle of a move land on a fresh instance ==
     //
     // QA, 2026-10-03, PR #38, blocker 2: reset() copied a crossfade's stale

@@ -233,7 +233,7 @@ inline constexpr float kAttackQuickestDb = 12.0f;
     The quick stage is for the case the 10 ms attack cannot meet. On top of
     15 to 20 dB of standing reduction, an 18 dB spike asks for 12 to 16 dB
     more, and a one-pole 10 ms attack has done almost none of it by the first
-    crest: the spike's peak came out 7.8 dB (Tele) and 13.6 dB (Stressed)
+    crest: the spike's peak came out 13.6 dB (Stressed) and 7.8 dB (Tele)
     above where a held level settles. That is not the same request as the one
     that was tested and refused. That candidate shortened the attack by how
     hard the level overdrove the envelope, everywhere, with a 1 ms floor it
@@ -242,8 +242,13 @@ inline constexpr float kAttackQuickestDb = 12.0f;
     does not stop at a compromise.
 
     "Short by" is measured in reduction, not level, because it is the error
-    in gain that is heard. The level a feedback cell reads is its own output,
-    so there it is the output's overshoot seen through the curve. */
+    in gain that is heard.
+
+    **Only the feedforward cell uses this.** It was built for both and heard
+    in both, blind, on 2026-10-04, each build entered twice. In Stressed both
+    copies with the quick stage were ranked above both without it; in Tele
+    both copies with it were ranked below both without it. Tele keeps the
+    plain 10 ms attack and its 7.8 dB. */
 inline float attackCoeffFor (float steadyTauSec, float quickTauSec, double rate,
                              float levelLin, float reductionDb, const Curve& curve) noexcept
 {
@@ -309,11 +314,12 @@ inline Curve curveForDistressor (float crushPercent) noexcept
     dosage, sliding up toward kReleaseSlowMaxTauSec only after real sustained
     exposure). A short transient barely moves it; a long, loud hit does.
 
-    Attack is ~10 ms for every move that leaves the cell within 6 dB of what
-    is being asked of it, which is what every source consulted gives and what
-    it has always been. Further short than that it quickens -- that part is
-    not from any source, it is from a measurement, and attackCoeffFor() says
-    which. */
+    Attack is fixed at ~10 ms, per every source consulted -- there is no
+    evidence that the real cell's attack is level-dependent the way its
+    release is. A quick stage for a cell far short of what is asked was
+    built for this cell too, and heard blind on 2026-10-04 with each build
+    entered twice: both copies with it were ranked below both without. So it
+    is not here. The other cell has it -- see attackCoeffFor(). */
 class La2aCell
 {
 public:
@@ -348,8 +354,7 @@ public:
         const auto levelLin = std::abs (y);
         const auto rising   = levelLin > envelopeLin;
 
-        const auto attackCoeff = rising ? attackCoeffFor (kAttackTauSec, kAttackQuickTauSec, rate, levelLin, reductionDb, curve)
-                                        : 0.0f;
+        const auto attackCoeff = coeffFor (kAttackTauSec, rate);
 
         const auto dosageT      = std::clamp (dosageSec / kDosageGrowthSec, 0.0f, 4.0f);
         const auto dosageAmount = 1.0f - std::exp (-dosageT);
@@ -397,12 +402,7 @@ public:
     float currentGainLin() const noexcept { return gainLin; }
 
 private:
-    static constexpr float kAttackTauSec         = 0.010f;  // ~10 ms: every move within 6 dB of what is asked
-
-    /** The quick stage, for a cell more than 12 dB short -- see
-        attackCoeffFor(). The loop divides whatever constant it is given by
-        one plus the slope, so 1 ms here acts as a third of that. */
-    static constexpr float kAttackQuickTauSec    = 0.001f;
+    static constexpr float kAttackTauSec         = 0.010f;  // ~10 ms, fixed: the quick stage was heard here and refused
     static constexpr float kReleaseFastTauSec    = 0.06f;   // ~60 ms to the first 50% of recovery
     static constexpr float kReleaseSlowMinTauSec = 1.0f;    // slow tail floor: a hit just past "sustained"
 
@@ -527,9 +527,8 @@ private:
     static constexpr float kAttackTauSec       = 0.010f; // ~10 ms: every move within 6 dB of what is asked
 
     /** The quick stage, for a cell more than 12 dB short -- see
-        attackCoeffFor(). Half the feedback cell's figure, because nothing
-        here shortens it: that cell's loop turns its 1 ms into a third of
-        one, and this one gets exactly the constant it is given. */
+        attackCoeffFor(). Half a millisecond, because nothing here shortens
+        it: a feedforward cell gets exactly the constant it is given. */
     static constexpr float kAttackQuickTauSec  = 0.0005f;
     static constexpr float kReleaseFastTauSec  = 0.06f;
 

@@ -928,16 +928,38 @@ double letThroughDb (Mode mode)
 /** A loud spike on top of heavy reduction must not come through whole.
 
     With no lookahead the first crest always gets some of the way out; what
-    can be held is how much. On the 10 ms attack alone the spike's peak came
+    can be held is how much, and only Stressed holds it: on the 10 ms attack
+    alone the spike's peak came
     out 7.8 dB (Tele) and 13.6 dB (Stressed) above where a held level
     settles. */
 void testASpikeIsCaught()
 {
-    const auto tele     = letThroughDb (Mode::La2a);
     const auto stressed = letThroughDb (Mode::Distressor);
+    const auto tele     = letThroughDb (Mode::La2a);
 
-    check (tele < 3.5,     "Tele lets an 18 dB spike through by " + std::to_string (tele) + " dB (under 3.5)");
     check (stressed < 9.5, "Stressed lets an 18 dB spike through by " + std::to_string (stressed) + " dB (under 9.5)");
+
+    // Tele has no quick stage (see testTeleKeepsItsAttackOnALargeStep), so
+    // its figure is the 10 ms attack's, held here so that it is a choice and
+    // not an accident if it ever moves.
+    check (tele > 7.0 && tele < 8.6, "Tele lets an 18 dB spike through by " + std::to_string (tele) + " dB (7.0 to 8.6, the 10 ms attack)");
+}
+
+/** Tele's attack is the 10 ms attack at every size of step.
+
+    The quick stage was built for both cells and heard in both on
+    2026-10-04, blind, each build entered twice. In Stressed both copies with
+    it were ranked above both without. In Tele both copies with it were ranked
+    below both without, so Tele does not have it, and this holds that: the
+    time to cover 63 % of the way on an 18 dB step is the figure the 10 ms
+    attack gives through this cell's loop, 3 ms, where the quick stage made
+    it under 1. */
+void testTeleKeepsItsAttackOnALargeStep()
+{
+    const auto tele = attackMs (Mode::La2a, 100.0f, 18.0, 0.63);
+
+    check (tele >= 2.0 && tele <= 5.0,
+           "Tele covers 63% of an 18 dB step in " + std::to_string (tele) + " ms (2 to 5)");
 }
 
 } // namespace
@@ -965,6 +987,7 @@ int main()
     testAHeldLevelIsStillProgramme();
     testASmallStepKeepsTheTenMillisecondAttack();
     testASpikeIsCaught();
+    testTeleKeepsItsAttackOnALargeStep();
 
     std::printf ("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

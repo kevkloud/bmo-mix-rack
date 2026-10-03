@@ -503,7 +503,7 @@ namespace
     }
 }
 
-int main()
+int main (int argc, char** argv)
 {
     //== The schema and the adapter agree about length ========================
     {
@@ -2892,6 +2892,144 @@ int main()
         std::cout << "  DECAY 20 s x 2.0, a second of noise then a minute: peak " << peak << "\n";
         check (peak <= 2.0f, "the 40 s corner never passes +6 dBFS");
         check (! growing, "the 40 s corner's energy never grows from one 10 s window to the next");
+    }
+
+    //== The loop loses energy as it runs, not as it was designed ===============
+    //
+    // QA, 2026-10-03: at 96 and 192 kHz the low shelf's coefficients, rounded
+    // to float, gave a DC loop gain of up to 1.0071 where the design said
+    // 0.9993, and Room at SIZE 0.5, DECAY 10 grew to +416 dBFS in two minutes.
+    // The anchors the stability test above reads are the design's. This reads
+    // what every line actually runs, at every rate, across the corners of
+    // SIZE, DECAY and both multipliers, on a dense grid from DC to Nyquist.
+    {
+        double worst = 0.0;
+        std::string worstAt;
+        int configs = 0;
+
+        for (const auto rate : { 44100.0, 48000.0, 96000.0, 192000.0 })
+            for (int t = 0; t < numTypes; ++t)
+                for (const auto size : { 0.5f, constantsFor (t).sizeM, 80.0f })
+                    for (const auto decay : { 0.1f, 1.8f, 20.0f })
+                        for (const auto& damp : { std::array<float, 2> { 0.1f, 0.1f }, std::array<float, 2> { 0.1f, 2.0f },
+                                                  std::array<float, 2> { 2.0f, 0.1f }, std::array<float, 2> { 2.0f, 2.0f },
+                                                  std::array<float, 2> { 1.2f, 0.4f } })
+                        {
+                            DspCore core;
+                            DspCore::Params p;
+                            p.type = (Type) t;
+                            p.sizeM = size;
+                            p.decaySeconds = decay;
+                            p.dampLo = damp[0];
+                            p.dampHi = damp[1];
+                            p.dampLoFreqHz = constantsFor (t).dampLoFreqHz;
+                            p.dampHiFreqHz = constantsFor (t).dampHiFreqHz;
+                            core.setParams (p);
+                            core.prepare (rate, 512, 2);
+                            ++configs;
+
+                            for (int i = 0; i < DspCore::kNumLines; ++i)
+                            {
+                                const auto check1 = [&] (double hz)
+                                {
+                                    const auto g = core.lateNetwork().realisedGain (i, hz);
+                                    if (g > worst)
+                                    {
+                                        worst = g;
+                                        worstAt = std::string (kTypeNames[t]) + " at " + std::to_string ((int) rate) + " Hz, SIZE "
+                                                + std::to_string (size) + ", DECAY " + std::to_string (decay) + ", LOW x "
+                                                + std::to_string (damp[0]) + ", HIGH x " + std::to_string (damp[1])
+                                                + ", line " + std::to_string (i) + ", " + std::to_string (hz) + " Hz";
+                                    }
+                                };
+                                check1 (0.0);
+                                check1 (rate * 0.5);
+                                for (int k = 0; k <= 240; ++k)
+                                    check1 (std::pow (10.0, (double) k / 240.0 * std::log10 (rate * 0.5)));
+                            }
+                        }
+
+        std::cout << "  realised loop gain over " << configs << " settings: worst " << worst << " (" << worstAt << ")\n";
+        check (worst < 1.0, "every line's realised |H| is under 1 at every rate, type, SIZE, DECAY and multiplier corner");
+    }
+
+    //== And the tail never grows, at the rates where it did ====================
+    //
+    // A 10 ms burst, and 2 s held, of noise at -18 dBFS RMS, then silence, at
+    // 96 and 192 kHz: every type, SIZE 0.5 and 80, DECAY 20, both multipliers
+    // 2.0 -- the longest the schema allows. The peak in each 5 s window over
+    // 20 s may never rise from the one before. With --long it runs 280 s and
+    // must reach exact zero, which at an effective 40 s T60 takes about 200 s.
+    {
+        const bool longRun = argc > 1 && std::string (argv[1]) == "--long";
+        const auto seconds = longRun ? 280.0 : 20.0;
+        bool grew = false, silent = true;
+        std::string where;
+
+        for (const auto rate : { 96000.0, 192000.0 })
+            for (int t = 0; t < numTypes; ++t)
+                for (const auto size : { 0.5f, 80.0f })
+                    for (const auto held : { 0.01, 2.0 })
+                    {
+                        DspCore core;
+                        DspCore::Params p;
+                        p.type = (Type) t;
+                        p.sizeM = size;
+                        p.decaySeconds = 20.0f;
+                        p.dampLo = p.dampHi = 2.0f;
+                        p.dampLoFreqHz = constantsFor (t).dampLoFreqHz;
+                        p.dampHiFreqHz = constantsFor (t).dampHiFreqHz;
+                        p.erLevelDb = constantsFor (t).erLevelDb;
+                        p.verbLevelDb = 0.0f;
+                        p.mix = 1.0f;
+                        core.setParams (p);
+                        core.prepare (rate, 512, 2);
+
+                        std::vector<float> l (512), r (512);
+                        float* chans[] { l.data(), r.data() };
+                        const auto window = (long long) (5.0 * rate);
+                        const auto total  = (long long) (seconds * rate);
+                        const auto burst  = (long long) (held * rate);
+                        float peak = 0.0f, last = 1.0e30f, lastWindowPeak = 0.0f;
+                        long long n = 0;
+
+                        for (; n < total; n += 512)
+                        {
+                            for (int i = 0; i < 512; ++i)
+                                l[(size_t) i] = r[(size_t) i] = n + i < burst ? noiseAt ((int) (n + i)) * 0.6928f : 0.0f;
+                            core.process (chans, 2, 512);
+                            for (int i = 0; i < 512; ++i)
+                                peak = std::max (peak, std::max (std::abs (l[(size_t) i]), std::abs (r[(size_t) i])));
+
+                            if ((n + 512) / window != n / window)
+                            {
+                                // The first window holds the burst itself; growth is measured
+                                // from the second on.
+                                if (n >= window && peak > last && ! grew)
+                                {
+                                    grew = true;
+                                    where = std::string (kTypeNames[t]) + " at " + std::to_string ((int) rate) + " Hz, SIZE "
+                                          + std::to_string (size) + (held > 1.0 ? ", held" : ", burst");
+                                }
+                                if (n >= window) last = peak;
+                                lastWindowPeak = peak;
+                                peak = 0.0f;
+                            }
+                        }
+
+                        if (longRun && lastWindowPeak != 0.0f)
+                        {
+                            silent = false;
+                            std::cout << "  not silent after " << seconds << " s: " << kTypeNames[t] << " at " << rate
+                                      << " Hz, SIZE " << size << ", last window peak " << lastWindowPeak << "\n";
+                        }
+                    }
+
+        if (grew)
+            std::cout << "  the tail grew: " << where << "\n";
+        check (! grew, "at 96 and 192 kHz the longest tail never grows from one 5 s window to the next");
+        if (longRun)
+            check (silent, "and after 280 s every one of them is exactly silent");
     }
 
     //== The tail a host is told is at least the tail that rings ================

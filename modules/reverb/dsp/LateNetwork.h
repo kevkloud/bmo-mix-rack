@@ -317,7 +317,27 @@ public:
     float maxLoopGain (int i) const noexcept
     {
         const auto& f = filt[(size_t) i];
-        return std::max ({ f.g * f.loDc, f.g, f.g * f.hiNyq });
+        return (float) std::max ({ f.g * f.loDc, f.g, f.g * f.hiNyq });
+    }
+
+    /** |H_i(f)| of line i's absorbent filter, evaluated in double from the
+        coefficients the line **actually runs** -- not the design. The
+        anchors above are the design's; this is what the loop sees, and the
+        two parted at 96 and 192 kHz (QA, 2026-10-03). */
+    double realisedGain (int i, double hz) const noexcept
+    {
+        const auto& f = filt[(size_t) i];
+        const auto w = 2.0 * 3.14159265358979 * hz / sampleRate;
+        const auto at = [w] (const auto* b, const auto* a)
+        {
+            const double c1 = std::cos (w), s1 = std::sin (w), c2 = std::cos (2.0 * w), s2 = std::sin (2.0 * w);
+            const double nr = (double) b[0] + (double) b[1] * c1 + (double) b[2] * c2;
+            const double ni = -((double) b[1] * s1 + (double) b[2] * s2);
+            const double dr = 1.0 + (double) a[0] * c1 + (double) a[1] * c2;
+            const double di = -((double) a[0] * s1 + (double) a[1] * s2);
+            return std::sqrt ((nr * nr + ni * ni) / (dr * dr + di * di));
+        };
+        return (double) f.g * at (f.lb, f.la) * at (f.hb, f.ha);
     }
 
     /** **The tail's level does not rise as the room shrinks.** For a given T60 a
@@ -525,12 +545,19 @@ private:
     // monotonic, so the three anchors below are still its extremes and 10
     // section 4's clamp still bounds it. Two more multiply-adds a filter.
 
+    /** **In double, coefficients and state.** At 192 kHz a shelf at 140 Hz has
+        its pole within 0.005 of z = 1, and rounding its coefficients to float
+        moved the realised DC gain by more than the loss the line is meant to
+        apply: up to 1.0071 where the design said 0.9993, and a tail that grew
+        to +416 dBFS in two minutes (QA, 2026-10-03). In double the realised
+        gain is the design to 1e-12. Two biquads a line, so the cost is small;
+        the lines themselves stay float. */
     struct Filter
     {
-        float g = 1.0f;
-        float lb[3] { 1.0f, 0.0f, 0.0f }, la[2] {}, lz[2] {};   ///< low shelf, TDF-II
-        float hb[3] { 1.0f, 0.0f, 0.0f }, ha[2] {}, hz[2] {};   ///< high shelf
-        float loDc = 1.0f, hiNyq = 1.0f;                        ///< the anchors, for the tests
+        double g = 1.0;
+        double lb[3] { 1.0, 0.0, 0.0 }, la[2] {}, lz[2] {};   ///< low shelf, TDF-II
+        double hb[3] { 1.0, 0.0, 0.0 }, ha[2] {}, hz[2] {};   ///< high shelf
+        double loDc = 1.0, hiNyq = 1.0;                         ///< the anchors, for the tests
     };
 
     /** **Denormals are flushed by hand, not dodged.** 10 section 4 suggested an
@@ -542,18 +569,20 @@ private:
         denormal. */
     static float flush (float v) noexcept { return std::abs (v) < 1.0e-15f ? 0.0f : v; }
 
-    static float biquad (const float* b, const float* a, float* z, float x) noexcept
+    static double flushD (double v) noexcept { return std::abs (v) < 1.0e-15 ? 0.0 : v; }
+
+    static double biquad (const double* b, const double* a, double* z, double x) noexcept
     {
         const auto y = b[0] * x + z[0];
-        z[0] = flush (b[1] * x - a[0] * y + z[1]);
-        z[1] = flush (b[2] * x - a[1] * y);
+        z[0] = flushD (b[1] * x - a[0] * y + z[1]);
+        z[1] = flushD (b[2] * x - a[1] * y);
         return y;
     }
 
     float absorb (int i, float x) noexcept
     {
         auto& f = filt[(size_t) i];
-        return biquad (f.hb, f.ha, f.hz, biquad (f.lb, f.la, f.lz, x * f.g));
+        return (float) biquad (f.hb, f.ha, f.hz, biquad (f.lb, f.la, f.lz, (double) x * f.g));
     }
 
     /** The two knees' trigonometry, shared by every line. */
@@ -568,7 +597,7 @@ private:
     /** RBJ's shelves at S = 1, with A = sqrt(gain) so the plateau is `gain`
         (its DC gain for the low shelf, its Nyquist gain for the high) and the
         half-way point in dB is the knee. */
-    static void shelf (bool low, double gain, const Knee& k, float* b, float* a) noexcept
+    static void shelf (bool low, double gain, const Knee& k, double* b, double* a) noexcept
     {
         const auto A  = std::sqrt (std::max (gain, 1.0e-9));
         const auto sA = std::sqrt (A);
@@ -595,8 +624,8 @@ private:
             a2 = (A + 1) - (A - 1) * c - 2 * sA * al;
         }
 
-        b[0] = (float) (b0 / a0); b[1] = (float) (b1 / a0); b[2] = (float) (b2 / a0);
-        a[0] = (float) (a1 / a0); a[1] = (float) (a2 / a0);
+        b[0] = b0 / a0; b[1] = b1 / a0; b[2] = b2 / a0;
+        a[0] = a1 / a0; a[1] = a2 / a0;
     }
 
     void design (float m, const Knee& lo, const Knee& hi, Filter& f) const noexcept
@@ -611,9 +640,9 @@ private:
         const auto aLo  = std::min (dbAt (tMid * smoothed[1]), ceilingDb);
         const auto aHi  = std::min (dbAt (tMid * smoothed[2]), ceilingDb);
 
-        f.g     = std::pow (10.0f, aMid * 0.05f);
-        f.loDc  = std::pow (10.0f, (aLo - aMid) * 0.05f);
-        f.hiNyq = std::pow (10.0f, (aHi - aMid) * 0.05f);
+        f.g     = std::pow (10.0, (double) aMid * 0.05);
+        f.loDc  = std::pow (10.0, (double) (aLo - aMid) * 0.05);
+        f.hiNyq = std::pow (10.0, (double) (aHi - aMid) * 0.05);
         shelf (true,  f.loDc,  lo, f.lb, f.la);
         shelf (false, f.hiNyq, hi, f.hb, f.ha);
     }
@@ -653,7 +682,7 @@ private:
         reads, so the end of the fade is where the blend already is. */
     void blendFilters (float w) noexcept
     {
-        const auto mix = [w] (float a, float b) { return a + (b - a) * w; };
+        const auto mix = [w] (double a, double b) { return a + (b - a) * (double) w; };
         for (int i = 0; i < N; ++i)
         {
             auto& f = filt[(size_t) i];

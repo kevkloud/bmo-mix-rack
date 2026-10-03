@@ -1468,8 +1468,108 @@ void testAutomationIsBlockSizeInvariant()
     }
 }
 
+/** The meter's peak over [from, to), read after every block of 16. */
+double peakReduction (double rate, const std::vector<float>& source, const std::vector<float>& v,
+                      size_t from, size_t to)
+{
+    DeesserDsp dsp;
+    dsp.prepare (rate, 16, 2);
+    dsp.setParams (v.data(), (int) v.size());
+
+    auto left = source, right = source;
+    auto peak = 0.0;
+
+    for (size_t n = 0; n < source.size(); n += 16)
+    {
+        const auto count = (int) std::min ((size_t) 16, source.size() - n);
+        float* ch[2] { left.data() + n, right.data() + n };
+        dsp.process (ch, 2, count);
+
+        if (n >= from && n < to)
+            peak = std::max (peak, (double) dsp.currentGainReductionDb());
+    }
+
+    return peak;
+}
+
+/** **One huge sample cannot switch the de-esser off for seconds.** A single
+    sample at +60 dBFS charged the band's slow 500 ms memory so far above
+    anything real that every ess for 5.8 s after it read as unremarkable
+    (7.4 s at +72, 10.2 s at +96), and the fast envelopes took a quarter of a
+    second to come down from it as well. A sample more than 40 dB over the
+    programme now reaches the detector clamped to that line, and the slow
+    memory sits out it and its ring-out (DspCore, `kSpikeOverDb`), so the next
+    sibilant burst, 250 ms later, is reduced within 1 dB of a run that never
+    had the spike -- in both shapes. */
+void testOneHugeSampleDoesNotDeafenTheDetector()
+{
+    for (const auto rate : { 44100.0, 48000.0, 96000.0 })
+        for (const auto shapeChoice : { (int) bell, (int) highShelf })
+        {
+            // essAt (2 s) bursts from 1.0 s; the spike is 250 ms before it.
+            const auto clean = essAt (rate, 2.0);
+            const auto burstFrom = (size_t) (1.0 * rate), burstTo = (size_t) (1.1 * rate);
+            const auto spikeAt = (size_t) (0.75 * rate);
+
+            auto v = defaults();
+            v[shape] = (float) shapeChoice;
+
+            const auto reference = peakReduction (rate, clean, v, burstFrom, burstTo);
+            const auto where = std::string (shapeChoice == bell ? "bell" : "shelf") + " at "
+                             + std::to_string ((int) rate) + " Hz";
+
+            check (reference > 3.0, "the burst is reduced in the clean run, "
+                                        + std::to_string (reference) + " dB, " + where);
+
+            for (const auto dbfs : { 60.0, 72.0, 96.0 })
+            {
+                auto spiked = clean;
+                spiked[spikeAt] = (float) std::pow (10.0, dbfs / 20.0);
+
+                const auto got = peakReduction (rate, spiked, v, burstFrom, burstTo);
+
+                checkNear (got, reference, 1.0, "the burst 250 ms after one sample at +" + std::to_string ((int) dbfs)
+                                                    + " dBFS is reduced as if it had not happened, " + where);
+            }
+        }
+}
+
+/** **What the spike line costs real material: nothing.** It never sits
+    below +20 dBFS, so a signal that peaks anywhere up to there reaches the
+    detector unclamped, and the detector is level-independent exactly as it
+    was: the same take 30 dB louder, peaking near +12, takes the same
+    reduction on its ess to within a hundredth of a dB. */
+void testLoudMaterialIsUnchangedByTheCeiling()
+{
+    const auto source = essAt (kSampleRate, 1.0);
+
+    auto loud = source;
+    auto peakIn = 0.0;
+
+    for (auto& s : loud)
+    {
+        s = (float) (s * std::pow (10.0, 30.0 / 20.0) * 0.2);
+        peakIn = std::max (peakIn, (double) std::abs (s));
+    }
+
+    auto quiet = source;
+    for (auto& s : quiet)
+        s = (float) (s * 0.2);
+
+    const auto v = defaults();
+    const auto from = (size_t) (0.5 * kSampleRate), to = (size_t) (0.7 * kSampleRate);
+    const auto atQuiet = peakReduction (kSampleRate, quiet, v, from, to);
+    const auto atLoud  = peakReduction (kSampleRate, loud,  v, from, to);
+
+    check (20.0 * std::log10 (peakIn) > 6.0 && 20.0 * std::log10 (peakIn) < 24.0,
+           "the loud take peaks between +6 and +24 dBFS, " + std::to_string (20.0 * std::log10 (peakIn)));
+    checkNear (atLoud, atQuiet, 0.01, "a take 30 dB louder takes the same reduction on its ess");
+}
+
 int main()
 {
+    testOneHugeSampleDoesNotDeafenTheDetector();
+    testLoudMaterialIsUnchangedByTheCeiling();
     testEveryParameterGlides();
     testGlidesLandExactly();
     testAutomationIsBlockSizeInvariant();

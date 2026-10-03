@@ -164,12 +164,19 @@ public:
     }
 
     /** One sample of band level and reference level, both already power-summed
-        across channels. Returns prominence in dB, or `kSilent`. */
-    double process (double bandLevel, double referenceLevel) noexcept
+        across channels. Returns prominence in dB, or `kSilent`.
+
+        `learnSlow` false holds the slow memory where it is for this sample.
+        **The slow term had no bound**: it holds a peak for half a second and
+        averages that for another, so one sample far over the programme set it
+        so high that every ess for seconds afterwards read as unremarkable.
+        The caller decides which samples are not to be learnt from (DspCore,
+        `kSpikeOverDb`); everything else is learnt exactly as before. */
+    double process (double bandLevel, double referenceLevel, bool learnSlow = true) noexcept
     {
         const auto b = band.process (bandLevel);
         const auto w = reference.process (referenceLevel);
-        const auto s = slow.process (bandLevel);
+        const auto s = learnSlow ? slow.process (bandLevel) : slow.value();
 
         const auto bDb = levelDb (b);
         const auto wDb = levelDb (w);
@@ -196,6 +203,11 @@ public:
         what the detector is looking at, so a highlight derived from it cannot
         disagree with what the module did. */
     double bandEnvelope() const noexcept { return band.value(); }
+
+    /** The reference's fast envelope, linear: the programme's own recent
+        peak, which is what a sample is judged against before the detector
+        learns from it. */
+    double referenceEnvelope() const noexcept { return reference.value(); }
 
 private:
     Config config;

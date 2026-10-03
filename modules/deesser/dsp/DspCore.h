@@ -174,6 +174,33 @@ public:
     static constexpr double kRangeGlideMs  = 10.0;
     static constexpr double kShapeFadeMs   = 20.0;
 
+    /** **What one sample can teach the detector.** A single sample at
+        +60 dBFS charged the band's slow memory -- `S`, which holds a peak for
+        half a second and averages it for another -- so far above anything
+        real that every ess for 5.8 s afterwards read as unremarkable (7.4 s at
+        +72, 10.2 s at +96), and the fast envelopes took a quarter of a second
+        to come down as well.
+
+        So a sample more than `kSpikeOverDb` above the reference envelope (the
+        programme's own recent peak, before this sample) reaches the detector
+        clamped to that line, and the slow memory does not learn from it or
+        from the `kSpikeHoldMs` after it, while the band filter rings out. The
+        fast envelopes still rise -- a genuinely louder passage gets through
+        within a few samples, since each one raises the line -- but from 40 dB
+        over the programme rather than from wherever the sample was.
+
+        **The line never sits below `kSpikeFloorDb`**, so nothing at or under
+        +20 dBFS is ever touched, from silence or otherwise: for audio this is
+        the identity, bit for bit, and a sustained 0 dBFS signal is exactly
+        what it was. Relative rather than absolute because legal settings in
+        a rack carry far hotter signals between slots than any mix does
+        (core/dsp/FiniteGuard.h measures +119 dBFS), and the detector has to
+        stay level-independent through them. The cut is applied to the
+        sample as it came, always: this is the sidechain only. */
+    static constexpr double kSpikeOverDb  = 40.0;
+    static constexpr double kSpikeFloorDb = -20.0;
+    static constexpr double kSpikeHoldMs  = 5.0;
+
 
     /** Where the high-frequency energy actually sits, in Hz, estimated with a
         handful of filters rather than a transform.
@@ -298,6 +325,10 @@ public:
             detectorDesign (Shape::highShelf, kRefHighPassHz, 0.707, rate));
         refTaps = dsp::SvfTaps::of (refCoeffs.g, refCoeffs.k);
 
+        spikeRatio = std::pow (10.0, kSpikeOverDb / 20.0);
+        spikeFloor = std::pow (10.0, kSpikeFloorDb / 20.0);
+        spikeHold  = (int) std::lround (kSpikeHoldMs * 1.0e-3 * rate);
+
         listenMix.prepare (rate, kListenFadeMs);
         freqGlide  .prepare (rate, kFreqGlideMs);
         qGlide     .prepare (rate, kQGlideMs);
@@ -326,6 +357,7 @@ public:
 
         primed = false;
         sinceTick = 0;
+        spikeHoldLeft = 0;
         depthAtTick = depthTwoTicksAgo = 0.0;
 
         ribbonCountdown = 0;
@@ -456,9 +488,17 @@ public:
             // That is why there is no stereo-link parameter to get wrong.
             double bandPower = 0.0, refPower = 0.0;
 
+            // A sample far over the programme is clamped for the detector, and
+            // the slow memory sits out it and its ring-out (kSpikeOverDb).
+            const auto line = std::max (detector.referenceEnvelope(), spikeFloor) * spikeRatio;
+            auto spiked = false;
+
             for (int c = 0; c < chans; ++c)
             {
-                const auto x = (double) channels[c][n];
+                const auto raw = (double) channels[c][n];
+                const auto x = std::clamp (raw, -line, line);
+                spiked = spiked || x != raw;
+
                 auto b = band.sideSample (c, x);
                 const auto r = refState[(size_t) c].process (refTaps, refCoeffs, x);
 
@@ -475,8 +515,14 @@ public:
             }
 
             const auto inv = 1.0 / (double) chans;
+            if (spiked)
+                spikeHoldLeft = spikeHold;
+            else if (spikeHoldLeft > 0)
+                --spikeHoldLeft;
+
             const auto prominence = detector.process (std::sqrt (bandPower * inv),
-                                                      std::sqrt (refPower * inv));
+                                                      std::sqrt (refPower * inv),
+                                                      spikeHoldLeft == 0);
 
             // Hysteresis is applied to the threshold the detector is judged
             // against, so that having decided this is an ess the module is
@@ -723,6 +769,11 @@ private:
 
     dsp::DesignGrid grid {};
     Band band;
+
+    /** The spike line's two factors, linear, and how long the slow memory
+        sits out after a clamped sample, in samples (kSpikeOverDb). */
+    double spikeRatio = 100.0, spikeFloor = 0.1;
+    int spikeHold = 0, spikeHoldLeft = 0;
 
     /** The shape being faded out, run only while `shapeMix` is moving. */
     Band outgoing;

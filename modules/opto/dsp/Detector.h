@@ -216,6 +216,48 @@ inline float exposureDb (float reductionDb, float envelopeLin, float keptLin, co
     return std::min (reductionDb, std::clamp (kneeReductionDb (keptDb, curve), 0.0f, 40.0f));
 }
 
+/** How many dB of reduction a cell has to be short by before its attack
+    starts to quicken, and by how many it is at its quickest. */
+inline constexpr float kAttackQuickenDb  = 6.0f;
+inline constexpr float kAttackQuickestDb = 12.0f;
+
+/** The attack coefficient for one sample that is pushing the envelope up.
+
+    Two stages. Within 6 dB of the reduction this sample's level asks of the
+    static curve, the attack is `steadyTauSec`, the 10 ms both cells have
+    always had, and every ordinary move is met at that pace: a three-round
+    blind test in September could not tell a uniformly faster attack from it,
+    so there is no reason to change what ordinary moves get. Beyond 12 dB
+    short it is `quickTauSec`, and between the two the rates blend.
+
+    The quick stage is for the case the 10 ms attack cannot meet. On top of
+    15 to 20 dB of standing reduction, an 18 dB spike asks for 12 to 16 dB
+    more, and a one-pole 10 ms attack has done almost none of it by the first
+    crest: the spike's peak came out 7.8 dB (Tele) and 13.6 dB (Stressed)
+    above where a held level settles. That is not the same request as the one
+    that was tested and refused. That candidate shortened the attack by how
+    hard the level overdrove the envelope, everywhere, with a 1 ms floor it
+    reached only far beyond anything a vocal does; this one leaves the attack
+    alone until the cell is a long way short of what is being asked, and then
+    does not stop at a compromise.
+
+    "Short by" is measured in reduction, not level, because it is the error
+    in gain that is heard. The level a feedback cell reads is its own output,
+    so there it is the output's overshoot seen through the curve. */
+inline float attackCoeffFor (float steadyTauSec, float quickTauSec, double rate,
+                             float levelLin, float reductionDb, const Curve& curve) noexcept
+{
+    const auto steady  = coeffFor (steadyTauSec, rate);
+    const auto levelDb = 20.0f * std::log10 (std::max (levelLin, 1.0e-6f));
+    const auto shortBy = std::clamp (kneeReductionDb (levelDb, curve), 0.0f, 40.0f) - reductionDb;
+
+    if (shortBy <= kAttackQuickenDb)
+        return steady;
+
+    const auto quick = std::min ((shortBy - kAttackQuickenDb) / (kAttackQuickestDb - kAttackQuickenDb), 1.0f);
+    return steady + (coeffFor (quickTauSec, rate) - steady) * quick;
+}
+
 /** CRUSH, 0-100 on the panel, mapped to threshold only. LA-2A: ~3:1, a soft
     16 dB knee -- both fixed, per the digest's "effectively fixed/soft-knee,
     not a user ratio control."
@@ -267,9 +309,11 @@ inline Curve curveForDistressor (float crushPercent) noexcept
     dosage, sliding up toward kReleaseSlowMaxTauSec only after real sustained
     exposure). A short transient barely moves it; a long, loud hit does.
 
-    Attack is fixed at ~10 ms, per every source consulted -- there's no
-    evidence (here or in the digest) that the real cell's attack is
-    level-dependent the way its release is, so this doesn't invent one. */
+    Attack is ~10 ms for every move that leaves the cell within 6 dB of what
+    is being asked of it, which is what every source consulted gives and what
+    it has always been. Further short than that it quickens -- that part is
+    not from any source, it is from a measurement, and attackCoeffFor() says
+    which. */
 class La2aCell
 {
 public:
@@ -304,7 +348,8 @@ public:
         const auto levelLin = std::abs (y);
         const auto rising   = levelLin > envelopeLin;
 
-        const auto attackCoeff = coeffFor (kAttackTauSec, rate);
+        const auto attackCoeff = rising ? attackCoeffFor (kAttackTauSec, kAttackQuickTauSec, rate, levelLin, reductionDb, curve)
+                                        : 0.0f;
 
         const auto dosageT      = std::clamp (dosageSec / kDosageGrowthSec, 0.0f, 4.0f);
         const auto dosageAmount = 1.0f - std::exp (-dosageT);
@@ -352,7 +397,12 @@ public:
     float currentGainLin() const noexcept { return gainLin; }
 
 private:
-    static constexpr float kAttackTauSec         = 0.010f;  // ~10 ms, fixed -- no source supports it moving
+    static constexpr float kAttackTauSec         = 0.010f;  // ~10 ms: every move within 6 dB of what is asked
+
+    /** The quick stage, for a cell more than 12 dB short -- see
+        attackCoeffFor(). The loop divides whatever constant it is given by
+        one plus the slope, so 1 ms here acts as a third of that. */
+    static constexpr float kAttackQuickTauSec    = 0.001f;
     static constexpr float kReleaseFastTauSec    = 0.06f;   // ~60 ms to the first 50% of recovery
     static constexpr float kReleaseSlowMinTauSec = 1.0f;    // slow tail floor: a hit just past "sustained"
 
@@ -410,9 +460,10 @@ private:
     to justify claiming more precision than that.
 
     Feedforward: the detector reads the input directly, not the cell's own
-    output, matching the real unit's topology. Attack is static at ~10 ms
-    and does not lengthen with programme material, per the digest -- unlike
-    the LA-2A, this is stated explicitly rather than just unconfirmed. */
+    output, matching the real unit's topology. Attack is ~10 ms and does not
+    lengthen with programme material, per the digest. It does quicken when
+    the cell is more than 6 dB short of what is asked -- see
+    attackCoeffFor(), which is a measurement's doing and not the digest's. */
 class DistressorCell
 {
 public:
@@ -443,7 +494,8 @@ public:
         const auto levelLin = std::abs (x);
         const auto rising   = levelLin > envelopeLin;
 
-        const auto attackCoeff = coeffFor (kAttackTauSec, rate);
+        const auto attackCoeff = rising ? attackCoeffFor (kAttackTauSec, kAttackQuickTauSec, rate, levelLin, reductionDb, curve)
+                                        : 0.0f;
 
         const auto depth        = std::clamp (chargeDb / 20.0f, 0.0f, 1.0f);
         const auto releaseTau   = kReleaseFastTauSec + (kReleaseSlowTauSec - kReleaseFastTauSec) * depth;
@@ -472,7 +524,13 @@ public:
     float currentGainLin() const noexcept { return gainLin; }
 
 private:
-    static constexpr float kAttackTauSec       = 0.010f; // ~10 ms, static -- confirmed non-adaptive
+    static constexpr float kAttackTauSec       = 0.010f; // ~10 ms: every move within 6 dB of what is asked
+
+    /** The quick stage, for a cell more than 12 dB short -- see
+        attackCoeffFor(). Half the feedback cell's figure, because nothing
+        here shortens it: that cell's loop turns its 1 ms into a third of
+        one, and this one gets exactly the constant it is given. */
+    static constexpr float kAttackQuickTauSec  = 0.0005f;
     static constexpr float kReleaseFastTauSec  = 0.06f;
 
     /** This mode's slow ceiling. 20 s until 0.2.1, for the same reason

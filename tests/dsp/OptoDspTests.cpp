@@ -862,6 +862,84 @@ void testAHeldLevelIsStillProgramme()
     }
 }
 
+//==============================================================================
+// The attack. Nothing pinned it before: the suite passed unchanged with the
+// attack rewritten in both cells, which is how that was found out.
+
+/** Milliseconds from a step in the programme's level to the reduction having
+    covered `fraction` of the way to where it settles. */
+double attackMs (Mode mode, float crushPercent, double stepDb, double fraction)
+{
+    const auto trace   = reductionTrace (programmeWithBursts (kPrerollSec + 3.0, stepDb, 3.0, { kPrerollSec }), mode, crushPercent);
+    const auto before  = meanReduction (trace, kPrerollSec - 0.5, 0.5);
+    const auto settled = meanReduction (trace, kPrerollSec + 2.9, 0.1);
+    const auto target  = before + fraction * (settled - before);
+
+    for (auto i = (size_t) std::llround (kPrerollSec * 1000.0); i < trace.size(); ++i)
+        if (trace[i] >= target)
+            return (double) i - kPrerollSec * 1000.0;
+
+    return -1.0;
+}
+
+/** A small move is met at the pace it always was.
+
+    The programme steps up 3 dB and stays. That asks each cell for well under
+    6 dB more than it is giving, so the quick stage of the attack has no part
+    in it, and the figures are the 10 ms attack's own as it measures on a
+    220 Hz tone: 12 ms for Tele, whose loop shortens it, and 30 ms for
+    Stressed, which also has to wait for its charge before the envelope stops
+    sagging between crests. They are absolute, and they are the same before
+    and after the quick stage existed. */
+void testASmallStepKeepsTheTenMillisecondAttack()
+{
+    const auto tele     = attackMs (Mode::La2a, 60.0f, 3.0, 0.63);
+    const auto stressed = attackMs (Mode::Distressor, 60.0f, 3.0, 0.63);
+
+    check (tele >= 9.0 && tele <= 15.0,
+           "Tele covers 63% of a 3 dB step in " + std::to_string (tele) + " ms (9 to 15)");
+    check (stressed >= 24.0 && stressed <= 36.0,
+           "Stressed covers 63% of a 3 dB step in " + std::to_string (stressed) + " ms (24 to 36)");
+}
+
+/** How far the loudest sample of an 18 dB, 20 ms spike comes out above the
+    peak the output settles to when that level is held. */
+double letThroughDb (Mode mode)
+{
+    DspCore::Params p;
+    p.crushPercent = 100.0f;
+    p.mode = mode;
+
+    const auto peakBetween = [] (const std::vector<float>& v, double fromSec, double toSec)
+    {
+        auto peak = 0.0;
+        for (auto i = (size_t) (fromSec * kSampleRate); i < std::min (v.size(), (size_t) (toSec * kSampleRate)); ++i)
+            peak = std::max (peak, (double) std::abs (v[i]));
+        return peak;
+    };
+
+    const auto held  = render (programmeWithBursts (kPrerollSec + 5.0, 18.0, 5.0, { kPrerollSec }), p);
+    const auto spike = render (programmeWithBursts (kPrerollSec + 1.0, 18.0, 0.020, { kPrerollSec }), p);
+
+    return 20.0 * std::log10 (peakBetween (spike, kPrerollSec, kPrerollSec + 0.020)
+                                / peakBetween (held, kPrerollSec + 4.95, kPrerollSec + 5.0));
+}
+
+/** A loud spike on top of heavy reduction must not come through whole.
+
+    With no lookahead the first crest always gets some of the way out; what
+    can be held is how much. On the 10 ms attack alone the spike's peak came
+    out 7.8 dB (Tele) and 13.6 dB (Stressed) above where a held level
+    settles. */
+void testASpikeIsCaught()
+{
+    const auto tele     = letThroughDb (Mode::La2a);
+    const auto stressed = letThroughDb (Mode::Distressor);
+
+    check (tele < 3.5,     "Tele lets an 18 dB spike through by " + std::to_string (tele) + " dB (under 3.5)");
+    check (stressed < 9.5, "Stressed lets an 18 dB spike through by " + std::to_string (stressed) + " dB (under 9.5)");
+}
+
 } // namespace
 
 //==============================================================================
@@ -885,6 +963,8 @@ int main()
     testASpikeDoesNotLeaveADip();
     testRepeatedSpikesDoNotRatchet();
     testAHeldLevelIsStillProgramme();
+    testASmallStepKeepsTheTenMillisecondAttack();
+    testASpikeIsCaught();
 
     std::printf ("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

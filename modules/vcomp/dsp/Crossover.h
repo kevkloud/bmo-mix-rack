@@ -42,8 +42,8 @@ namespace bmo::vcomp
 // 20 Hz low band and a 20 kHz high band that contain nothing. Nothing is not
 // quite nothing: the filters would still be in circuit and would still cost
 // the allpass phase shift, so a module that "isn't using" the feature would be
-// colouring the signal anyway. DspCore::bandsActive() is the switch and
-// testRailsAreExactlyOff is what holds it.
+// colouring the signal anyway. BandSplit::inCircuit() says when it is
+// in, and testRailsAreExactlyOff is what holds it.
 //==============================================================================
 
 /** How close to Nyquist a filter cutoff in this module may be placed, as a
@@ -63,12 +63,24 @@ namespace bmo::vcomp
     k)) about 9.5e-4, which is nowhere near the edge of float. */
 inline constexpr float kMaxCutoffOfNyquist = 0.98f;
 
-/** How long a crossover in circuit takes to glide to a new frequency, in ms.
-    See LinkwitzRiley4::glideTo. Twice the suite's 10 ms switch time on
-    purpose: a glide moves a band edge across the signal rather than blending
-    two settings of it, and at 10 ms LOW THRU 21 -> 500 stepped 1.59x the
-    signal's own largest step on a 150 Hz tone, 1.33x at 20 ms. */
-inline constexpr double kCrossoverGlideMs = 20.0;
+/** How a crossover in circuit glides to a new frequency. See
+    LinkwitzRiley4::glideTo.
+
+    **At a rate that keeps pace with the frequency it is passing**, not in a
+    fixed time. A crossover's allpass turns the phase of everything within
+    about two octaves of it, and how much the level of a tone wobbles while
+    that happens depends only on how many of the tone's own cycles the move
+    takes per octave: measured on a sweeping LR4 at 15 Hz, 100 Hz and 1 kHz
+    alike, half a cycle per octave swings a tone -3.1 / +5.1 dB, one cycle
+    -1.8 / +2.6, two -1.0 / +1.2, four -0.5 / +0.6. So the crossover moves
+    kCrossoverGlideCycles of its own period per octave, which is the same
+    figure at every frequency it passes: the period itself moves in a
+    straight line, quickly through the top of the range and slowly through
+    the bottom. A glide is never shorter than kCrossoverGlideMs; the first
+    build glided everything in a fixed 20 ms, which was quick enough at a
+    few kHz and swung a 100 Hz tone by 7 dB. */
+inline constexpr double kCrossoverGlideMs     = 20.0;
+inline constexpr double kCrossoverGlideCycles = 2.5;
 
 /** One TPT state variable section (Zavalishin, The Art of VA Filter Design),
     giving low-pass and high-pass outputs from the same state. TPT rather than
@@ -138,8 +150,7 @@ public:
         applyWarped (g);
     }
 
-    /** Moves the crossover to `hz` over kCrossoverGlideMs, from wherever it
-        is, for a split that is in circuit. Asking for the frequency already
+    /** Moves the crossover to `hz`, from wherever it is, for a split that is in circuit. Asking for the frequency already
         being approached (or held) changes nothing, so this is safe to call
         every block with the control's current value.
 
@@ -147,8 +158,8 @@ public:
         stays well behaved while it moves. The TPT section's poles are the
         bilinear transform of a Butterworth pair, so at every cutoff along the
         way they sit inside the unit circle: the radius is
-        sqrt ((1 - k g + g^2) / (1 + k g + g^2)), largest at the bottom of
-        LOW THRU's range, 0.99907 at 20 Hz and 96 kHz. And the state is
+        sqrt ((1 - k g + g^2) / (1 + k g + g^2)), largest where the low side
+        parks, 0.99977 at 5 Hz and 96 kHz and 0.99988 at 192. And the state is
         trapezoidal integrator memory, not past outputs, so a coefficient
         that changes does not turn old output into a new click -- which is
         why this module uses TPT sections at all. A second split to fade
@@ -156,22 +167,44 @@ public:
         and a knob dragged across a block boundary would start a new fade
         each block.
 
-        The glide is geometric in the warped frequency g = tan(pi fc / fs),
-        which is the frequency itself on a log scale everywhere but the top
-        octave: equal time for equal ratios, as the knob is laid out. */
-    void glideTo (float hz) noexcept
+        How fast it moves is kCrossoverGlideCycles' business: see there. */
+    void glideTo (float hz) noexcept { glideToWarped (warpedFor (hz)); }
+
+    /** Puts the crossover at the warped frequency `warped` at once. */
+    void setWarped (float warped) noexcept
     {
-        const auto target = warpedFor (hz);
+        glideLeft = 0;
+        g = gTarget = warped;
+        applyWarped (g);
+    }
+
+    /** glideTo() for a warped frequency. */
+    void glideToWarped (float target) noexcept
+    {
+        if (! (g > 0.0f))
+        {
+            setWarped (target);
+            return;
+        }
 
         if (! (target < gTarget) && ! (gTarget < target))
             return;
 
-        gTarget    = target;
-        glideLeft  = glideLength;
-        glideRatio = std::pow (gTarget / g, 1.0f / (float) glideLength);
+        // The period, 1/g, moves in a straight line: kCrossoverGlideCycles of
+        // it per octave is d(1/g) = ln 2 / (pi N) a sample, whatever the
+        // frequency, while g is well below Nyquist -- and never less than
+        // kCrossoverGlideMs in all.
+        const auto from = 1.0 / (double) g, to = 1.0 / (double) target;
+        const auto samples = std::abs (to - from) * 3.14159265358979323846 * kCrossoverGlideCycles / 0.69314718055994531;
+
+        gTarget   = target;
+        glideLeft = std::max (glideLength, (int) std::min (samples, 1.0e8));
+        period    = from;
+        periodStep = (to - from) / (double) glideLeft;
     }
 
-    bool isGliding() const noexcept { return glideLeft > 0; }
+    bool  isGliding() const noexcept    { return glideLeft > 0; }
+    float warpedTarget() const noexcept { return gTarget; }
 
     /** One sample of a glide. Lands on the target exactly, so a crossover
         that has finished moving has the coefficients it would have had if it
@@ -185,7 +218,8 @@ public:
         }
         else
         {
-            g *= glideRatio;
+            period += periodStep;
+            g = (float) (1.0 / period);
         }
 
         applyWarped (g);
@@ -215,7 +249,8 @@ public:
         return l + h;
     }
 
-private:
+    /** tan(pi fc / fs) for `hz`, clamped to the range every cutoff in this
+        module is placed in. */
     float warpedFor (float hz) const noexcept
     {
         const auto nyquist = (float) (sampleRate * 0.5);
@@ -223,6 +258,7 @@ private:
         return std::tan (3.14159265358979323846f * fc / (float) sampleRate);
     }
 
+private:
     void applyWarped (float warped) noexcept
     {
         const auto a1 = 1.0f / (1.0f + warped * (warped + Svf::kK));
@@ -236,7 +272,8 @@ private:
     double sampleRate = 44100.0;
     Svf low[2], high[2];
 
-    float g = 0.0f, gTarget = 0.0f, glideRatio = 1.0f;
+    float  g = 0.0f, gTarget = 0.0f;
+    double period = 0.0, periodStep = 0.0;
     int   glideLength = 1, glideLeft = 0;
 };
 
@@ -258,23 +295,31 @@ public:
         lowAlign.prepare (rate);
         lowMix.prepare (rate, kBandSwitchMs);
         highMix.prepare (rate, kBandSwitchMs);
+
+        lowEdge  = std::tan (3.14159265358979323846f * kLowSplitEdgeHz / (float) std::max (rate, 1.0));
+        highEdge = upper.warpedFor (1.0e9f);
+        lowWarmLength = (int) std::lround (std::max (rate, 1.0) * kLowWarmUpMs * 0.001);
         reset();
     }
 
     /** Clears every filter and puts each side where its control last said,
-        with nothing fading or gliding. */
+        with nothing fading or gliding: a side that is wanted in circuit, at
+        its setting; one that is not, out and parked at its edge. */
     void reset() noexcept
     {
-        lowMix.snap (lowMix.target());
-        highMix.snap (highMix.target());
+        lowWarm = highWarm = 0;
+        lowMix.snap (wantLow ? 1.0f : 0.0f);
+        highMix.snap (wantHigh ? 1.0f : 0.0f);
 
         lower.reset();
         upper.reset();
         lowAlign.reset();
 
-        lower.setCutoff (lowCutoffHz);
-        upper.setCutoff (highCutoffHz);
-        lowAlign.setCutoff (highCutoffHz);
+        if (wantLow)  lower.setCutoff (lowCutoffHz);
+        else          lower.setWarped (lowEdge);
+
+        if (wantHigh) { upper.setCutoff (highCutoffHz); lowAlign.setCutoff (highCutoffHz); }
+        else          { upper.setWarped (highEdge);     lowAlign.setWarped (highEdge); }
     }
 
     void setCutoffs (float lowHz, float highHz) noexcept
@@ -297,8 +342,8 @@ public:
         // at 300 and HIGH THRU at its rail, a 12 kHz tone was pumped by 4.7 dB
         // where it should have been the full 11.5, and the number was there in
         // a table next to three that were right.
-        const auto wantLow  = lowHz  > kLowThruOffHz;
-        const auto wantHigh = highHz < kHighThruOffHz;
+        wantLow  = lowHz  > kLowThruOffHz;
+        wantHigh = highHz < kHighThruOffHz;
 
         // A side that is out is cleared, so that it comes back from silence
         // rather than replaying what it held when it went out. A side left out
@@ -315,33 +360,26 @@ public:
         if (! (lowRunning() && highRunning()))
             lowAlign.reset();
 
-        // A side coming in from rest is put at its frequency; one already in
-        // circuit glides there. A side going out keeps the frequency it had
-        // while it fades: its rail means "not in circuit", not a frequency to
-        // glide towards. lowAlign is always where the upper split is.
         if (wantLow)
         {
-            if (lowRunning())  lower.glideTo (lowHz);
-            else               lower.setCutoff (lowHz);
-
+            lowTarget   = lower.warpedFor (lowHz);
             lowCutoffHz = lowHz;
         }
 
         if (wantHigh)
         {
-            if (highRunning()) { upper.glideTo (highHz);   lowAlign.glideTo (highHz); }
-            else               { upper.setCutoff (highHz); lowAlign.setCutoff (highHz); }
-
+            highTarget   = upper.warpedFor (highHz);
             highCutoffHz = highHz;
         }
 
-        lowMix.setTarget  (wantLow  ? 1.0f : 0.0f);
-        highMix.setTarget (wantHigh ? 1.0f : 0.0f);
+        steerLow();
+        steerHigh();
     }
 
-    /** True while either side is in circuit or fading, and therefore while
-        process() has to be called at all. With both sides at rest at their
-        rails the whole split is skipped -- see DspCore::bandsActive(). */
+    /** True while either side is in circuit or on its way in or out, and
+        therefore while process() has to be called at all. With both sides
+        out the whole split is skipped: a crossover left in circuit costs its
+        allpass phase shift whether or not anything is in its outer bands. */
     bool inCircuit() const noexcept { return lowRunning() || highRunning(); }
 
     /** Splits `x` into the band to compress and the band that passes through.
@@ -351,16 +389,52 @@ public:
         `lowAlign` is not used -- the two bands are that one crossover's own
         outputs and sum to its allpass by construction.
 
-        **A side comes in and goes out over kBandSwitchMs.** It used to switch
-        in one sample, and a crossover in circuit is not the signal it
-        replaces -- it is an allpass of it, so the two disagree in phase
-        everywhere near the split: on a 150 Hz tone LOW THRU 200 -> 20 stepped
-        104x the signal's own largest step, COMPLEX on -> off 144x, HIGH THRU
-        20k -> 6k 35x. Fading, a side's own split blends with the signal it
-        was handed and its outer band comes up with it, and the low band is
-        aligned to the upper split in the same proportion as that split is
-        in. With nothing fading the arithmetic is exactly what it always was. */
+        **A side comes in and goes out at the far edge of its range.** It used
+        to switch in one sample, and a crossover in circuit is not the signal
+        it replaces -- it is an allpass of it: on a 150 Hz tone LOW THRU 200 ->
+        20 stepped 104x the signal's own largest step, COMPLEX on -> off 144x,
+        HIGH THRU 20k -> 6k 35x. The first cure faded the side from the signal
+        to its split over 10 ms where it stood, and that traded the step for a
+        notch: half way through, the dry signal and the allpass are in
+        anti-phase at the crossover, so a tone there cancelled completely and
+        anything within an octave of it dipped more than 3 dB.
+
+        So a side coming in starts with its crossover parked at the edge --
+        kLowSplitEdgeHz for the low side, the top of the range for the high
+        one -- where its allpass is a wire across the audio band, fades in
+        there over kBandSwitchMs, and then glides to its setting; going out,
+        it glides to the edge first and fades out there. Fading at the edge
+        costs nothing anybody can hear, and a crossover in circuit gliding is
+        an allpass all the way, so the level does not move. A whole entry or
+        exit takes the fade plus one glide: at most 10 + 36 ms for the low
+        side and 10 + 45 ms for the high one, at any rate up to 192 kHz.
+        With nothing moving the arithmetic is exactly what it always was. */
     void process (float x, float& mid, float& thru) noexcept
+    {
+        const auto lowWasMoving  = lower.isGliding() || lowMix.isMoving();
+        const auto highWasMoving = upper.isGliding() || highMix.isMoving();
+
+        split (x, mid, thru);
+
+        // A side that has run long enough at its edge for its filters to
+        // have forgotten starting from rest starts to fade in.
+        if (lowWarm > 0 && --lowWarm == 0)
+            lowMix.setTarget (1.0f);
+
+        if (highWarm > 0 && --highWarm == 0)
+            highMix.setTarget (1.0f);
+
+        // A glide or a fade that has just finished hands each side on to the
+        // next step of its way in or out.
+        if (lowWasMoving && ! lower.isGliding() && ! lowMix.isMoving())
+            steerLow();
+
+        if (highWasMoving && ! upper.isGliding() && ! highMix.isMoving())
+            steerHigh();
+    }
+
+private:
+    void split (float x, float& mid, float& thru) noexcept
     {
         if (lower.isGliding())
             lower.advanceGlide();
@@ -374,7 +448,7 @@ public:
         const auto runLow  = lowRunning();
         const auto runHigh = highRunning();
 
-        if (! lowMix.isMoving() && ! highMix.isMoving())
+        if (! lowMix.isMoving() && ! highMix.isMoving() && lowWarm == 0 && highWarm == 0)
         {
             if (runLow && runHigh)
             {
@@ -440,16 +514,113 @@ public:
         thru = lowBand + highBand;
     }
 
-private:
-    /** How long a side of the split takes to come in or go out, in ms: the
-        suite's switch time. */
+    /** How long a side of the split takes to fade in or out at its edge, in
+        ms: the suite's switch time. */
     static constexpr double kBandSwitchMs = 10.0;
 
-    bool lowRunning() const noexcept  { return lowMix.isMoving()  || lowMix.value()  > 0.0f; }
-    bool highRunning() const noexcept { return highMix.isMoving() || highMix.value() > 0.0f; }
+    /** Where the low side's crossover is parked while it fades in or out.
+        Below the bottom of LOW THRU's range by more than three octaves, so
+        that fading the dry signal into its allpass there moves the level of
+        nothing a voice has: at 10 Hz, the lowest frequency the dip is
+        measured at, the fade costs 0.3 dB. The high side parks at the top of
+        the range a crossover can be placed in, 0.98 of Nyquist, which is as
+        far above 20 kHz as each rate allows. */
+    static constexpr float kLowSplitEdgeHz = 5.0f;
+
+    /** How long a low side coming in runs at its edge, heard by nothing,
+        before it starts to fade in, in ms. A crossover started from rest is
+        not yet the allpass it settles into: at 5 Hz its start-up transient
+        takes about 45 ms per time constant to die away, and faded in at once
+        it moved a 30 Hz tone by -1.9 to -2.7 dB. Five time constants and
+        more. The high side parks at the top of the range, where the same
+        transient is over in microseconds, and needs none. */
+    static constexpr double kLowWarmUpMs = 250.0;
+
+    bool lowRunning() const noexcept  { return lowWarm > 0 || lowMix.isMoving()  || lowMix.value()  > 0.0f; }
+    bool highRunning() const noexcept { return highWarm > 0 || highMix.isMoving() || highMix.value() > 0.0f; }
+
+    /** One side's next step on its way in or out. Called whenever its
+        control is set and whenever its glide or its fade finishes, so a side
+        always knows where it is going: in at the edge, then a glide to its
+        setting; or a glide to the edge, then out. A control that changes its
+        mind part way turns the side round from wherever it is. */
+    static void steer (bool want, float target, float edge, dsp::Ramp& mix, int& warm, int warmLength,
+                       LinkwitzRiley4& xo, LinkwitzRiley4* mirror) noexcept
+    {
+        const auto running = warm > 0 || mix.isMoving() || mix.value() > 0.0f;
+
+        auto glide = [&] (float to)
+        {
+            xo.glideToWarped (to);
+            if (mirror != nullptr) mirror->glideToWarped (to);
+        };
+
+        if (want)
+        {
+            if (! running)
+            {
+                // From rest, parked at the edge: run there unheard while
+                // the filters settle, then fade in there.
+                xo.setWarped (edge);
+                if (mirror != nullptr) mirror->setWarped (edge);
+
+                if (warmLength > 0) warm = warmLength;
+                else                mix.setTarget (1.0f);
+
+                return;
+            }
+
+            if (warm > 0)
+                return;
+
+            if (mix.target() < 1.0f)
+            {
+                // Fading out at the edge: turn round there.
+                mix.setTarget (1.0f);
+                return;
+            }
+
+            if (! mix.isMoving())
+                glide (target);
+
+            return;
+        }
+
+        if (! running)
+            return;
+
+        if (warm > 0)
+        {
+            // Still settling, unheard: simply stop.
+            warm = 0;
+            return;
+        }
+
+        if (mix.isMoving())
+        {
+            // Fading in at the edge: turn round there.
+            mix.setTarget (0.0f);
+            return;
+        }
+
+        if (xo.warpedTarget() < edge || edge < xo.warpedTarget())
+        {
+            glide (edge);
+            return;
+        }
+
+        if (! xo.isGliding())
+            mix.setTarget (0.0f);
+    }
+
+    void steerLow() noexcept  { steer (wantLow,  lowTarget,  lowEdge,  lowMix,  lowWarm,  lowWarmLength, lower, nullptr); }
+    void steerHigh() noexcept { steer (wantHigh, highTarget, highEdge, highMix, highWarm, 0,             upper, &lowAlign); }
 
     LinkwitzRiley4 lower, upper, lowAlign;
     dsp::Ramp lowMix, highMix;
+    bool  wantLow = false, wantHigh = false;
+    int   lowWarm = 0, highWarm = 0, lowWarmLength = 0;
+    float lowTarget = 0.0f, highTarget = 0.0f, lowEdge = 0.0f, highEdge = 0.0f;
     float lowCutoffHz = kLowThruOffHz, highCutoffHz = kHighThruOffHz;
 };
 

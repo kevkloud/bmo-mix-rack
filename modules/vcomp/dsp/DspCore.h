@@ -238,19 +238,6 @@ public:
         applyTimings();
     }
 
-    /** True when either band control is off its rail, and therefore when the
-        crossover is in circuit at all. Both at their rails means the whole
-        split is skipped rather than run with empty outer bands -- a crossover
-        left in costs its allpass phase shift whether or not anything is in the
-        bands it made. */
-    static bool bandsActive (const Params& p) noexcept
-    {
-        if (! p.complex)
-            return false;
-
-        return p.lowThruHz > kLowThruOffHz || p.highThruHz < kHighThruOffHz;
-    }
-
     void process (float* const* channelData, int numChannels, int numSamples) noexcept
     {
         const auto active = std::min (numChannels, numActiveChannels);

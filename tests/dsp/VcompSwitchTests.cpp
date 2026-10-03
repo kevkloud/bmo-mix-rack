@@ -215,6 +215,66 @@ namespace
 
         return worst;
     }
+
+    /** The level of a move, sample by sample, as the mean energy of an
+        ensemble of renders: four phases of a sine an eighth of a cycle apart
+        (whose energies sum to a constant, so the mean is the level with no
+        window needed to average the cycle out), or `seeds` renders of white
+        noise. Returned as the worst 2 ms level against the input's over
+        [from, to) seconds, in dB, low and high. At AMOUNT 0 every band takes
+        a gain of exactly 1, so the split on its own is an allpass and any
+        departure from the input's level is the move's. */
+    struct LevelSwing { double low = 0.0, high = 0.0; };
+
+    LevelSwing levelSwing (double fs, double hz, int seeds, const std::function<Params (size_t)>& paramsAt,
+                           double seconds, double from, double to)
+    {
+        const auto n = (size_t) (seconds * fs);
+        std::vector<double> ey (n, 0.0), ex (n, 0.0);
+        const auto members = hz > 0.0 ? 4 : seeds;
+
+        for (int k = 0; k < members; ++k)
+        {
+            std::vector<float> x (n);
+            unsigned state = 12345u + 7919u * (unsigned) k;
+
+            for (size_t i = 0; i < n; ++i)
+            {
+                if (hz > 0.0)
+                {
+                    x[i] = (float) (0.25 * std::sin (2.0 * kPi * hz * (double) i / fs + k * kPi / 4.0));
+                }
+                else
+                {
+                    state = state * 1664525u + 1013904223u;
+                    x[i] = (float) (0.25 * ((double) (state >> 8) / 8388608.0 - 1.0));
+                }
+            }
+
+            const auto y = render (fs, x, 64, paramsAt);
+
+            for (size_t i = 0; i < n; ++i)
+            {
+                ey[i] += (double) y[i] * y[i];
+                ex[i] += (double) x[i] * x[i];
+            }
+        }
+
+        LevelSwing s { 1.0e9, -1.0e9 };
+        const auto w = std::max<size_t> (1, (size_t) (0.002 * fs));
+
+        for (auto a = (size_t) (from * fs); a + w <= std::min (n, (size_t) (to * fs)); a += w / 2)
+        {
+            double sy = 0.0, sx = 0.0;
+            for (size_t i = a; i < a + w; ++i) { sy += ey[i]; sx += ex[i]; }
+
+            const auto db = 10.0 * std::log10 (sy / sx);
+            s.low  = std::min (s.low, db);
+            s.high = std::max (s.high, db);
+        }
+
+        return s;
+    }
 }
 
 int main()
@@ -552,7 +612,17 @@ int main()
             for (const auto hz : { 150.0, 1000.0 })
                 for (const auto& m : moves)
                 {
-                    const auto ratio = stepRatio (fs, hz, m.moves, nullptr, 1.6);
+                    // COMPLEX on with the knobs moved puts SIDECHAIN at 500 Hz, so a
+                    // 150 Hz tone stops driving the compressor and comes up on its
+                    // makeup into the limiter -- for as long as it sits in the band
+                    // that takes the makeup, which is until LOW THRU has glided past
+                    // it. That is the settings, not the move; the loudest it is in
+                    // transit is that setting with LOW THRU not yet in, and a step
+                    // is judged against the signal at that level.
+                    auto inTransit = knobs;
+                    inTransit.lowThruHz = lo;
+                    const auto widest = std::string (m.name) == "COMPLEX off -> on (knobs moved)" ? &inTransit : nullptr;
+                    const auto ratio = stepRatio (fs, hz, m.moves, widest, 1.6);
                     check (ratio < 1.5, std::string (m.name) + ", " + fixed (hz, 0) + " Hz, at " + rateName (fs)
                                             + " steps " + fixed (ratio) + "x the signal's own");
                 }
@@ -698,6 +768,76 @@ int main()
                 else
                     check (worstDb <= 1.0e-4, std::string (k.name) + " at " + rateName (fs) + ": from 6 s after the move, "
                                                   + std::to_string (worstDb) + " dB from a fresh instance at the target");
+            }
+    }
+
+    //== 5. A side of the split comes in and goes out without a dip =========
+    //
+    // A side used to fade from the dry signal to the split's reconstruction,
+    // which is an allpass of it, and the two are in anti-phase at the
+    // crossover: half way through the 10 ms fade a tone at the crossover
+    // frequency cancelled completely, and anything within about an octave of
+    // it dipped by more than 3 dB. A side now comes in with its crossover at
+    // the far edge of its range, where the allpass is a wire across the
+    // audio band, and glides to its setting; it goes out the same way round.
+    //
+    // Measured as the level of an ensemble (levelSwing), at AMOUNT 0 so the
+    // split is the only thing acting, for a tone at the crossover, an octave
+    // either side of it and white noise; the worst 2 ms is held to within
+    // 1 dB of the input's level, either way, through the whole transition.
+    {
+        auto at = [] (float lowHz, float highHz, bool complex = true)
+        {
+            auto p = complexMode (0.0f, 5.0f, 200.0f, true, kStandardSidechainHz, lowHz, highHz);
+            p.complex = complex;
+            return p;
+        };
+
+        constexpr float lo = kLowThruOffHz, hi = kHighThruOffHz;
+
+        struct Move { std::string name; Params from, to; std::vector<double> crossovers; };
+        std::vector<Move> moves;
+
+        for (const auto fc : { 30.0f, 200.0f, 500.0f })
+        {
+            moves.push_back ({ "LOW THRU 20 -> " + fixed (fc, 0), at (lo, hi), at (fc, hi), { fc } });
+            moves.push_back ({ "LOW THRU " + fixed (fc, 0) + " -> 20", at (fc, hi), at (lo, hi), { fc } });
+        }
+
+        for (const auto fc : { 2000.0f, 6000.0f, 15000.0f })
+        {
+            moves.push_back ({ "HIGH THRU 20k -> " + fixed (fc, 0), at (lo, hi), at (lo, fc), { fc } });
+            moves.push_back ({ "HIGH THRU " + fixed (fc, 0) + " -> 20k", at (lo, fc), at (lo, hi), { fc } });
+        }
+
+        moves.push_back ({ "HIGH THRU 20k -> 6000, LOW THRU 200", at (200, hi), at (200, 6000), { 200.0, 6000.0 } });
+        moves.push_back ({ "LOW THRU 200 -> 20, HIGH THRU 6000",  at (200, 6000), at (lo, 6000), { 200.0, 6000.0 } });
+        moves.push_back ({ "COMPLEX off -> on, 200 / 6000",       at (200, 6000, false), at (200, 6000), { 200.0, 6000.0 } });
+        moves.push_back ({ "COMPLEX on -> off, 200 / 6000",       at (200, 6000), at (200, 6000, false), { 200.0, 6000.0 } });
+
+        for (const auto fs : kRates)
+            for (const auto& m : moves)
+            {
+                std::vector<double> tones;
+                for (const auto fc : m.crossovers)
+                    for (const auto f : { fc, 0.5 * fc, 2.0 * fc })
+                        if (f < 0.45 * fs && f >= 20.0)
+                            tones.push_back (f);
+                tones.push_back (0.0);   // noise
+
+                const auto sw = (size_t) (0.5 * fs) / 64 * 64;
+
+                for (const auto hz : tones)
+                {
+                    const auto s = levelSwing (fs, hz, 16, [&] (size_t i) { return i < sw ? m.from : m.to; },
+                                               1.6, (double) sw / fs, (double) sw / fs + 1.0);
+
+                    const auto what = m.name + ", " + (hz > 0.0 ? fixed (hz, 0) + " Hz" : std::string ("noise"))
+                                    + ", at " + rateName (fs);
+
+                    check (s.low >= -1.0, what + " dips " + fixed (s.low) + " dB");
+                    check (s.high <= 1.0, what + " rises " + fixed (s.high) + " dB");
+                }
             }
     }
 

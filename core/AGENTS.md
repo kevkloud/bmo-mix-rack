@@ -104,14 +104,14 @@ rack/     SlotParameter (one generic host parameter, remapped live),
 - `processBlock` in the rack takes a `ScopedTryLock` and passes audio
   through if the message thread is mid-rebuild. Never block the audio
   thread on the chain lock.
-- **No processor hands a host a NaN or an infinity, and no module's DSP is
-  ever handed one, nor a sample at or over +192.7 dBFS** (2026-10-03;
+- **No processor hands a host, and no module's DSP is ever handed, a NaN,
+  an infinity or a sample at or over +192.7 dBFS** (2026-10-03;
   `finite::kCeiling`, whose comment has the measurements: one finite
   +200 dBFS sample held BMO Opto 40 dB down for a minute).
   `ModuleEngine::process`, which every standalone product, every rack slot
   and BMO Tune RT go through, replaces each such input sample with zero,
-  and resets a module that produces a non-finite one and silences that
-  block, so it runs again from the next. The processors scrub the paths
+  and resets a module that produces one and silences that block, so it
+  runs again from the next. The processors scrub the paths
   that skip an engine: the rack at its input, which covers an empty chain
   and a block the try-lock skips, and both processors'
   `processBlockBypassed`. On audio under the ceiling all of it only reads,

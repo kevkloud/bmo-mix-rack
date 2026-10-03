@@ -68,26 +68,20 @@ namespace detail
     static_assert (kCeiling == 4294967296.0f, "kCeilingExponent is 2^32's; change both together");
 }
 
-/** True if any of `n` samples is a NaN or an infinity. */
-inline bool anyNonFinite (const float* x, int n) noexcept
-{
-    return detail::anyAtOrOver<255> (x, n);
-}
-
-inline bool anyNonFinite (const float* const* channels, int numChannels, int numSamples) noexcept
-{
-    for (int ch = 0; ch < numChannels; ++ch)
-        if (anyNonFinite (channels[ch], numSamples))
-            return true;
-
-    return false;
-}
-
 /** True if any of `n` samples is not audio: a NaN, an infinity, or a finite
     sample at or over `kCeiling` in either sign. */
 inline bool anyNotAudio (const float* x, int n) noexcept
 {
     return detail::anyAtOrOver<detail::kCeilingExponent> (x, n);
+}
+
+inline bool anyNotAudio (const float* const* channels, int numChannels, int numSamples) noexcept
+{
+    for (int ch = 0; ch < numChannels; ++ch)
+        if (anyNotAudio (channels[ch], numSamples))
+            return true;
+
+    return false;
 }
 
 /** Writes zero over every sample that is not audio -- NaN, infinity, and a

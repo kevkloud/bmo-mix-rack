@@ -117,14 +117,17 @@ public:
         inMeter.measure (channels, numChannels, numSamples);
         dsp->process (channels, numChannels, numSamples);
 
-        // Out: a module that blows up by itself, on finite input, is reset and
-        // its block is silenced on every channel, so nothing non-finite reaches
-        // the host or the next slot and the module is running again from the
-        // next block with no one touching it. The whole block, not only the
-        // bad samples: what came before them was made by the same broken
-        // state. Rare by construction, so the reset's cost is not the
-        // concern; every module's reset only clears memory it already owns.
-        if (finite::anyNonFinite (channels, numChannels, numSamples))
+        // Out: a module that blows up by itself, on clean input, is reset and
+        // its block is silenced on every channel, so nothing that is not
+        // audio reaches the host or the next slot and the module is running
+        // again from the next block with no one touching it. The same test as
+        // the input's: a finite sample at or over the ceiling counts, or a
+        // standalone module, and the rack's last slot, could hand the host
+        // one. The whole block, not only the bad samples: what came before
+        // them was made by the same broken state. Rare by construction, so the
+        // reset's cost is not the concern; every module's reset only clears
+        // memory it already owns.
+        if (finite::anyNotAudio (channels, numChannels, numSamples))
         {
             dsp->reset();
 

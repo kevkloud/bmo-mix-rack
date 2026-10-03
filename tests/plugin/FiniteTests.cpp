@@ -30,10 +30,11 @@
     - **A module that blows up by itself.** No registered module produces a
       non-finite sample from finite input at its defaults, so the output half
       of the guard is driven by a probe that passes its input through and, on
-      a given block, latches into putting out NaN until it is reset -- which
-      is what a filter that has gone unstable looks like from outside. The
-      listener gets exactly one block of silence and then the input again,
-      and the probe is reset exactly once.
+      a given block, latches into putting out NaN, +Inf or 1e12 (finite, and
+      over the ceiling) until it is reset -- which is what a filter that has
+      gone unstable looks like from outside. The listener gets exactly one
+      block of silence and then the input again, and the probe is reset
+      exactly once.
 
     - **The rack.** A chain of real modules with the bad sample entering at
       the rack's input; and the same chain with the blowing-up probe in the
@@ -151,6 +152,10 @@ void expect (bool condition, const juce::String& what)
 const float kNaN = std::numeric_limits<float>::quiet_NaN();
 const float kInf = std::numeric_limits<float>::infinity();
 
+/** What the guard refuses, in this file's own words rather than its bit test:
+    not finite, or at or over the ceiling, either sign. */
+bool notAudio (float x) { return ! std::isfinite (x) || std::abs (x) >= bmo::finite::kCeiling; }
+
 //== The stimulus =============================================================
 const std::vector<float>& sine()
 {
@@ -203,7 +208,7 @@ struct Render
     int  channels      = 0;
     int  badAt         = kBadAt;
     std::vector<float> out;
-    int  nonFinite     = 0;
+    int  badOut        = 0;     // samples out that are not finite, or at or over the ceiling
     bool metersFinite  = true;
 };
 
@@ -258,8 +263,8 @@ Render render (juce::AudioProcessor& proc, Layout layout, Hit hit, const std::fu
             const auto* read = buffer.getReadPointer (ch);
 
             for (int i = 0; i < kBlock; ++i)
-                if (! std::isfinite (read[i]))
-                    ++r.nonFinite;
+                if (notAudio (read[i]))
+                    ++r.badOut;
 
             std::memcpy (r.out.data() + (size_t) ch * kLength + offset, read, sizeof (float) * kBlock);
         }
@@ -340,7 +345,7 @@ juce::String nameOf (float v)
 void printFigures (const juce::String& who, const juce::String& what, const Render& clean, const Render& hit)
 {
     std::cout << std::left << std::setw (44) << (who + " " + what).toStdString()
-              << " non-finite " << std::setw (7) << hit.nonFinite
+              << " bad out " << std::setw (7) << hit.badOut
               << " diff after 0.05 s " << std::setw (11) << db (maxDiffDb (clean, hit, samplesAfter (hit, 0.05))).toStdString()
               << " 0.25 s " << std::setw (11) << db (maxDiffDb (clean, hit, samplesAfter (hit, 0.25))).toStdString()
               << " 0.5 s "  << std::setw (11) << db (maxDiffDb (clean, hit, samplesAfter (hit, 0.5))).toStdString()
@@ -363,9 +368,9 @@ void expectRecovered (const juce::String& who, const juce::String& what, const R
 
     printFigures (who, what, clean, hit);
 
-    expect (clean.nonFinite == 0, who + ": the render with no bad sample is finite throughout");
-    expect (hit.nonFinite == 0,
-            where + ": no non-finite sample leaves the processor, got " + juce::String (hit.nonFinite));
+    expect (clean.badOut == 0, who + ": the render with no bad sample is finite throughout");
+    expect (hit.badOut == 0,
+            where + ": no sample out is non-finite or at or over the ceiling, got " + juce::String (hit.badOut));
     expect (hit.metersFinite, where + ": every meter a panel reads stays finite");
 
     const auto diff = maxDiffDb (clean, hit, samplesAfter (hit, settleSeconds));
@@ -521,7 +526,7 @@ OneBlock oneBlock (float bad, const std::function<void (juce::AudioBuffer<float>
             const auto o = buffer.getSample (ch, i);
             const auto x = sine()[(size_t) (kBlock + i)];
 
-            r.finite = r.finite && std::isfinite (o);
+            r.finite = r.finite && ! notAudio (o);
 
             if (ch == 0 && i == 100)
                 continue;
@@ -743,12 +748,14 @@ int main()
 
             // Just under the ceiling the sample is the module's to answer, as
             // a signal legal settings can make; BMO Opto may hold for most of
-            // a minute over it. What the guard owes there is a finite output,
-            // and that is what is asserted. The figures are printed.
+            // a minute over it. What the guard owes there is an output that is
+            // finite and under the ceiling -- a module that amplifies it past
+            // the ceiling is reset, as one that overflows is -- and that is what
+            // is asserted. The figures are printed.
             const auto loud = run (4.0e9f);
             printFigures (def->id, "4e+09 L mid (under the ceiling)", clean, loud);
-            expect (loud.nonFinite == 0 && loud.metersFinite,
-                    juce::String (def->id) + ", one sample just under the ceiling: everything out stays finite");
+            expect (loud.badOut == 0 && loud.metersFinite,
+                    juce::String (def->id) + ", one sample just under the ceiling: everything out is finite and under the ceiling");
         }
 
         // And at the rack's input.
@@ -773,9 +780,9 @@ int main()
     }
 
     //== A module that blows up by itself: one block of silence ===============
-    for (const auto bad : { kNaN, kInf })
+    for (const auto bad : { kNaN, kInf, 1.0e12f })
     {
-        const juce::String what { std::isnan (bad) ? "NaN" : "+Inf" };
+        const juce::String what { nameOf (bad) };
 
         blowUpAt = kBadBlock;
         blowUpWith = bad;
@@ -785,8 +792,8 @@ int main()
         auto* engine = &proc->getEngine();
         const auto hit = render (*proc, 0.0f, [engine] { return engineMetersFinite (*engine); });
 
-        expect (hit.nonFinite == 0, "blow-up probe (" + what + "): no non-finite sample leaves the processor, got "
-                                        + juce::String (hit.nonFinite));
+        expect (hit.badOut == 0, "blow-up probe (" + what + "): no sample out is non-finite or at or over the ceiling, got "
+                                        + juce::String (hit.badOut));
         expect (hit.metersFinite, "blow-up probe (" + what + "): every meter stays finite");
         expect (probeResets == 1, "blow-up probe (" + what + "): the module was reset exactly once, "
                                       + juce::String (probeResets));
@@ -867,7 +874,7 @@ int main()
             blowUpAt = -1;
             const auto clean = [&] { auto rack = makeRack (true); return render (*rack, 0.0f, rackMeters (*rack)); }();
 
-            for (const auto bad : { kNaN, kInf })
+            for (const auto bad : { kNaN, kInf, 1.0e12f })
             {
                 blowUpAt = kBadBlock;
                 blowUpWith = bad;
@@ -882,7 +889,7 @@ int main()
                 // The probe's block is silenced from its first sample, 100
                 // before `kBadAt`, which the settle is measured from: 2 ms
                 // against a settle of half a second.
-                expectRecovered ("rack (mid-chain)", std::isnan (bad) ? "NaN" : "+Inf", clean, hit,
+                expectRecovered ("rack (mid-chain)", nameOf (bad), clean, hit,
                                  kRackSettleSeconds, kToleranceDb);
             }
 
@@ -898,14 +905,14 @@ int main()
     // a host's bypass, which JUCE answers by passing the input through. None
     // of them can latch, having no state, but none of them may hand a host a
     // non-finite sample either.
-    for (const auto bad : { kNaN, kInf, -kInf })
+    for (const auto bad : { kNaN, kInf, -kInf, 1.0e12f, -1.0e12f })
     {
-        const juce::String what { std::isnan (bad) ? "NaN" : (bad > 0.0f ? "+Inf" : "-Inf") };
+        const juce::String what { nameOf (bad) };
         juce::MidiBuffer midi;
 
         const auto expectClean = [&] (const OneBlock& r, const juce::String& where, bool passedThrough)
         {
-            expect (r.finite, where + ", one " + what + " in: every sample out is finite");
+            expect (r.finite, where + ", one " + what + " in: every sample out is finite and under the ceiling");
             expect (passedThrough ? r.untouched : r.halved,
                     where + ", one " + what + (passedThrough ? ": every other sample passes through exactly"
                                                              : ": the slot processed every other sample"));

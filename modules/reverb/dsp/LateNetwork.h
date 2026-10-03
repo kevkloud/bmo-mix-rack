@@ -123,6 +123,10 @@ public:
     {
         sampleRate = newSampleRate > 0.0 ? newSampleRate : 48000.0;
         fadeLength = std::max (1, (int) std::lround (kCrossfadeMs * 0.001 * sampleRate));
+
+        moveRamp.resize ((size_t) fadeLength + 1);
+        for (int k = 0; k <= fadeLength; ++k)
+            moveRamp[(size_t) k] = 0.5f * (1.0f + std::cos ((float) k / (float) fadeLength * 3.14159265f));
         smoothCoef = 1.0f - std::exp (-1.0f / (kSmoothingMs * 0.001f * (float) sampleRate));
 
         // The longest line any type reaches at the top of SIZE, at this rate.
@@ -185,7 +189,7 @@ public:
         levelNow = levelTo = levelFor (current);
         fourWeight = fourTarget = fourFor (current.type);
         fading = dipping = preFading = false;
-        fadePos = dipPos = prePos = 0;
+        movePos = moveEnd = dipPos = prePos = 0;
         preDelaySamples = preDelayFor (current.preDelayMs);
 
         smoothed = { current.decaySeconds, current.dampLo, current.dampHi };
@@ -265,29 +269,62 @@ public:
             }
             else
             {
-                // **A length move crossfades two whole paths, not their
-                // parts.** The old read goes through the old filters at the
-                // old level, the new read through the new filters at the new
-                // level, and only the results are mixed. Each path's loop
-                // gain is under one, so the mix is too. Blending the
-                // *coefficients* instead, as this did until 2026-10-03, does
-                // not keep a filter's gain-times-shelf product: Room at DECAY
-                // 0.1, LOW x 2.0, SIZE 0.5 -> 80 ends on a gain of 1e-5 under
-                // a +50 dB shelf, and half way there it was 0.35 under most
-                // of the shelf -- a burst 27 dB over the tail on either side.
-                const auto w = raisedCosine (fadePos, fadeLength);
+                // **A length move, and why it cannot add energy.** Two whole
+                // paths run: the old read through the old filters at the old
+                // level, the new read through the new filters at the new
+                // level. What weights them is the rule that matters, and it
+                // is counted in **when a sample was written**, not when it is
+                // read:
+                //
+                //   - a sample written before the move is read at the old
+                //     delay, in full, and never again;
+                //   - a sample written after it is read at the new delay;
+                //   - across the 30 ms after the move starts the two weights
+                //     cross over, summing to one for each sample;
+                //   - and at no instant do the two paths together weigh more
+                //     than one.
+                //
+                // **What that proves, and what it does not.** With weights a
+                // and b, a + b <= 1 at every instant, (a x + b y)^2 <= a x^2 +
+                // b y^2; summed over time, each stored sample appears with a
+                // total weight of at most one. So the two *reads* of a line
+                // together carry no more energy than was written to it,
+                // whatever the weights are doing. That is exact.
+                //
+                // The reads then go through two different filters, each
+                // realising a gain under one (tested for both banks, mid-
+                // move), and the sum of two differently filtered signals is
+                // not covered by that argument. That last step is held by
+                // measurement: SIZE and TYPE toggled at every cadence from
+                // one block to a third of a second over a 40 s tail, 43 rows
+                // in the tests and 72 in QA's probe, none growing.
+                //
+                // Until QA's third pass (2026-10-04) both paths were weighted
+                // by one crossfade in *read* time. Reading at a longer delay
+                // then replayed samples that had already been round the loop,
+                // every move put energy back, and SIZE toggling 12 <-> 30 m
+                // every 64 blocks at DECAY 20 s reached +573 dBFS in a minute.
+                //
+                // What it costs: a line that grows goes quiet between its old
+                // delay and its new one, because nothing written since the
+                // move has reached the new delay yet -- which is what a room
+                // getting bigger does. A move takes the longest line plus
+                // 30 ms to finish, and the next move waits for it.
                 float lOld = 0.0f, rOld = 0.0f, lNew = 0.0f, rNew = 0.0f;
 
                 for (int i = 0; i < N; ++i)
                 {
-                    const auto a = absorb (filt[(size_t) i],   read (i, lengths[i]));
-                    const auto b = absorb (filtTo[(size_t) i], read (i, fadeTo[i]));
-                    mixed[i] = a * (1.0f - w) + b * w;
-                    lOld += outL[i] * a;  rOld += outR[i] * a;
-                    lNew += outL[i] * b;  rNew += outR[i] * b;
+                    const auto a = writtenBefore (movePos - lengths[i]);
+                    const auto b = std::min (1.0f - writtenBefore (movePos - fadeTo[i]), 1.0f - a);
+
+                    const auto ya = absorb (filt[(size_t) i],   a * read (i, lengths[i]));
+                    const auto yb = absorb (filtTo[(size_t) i], b * read (i, fadeTo[i]));
+                    mixed[i] = ya + yb;
+                    lOld += outL[i] * ya;  rOld += outR[i] * ya;
+                    lNew += outL[i] * yb;  rNew += outR[i] * yb;
                 }
-                l = (1.0f - w) * levelNow * lOld + w * levelTo * lNew;
-                r = (1.0f - w) * levelNow * rOld + w * levelTo * rNew;
+                l = levelNow * lOld + levelTo * lNew;
+                r = levelNow * rOld + levelTo * rNew;
             }
 
             hadamard (mixed);
@@ -297,7 +334,7 @@ public:
 
             if (++writeIdx == lineLength) writeIdx = 0;
 
-            if (fading && ++fadePos >= fadeLength)
+            if (fading && ++movePos >= moveEnd)
             {
                 // The new path becomes the only one, filter state and all.
                 fading   = false;
@@ -322,9 +359,7 @@ public:
                     primeLengths (current, fadeTo);
                     levelTo = levelFor (current);
                     sizeAtBuild = current.sizeM;
-                    fading  = true;
-                    fadePos = 0;
-                    beginFilterFade();
+                    beginMove();
                     fourTarget = fourFor (current.type);
                 }
                 else if (dipPos >= 2 * half)
@@ -359,10 +394,12 @@ public:
     /** |H_i(f)| of line i's absorbent filter, evaluated in double from the
         coefficients the line **actually runs** -- not the design. The
         anchors above are the design's; this is what the loop sees, and the
-        two parted at 96 and 192 kHz (QA, 2026-10-03). */
-    double realisedGain (int i, double hz) const noexcept
+        two parted at 96 and 192 kHz (QA, 2026-10-03). `incoming` reads the
+        bank a length move is fading to, which runs alongside the live one
+        for as long as the move lasts and is only meaningful while one is. */
+    double realisedGain (int i, double hz, bool incoming = false) const noexcept
     {
-        const auto& f = filt[(size_t) i];
+        const auto& f = incoming ? filtTo[(size_t) i] : filt[(size_t) i];
         const auto w = 2.0 * 3.14159265358979 * hz / sampleRate;
         const auto at = [w] (const auto* b, const auto* a)
         {
@@ -497,9 +534,7 @@ private:
             primeLengths (current, fadeTo);
             levelTo = levelFor (current);
             sizeAtBuild = current.sizeM;
-            fading  = true;
-            fadePos = 0;
-            beginFilterFade();
+            beginMove();
         }
     }
 
@@ -734,14 +769,33 @@ private:
                 design ((float) fadeTo[(size_t) i], lo, hi, filtTo[(size_t) i]);
     }
 
-    /** A length move starts: design the path it is going to, from silence.
-        The new filters begin with empty state, which is exact -- their
-        weight in the crossfade is zero at this sample. See `process`. */
-    void beginFilterFade() noexcept
+    /** A length move starts (`fadeTo` and `levelTo` are already set). It runs
+        until the longest line, old or new, has been read out and the 30 ms
+        crossover after it is done; see `process` for the weights. The path
+        it is going to is designed here and its filters start from empty
+        state, which costs nothing: that path's weight is zero until the
+        first sample written after this one comes back round. */
+    void beginMove() noexcept
     {
+        fading  = true;
+        movePos = 0;
+
+        int longest = 0;
+        for (int i = 0; i < N; ++i)
+            longest = std::max ({ longest, lengths[(size_t) i], fadeTo[(size_t) i] });
+        moveEnd = longest + fadeLength;
+
         designAll();
         for (auto& f : filtTo)
             f.lz[0] = f.lz[1] = f.hz[0] = f.hz[1] = 0.0;
+    }
+
+    /** The old path's weight for a sample written `k` samples after a move
+        began: one for anything written before it, a raised cosine down to
+        zero over the crossfade, zero after. The new path's is one minus this. */
+    float writtenBefore (int k) const noexcept
+    {
+        return k <= 0 ? 1.0f : k >= fadeLength ? 0.0f : moveRamp[(size_t) k];
     }
 
     /** DECAY and the two multipliers glide 20 ms one-pole, stepped per
@@ -779,7 +833,8 @@ private:
     int lineLength = 0, writeIdx = 0;
     std::array<int, N> lengths {}, fadeTo {};
     bool fading = false, dipping = false;
-    int fadePos = 0, dipPos = 0;
+    int movePos = 0, moveEnd = 0, dipPos = 0;   ///< a length move, in samples since it began
+    std::vector<float> moveRamp;                ///< `writtenBefore`, built in prepare()
 
     std::vector<float> preLine;
     int preLength = 0, preIdx = 0, preDelaySamples = 0, preDelayTarget = 0, prePos = 0;

@@ -3033,6 +3033,101 @@ int main (int argc, char** argv)
             check (silent, "and after 280 s every one of them is exactly silent");
     }
 
+    //== SIZE and TYPE kept moving never make the tail grow =====================
+    //
+    // QA, 2026-10-04, PR #38, third pass. Frosty's rule for a feedback loop:
+    // under 100 % feedback it loses energy and never rings indefinitely, and a
+    // parameter change while signal is in the loop is part of that. A length
+    // move re-read each line at its new delay, and reading at a longer delay
+    // replayed samples that had already been round the loop once -- so every
+    // move put energy back, and SIZE toggling 12 <-> 30 m every 64 blocks
+    // under a DECAY of 20 s reached +573 dBFS in a minute. In the first head
+    // QA saw, and missed because every earlier test moved SIZE once.
+    //
+    // A 10 ms burst at -18 dBFS RMS, then silence, DECAY 20 s and both
+    // multipliers at 2.0, while SIZE, TYPE or both alternate every N blocks
+    // of 32 samples: the peak in each 10 s window may never rise.
+    {
+        struct Row { double rate; int type; float sizeA, sizeB; int typeB; int everyBlocks; };
+        std::vector<Row> rows;
+
+        for (const auto type : { (int) room, (int) ambience })
+            for (const auto& sizes : { std::array<float, 2> { 12.0f, 30.0f }, std::array<float, 2> { 0.5f, 80.0f },
+                                       std::array<float, 2> { 12.0f, 12.5f } })
+                for (const auto every : { 1, 64, 2048 })
+                    rows.push_back ({ 48000.0, type, sizes[0], sizes[1], type, every });
+
+        for (const auto& sizes : { std::array<float, 2> { 12.0f, 30.0f }, std::array<float, 2> { 0.5f, 80.0f } })
+            for (const auto every : { 1, 64, 2048 })
+                rows.push_back ({ 192000.0, (int) room, sizes[0], sizes[1], (int) room, every });
+
+        // TYPE alone, and SIZE with it.
+        for (const auto typeB : { (int) hall, (int) plate, (int) ambience })
+            for (const auto every : { 1, 64, 2048 })
+            {
+                rows.push_back ({ 48000.0, (int) room, 12.0f, 12.0f, typeB, every });
+                rows.push_back ({ 48000.0, (int) room, 12.0f, 30.0f, typeB, every });
+            }
+        rows.push_back ({ 192000.0, (int) room, 12.0f, 30.0f, (int) plate, 64 });
+
+        int grew = 0;
+
+        for (const auto& row : rows)
+        {
+            DspCore core;
+            DspCore::Params p;
+            p.type = (Type) row.type;
+            p.sizeM = row.sizeA;
+            p.decaySeconds = 20.0f;
+            p.dampLo = p.dampHi = 2.0f;
+            p.erLevelDb = -40.0f;
+            p.verbLevelDb = 0.0f;
+            p.mix = 1.0f;
+            core.setParams (p);
+            core.prepare (row.rate, 32, 2);
+
+            float l[32], r[32];
+            float* chans[] { l, r };
+            const auto blocks  = (long long) (30.0 * row.rate / 32);
+            const auto window  = (long long) (10.0 * row.rate / 32);
+            const auto burst   = (long long) (0.01 * row.rate);
+            float peaks[3] {};
+            bool flip = false;
+
+            for (long long b = 0; b < blocks; ++b)
+            {
+                if (b > 0 && b % row.everyBlocks == 0)
+                {
+                    flip = ! flip;
+                    p.sizeM = flip ? row.sizeB : row.sizeA;
+                    p.type  = (Type) (flip ? row.typeB : row.type);
+                    core.setParams (p);
+                }
+
+                for (int i = 0; i < 32; ++i)
+                    l[i] = r[i] = b * 32 + i < burst ? noiseAt ((int) (b * 32 + i)) * 0.4362f : 0.0f;
+                core.process (chans, 2, 32);
+
+                auto& peak = peaks[(size_t) std::min<long long> (2, b / window)];
+                for (int i = 0; i < 32; ++i)
+                    peak = std::max ({ peak, std::abs (l[i]), std::abs (r[i]) });
+            }
+
+            const bool rose = peaks[1] > peaks[0] || peaks[2] > peaks[1];
+            if (rose)
+            {
+                ++grew;
+                const auto db = [] (float x) { return 20.0 * std::log10 (std::max (x, 1.0e-30f)); };
+                std::cout << "  GREW: " << row.rate << " Hz, " << kTypeNames[row.type] << " <-> " << kTypeNames[row.typeB]
+                          << ", SIZE " << row.sizeA << " <-> " << row.sizeB << " every " << row.everyBlocks
+                          << " blocks: " << db (peaks[0]) << ", " << db (peaks[1]) << ", " << db (peaks[2]) << " dBFS\n";
+            }
+        }
+
+        std::cout << "  SIZE / TYPE kept moving over a 40 s tail: " << grew << " of " << rows.size() << " rows grew\n";
+        check (grew == 0, "no cadence of SIZE or TYPE moves makes the tail's 10 s window peaks rise");
+    }
+
     //== A short tail reaches exactly zero, in the suite CI runs ================
     //
     // The 280 s run above is behind --long, which ctest does not pass, so the
@@ -3136,6 +3231,98 @@ int main (int argc, char** argv)
                   << moved.second << " after; held at 80 m all along: " << held.second << " dBFS\n";
         check (moved.second <= std::max (moved.first, held.second) + 1.0,
                "the second after a full-range SIZE move is no louder than the tail before it or SIZE 80 held");
+    }
+
+    //== What one SIZE move does to level and timing ============================
+    //
+    // The price of a move that cannot add energy (see `LateNetwork::process`):
+    // a growing line is quiet between its old delay and its new one, and a
+    // move lasts the longest line plus the 30 ms crossover. Measured on noise
+    // at -18 dBFS RMS held through the move, Room, DECAY 1.8 s, in 10 ms
+    // windows: the level before, the deepest window during the move, how
+    // long until it is within 1 dB of where it settles, and how long the
+    // network reports itself moving. Asserted: no window is louder than the
+    // louder end by more than 1 dB, and the move ends when it should.
+    for (const auto& move : { std::array<float, 2> { 12.0f, 30.0f }, std::array<float, 2> { 30.0f, 12.0f },
+                              std::array<float, 2> { 12.0f, 80.0f }, std::array<float, 2> { 80.0f, 12.0f } })
+    {
+        constexpr double rate = 48000.0;
+        DspCore core;
+        DspCore::Params p;
+        p.erLevelDb = -40.0f;
+        p.verbLevelDb = 0.0f;
+        p.mix = 1.0f;
+        p.sizeM = move[0];
+        core.setParams (p);
+        core.prepare (rate, 32, 2);
+
+        // The longest line before the move; the longest after it is added
+        // once it has landed.
+        int longest = 0;
+        for (int i = 0; i < DspCore::kNumLines; ++i)
+            longest = std::max (longest, core.lateNetwork().lineLengthSamples (i));
+
+        float l[32], r[32];
+        float* chans[] { l, r };
+        const int win = 480, moveAt = (int) (3.0 * rate), total = (int) (7.0 * rate);
+        std::vector<double> rms;
+        double acc = 0.0;
+        int movingSamples = 0;
+
+        for (int n = 0; n < total; n += 32)
+        {
+            if (n == moveAt) { p.sizeM = move[1]; core.setParams (p); }
+            for (int i = 0; i < 32; ++i)
+                l[i] = r[i] = noiseAt (n + i) * 0.4362f;
+            core.process (chans, 2, 32);
+            if (n >= moveAt && core.lateNetwork().isMoving())
+                movingSamples += 32;
+            for (int i = 0; i < 32; ++i)
+            {
+                acc += (double) l[i] * l[i] + (double) r[i] * r[i];
+                if ((n + i + 1) % win == 0) { rms.push_back (10.0 * std::log10 (std::max (acc / (2.0 * win), 1.0e-30))); acc = 0.0; }
+            }
+        }
+
+        const auto mean = [&rms] (int from, int to)
+        {
+            double s = 0.0;
+            for (int k = from; k < to; ++k) s += std::pow (10.0, rms[(size_t) k] / 10.0);
+            return 10.0 * std::log10 (s / (to - from));
+        };
+        const auto w0 = moveAt / win;
+        const auto before  = mean (w0 - 100, w0);
+        const auto settled = mean ((int) rms.size() - 100, (int) rms.size());
+
+        double deepest = 1.0e9, loudest = -1.0e9;
+        int recovered = 0;
+        for (int k = w0; k < (int) rms.size(); ++k)
+        {
+            deepest = std::min (deepest, rms[(size_t) k]);
+            loudest = std::max (loudest, rms[(size_t) k]);
+            if (std::abs (rms[(size_t) k] - settled) > 1.0 && k < w0 + 300)
+                recovered = k - w0 + 1;
+        }
+
+
+        std::cout << "  SIZE " << move[0] << " -> " << move[1] << " m on held noise: " << before << " dBFS before, deepest 10 ms window "
+                  << deepest - before << " dB below it, settles at " << settled << " dBFS, within 1 dB of that after "
+                  << recovered * 10 << " ms; moving for " << 1000.0 * movingSamples / rate << " ms\n";
+
+        const auto name = "SIZE " + std::to_string ((int) move[0]) + " -> " + std::to_string ((int) move[1]);
+        // A 10 ms window of noise wanders about its mean by a dB or two on
+        // its own, so the ceiling is the loudest window before the move.
+        double loudestBefore = -1.0e9;
+        for (int k = w0 - 100; k < w0; ++k) loudestBefore = std::max (loudestBefore, rms[(size_t) k]);
+        double loudestSettled = -1.0e9;
+        for (int k = (int) rms.size() - 100; k < (int) rms.size(); ++k) loudestSettled = std::max (loudestSettled, rms[(size_t) k]);
+
+        check (loudest <= std::max (loudestBefore, loudestSettled) + 1.0, (name + ": no moment of the move is louder than either end").c_str());
+        for (int i = 0; i < DspCore::kNumLines; ++i)
+            longest = std::max (longest, core.lateNetwork().lineLengthSamples (i));
+
+        check (movingSamples > 0 && movingSamples <= longest + (int) (0.030 * rate) + 64,
+               (name + ": the move ends within the longest line, old or new, plus the 30 ms crossover").c_str());
     }
 
     //== reset() before prepare() returns, and an unprepared network is silent ==
@@ -3309,6 +3496,82 @@ int main (int argc, char** argv)
                    "and Plate's four diffusers, not Room's two");
             sameNetwork (*core, *fresh (48000.0, p), "reset() mid-dip");
         }
+
+        // (d): reset() **after** the bottom of the dip, when the length move
+        // has begun and the incoming filter bank is running beside the live
+        // one. (c) resets 11 ms in, before the 30 ms bottom, and never reaches
+        // it (QA, 2026-10-04). Four blocks is 43 ms.
+        {
+            DspCore::Params p;
+            tailOnly (p);
+            auto core = fresh (48000.0, p);
+            run (*core, 20);
+            p.type = Type::plate;
+            core->setParams (p);
+            run (*core, 4);
+            check (core->lateNetwork().isMoving(), "past the bottom of the dip the length move is in flight");
+
+            core->reset();
+            const auto freshPlate = fresh (48000.0, p);
+            check (lengthsOf (*core) == lengthsOf (*freshPlate), "reset() past the dip's bottom gives Plate's lengths");
+            sameNetwork (*core, *fresh (48000.0, p), "reset() past the dip's bottom");
+        }
+    }
+
+    //== Both filter banks lose energy while a length move is in flight ==========
+    //
+    // The realised-gain sweep above reads the live bank. A move runs a second
+    // one beside it, for the path it is going to, and that one was never read
+    // (QA, 2026-10-04). Here a full-range SIZE move is started in each
+    // direction and both banks are read while it is in flight.
+    {
+        double worst = 0.0;
+        int moves = 0;
+
+        for (const auto rate : { 48000.0, 192000.0 })
+            for (int t = 0; t < numTypes; ++t)
+                for (const auto decay : { 0.1f, 20.0f })
+                    for (const auto& damp : { std::array<float, 2> { 2.0f, 2.0f }, std::array<float, 2> { 0.1f, 2.0f },
+                                              std::array<float, 2> { 2.0f, 0.1f } })
+                        for (const auto& sizes : { std::array<float, 2> { 0.5f, 80.0f }, std::array<float, 2> { 80.0f, 0.5f } })
+                        {
+                            DspCore core;
+                            DspCore::Params p;
+                            p.type = (Type) t;
+                            p.sizeM = sizes[0];
+                            p.decaySeconds = decay;
+                            p.dampLo = damp[0];
+                            p.dampHi = damp[1];
+                            p.dampLoFreqHz = constantsFor (t).dampLoFreqHz;
+                            p.dampHiFreqHz = constantsFor (t).dampHiFreqHz;
+                            core.setParams (p);
+                            core.prepare (rate, 64, 2);
+
+                            float l[64] {}, r[64] {};
+                            float* chans[] { l, r };
+                            core.process (chans, 2, 64);
+                            p.sizeM = sizes[1];
+                            core.setParams (p);
+                            core.process (chans, 2, 64);
+
+                            if (! core.lateNetwork().isMoving())
+                                continue;
+                            ++moves;
+
+                            for (int i = 0; i < DspCore::kNumLines; ++i)
+                                for (const bool incoming : { false, true })
+                                {
+                                    worst = std::max ({ worst, core.lateNetwork().realisedGain (i, 0.0, incoming),
+                                                        core.lateNetwork().realisedGain (i, rate * 0.5, incoming) });
+                                    for (int k = 0; k <= 60; ++k)
+                                        worst = std::max (worst, core.lateNetwork().realisedGain (
+                                                                     i, std::pow (10.0, (double) k / 60.0 * std::log10 (rate * 0.5)), incoming));
+                                }
+                        }
+
+        std::cout << "  realised loop gain, live and incoming banks, over " << moves << " moves in flight: worst " << worst << "\n";
+        check (moves == 144, "every full-range SIZE move was caught in flight");
+        check (worst < 1.0, "both filter banks realise under 1 while a length move is in flight");
     }
 
     //== The tail a host is told is at least the tail that rings ================
@@ -3579,15 +3842,22 @@ int main (int argc, char** argv)
             { "HIGH x 0.4 -> 2.0",    Index::damphi,   0.4f, 2.0f },
             { "TYPE Room -> Hall",    Index::type,     (float) room, (float) hall },
         };
-        // **11 section 6's own metric for these: no 1 ms energy jump above
-        // 3 dB.** A 1 kHz sine puts exactly one cycle in each 1 ms window, so
-        // a window's energy is steady unless something steps. The sample-step
-        // ratio the ER block uses cannot tell a click from a swell: during a
-        // SIZE crossfade two read points of one sine briefly line up in phase
-        // and the tail swells by a few dB over 30 ms, which that ratio reads
-        // as 1.5 and the ear reads as nothing. It is printed beside this for
-        // the record. TYPE is held to the step ratio instead, because its 30 ms
-        // dip to silence is a large energy change by design.
+        // **Coefficient moves (PRE-DELAY, DECAY, the multipliers) are held to
+        // 11 section 6's own metric: no 1 ms energy jump above 3 dB.** A 1 kHz
+        // sine puts exactly one cycle in each 1 ms window, so a window's
+        // energy is steady unless something steps.
+        //
+        // **SIZE and TYPE are held to the step ratio instead**, 11 section 6's
+        // "no click": no sample-to-sample step bigger than the signal had
+        // before the move, allowing for where it settles. Both open a gap in
+        // the tail by design -- TYPE dips to silence, and since 2026-10-04 a
+        // SIZE move leaves each growing line quiet between its old delay and
+        // its new one, so nothing is replayed -- and on a steady sine eight
+        // lines dropping out and coming back pass through near-cancellation,
+        // where a smooth change is a large one in dB (3.8 dB in a millisecond
+        // for 12 -> 30 m, with a step ratio of 1.00). Each metric has a blind
+        // side: the energy jump cannot tell a smooth dip from a click, the
+        // step ratio cannot tell a smooth swell from one. Both are printed.
         const auto worstJumpDb = [&] (const Move& m)
         {
             auto v = defaults();
@@ -3630,9 +3900,10 @@ int main (int argc, char** argv)
             const auto s = stepRatioAcross ([&] (auto& v) { tailOn (v); v[m.which] = m.from; },
                                             [&] (auto& v) { v[m.which] = m.to; });
 
-            if (m.which == Index::type)
+            if (m.which == Index::type || m.which == Index::size)
             {
-                std::cout << "  tail on, " << m.name << ": step ratio " << s.ratio << " (settles at " << s.settled << ")\n";
+                std::cout << "  tail on, " << m.name << ": step ratio " << s.ratio << " (settles at " << s.settled
+                          << "; worst 1 ms energy jump " << worstJumpDb (m) << " dB)\n";
                 check (s.edits == 1 && s.ratio <= 1.5f * std::max (1.0f, s.settled),
                        (std::string (m.name) + " does not click in the tail").c_str());
                 continue;

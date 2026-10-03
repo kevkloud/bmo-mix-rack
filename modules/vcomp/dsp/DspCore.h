@@ -12,38 +12,85 @@
 namespace bmo::vcomp
 {
 
+/** How close a smoother has to get before it lands on its target, in the
+    parameter's own units: % of AMOUNT, dB of OUTPUT. The landing is the one
+    step a move takes that is not on its curve, and this is how big it can
+    be: 0.001 dB of OUTPUT is a gain step of 1.2e-4, and 0.001 % of AMOUNT
+    moves the static gain by at most 0.00035 dB. Against a 100 Hz tone's own
+    largest step at 192 kHz, 3.3e-3 of its amplitude, either is under a
+    twentieth. */
+inline constexpr float kSmootherLandWithin = 1.0e-3f;
+
 /** One-pole parameter smoother, the same shape as the ones in modules/sat/dsp
-    and modules/opto/dsp -- see either for why it snaps to the target inside an
-    epsilon, so a settled parameter compares exactly equal.
+    and modules/opto/dsp: a 15 ms one-pole that lands on its target and then
+    holds it, so a settled parameter compares exactly equal.
 
     AMOUNT and OUTPUT get one each. Both are steady knobs most of the time, but
     either can be automated, and AMOUNT moves the threshold, the knee, the
     ratio and the makeup gain at once -- stepping all four block to block with
-    no ramp is an audible zipper on the one control anybody will ride. */
+    no ramp is an audible zipper on the one control anybody will ride.
+
+    **It used to stall instead of landing.** The state was a float, and near
+    AMOUNT 100 one float step is 7.6e-6, so once the pole's increment fell
+    under half of that it rounded away and the smoother stopped where it was:
+    0.0007 to 0.011 short of the target (dB of OUTPUT, % of AMOUNT) for good,
+    under the 1e-5 it snapped within. A held setting after a move then never
+    sounded the way that setting sounds from a fresh instance. The state is a
+    double now, which keeps moving all the way in, and it lands when it is
+    within kSmootherLandWithin: a full-range move takes about 175 ms at any
+    rate. Once landed it does no arithmetic at all. */
 class Smoother
 {
 public:
     void prepare (double sampleRate, double timeMs) noexcept
     {
         const auto tau = std::max (timeMs, 0.01) * 0.001;
-        coeff = (float) (1.0 - std::exp (-1.0 / (std::max (sampleRate, 1.0) * tau)));
+        coeff = 1.0 - std::exp (-1.0 / (std::max (sampleRate, 1.0) * tau));
     }
 
-    void snap (float v) noexcept      { current = target = v; }
-    void setTarget (float t) noexcept { target = t; }
+    void snap (float v) noexcept
+    {
+        current = target = v;
+        state = v;
+        moving = false;
+    }
+
+    /** Safe to call every block with the control's current value: asking for
+        the target already being approached, or held, changes nothing. */
+    void setTarget (float t) noexcept
+    {
+        if (! (t < target) && ! (target < t))
+            return;
+
+        target = t;
+        moving = true;
+    }
 
     float tick() noexcept
     {
-        current += coeff * (target - current);
+        if (! moving)
+            return current;
 
-        if (std::abs (target - current) < 1.0e-5f)
+        state += coeff * ((double) target - state);
+
+        if (std::abs ((double) target - state) < (double) kSmootherLandWithin)
+        {
             current = target;
+            state   = target;
+            moving  = false;
+        }
+        else
+        {
+            current = (float) state;
+        }
 
         return current;
     }
 
 private:
-    float coeff = 1.0f, current = 0.0f, target = 0.0f;
+    double coeff = 1.0, state = 0.0;
+    float  current = 0.0f, target = 0.0f;
+    bool   moving = false;
 };
 
 /** How far below the makeup reference the thru bands' content is taken to sit,

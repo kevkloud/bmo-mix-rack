@@ -588,6 +588,119 @@ int main()
             }
     }
 
+    //== 4. A smoothed parameter lands on its setting, exactly ==============
+    //
+    // AMOUNT and OUTPUT are smoothed, and the smoother used to stall short
+    // of its target and stay there: a float one-pole whose step had rounded
+    // away, 0.0007 to 0.011 short (dB of OUTPUT, % of AMOUNT) depending on
+    // the rate and the move. So a setting held after a move never sounded
+    // the way that setting sounds from a fresh instance. It now lands, in
+    // bounded time, and then does no work.
+    {
+        // The smoother on its own: every move lands exactly on its target
+        // within 200 ms and stays, and the last step onto the target is no
+        // bigger than kSmootherLandWithin and the pole's own step at that
+        // point, which is coeff of it: under 1 % of it at any of these rates.
+        struct Move { float from, to; };
+        const Move smootherMoves[] { { 0.0f, 100.0f }, { 100.0f, 0.0f }, { 0.0f, 55.0f }, { 55.0f, 54.9f },
+                                     { -24.0f, 24.0f }, { 24.0f, -24.0f }, { 0.0f, -3.5f } };
+
+        for (const auto fs : { 44100.0, 48000.0, 96000.0, 192000.0 })
+            for (const auto& m : smootherMoves)
+            {
+                Smoother s;
+                s.prepare (fs, 15.0);
+                s.snap (m.from);
+                s.setTarget (m.to);
+
+                long landedAt = -1;
+                auto last = m.from, landingStep = 0.0f;
+                auto stays = true;
+
+                for (long n = 0; n < (long) (0.5 * fs); ++n)
+                {
+                    const auto v = s.tick();
+
+                    if (landedAt < 0 && v == m.to)
+                    {
+                        landedAt = n;
+                        landingStep = std::abs (v - last);
+                    }
+                    else if (landedAt >= 0 && v != m.to)
+                    {
+                        stays = false;
+                    }
+
+                    last = v;
+                }
+
+                const auto name = "smoother " + fixed (m.from, 1) + " -> " + fixed (m.to, 1) + " at " + rateName (fs);
+                check (landedAt >= 0 && landedAt < (long) (0.2 * fs) && stays,
+                       name + " lands exactly on its target within 200 ms and stays"
+                           + (landedAt < 0 ? std::string (" (never landed; " + std::to_string (last) + ")")
+                                           : " (landed at " + fixed (1000.0 * (double) landedAt / fs, 1) + " ms)"));
+                check (landingStep <= kSmootherLandWithin * 1.01f,
+                       name + ": its last step onto the target is " + std::to_string (landingStep));
+            }
+
+        // Through the module: after a move of either, the output becomes bit
+        // for bit what a fresh instance held at the target gives, once the
+        // smoother has landed and the limiter, which the move may have
+        // driven, has let go: from 1 s after the move.
+        //
+        // Bit for bit wherever the move leaves no history behind it but the
+        // smoother's: OUTPUT is applied after the detector, so its moves are
+        // checked under heavy compression, and AMOUNT on a tone below the
+        // knee at both ends, where it moves only the makeup. An AMOUNT move
+        // under compression also changes what the detector heard while it
+        // moved, and the detector's one-poles are float: once two of them
+        // are within a rounding step of the same steady state they can stay
+        // a step apart for good, which no smoother can settle. That case is
+        // held to 1e-4 dB instead, from 6 s after the move, once ARC's 2 s
+        // release has forgotten it.
+        struct Knob { const char* name; Params from, to; double toneDb; bool exact; };
+        const Knob knobs[] {
+            { "OUTPUT -24 -> -6",                    standard (55.0f, -24.0f), standard (55.0f, -6.0f), -15.0, true },
+            { "OUTPUT +24 -> -6 (off the ceiling)",  standard (55.0f, 24.0f),  standard (55.0f, -6.0f), -15.0, true },
+            { "OUTPUT -3.5 -> -12",                  standard (55.0f, -3.5f),  standard (55.0f, -12.0f), -15.0, true },
+            { "AMOUNT 20 -> 55, below the knee",     standard (20.0f),         standard (55.0f),        -40.0, true },
+            { "AMOUNT 0 -> 55, below the knee",      standard (0.0f),          standard (55.0f),        -40.0, true },
+            { "AMOUNT 55 -> 30, below the knee",     standard (55.0f),         standard (30.0f),        -40.0, true },
+            { "AMOUNT 20 -> 55, compressing",        standard (20.0f),         standard (55.0f),        -15.0, false },
+            { "AMOUNT 100 -> 55, compressing",       standard (100.0f),        standard (55.0f),        -15.0, false },
+        };
+
+        for (const auto fs : kRates)
+            for (const auto& k : knobs)
+            {
+                const auto x = toneSegments (fs, 1000.0, 8.0, { { 0.0, k.toneDb } });
+                const auto sw = (size_t) (0.2 * fs) / 64 * 64;
+                const auto from = sw + (size_t) ((k.exact ? 1.0 : 6.0) * fs);
+
+                const auto y     = render (fs, x, 64, [&] (size_t s) { return s < sw ? k.from : k.to; });
+                const auto fresh = render (fs, x, 64, [&] (size_t) { return k.to; });
+
+                auto differ = 0;
+                auto worstDb = 0.0;
+
+                for (size_t i = from; i < y.size(); ++i)
+                {
+                    differ += y[i] != fresh[i] ? 1 : 0;
+
+                    if (std::abs (fresh[i]) > 0.25 * dbToLin (k.toneDb))
+                        worstDb = std::max (worstDb, std::abs (20.0 * std::log10 (std::abs ((double) y[i] / fresh[i]))));
+                }
+
+                if (k.exact)
+                    check (differ == 0, std::string (k.name) + " at " + rateName (fs) + ": from 1 s after the move, "
+                                            + std::to_string (differ) + " samples differ from a fresh instance at the target ("
+                                            + std::to_string (worstDb) + " dB)");
+                else
+                    check (worstDb <= 1.0e-4, std::string (k.name) + " at " + rateName (fs) + ": from 6 s after the move, "
+                                                  + std::to_string (worstDb) + " dB from a fresh instance at the target");
+            }
+    }
+
     if (failures == 0)
         std::cout << "All LTV Comp switch tests passed.\n";
 

@@ -66,6 +66,22 @@ namespace bmo::opto
     presets against each other, and it had been that way since 0.2.0, when
     it was left alone for being "inside tolerance".
 
+    **Re-solved again on 2026-10-04**, for the release that gives back what a
+    spike adds (see releaseCoeffFor() in Detector.h). The top of every short
+    note is reduction the charge has not backed, so it now comes back at the
+    fast rate, the presets hold less reduction on the test signal, and each
+    came out loud with its old LEVEL. Frosty asked for the re-solve.
+    BMO_PRINT_PRESET_LEVELS on opto_tests, Release, on ICE QUEEN, whose
+    figures for the old values on the old cells matched the CI run above to
+    the last digit it printed:
+
+        Gentle      +0.16dB  ->  LEVEL 5.06 becomes 4.90
+        Vocal Glue  +1.05dB  ->  LEVEL 10.86 becomes 9.77
+        Crushed <3  +2.89dB  ->  LEVEL 20.13 becomes 17.13
+
+    Two passes, because Tele's drive stage sits after LEVEL and is not
+    linear: the first landed Crushed <3 0.11dB out.
+
     These come from CI, never from the local solver in
     tools/measure/renders, which ports voice() faithfully but omits the
     drive and Color stages and lands ~8dB out at deep settings.
@@ -86,9 +102,9 @@ inline const std::vector<FactoryPreset>& factory()
     static const std::vector<FactoryPreset> presets {
         { "Init", {} },
 
-        { "Gentle",     { { kCrush, 15.0f }, { kLevel, 5.06f } } },
-        { "Vocal Glue", { { kCrush, 45.0f }, { kLevel, 10.86f } } },
-        { "Crushed <3", { { kCrush, 85.0f }, { kLevel, 20.13f } } },  // all three measured on CI, run 34085918240
+        { "Gentle",     { { kCrush, 15.0f }, { kLevel, 4.90f } } },
+        { "Vocal Glue", { { kCrush, 45.0f }, { kLevel, 9.77f } } },
+        { "Crushed <3", { { kCrush, 85.0f }, { kLevel, 17.13f } } },  // all three re-solved 2026-10-04, see above
     };
 
     return presets;

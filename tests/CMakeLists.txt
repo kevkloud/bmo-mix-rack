@@ -195,6 +195,18 @@ if(BMO_BUILD_TUNE)
 endif()
 add_test(NAME lifecycle COMMAND lifecycle_tests)
 
+# How long each module takes to come back from one very loud sample under the
+# guard's ceiling: recorded figures, not targets (see the file). Up to 100 s
+# of audio per case, so it is the slowest suite here. Linked like finite_tests,
+# Tune included.
+bmo_add_tool(recovery_tests plugin/RecoveryTests.cpp ${BMO_ROOT}/products/rack/Registry.cpp)
+target_link_libraries(recovery_tests PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp bmo_deesser bmo_fetcomp bmo_dwell bmo_reverb)
+if(BMO_BUILD_TUNE)
+    target_link_libraries(recovery_tests PRIVATE bmo_tune)
+    target_compile_definitions(recovery_tests PRIVATE BMO_RECOVERY_TESTS_TUNE=1)
+endif()
+add_test(NAME recovery COMMAND recovery_tests)
+
 # Layout assertions on the real panels. JUCE, not bmo_add_dsp_tool: no
 # rendering happens, but Tokens.h includes juce_gui_basics, so a UI assertion
 # cannot run in the DSP-only job whatever docs/ui-workflow-brief.md §4 says.

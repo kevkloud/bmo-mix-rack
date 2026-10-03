@@ -751,7 +751,9 @@ int main()
             // a minute over it. What the guard owes there is an output that is
             // finite and under the ceiling -- a module that amplifies it past
             // the ceiling is reset, as one that overflows is -- and that is what
-            // is asserted. The figures are printed.
+            // is asserted here. How long each module then takes to come back,
+            // at this level and at +60, +72 and +96 dBFS, is recorded and held
+            // in tests/plugin/RecoveryTests.cpp. The figures are printed.
             const auto loud = run (4.0e9f);
             printFigures (def->id, "4e+09 L mid (under the ceiling)", clean, loud);
             expect (loud.badOut == 0 && loud.metersFinite,

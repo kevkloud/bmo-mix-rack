@@ -7,14 +7,17 @@ namespace bmo::dim
 
 namespace
 {
-    // DIMENSION, the hero. 148 px against the pairs' 64 -- Frosty, 2026-09-17,
-    // from a ladder of 92 (Opto's size, what it was), 132, 148 and 156. 156
-    // began to crowd the WIDTH legend above it.
+    // DIMENSION, the hero. 132 px against the pairs' 64. It was 148 --
+    // Frosty, 2026-09-17, from a ladder of 92 (Opto's size, what it was), 132,
+    // 148 and 156; 156 began to crowd the WIDTH legend above it -- until
+    // OUTPUT arrived. Frosty, 2026-10-03, from two renders: OUTPUT gets the
+    // suite's whole output section, and the 16 px it costs comes out of the
+    // hero, back to the next rung down the same ladder.
     //
     // Its box is the knob plus 30 px, where it had been the knob plus 58: the
     // caption takes about 22, and the other 36 of the old allowance was bare
     // plate under it. Growing the knob alone left that band where it was.
-    constexpr int kBigKnobSide   = 148;
+    constexpr int kBigKnobSide   = 132;
     constexpr int kBigKnobHeight = kBigKnobSide + 30;
 
     // Between GENERATE and the pair under it. The suite's switch gap rather
@@ -161,18 +164,22 @@ void DimPanel::resized()
     auto area = getLocalBounds().reduced (kPad, 4);
     clearRules();
 
-    // OUTPUT, off the foot first (2026-10-04). The knob lands on the suite's
-    // output row, 602..679, so it lines up with BMO EQ's and the Saturator's
-    // in a rack. Not the whole of takeOutputSection: this module has no
-    // output switches, and the 28 px switch row it would leave empty is more
-    // than this column can give without shrinking a control. So a bare rule
-    // straight over the knob instead, the way the section's own rule sits
-    // over its switches; what it costs is the blocks above moving closer
-    // together, through the derived gap below.
+    // OUTPUT, in the suite's output section, off the foot first -- Frosty,
+    // 2026-10-03, who chose it over a bare rule straight above the knob. The
+    // rule lands on the line every module's lower rule is on (566) and the
+    // knob on the output row (602..679), so both line up across a rack. The
+    // switch row between them is empty: this module has no output switches,
+    // and the row is kept rather than closed up because keeping it is what
+    // puts the knob on the shared row.
+    //
+    // The rule is bare, as every module's output rule is. SOURCE and WIDTH
+    // name their sections because each holds several controls that need a
+    // word to hold them together; this one holds a single knob whose caption
+    // already says OUTPUT, and a legend would print the word twice.
     {
-        auto foot = area.removeFromBottom (kRuleRow + kTrimKnobRow + kFootMargin);
-        addRule (foot.removeFromTop (kRuleRow), {});
-        output.setBounds (foot.removeFromTop (kTrimKnobRow));
+        const auto out = takeOutputSection (area);
+        addRule (out.rule, {});
+        output.setBounds (out.knob);
     }
 
     // Two legends, set in the gaps the rhythm below already leaves, so no
@@ -201,8 +208,15 @@ void DimPanel::resized()
     // margin above the first, so the spacing stays even if a block's height
     // changes later. Four derived gaps -- the fixed kSourceGap is inside
     // SOURCE. There were five, the fifth a margin under the last block, until
-    // OUTPUT took the foot on 2026-10-04: its rule's own half-height is that
-    // margin now, and the column could not spare a second one.
+    // the output section took the foot on 2026-10-03: its rule's own
+    // half-height is that margin now.
+    //
+    // **Every gap is at its floor.** The section takes 126 px, the blocks
+    // need 522, and 554 is left, so the four gaps share 32 px and each is
+    // kSwitchGap. A legend's row is 16 px, twice that, so SOURCE starts at
+    // the top of the panel: 10 px nearer the preset bar than it sat before
+    // OUTPUT, and WIDTH reaches 4 px into the blocks either side of it.
+    // Getting the old spacing back means 20 px out of a control.
     const auto content = kSwitchHeight + kSourceGap + kPairKnobHeight * 3 + kValueRow + kBigKnobHeight;
     const auto gap     = juce::jmax (kSwitchGap, (area.getHeight() - content) / 4);
 

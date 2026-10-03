@@ -27,7 +27,8 @@ namespace bmo::dim
     append-only, and a host session that automated them must still load.
 
     Built on BMO Opto's panel rather than on BMO EQ's: blocks placed from the
-    top on one derived gap, and no input or output section reserved. It had no
+    top on one derived gap. No input section; since 2026-10-03 the suite's
+    output section, for OUTPUT, under a bare rule on the shared line. It had no
     rules either, on the argument that it was one idea. Frosty's legends settled
     that it is two -- make width, then shape it -- and the legends sit in gaps
     the rhythm already left, so adding them moved no control.
@@ -41,7 +42,8 @@ namespace bmo::dim
     it is permanent and because it is what a host's automation list shows. The
     two are independent and each is right for the list it is in.
 
-    DIMENSION is the hero, at 148 px where Opto puts its meter; everything else
+    DIMENSION is the hero, at 132 px (148 until OUTPUT took the foot);
+    everything else
     is paired at 64, the size the rest of the suite's paired knobs use. BELOW
     is the one knob here that prints its value -- it is a crossover, and "below
     what" is the question its caption raises -- and BLOOM keeps a blank line to
@@ -101,7 +103,8 @@ private:
     ui::PlainKnob width, shuffle, shuffleFreq, cents, diffuse,
                   rotation, asymmetry;
 
-    /** OUTPUT, 2026-10-04: the suite's trim knob, on the suite's output row. */
+    /** OUTPUT, 2026-10-03: the suite's trim knob, in the suite's output
+        section. */
     ui::PlainKnob output;
 
     ui::SwitchButton detuneOn;

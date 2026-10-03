@@ -4046,10 +4046,36 @@ int main (int argc, char** argv)
     {
         checkDimPanel (panel, "dim");
 
-        // OUTPUT (2026-10-04) sits where every module's output knob sits,
-        // rows 602..679, at the trim size, so it lines up across a rack.
+        // OUTPUT (2026-10-03) is in the suite's output section, Frosty's
+        // choice from two renders: the rule on the shared line, the knob on
+        // rows 602..679 at the trim size, and the switch row between them
+        // empty, since this module has no output switches.
+        checkOutputRule      (panel, "dim");
         checkOutputSection   (panel, "dim");
         checkTrimKnobHeights (panel, "dim", { "OUTPUT" });
+
+        for (auto* child : panel.getChildren())
+            check (! child->isVisible() || ! child->getBounds().intersects (juce::Rectangle<int> (0, 574, panel.getWidth(), 28)),
+                   "dim's output switch row is empty, but " + child->getName() + " is in it");
+
+        // What the section cost: DIMENSION at 132 (its box is knob + 30), and
+        // the SOURCE legend centred 8 px down the panel where it was 18. All
+        // four derived gaps are at their floor, so a block that grows has to
+        // say where its pixels come from.
+        if (auto* dimension = findNamed (panel, "DIMENSION"))
+            checkEquals (dimension->getHeight(), 162, "dim DIMENSION box is the 132 px knob plus 30");
+        else
+            check (false, "dim has no DIMENSION knob");
+
+        bool sawSource = false;
+        for (const auto& rule : panel.getRules())
+            if (rule.text == "SOURCE")
+            {
+                sawSource = true;
+                checkEquals (rule.row.getCentreY(), 8, "dim SOURCE legend centre");
+            }
+
+        check (sawSource, "dim has a SOURCE legend");
     });
 
     // BMO Util reserves the output section and adopts neither half of it. This

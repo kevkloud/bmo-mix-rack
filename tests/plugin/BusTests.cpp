@@ -462,12 +462,12 @@ const Golden kSwept[]
       -7.60426052625, 1.1754732132,
       -8.30132334629, 1.07108569145, -6.68785712242, 1.168405056,
       -7.60426052625, 1.1754732132, -7.60426052625, 1.1754732132 },
-    // BMO Opto's row and the rack's were regenerated on 2026-10-04, when the
+    // BMO Opto's row and the rack's were regenerated on 2026-10-03, when the
     // cells changed on purpose: the charge counts only a level the signal has
     // kept up, which let 0.15 dB more through on this noisy stimulus, and
     // Stressed (where 0.63 puts Mode) gained a quick attack stage that rides
     // the noise's crests and takes 1.77 dB off. Net 1.61 dB lower, peak 0.428
-    // to 0.337. testing-notes/opto-spike-and-dip-2026-10-04.md has the work.
+    // to 0.337. testing-notes/opto-spike-and-dip-2026-10-03.md has the work.
     { "opto",
       -20.0948769542, 0.336609631777,
       -21.2901275396, 0.277803987265, -21.1450327082, 0.417769670486,

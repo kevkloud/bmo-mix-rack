@@ -65,7 +65,7 @@ that, and each has a reason a later change could undo by accident:
   that decay nothing pushes the envelope, so the charge never built, and the
   cell turned into a fast compressor on anything percussive.
 
-What this costs is on the record in `testing-notes/opto-spike-and-dip-2026-10-04.md`:
+What this costs is on the record in `testing-notes/opto-spike-and-dip-2026-10-03.md`:
 programme made of short decaying notes holds less reduction than it did.
 
 **Stressed has a two-stage attack and Tele does not.** Within 6 dB of what is
@@ -128,7 +128,7 @@ touching `DspCore`:
   36 dB at the deepest setting. That was accepted when BMO FET was designed
   (`modules/fetcomp/AGENTS.md`): the needle says "a lot" and
   `currentGainReductionDb()` still reports the true figure. It was raised
-  again in the October 2026 review and decided again on 2026-10-04: it stays
+  again in the October 2026 review and decided again on 2026-10-03: it stays
   pinned. Changing it would move every panel that uses the meter.
 
 ## Faults the tests could not see
@@ -159,7 +159,7 @@ absolute rather than relative, and at the level a track arrives at.
   That is the charge's own 0.3 s and the slow release at work. It was
   measured, reported and left alone in October 2026.
 - **Preset levels are back-solved, not ear-tuned**, and move with any change
-  to how much reduction a preset holds. They were re-solved on 2026-10-04
+  to how much reduction a preset holds. They were re-solved on 2026-10-03
   for the new release. `BMO_PRINT_PRESET_LEVELS` on `opto_tests` prints every
   delta, pass or fail. Ask before re-solving them.
 - **The Mode labels and the two mode buttons** stay as they are for 0.2.6 and

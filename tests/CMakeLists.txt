@@ -179,6 +179,42 @@ if(BMO_BUILD_TUNE)
 endif()
 add_test(NAME tempo COMMAND tempo_tests)
 
+# One NaN or infinity into every registered module, through the processor a
+# host drives, and into a rack at its input and mid-chain: nothing non-finite
+# leaves, and the module recovers by itself. Linked like tempo_tests, Tune
+# included, because it walks the registry and the guard is ModuleEngine's.
+bmo_add_tool(finite_tests plugin/FiniteTests.cpp ${BMO_ROOT}/products/rack/Registry.cpp)
+target_link_libraries(finite_tests PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp bmo_deesser bmo_fetcomp bmo_dwell bmo_reverb)
+if(BMO_BUILD_TUNE)
+    target_link_libraries(finite_tests PRIVATE bmo_tune)
+    target_compile_definitions(finite_tests PRIVATE BMO_FINITE_TESTS_TUNE=1)
+endif()
+add_test(NAME finite COMMAND finite_tests)
+
+# reset(), latency and tail before any prepare, and release twice, for every
+# module, in the standalone processor and in a rack slot. A call that does not
+# return fails the suite within seconds rather than stalling ctest. Linked like
+# finite_tests, Tune included.
+bmo_add_tool(lifecycle_tests plugin/LifecycleTests.cpp ${BMO_ROOT}/products/rack/Registry.cpp)
+target_link_libraries(lifecycle_tests PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp bmo_deesser bmo_fetcomp bmo_dwell bmo_reverb)
+if(BMO_BUILD_TUNE)
+    target_link_libraries(lifecycle_tests PRIVATE bmo_tune)
+    target_compile_definitions(lifecycle_tests PRIVATE BMO_LIFECYCLE_TESTS_TUNE=1)
+endif()
+add_test(NAME lifecycle COMMAND lifecycle_tests)
+
+# How long each module takes to come back from one very loud sample under the
+# guard's ceiling: recorded figures, not targets (see the file). Up to 100 s
+# of audio per case, so it is the slowest suite here. Linked like finite_tests,
+# Tune included.
+bmo_add_tool(recovery_tests plugin/RecoveryTests.cpp ${BMO_ROOT}/products/rack/Registry.cpp)
+target_link_libraries(recovery_tests PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp bmo_deesser bmo_fetcomp bmo_dwell bmo_reverb)
+if(BMO_BUILD_TUNE)
+    target_link_libraries(recovery_tests PRIVATE bmo_tune)
+    target_compile_definitions(recovery_tests PRIVATE BMO_RECOVERY_TESTS_TUNE=1)
+endif()
+add_test(NAME recovery COMMAND recovery_tests)
+
 # Layout assertions on the real panels. JUCE, not bmo_add_dsp_tool: no
 # rendering happens, but Tokens.h includes juce_gui_basics, so a UI assertion
 # cannot run in the DSP-only job whatever docs/ui-workflow-brief.md §4 says.

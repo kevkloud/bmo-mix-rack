@@ -245,7 +245,7 @@ inline constexpr float kAttackQuickestDb = 12.0f;
     in gain that is heard.
 
     **Only the feedforward cell uses this.** It was built for both and heard
-    in both, blind, on 2026-10-04, each build entered twice. In Stressed both
+    in both, blind, on 2026-10-03, each build entered twice. In Stressed both
     copies with the quick stage were ranked above both without it; in Tele
     both copies with it were ranked below both without it. Tele keeps the
     plain 10 ms attack and its 7.8 dB. */
@@ -317,7 +317,7 @@ inline Curve curveForDistressor (float crushPercent) noexcept
     Attack is fixed at ~10 ms, per every source consulted -- there is no
     evidence that the real cell's attack is level-dependent the way its
     release is. A quick stage for a cell far short of what is asked was
-    built for this cell too, and heard blind on 2026-10-04 with each build
+    built for this cell too, and heard blind on 2026-10-03 with each build
     entered twice: both copies with it were ranked below both without. So it
     is not here. The other cell has it -- see attackCoeffFor(). */
 class La2aCell

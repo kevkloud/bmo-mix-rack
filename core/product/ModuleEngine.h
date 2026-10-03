@@ -1,9 +1,11 @@
 #pragma once
 
 #include "ModuleDef.h"
+#include "core/dsp/FiniteGuard.h"
 #include "core/dsp/Meter.h"
 #include "core/product/HostTempo.h"
 #include "core/state/ParamSet.h"
+#include <algorithm>
 #include <atomic>
 
 namespace bmo
@@ -96,8 +98,43 @@ public:
         read();
         dsp->setParams (values.data(), (int) values.size());
         dsp->setTempo (tempo.bpm, tempo.valid, tempo.playing);
+
+        // **The suite's one guard against NaN and infinity**, at the one call
+        // every module goes through: the standalone product, every rack slot
+        // and BMO Tune RT. A non-finite sample left in a filter's memory, a
+        // detector or a delay line stays there and makes every sample after it
+        // non-finite until a reset, and in a rack it then reaches every slot
+        // downstream. core/AGENTS.md states what this guarantees; no module
+        // adds a guard of its own.
+        //
+        // In: a bad sample from the host or from the slot before -- not
+        // finite, or at or over finite::kCeiling (+192.7 dBFS), which can hold
+        // a compressor down for a minute as surely as an infinity can -- is
+        // written over with zero before the module sees it (finite::scrub
+        // says why zero). A clean block is only read.
+        finite::scrub (channels, numChannels, numSamples);
+
         inMeter.measure (channels, numChannels, numSamples);
         dsp->process (channels, numChannels, numSamples);
+
+        // Out: a module that blows up by itself, on clean input, is reset and
+        // its block is silenced on every channel, so nothing that is not
+        // audio reaches the host or the next slot and the module is running
+        // again from the next block with no one touching it. The same test as
+        // the input's: a finite sample at or over the ceiling counts, or a
+        // standalone module, and the rack's last slot, could hand the host
+        // one. The whole block, not only the bad samples: what came before
+        // them was made by the same broken state. Rare by construction, so the
+        // reset's cost is not the concern; every module's reset only clears
+        // memory it already owns.
+        if (finite::anyNotAudio (channels, numChannels, numSamples))
+        {
+            dsp->reset();
+
+            for (int ch = 0; ch < numChannels; ++ch)
+                std::fill (channels[ch], channels[ch] + numSamples, 0.0f);
+        }
+
         outputMeter.measure (channels, numChannels, numSamples);
         grMeter.publish (dsp->currentGainReductionDb());
     }

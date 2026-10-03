@@ -110,7 +110,21 @@ void SingleModuleProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
     // one channel and silence. BusLayouts.h says why at length.
     buses::spreadInputAcrossOutputs (buffer, numIn, numOut);
 
+    // Every block goes through the engine, which guarantees a finite output;
+    // there is no early return here, and none should be added without the
+    // scrub RackProcessor::processBlock does at its own edge.
     engine.process (buffer.getArrayOfWritePointers(), numOut, numSamples, tempo);
+}
+
+void SingleModuleProcessor::processBlockBypassed (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
+{
+    // A host's bypass is JUCE's pass-through, which hands the host its own
+    // buffer back and so its own bad samples with it. Scrubbed after, so the
+    // pass-through itself is JUCE's, unchanged.
+    AudioProcessor::processBlockBypassed (buffer, midi);
+    finite::scrub (buffer.getArrayOfWritePointers(),
+                   juce::jmin (buffer.getNumChannels(), getTotalNumOutputChannels()),
+                   buffer.getNumSamples());
 }
 
 //==============================================================================

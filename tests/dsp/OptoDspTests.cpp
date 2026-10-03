@@ -951,7 +951,7 @@ void testASpikeIsCaught()
 /** Tele's attack is the 10 ms attack at every size of step.
 
     The quick stage was built for both cells and heard in both on
-    2026-10-04, blind, each build entered twice. In Stressed both copies with
+    2026-10-03, blind, each build entered twice. In Stressed both copies with
     it were ranked above both without. In Tele both copies with it were ranked
     below both without, so Tele does not have it, and this holds that: the
     time to cover 63 % of the way on an 18 dB step is the figure the 10 ms

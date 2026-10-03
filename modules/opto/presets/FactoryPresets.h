@@ -66,7 +66,7 @@ namespace bmo::opto
     presets against each other, and it had been that way since 0.2.0, when
     it was left alone for being "inside tolerance".
 
-    **Re-solved again on 2026-10-04**, for the release that gives back what a
+    **Re-solved again on 2026-10-03**, for the release that gives back what a
     spike adds (see releaseCoeffFor() in Detector.h). The top of every short
     note is reduction the charge has not backed, so it now comes back at the
     fast rate, the presets hold less reduction on the test signal, and each
@@ -104,7 +104,7 @@ inline const std::vector<FactoryPreset>& factory()
 
         { "Gentle",     { { kCrush, 15.0f }, { kLevel, 4.90f } } },
         { "Vocal Glue", { { kCrush, 45.0f }, { kLevel, 9.77f } } },
-        { "Crushed <3", { { kCrush, 85.0f }, { kLevel, 17.13f } } },  // all three re-solved 2026-10-04, see above
+        { "Crushed <3", { { kCrush, 85.0f }, { kLevel, 17.13f } } },  // all three re-solved 2026-10-03, see above
     };
 
     return presets;

@@ -106,7 +106,7 @@ const size_t kCycle = (size_t) std::llround (kSampleRate / 220.0);
     The cell that Mode was not using used to be frozen, holding whatever it
     held when it was last switched away from. A loud passage, a switch away
     just after it and a switch back three seconds later brought the cell back
-    still holding that passage: the output sat 11.1 dB (Tele) and 6.7 dB
+    still holding that passage: the output sat 11.3 dB (Tele) and 6.7 dB
     (Stressed) below a run that had stayed in the mode, and stayed low for
     more than three seconds. */
 void testAModeRoundTripComesBackWhereItWouldHaveBeen()

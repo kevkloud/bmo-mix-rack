@@ -210,7 +210,7 @@ private:
         memories of the programme, and a memory that stops being written to is
         simply out of date: switch away just after a loud passage and back
         three seconds later, and the cell came back still holding that
-        passage, 11.1 dB (Tele) and 6.7 dB (Stressed) below a core that had
+        passage, 11.3 dB (Tele) and 6.7 dB (Stressed) below a core that had
         never left, for more than three seconds. Running both costs one more
         cell and means the one that is switched to has heard everything the
         other has, which is also what gives Mode's crossfade two real sides. */

@@ -36,7 +36,7 @@ the release doing what the mode is for, and it is why there is no release knob.
 - **The meter's reduction scale stops at 24 dB.** At the deepest settings the
   module can apply more than that; the needle pins and the module carries on.
 - **A loud spike does not leave the level turned down behind it.** What a
-  short spike adds comes back in about a tenth of a second; what a held
+  short spike adds comes back within about a third of a second; what a held
   passage adds comes back slowly, as it should.
 - **No latency.** Nothing is delayed, so the very front of a hard onset always
   gets part of the way through before the cell catches it.

@@ -306,7 +306,7 @@ private:
     std::unique_ptr<Shared> shared = std::make_unique<Shared>();
     double rate = 48000.0, tickAlpha = 0.0;
     int tickPhase = 0, bandsInUse = 0;
-    bool primed = false;
+    bool primed = false, prepared = false;
 
     // Solo crosses over from what was being heard (-1: the whole EQ) to what
     // is asked for. The first block after prepare()/reset() takes it as it is.

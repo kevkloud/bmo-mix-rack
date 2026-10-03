@@ -39,6 +39,7 @@ public:
     void prepare (double sampleRate, int maxBlockSize, int numChannels) override
     {
         core.prepare (sampleRate, maxBlockSize, numChannels);
+        prepared = true;
         grid = DesignGrid::make (sampleRate);
         const auto tau = 0.005;
         smoothCoeff = 1.0 - std::exp (-1.0 / (std::max (sampleRate, 1.0) * tau));
@@ -121,6 +122,11 @@ public:
 
     void process (float* const* channels, int numChannels, int numSamples) override
     {
+        // A wire until prepare(): the engine passes the signal through, and so
+        // does the output stage rather than applying a trim at no known rate.
+        if (! prepared)
+            return;
+
         core.process (channels, numChannels, numSamples);
 
         const auto used = std::min (numChannels, 2);
@@ -193,7 +199,7 @@ private:
     Settings settings;
     DesignGrid grid;
     double smoothCoeff = 1.0, gainTarget = 1.0, gainNow = 1.0, autoGain = 1.0, outputDb = 0.0;
-    bool primed = false, autoDirty = true, autoOn = false;
+    bool primed = false, autoDirty = true, autoOn = false, prepared = false;
 };
 
 inline std::unique_ptr<ModuleDsp> createDsp() { return std::make_unique<DeqDsp>(); }

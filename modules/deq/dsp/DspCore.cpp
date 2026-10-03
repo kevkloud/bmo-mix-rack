@@ -115,6 +115,7 @@ namespace
 void DspCore::prepare (double sampleRate, int, int) noexcept
 {
     rate = (std::isfinite (sampleRate) && sampleRate > 0.0) ? sampleRate : 48000.0;
+    prepared = true;
     tickAlpha = std::exp (-(double) kControlInterval / (kSmoothingMs * 1.0e-3 * rate));
     grid = DesignGrid::make (rate);
 
@@ -394,6 +395,13 @@ template <typename Sample>
 void DspCore::processImpl (Sample* const* channels, int numChannels, int numSamples) noexcept
 {
     if (numChannels < 1 || numSamples <= 0 || channels == nullptr || channels[0] == nullptr)
+        return;
+
+    // Before prepare() there is no sample rate to design a filter at, and the
+    // grid designed at a rate of 0 gave NaN. Until then the engine is a wire,
+    // as an unprepared Dip is (core/dsp/SwitchFade.h) and as this EQ is at
+    // its defaults.
+    if (! prepared)
         return;
 
     // Stereo in, stereo out first (spec A4). Channels past the second pass

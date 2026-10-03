@@ -1837,6 +1837,42 @@ namespace
                         + " ratio " + std::to_string ((int) c.ratio));
         }
     }
+
+    /** process() before prepare() passes the signal through untouched, the
+        engine and the module alike: with no sample rate there is no filter to
+        design, and the review of 2026-10-03 found it designing at a rate of
+        0 and putting out NaN. A wire is what an unprepared Dip does too
+        (core/dsp/SwitchFade.h), and what this module is at its defaults. */
+    void testProcessBeforePrepare()
+    {
+        std::vector<double> l (256), r (256);
+        for (size_t i = 0; i < l.size(); ++i) { l[i] = 0.3 * std::sin (0.05 * (double) i); r[i] = -0.2 * std::cos (0.07 * (double) i); }
+
+        {
+            auto s = bandsConfig (3);
+            DspCore e;
+            e.setSettings (s);
+            auto yl = l, yr = r;
+            double* ch[2] { yl.data(), yr.data() };
+            e.process (ch, 2, (int) yl.size());
+            check (yl == l && yr == r, "Before prepare: the engine passes the signal through untouched");
+        }
+
+        {
+            Values p;
+            for (int b = 0; b < kBands; ++b) { p.at (b, Control::on) = 1.0f; p.at (b, Control::gain) = 6.0f; p.at (b, Control::shape) = 0.0f; }
+            p.at (kOutput) = 6.0f;
+            p.at (kAutoGain) = 1.0f;
+
+            DeqDsp d;
+            d.setParams (p.v.data(), (int) p.v.size());
+            std::vector<float> fl (l.begin(), l.end()), fr (r.begin(), r.end());
+            const auto inL = fl, inR = fr;
+            float* ch[2] { fl.data(), fr.data() };
+            d.process (ch, 2, (int) fl.size());
+            check (fl == inL && fr == inR, "Before prepare: the module passes the signal through untouched");
+        }
+    }
 }
 
 int main()
@@ -1858,6 +1894,7 @@ int main()
     testSwitchesFade();
     testCutQIsCapped();
     testMeterReadsWhatIsApplied();
+    testProcessBeforePrepare();
 
     if (failures == 0)
         std::cout << "deq_dsp: all passed\n";

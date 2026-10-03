@@ -13,14 +13,20 @@ compared by ear first with `testing-notes/deq-topology-listening.md`.
 ## What is here
 
 ```
+params.h      the 159 parameters, the rack's lane map, the shelf and cut Q caps
+Module.*      the ModuleDef the product and the rack both drive
 dsp/          the audio path (JUCE-free)
-  Prototype.h   the analogue filters every band is measured against
-  Design.*      matched-Z coefficient design
-  Svf.h         the filter structure that runs them
+  Filters.h     the matched-Z design, the analogue prototypes and the SVF,
+                which live in core/dsp/ (Design.*, Prototype.h, Svf.h) and
+                are named into this module here
   Dynamics.h    detector and gain computer
-  DspCore.*     bands, M/S, topology, smoothing
+  DspCore.*     bands, M/S, topology, smoothing, the switch crossovers
+  AutoGain.h    AUTO: the static curve's broadband level
+  DeqDsp.h      the ModuleDsp adapter: parameter values in, DspCore out
+panel/        the panel at both widths, the curve, the analyser
+presets/      the factory presets (Init only, for now)
 reference/    test-only: the cookbook designs and measurement helpers
-spec/         the spec as received, and its review
+spec/         the spec as received, its review, and the decisions since
 ```
 
 ## Trying it

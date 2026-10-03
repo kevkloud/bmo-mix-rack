@@ -53,6 +53,12 @@ void DspCore::Channel::prepare (double rate, const Character& c) noexcept
 
 void DspCore::Channel::reset() noexcept
 {
+    resetStage();
+    oversampler.reset();
+}
+
+void DspCore::Channel::resetStage() noexcept
+{
     shaper.reset();
     bodyShaper.reset();
     sheenShaper.reset();
@@ -69,7 +75,6 @@ void DspCore::Channel::reset() noexcept
     sheenSplit.reset();
     sheenTilt.reset();
     dc.reset();
-    oversampler.reset();
 }
 
 void DspCore::Channel::setTone (float amountPercent, double rate) noexcept
@@ -113,13 +118,20 @@ float DspCore::Channel::process (float x) noexcept
     return dc.process (bell.process (filtered));
 }
 
-float DspCore::Channel::runWet (float driven, int factor, bool saturate) noexcept
+float DspCore::Channel::runWet (float driven, int factor, bool saturate,
+                                bool fading, float amount) noexcept
 {
     float buffer[Oversampler::kMaxFactor] {};
     oversampler.upsample (driven, buffer);
 
-    for (int j = 0; j < factor; ++j)
-        buffer[j] = saturate ? process (buffer[j]) : buffer[j];
+    // Fading, the stage and the wire are blended; settled, the path is the
+    // one the module always had, untouched by the blend.
+    if (fading)
+        for (int j = 0; j < factor; ++j)
+            buffer[j] = bmo::dsp::crossfade (buffer[j], process (buffer[j]), amount);
+    else
+        for (int j = 0; j < factor; ++j)
+            buffer[j] = saturate ? process (buffer[j]) : buffer[j];
 
     return oversampler.downsample (buffer);
 }
@@ -166,6 +178,13 @@ void DspCore::prepare (double newSampleRate, int maxBlockSize, int numChannels,
     inputEnergy = processedEnergy = 0.0;
 
     oversamplingDip.prepare (sampleRate, kSwitchFadeMs);
+
+    // Taken as found, never faded in from whatever they held before.
+    for (auto* r : { &satMix, &polaritySwitch })
+        r->prepare (sampleRate, kSwitchFadeMs);
+
+    satMix        .snap (params.saturationIn ? 1.0f : 0.0f);
+    polaritySwitch.snap (params.phaseInvert ? -1.0f : 1.0f);
 
     applyOversampling (oversampleFactor);
     pendingFactor = currentFactor;
@@ -238,6 +257,11 @@ void DspCore::reset() noexcept
     // hide; a change still wanted is made at once by the next process().
     oversamplingDip.reset();
     running = false;
+
+    // Likewise a switch's fade: the stage starts over from rest either way,
+    // so the switch is simply where it was going.
+    satMix        .snap (satMix.target());
+    polaritySwitch.snap (polaritySwitch.target());
 }
 
 //==============================================================================
@@ -256,8 +280,23 @@ void DspCore::setParams (const Params& p) noexcept
     if (! p.autoGain)
         makeupSm.setTarget (1.0f);
 
+    // Sat In out of circuit stops the stage, which then holds whatever the
+    // signal left in its filters; brought back in after the signal had
+    // stopped, it released that at up to +8.8 dBFS. Coming back in from fully
+    // out it now starts from rest; coming back during its own fade out its
+    // state is still live and it keeps it.
+    if (primed && p.saturationIn && ! satMix.isMoving() && satMix.value() == 0.0f)
+        for (auto& c : channels)
+            c.resetStage();
+
+    satMix        .setTarget (p.saturationIn ? 1.0f : 0.0f);
+    polaritySwitch.setTarget (p.phaseInvert ? -1.0f : 1.0f);
+
     if (primed)
         return;
+
+    satMix        .snap (p.saturationIn ? 1.0f : 0.0f);
+    polaritySwitch.snap (p.phaseInvert ? -1.0f : 1.0f);
 
     toneSm.snap (std::clamp (p.toneAmount, 0.0f, 100.0f));
     makeupSm.snap (1.0f);
@@ -348,6 +387,12 @@ void DspCore::process (float* const* channelData, int numChannels, int numSample
             const auto dipping = ! oversamplingDip.isIdle();
             const auto dip     = dipping ? oversamplingDip.next() : 1.0f;
 
+            // Sat In and Phase the same way: while one fades, its ramp gives the
+            // position; settled, the switch is used exactly as it always was.
+            const auto satFading = satMix.isMoving();
+            const auto satAmount = satFading ? satMix.next() : 1.0f;
+            const auto sign      = polaritySwitch.isMoving() ? polaritySwitch.next() : polarity;
+
             for (int ch = 0; ch < activeChannels; ++ch)
             {
                 auto& channel = channels[(size_t) ch];
@@ -360,7 +405,7 @@ void DspCore::process (float* const* channelData, int numChannels, int numSample
                 const auto delayed = dry[(size_t) readIndex];
 
                 const auto driven = input * inGain;
-                const auto shaped = channel.runWet (driven, factor, params.saturationIn);
+                const auto shaped = channel.runWet (driven, factor, params.saturationIn, satFading, satAmount);
 
                 // Measured before the makeup is applied, so the detector reads
                 // what the stage did rather than what it and its own
@@ -380,10 +425,11 @@ void DspCore::process (float* const* channelData, int numChannels, int numSample
                 // the curve is asymmetric, -f(-x) is not f(x): flipping ahead
                 // of the shaper changed which harmonics came out, so engaging
                 // a polarity switch altered the sound. A polarity control has
-                // one job and it is not that.
+                // one job and it is not that. The flip itself ramps through zero
+                // rather than stepping by twice the signal.
                 const auto blended = shaped * makeup * wet + delayed * dryLevel;
 
-                const auto out = blended * polarity * outGain;
+                const auto out = blended * sign * outGain;
                 data[i] = dipping ? out * dip : out;
             }
 

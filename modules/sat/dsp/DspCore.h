@@ -287,6 +287,11 @@ private:
 
         void prepare (double rate, const Character&) noexcept;
         void reset() noexcept;
+
+        /** Everything but the oversampler: the stage itself, which stops
+            while Sat In is out and starts from rest when it comes back. */
+        void resetStage() noexcept;
+
         void setDrive (float drive) noexcept;
         void setTone (float amountPercent, double rate) noexcept;
         float toneAmount = 1.0f;
@@ -296,8 +301,10 @@ private:
         /** One host-rate sample through the oversampled region: up, the
             stage at each oversampled sample (or a wire with Sat In off),
             down. Shared by process() and the warm-up of a new oversampling
-            path. */
-        float runWet (float driven, int factor, bool saturate) noexcept;
+            path. While Sat In fades, the stage and the wire are blended at
+            `amount`, 1 being the stage. */
+        float runWet (float driven, int factor, bool saturate,
+                      bool fading = false, float amount = 1.0f) noexcept;
 
         /** One harmonic generator: shape the band below the corner, keep what
             appears above it. */
@@ -323,6 +330,9 @@ private:
     bmo::dsp::Dip oversamplingDip;
     int pendingFactor = 1;
     bool running = false;   // false until the first process() after prepare() or reset()
+
+    // Sat In and Phase cross over rather than stepping; see setParams().
+    bmo::dsp::Ramp satMix, polaritySwitch;
 
     Smoother inputGainSm, driveSm, mixSm, outputLevelSm, makeupSm, toneSm;
 

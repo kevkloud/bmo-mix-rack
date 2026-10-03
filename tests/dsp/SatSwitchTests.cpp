@@ -271,6 +271,70 @@ int main()
                 }
     }
 
+    //== 2. Phase and Sat In cross over instead of stepping ==================
+    // Each changed the signal path in one sample: Phase stepped the output by
+    // twice the signal (4.2x the tone's own step in the review's probe, up to
+    // 13x at the worst phase), Sat In by the difference between the shaped
+    // and the plain signal (2.0x at Drive 40, 6.4x worst case). Each now fades
+    // over kSwitchFadeMs. Both directions, Drive 40 and 100, 1x and 2x.
+    {
+        for (double fs : { 44100.0, 48000.0, 96000.0 })
+            for (int os : { 1, 2 })
+                for (float drive : { 40.0f, 100.0f })
+                    for (int which = 0; which < 2; ++which)
+                        for (bool on : { true, false })
+                        {
+                            DspCore::Params a;
+                            a.oversampling = os;
+                            a.driveAmount = drive;
+                            auto& switched = which == 0 ? a.phaseInvert : a.saturationIn;
+                            switched = ! on;
+                            DspCore::Params b = a;
+                            (which == 0 ? b.phaseInvert : b.saturationIn) = on;
+
+                            const auto ratio = switchStepRatio (fs, a, b, 1000.0);
+                            check (ratio < 1.5, std::string (which == 0 ? "Phase " : "Sat In ") + (on ? "on" : "off")
+                                                    + " at " + rateName (fs) + ", " + std::to_string (os) + "x, Drive "
+                                                    + std::to_string ((int) drive) + " steps " + ratioText (ratio));
+                        }
+    }
+
+    //== 2b. Sat In back on does not replay what the stage heard before =======
+    // Switched out, the stage stops and holds whatever the signal left in its
+    // filters. Brought back in after the signal has stopped, it must start
+    // from rest rather than release that.
+    {
+        for (double fs : { 44100.0, 48000.0, 96000.0 })
+            for (int os : { 1, 2 })
+            {
+                DspCore::Params on;
+                on.oversampling = os;
+                on.driveAmount = 100.0f;
+                DspCore::Params off = on;
+                off.saturationIn = false;
+
+                DspCore core;
+                core.prepare (fs, 512, 1, os);
+                core.setParams (on);
+
+                const auto offAt    = (size_t) (0.5 * fs) / 512 * 512;
+                const auto silentAt = (size_t) (0.75 * fs);
+                const auto onAt     = (size_t) (1.5 * fs) / 512 * 512;
+
+                auto x = tone (fs, 7000.0, 0.5, 2.0);
+                std::fill (x.begin() + (long) silentAt, x.end(), 0.0f);
+
+                const auto y = render (core, x, 512, [&] (size_t s) { return s >= offAt && s < onAt ? off : on; });
+
+                double peak = 0.0;
+                for (size_t i = onAt; i < y.size(); ++i)
+                    peak = std::max (peak, (double) std::abs (y[i]));
+
+                check (peak < 1.0e-6, "Sat In back on in silence at " + rateName (fs) + ", "
+                                          + std::to_string (os) + "x peaks at " + std::to_string (peak));
+            }
+    }
+
     if (failures == 0)
         std::cout << "All Saturator switch tests passed.\n";
 

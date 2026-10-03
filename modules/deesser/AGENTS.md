@@ -12,11 +12,12 @@ carries the schema table, which is the single authoritative copy, and
 `10-dsp-spec.md` section 9 deliberately points at it rather than restating it,
 because restating it is how the two documents drifted apart the first time.
 
-**The DSP is a marked placeholder.** `dsp/DspCore.h` passes audio through
-untouched, reports no gain reduction, and honours the listen hook without
-changing the signal. What is real today is the schema, the panel, the
-registration and the latency contract. The DSP pass owns `dsp/` and nothing
-outside it.
+**The DSP is real and has not been heard.** `dsp/DspCore.h` is the wiring:
+the detector (`dsp/Detector.h`), the cut and its sidechain filter
+(`dsp/Band.h`), the glides and crossfades every control and LISTEN move
+through, and the latency contract. Every internal constant marked CALIBRATE
+is a first pass -- `P_ref` above all, which places THRESHOLD and freezes with
+the schema. The DSP pass owns `dsp/` and nothing outside it.
 
 ## What a de-esser is here, and what it is not
 

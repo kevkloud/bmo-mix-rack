@@ -1,14 +1,11 @@
 /*
     Tests for BMO Defang's DSP core. No JUCE, no host.
 
-    **The core is still the placeholder** -- see modules/deesser/dsp/DspCore.h
-    -- so this file asserts the frame rather than the de-esser: the adapter's
+    It began against the placeholder core, asserting the frame -- the adapter's
     unpacking of the flat parameter array, the latency contract, the listen
-    hook's lifecycle, and that the placeholder really is inert where it claims
-    to be.
-
-    Everything here should still pass once the detector and the band land. What
-    the real suite adds -- detection over a 24 dB level sweep, the two absolute
+    hook's lifecycle -- and those tests still stand. The de-esser itself is
+    tested below them, and the review fixes of 2026-10-03 at the end. What
+    the full suite asks for -- detection over a 24 dB level sweep, the two absolute
     gates and the `S` clamp, level independence at three values of the internal
     blend, the static curve and its depth, the fixed timings, the slow branch
     and the hold, HF pumping, transparency, shelf mode, modulation, aliasing,

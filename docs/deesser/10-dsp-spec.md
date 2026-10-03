@@ -32,9 +32,9 @@ the default, which is what the test in 11 §5 asserts.
 
 ## 2. Signal flow
 
-**(a) Detection path:** per channel a first-order 150 Hz high-pass feeds the
-*fullband reference* rectifier and a *band* bandpass (high-pass in shelf mode)
-at the user's f0 and width. Both come from the **dry** input, never the moving
+**(a) Detection path:** per channel a second-order 150 Hz high-pass (Q 0.707)
+feeds the *fullband reference* rectifier and a *band* bandpass (high-pass in
+shelf mode) at the user's f0 and width. Both come from the **dry** input, never the moving
 output filter, whose poles track its own gain — tapping it would close a
 feedback loop. **(b) Relative detector** → one level-independent *prominence* in
 dB (§3). **(c) Gain computer**: threshold, soft knee, slope, range → an offset
@@ -212,7 +212,7 @@ the host, and free to be retuned right up until it.
 | Slow release τ / engage | 120 / 150 ms | 01 §1; CALIBRATE |
 | Slow reference `S` τ / clamp | 500 ms / 20 dB below the κ=1 reference | no figure; CALIBRATE |
 | Hold / hysteresis | 5 ms / 1.5 dB | 02 §6; CALIBRATE |
-| Reference HPF / gates | 150 Hz 1st order; −55, −60 dBFS | CALIBRATE |
+| Reference HPF / gates | 150 Hz 2nd order, Q 0.707; −55, −60 dBFS | CALIBRATE |
 | Engine clamps | `f0` ≤ 0.45·Fs, Q 0.1–40, depth ≤ 30 dB | robustness; hosts send anything |
 | Channel link | power-sum, always linked | 01 §3 High |
 | Control interval / latency | 8 / 0 samples | repo; constraint |

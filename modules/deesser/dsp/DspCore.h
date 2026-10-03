@@ -95,7 +95,7 @@ public:
     // they are constants and not parameters is a schema decision, and it is
     // this file's job to hold it.
     //
-    // The placeholder ignores all of them.
+    // Every one of them is read by the DSP below; none is a parameter.
 
     /** The reference blend. 1 compares the band with the whole signal right
         now; 0 compares it with the band's own last half second, which is the
@@ -205,7 +205,7 @@ public:
     /** Where the high-frequency energy actually sits, in Hz, estimated with a
         handful of filters rather than a transform.
 
-        **Five bandpasses, log-spaced across the range sibilance lives in, and
+        **Seven bandpasses, log-spaced across the range sibilance lives in, and
         the energy-weighted centroid of their centres.** The weighting is done
         on log frequency and exponentiated back, because that is how the ear
         hears an interval and how FREQ's own knob is laid out -- an arithmetic
@@ -222,7 +222,7 @@ public:
         panel as a suggestion has to be better than the knob it is suggesting
         for, and that one would have sent a user 600 Hz wrong.
 
-        Five biquads on one channel is still nothing beside the 4096-point
+        Seven biquads on one channel are still nothing beside the 4096-point
         transform 11 section 4 refused -- and they only run while an editor is
         open, because the whole estimate is gated on the ribbon's tap.
 
@@ -812,7 +812,7 @@ private:
     float ribbonInputPeak = 0.0f, ribbonBandPeak = 0.0f;
     float ribbonReductionPeak = 0.0f;
 
-    /** The pitch estimator: five bandpasses on channel 0, their centres, and
+    /** The pitch estimator: seven bandpasses on channel 0, their centres, and
         the energy each has gathered this frame. */
     std::array<dsp::SvfCoeffs, kPitchBands> pitchCoeffs {};
     std::array<dsp::SvfTaps, kPitchBands>   pitchTaps {};

@@ -5,9 +5,9 @@ A de-esser. **It takes the bite out of your recordings.**
 Five controls, one band, no latency. Set where the sibilance lives, how far it
 has to stand out before the module acts, and how deep the cut may go.
 
-> **Not finished.** The panel, the parameters and the metering are real; the
-> processing is a marked placeholder that passes audio through untouched. See
-> `AGENTS.md` and `docs/deesser/`.
+> **Not finished.** The panel, the parameters, the metering and the processing
+> are real, but nothing has been heard yet, and where THRESHOLD's zero sits is
+> still a first guess. See `AGENTS.md` and `docs/deesser/`.
 
 ## The face
 

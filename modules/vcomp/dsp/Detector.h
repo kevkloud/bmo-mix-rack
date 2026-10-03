@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/dsp/GainComputer.h"
+#include "core/dsp/SwitchFade.h"
 #include "modules/vcomp/dsp/Crossover.h"
 #include "modules/vcomp/params.h"
 
@@ -164,35 +165,68 @@ inline constexpr float kArcSlowScale   = 10.0f;  // 2000 ms
 class ReleaseStage
 {
 public:
+    ReleaseStage() noexcept { arcMix.snap (arc ? 1.0f : 0.0f); }
+
+    /** Sets how long a change of ARC takes to cross over. Snaps to the
+        setting in use: prepare() is where the state starts over anyway. */
+    void prepare (double rate) noexcept
+    {
+        arcMix.prepare (rate, kArcSwitchMs);
+        arcMix.snap (arc ? 1.0f : 0.0f);
+    }
+
     void setTimes (float releaseMs, bool arcOn, double rate) noexcept
     {
         arc = arcOn;
+        arcMix.setTarget (arc ? 1.0f : 0.0f);
 
-        if (arc)
-        {
-            fastPole   = poleFor (releaseMs * kArcFastScale,   rate);
-            chargePole = poleFor (releaseMs * kArcChargeScale, rate);
-            slowPole   = poleFor (releaseMs * kArcSlowScale,   rate);
-        }
-        else
-        {
-            fastPole = poleFor (releaseMs, rate);
-        }
+        plainPole  = poleFor (releaseMs,                   rate);
+        fastPole   = poleFor (releaseMs * kArcFastScale,   rate);
+        chargePole = poleFor (releaseMs * kArcChargeScale, rate);
+        slowPole   = poleFor (releaseMs * kArcSlowScale,   rate);
     }
 
-    void reset() noexcept { fast = slow = 0.0f; }
+    void reset() noexcept
+    {
+        plain = fast = slow = 0.0f;
+        arcMix.snap (arc ? 1.0f : 0.0f);
+    }
 
     /** `demandDb` is the reduction the static curve is asking for, always
-        >= 0. Returns the reduction the release stage will allow. */
+        >= 0. Returns the reduction the release stage will allow.
+
+        **All three branches run whatever ARC is set to**, and ARC only
+        chooses which of them is heard. The slow branch used to stop while
+        ARC was off -- not clear, stop -- so turning ARC back on, however long
+        afterwards, released whatever reduction it had been holding when ARC
+        went off: 3 s at -6 dBFS, ARC off, 10 s of silence, ARC on, and a -30
+        dBFS tone came out 12.4 dB low at first and 14.1 dB low half a second
+        in. Loading the Manual preset (ARC off) and then any other did the
+        same. Clearing the branch instead would have been wrong the other way:
+        an instance that had ARC on all along would still be holding some of
+        a phrase that ended a second ago, and a cleared branch would not. So
+        each branch keeps listening, and whichever setting comes back finds
+        exactly the state an instance that had it all along would have. The
+        ARC-off branch runs separately from ARC's fast one for the same
+        reason in the other direction -- it releases over RELEASE, not over
+        kArcFastScale x RELEASE.
+
+        It costs two one-pole updates a sample that ARC is not using, the
+        cheapest arithmetic in the detector. A change of ARC crosses from one
+        figure to the other over kArcSwitchMs rather than at once: just after
+        a sustained phrase the branches disagree by 10 dB or more, and with a
+        fast ATTACK the gain would follow that in a few samples. */
     float tick (float demandDb) noexcept
     {
+        plain = std::max (demandDb, plainPole * plain + (1.0f - plainPole) * demandDb);
+
+        if (plain < kEnvelopeFloorDb)
+            plain = 0.0f;
+
         fast = std::max (demandDb, fastPole * fast + (1.0f - fastPole) * demandDb);
 
         if (fast < kEnvelopeFloorDb)
             fast = 0.0f;
-
-        if (! arc)
-            return fast;
 
         const auto pole = demandDb > slow ? chargePole : slowPole;
         slow = pole * slow + (1.0f - pole) * demandDb;
@@ -200,13 +234,19 @@ public:
         if (slow < kEnvelopeFloorDb)
             slow = 0.0f;
 
-        return std::max (fast, slow);
+        // At either end crossfade() returns that branch's figure itself, so
+        // with ARC held this is exactly the figure the setting always gave.
+        return dsp::crossfade (plain, std::max (fast, slow), arcMix.next());
     }
 
 private:
+    /** How long a change of ARC takes, in ms: the suite's switch time. */
+    static constexpr double kArcSwitchMs = 10.0;
+
     bool  arc = kStandardArc;
-    float fastPole = 0.0f, chargePole = 0.0f, slowPole = 0.0f;
-    float fast = 0.0f, slow = 0.0f;
+    float plainPole = 0.0f, fastPole = 0.0f, chargePole = 0.0f, slowPole = 0.0f;
+    float plain = 0.0f, fast = 0.0f, slow = 0.0f;
+    dsp::Ramp arcMix;
 };
 
 //==============================================================================

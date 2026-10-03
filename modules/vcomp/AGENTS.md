@@ -75,6 +75,14 @@ after a 3 s hit at the same level, and checks that the ARC-off control case
 recovers identically after both. A weaker test -- "the release is slow" -- would
 pass the broken version.
 
+**All three branches run whatever ARC is set to** (2026-10-03). The slow one
+used to stop while ARC was off, so ARC back on -- or the Manual preset followed
+by any other -- released a reduction held from whenever ARC went off: 12-14 dB
+low on a quiet tone 10 s later. Clearing it would be wrong the other way, since
+an instance with ARC on all along still holds part of a phrase that ended a
+second ago. Keeping all three listening costs about 0.3 ns a sample; a change
+of ARC crosses over in 10 ms. `vcomp_switch_tests` section 1 holds both.
+
 ### The gate is an expander, and it is first for a reason
 
 It exists because of the auto makeup, which is indiscriminate: at AMOUNT 80 the

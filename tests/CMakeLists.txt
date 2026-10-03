@@ -46,6 +46,10 @@ bmo_add_dsp_tool(vcomp_dsp_tests dsp/VcompDspTests.cpp)
 target_link_libraries(vcomp_dsp_tests PRIVATE bmo_vcomp_dsp)
 add_test(NAME vcomp_dsp COMMAND vcomp_dsp_tests)
 
+bmo_add_dsp_tool(vcomp_switch_tests dsp/VcompSwitchTests.cpp)
+target_link_libraries(vcomp_switch_tests PRIVATE bmo_vcomp_dsp)
+add_test(NAME vcomp_switch COMMAND vcomp_switch_tests)
+
 bmo_add_dsp_tool(deesser_dsp_tests dsp/DeesserDspTests.cpp)
 target_link_libraries(deesser_dsp_tests PRIVATE bmo_deesser_dsp)
 add_test(NAME deesser_dsp COMMAND deesser_dsp_tests)

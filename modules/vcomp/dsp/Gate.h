@@ -117,9 +117,16 @@ public:
         level of the raw input, both channels linked. */
     float process (float detectDb) noexcept
     {
+        // At its rail the gate is off, and an off gate holds nothing. The
+        // hold used to stop counting where it was instead, so a gate moved
+        // back off its rail in the quiet after a loud passage stayed open for
+        // up to kGateHoldMs before it began to close, which a gate moved there
+        // without that history does not. The envelope is not kept for later
+        // either: it depends on the threshold, and at the rail there is none.
         if (! active)
         {
             attenuationDb = 0.0f;
+            held = 0;
             return 1.0f;
         }
 

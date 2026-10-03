@@ -215,6 +215,21 @@ public:
         lower.setCutoff (lowHz);
         upper.setCutoff (highHz);
         lowAlign.setCutoff (highHz);
+
+        // A side that is out is cleared, so that it comes back from silence
+        // rather than replaying what it held when it went out. DspCore clears
+        // the whole split while it is bypassed, but a side left out while the
+        // other ran on used to keep its state frozen: with both sides in,
+        // HIGH THRU to its rail and back 0.8 s into digital silence put out a
+        // 0.13 peak, LOW THRU 0.05. Free: a side that is out is not running.
+        if (! splitLow)
+            lower.reset();
+
+        if (! splitHigh)
+            upper.reset();
+
+        if (! (splitLow && splitHigh))
+            lowAlign.reset();
     }
 
     /** Splits `x` into the band to compress and the band that passes through.

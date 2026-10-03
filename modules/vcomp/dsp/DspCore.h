@@ -154,6 +154,7 @@ public:
 
         gate.prepare (rate);
         limiter.prepare (rate);
+        release.prepare (rate);
 
         amountSmoother.prepare (rate, 15.0);
         outputSmoother.prepare (rate, 15.0);

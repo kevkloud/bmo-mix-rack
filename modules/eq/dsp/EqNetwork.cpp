@@ -45,11 +45,18 @@ void EqNetwork::reset() noexcept
     // A fade in progress was carrying state that is now gone.
     hpfMix.snap (hpfActive ? 1.0f : 0.0f);
     lpfMix.snap (lpfActive ? 1.0f : 0.0f);
+
+    // Likewise a gain ramp: the gains are where they were going.
+    gain = gainTarget;
+    gainRecip = gainRecipTarget;
+    gainRampLeft = 0;
 }
 
 //==============================================================================
-void EqNetwork::setSettings (const EqSettings& s) noexcept
+void EqNetwork::setSettings (const EqSettings& s, int gainRampSamples) noexcept
 {
+    const auto firstSettings = takeSwitchesAsFound;
+
     lowBranch .setCutoff (clampCutoff (s.lfFreqHz, sampleRate), sampleRate);
     highBranch.setCutoff (clampCutoff (s.hfFreqHz, sampleRate), sampleRate);
     const auto midQ = s.midQ > 0.0f
@@ -62,10 +69,41 @@ void EqNetwork::setSettings (const EqSettings& s) noexcept
                                    dbToGain (s.midGainDb),
                                    dbToGain (s.hfGainDb) };
 
+    // The band gains move a step per sample to their new values rather than
+    // all at once. They sit inside the feedback loop, whose branch states
+    // hold the signal at the gains it was shaped by, and a smoothed move
+    // handed over once per 32-sample control period arrived as a staircase
+    // of jumps against that state: LF -16 -> +16 dB under a 35 Hz tone
+    // stepped 5.2x the tone's own largest step, and back down 22x. Linear in
+    // g and in 1/g, between control points 32 host samples apart, so the
+    // loop's denominator stays above 1; the last sample lands on exactly the
+    // values the settings ask for.
+    bool gainsMove = false;
+
     for (int i = 0; i < kNumBands; ++i)
     {
-        gain[(size_t) i]      = gains[i];
-        gainRecip[(size_t) i] = 1.0f / gains[i];
+        gainTarget[(size_t) i]      = gains[i];
+        gainRecipTarget[(size_t) i] = 1.0f / gains[i];
+        gainsMove = gainsMove || ! (gain[(size_t) i] == gainTarget[(size_t) i]);
+    }
+
+    if (gainsMove && gainRampSamples > 1 && ! firstSettings)
+    {
+        const auto inverse = 1.0f / (float) gainRampSamples;
+
+        for (size_t i = 0; i < (size_t) kNumBands; ++i)
+        {
+            gainStep[i]      = (gainTarget[i] - gain[i]) * inverse;
+            gainRecipStep[i] = (gainRecipTarget[i] - gainRecip[i]) * inverse;
+        }
+
+        gainRampLeft = gainRampSamples;
+    }
+    else
+    {
+        gain = gainTarget;
+        gainRecip = gainRecipTarget;
+        gainRampLeft = 0;
     }
 
     // A cut switched on or off crosses over between the unfiltered signal and
@@ -140,6 +178,23 @@ float EqNetwork::processSample (float x) noexcept
         x = hpf2.processHighpass (hpf1.processHighpass (x));
     }
 
+    if (gainRampLeft > 0)
+    {
+        if (--gainRampLeft == 0)
+        {
+            gain = gainTarget;
+            gainRecip = gainRecipTarget;
+        }
+        else
+        {
+            for (size_t i = 0; i < (size_t) kNumBands; ++i)
+            {
+                gain[i]      += gainStep[i];
+                gainRecip[i] += gainRecipStep[i];
+            }
+        }
+    }
+
     // Resolve the shared feedback loop. Each branch reports its response as
     // b_i = d_i * u + v_i, so u falls out in closed form.
     float d[kNumBands], v[kNumBands];
@@ -195,8 +250,8 @@ std::complex<double> EqNetwork::responseAt (double frequencyHz) const noexcept
 
     for (int i = 0; i < kNumBands; ++i)
     {
-        numerator   += (double) gain[(size_t) i]      * branch[i];
-        denominator += (double) gainRecip[(size_t) i] * branch[i];
+        numerator   += (double) gainTarget[(size_t) i]      * branch[i];
+        denominator += (double) gainRecipTarget[(size_t) i] * branch[i];
     }
 
     auto h = numerator / denominator;

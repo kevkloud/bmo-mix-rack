@@ -360,13 +360,15 @@ void DspCore::updateCoefficients (int activeChannels, int numSamples) noexcept
     if (settingsChanged)
     {
         // A path warming for an oversampling change follows the knobs too,
-        // so it turns live with the settings the live one had.
+        // so it turns live with the settings the live one had. The band gains
+        // move across the control period that follows a step per sample, at
+        // each path's own rate; see EqNetwork::setSettings.
         for (int ch = 0; ch < activeChannels; ++ch)
         {
-            livePath().networks[(size_t) ch].setSettings (s);
+            livePath().networks[(size_t) ch].setSettings (s, numSamples * livePath().factor);
 
             if (warming)
-                standbyPath().networks[(size_t) ch].setSettings (s);
+                standbyPath().networks[(size_t) ch].setSettings (s, numSamples * standbyPath().factor);
         }
 
         currentSettings = s;

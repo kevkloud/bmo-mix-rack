@@ -104,8 +104,13 @@ public:
 
     /** Recompute coefficients. Cheap enough to call at control rate (see
         DspCore, which calls it once per sub-block from smoothed values).
-        A cut switched on or off crosses over in kSwitchFadeMs. */
-    void setSettings (const EqSettings&) noexcept;
+        A cut switched on or off crosses over in kSwitchFadeMs.
+
+        `gainRampSamples` is how many of this network's samples the next call
+        will be: the band gains move to their new values in a straight line
+        over them, a step per sample, rather than all at once. Zero, the
+        default, sets them at once, as a curve display wants. */
+    void setSettings (const EqSettings&, int gainRampSamples = 0) noexcept;
 
     float processSample (float x) noexcept;
 
@@ -133,8 +138,17 @@ private:
     ShelfBranch lowBranch, highBranch;
     Svf         midBranch;
 
-    std::array<float, kNumBands> gain      { 1.0f, 1.0f, 1.0f };   // g_i
-    std::array<float, kNumBands> gainRecip { 1.0f, 1.0f, 1.0f };   // 1/g_i
+    std::array<float, kNumBands> gain      { 1.0f, 1.0f, 1.0f };   // g_i, in use this sample
+    std::array<float, kNumBands> gainRecip { 1.0f, 1.0f, 1.0f };   // 1/g_i, in use this sample
+
+    // Where the gains are going, the per-sample step there, and how many
+    // samples are left. The targets are exactly what the settings ask for,
+    // and the response the curve and Auto Gain read is theirs.
+    std::array<float, kNumBands> gainTarget      { 1.0f, 1.0f, 1.0f };
+    std::array<float, kNumBands> gainRecipTarget { 1.0f, 1.0f, 1.0f };
+    std::array<float, kNumBands> gainStep        { 0.0f, 0.0f, 0.0f };
+    std::array<float, kNumBands> gainRecipStep   { 0.0f, 0.0f, 0.0f };
+    int gainRampLeft = 0;
 
     // Both filters are 18 dB/octave, so both are third order: a real pole plus
     // a complex pair.

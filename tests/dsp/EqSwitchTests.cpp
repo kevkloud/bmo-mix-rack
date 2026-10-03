@@ -375,6 +375,46 @@ int main()
             }
     }
 
+    //== 2e. A full-range jump of a band's gain does not step ===============
+    // The band gains are smoothed over 20 ms but were handed to the network
+    // once per 32-sample control period, so a jump arrived as a staircase of
+    // gain steps inside a feedback network whose branch state holds the
+    // signal at the old gain: LF -16 -> +16 dB under a 35 Hz tone stepped
+    // 5.2x the tone's own largest step, and +16 -> -16 22x. Each band, both
+    // ways, full range, driven at its lowest frequency choice (35 Hz, 360 Hz,
+    // 10 kHz) and the probe's 60 Hz for LF, at 44.1, 48 and 96 kHz, 1x and
+    // 2x: bound 1.5x.
+    {
+        struct Jump { const char* name; float DspCore::Params::* gain; float range; double hz; int lfIndex; };
+        const Jump jumps[] {
+            { "LF gain at 35 Hz",   &DspCore::Params::lfGainDb,  16.0f, 35.0,    0 },
+            { "LF gain at 60 Hz",   &DspCore::Params::lfGainDb,  16.0f, 60.0,    1 },
+            { "Mid gain at 360 Hz", &DspCore::Params::midGainDb, 18.0f, 360.0,   1 },
+            { "HF gain at 10 kHz",  &DspCore::Params::hfGainDb,  16.0f, 10000.0, 1 },
+        };
+
+        for (double fs : { 44100.0, 48000.0, 96000.0 })
+            for (int os : { 1, 2 })
+                for (const auto& j : jumps)
+                {
+                    DspCore::Params low;
+                    low.oversampling = os;
+                    low.lfFreqIndex  = j.lfIndex;
+                    low.midFreqIndex = 0;
+                    low.hfFreqIndex  = 0;
+                    low.*(j.gain) = -j.range;
+                    auto high = low;
+                    high.*(j.gain) = j.range;
+
+                    const auto up   = switchStepRatio (fs, low, high, j.hz);
+                    const auto down = switchStepRatio (fs, high, low, j.hz);
+                    const auto where = std::string (j.name) + ", " + rateName (fs) + ", " + std::to_string (os) + "x";
+
+                    check (up < 1.5, where + ", full range up, steps " + ratioText (up));
+                    check (down < 1.5, where + ", full range down, steps " + ratioText (down));
+                }
+    }
+
     //== 2b. EQ In brought back in silence does not replay either ===========
     // EQ In out of circuit stops the network, and a stopped network holds its
     // state exactly as a stopped cut does: the same fault as section 1, one

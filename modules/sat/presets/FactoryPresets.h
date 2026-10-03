@@ -23,6 +23,12 @@ namespace bmo::sat
     Anything a preset does not mention goes back to its default, so a preset
     cannot leave a stray setting behind from whatever was loaded before it.
 
+    **Every preset but Init names its TONE.** TONE's default went from 100 to
+    55 on 2026-10-03, the owner's decision before the 0.2.6 schema freeze, and
+    the seven that had left it to the default were given the 100 they had
+    always had, so none of them changed sound. Init follows the default.
+    SatTests holds this.
+
     **Re-solved in 0.5.0 from a measured run, not re-estimated.** Every one of
     these came back between 0.76 and 1.39 dB quiet, and every one of them had
     been passing, because the level-matching test's tolerance is +/-3 dB and a
@@ -54,11 +60,11 @@ inline const std::vector<FactoryPreset>& factory()
         // reference's own asymmetry, 0.62 against 0.84. Everything else in
         // this list is a move away from here.
         { "Reference", {
-            { kDrive, 40.0f }, { kAutoGain, 1.0f },
+            { kDrive, 40.0f }, { kTone, 100.0f }, { kAutoGain, 1.0f },
             { kOutputLevel, 1.27f } } },   // AUTO's residual -- see the note above
 
         { "Vocal Sheen", {
-            { kInputGain, 2.0f }, { kDrive, 34.0f },
+            { kInputGain, 2.0f }, { kDrive, 34.0f }, { kTone, 100.0f },
             { kOutputLevel, -0.04f } } },
 
         // Pulled back in 0.4.0: at Drive 52 with 5 dB of input on top of it,
@@ -66,7 +72,7 @@ inline const std::vector<FactoryPreset>& factory()
         // overdrive, and it distorted on every source it was tried on. The
         // gain was doing most of the damage.
         { "Vocal Front", {
-            { kInputGain, 1.5f }, { kDrive, 46.0f },
+            { kInputGain, 1.5f }, { kDrive, 46.0f }, { kTone, 100.0f },
             { kOutputLevel, 0.82f } } },
 
         { "Whisper", {                             // barely there, for a take that only needs air
@@ -79,7 +85,7 @@ inline const std::vector<FactoryPreset>& factory()
             { kOutputLevel, 0.27f } } },
 
         { "Snare Edge", {
-            { kInputGain, 6.0f }, { kDrive, 66.0f },
+            { kInputGain, 6.0f }, { kDrive, 66.0f }, { kTone, 100.0f },
             { kOutputLevel, -2.24f } } },
 
         { "Bass Warmth", {                         // no air on a bass; the curve only
@@ -87,18 +93,18 @@ inline const std::vector<FactoryPreset>& factory()
             { kOutputLevel, -1.87f } } },
 
         { "Guitar Grit", {
-            { kInputGain, 8.0f }, { kDrive, 78.0f },
+            { kInputGain, 8.0f }, { kDrive, 78.0f }, { kTone, 100.0f },
             { kOutputLevel, -4.12f } } },
 
         { "Mix Bus Colour", {
-            { kDrive, 24.0f }, { kMix, 45.0f },    // gentle, in parallel, level-matched
+            { kDrive, 24.0f }, { kMix, 45.0f }, { kTone, 100.0f },   // gentle, in parallel, level-matched
             { kAutoGain, 1.0f },
             { kOutputLevel, 0.76f } } },   // AUTO's residual -- see the note above
 
         // The top of the range, where the curve stops adding harmonics and
         // starts rearranging the waveform. Not subtle and not meant to be.
         { "Ruined", {
-            { kInputGain, 10.0f }, { kDrive, 100.0f },
+            { kInputGain, 10.0f }, { kDrive, 100.0f }, { kTone, 100.0f },
             { kOversampling, 2.0f },               // 4x: it needs the headroom up there
             { kOutputLevel, -6.40f } } },
     };

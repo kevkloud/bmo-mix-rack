@@ -20,7 +20,9 @@ inline ProductInfo rackInfo()
 }
 
 /** The chains that ship. A rack preset is an order and a setting for each
-    module in it; anything a module's entry does not mention is its default. */
+    module in it; anything a module's entry does not mention is its default.
+    The Saturator names its TONE in every chain: its default went from 100
+    to 55 on 2026-10-03, and these keep the 100 they always had. */
 inline const std::vector<RackPreset>& rackPresets()
 {
     static const std::vector<RackPreset> presets {
@@ -29,14 +31,14 @@ inline const std::vector<RackPreset>& rackPresets()
         { "Channel Strip", {
             { util::kModuleId, {} },
             { eq::kModuleId,   {} },
-            { sat::kModuleId,  {} } } },
+            { sat::kModuleId,  { { sat::kTone, 100.0f } } } } },
 
         { "Vocal Chain", {
             { util::kModuleId, { { util::kGain, -3.0f } } },
             { eq::kModuleId,   { { eq::kHpfFreq, 2 }, { eq::kHfGain, 4.0f },
                                  { eq::kMidFreq, 3 }, { eq::kMidGain, 1.5f },
                                  { eq::kInputGain, 5.0f }, { eq::kOutputLevel, -4.2f } } },
-            { sat::kModuleId,  { { sat::kInputGain, 2.0f }, { sat::kDrive, 34.0f },
+            { sat::kModuleId,  { { sat::kInputGain, 2.0f }, { sat::kDrive, 34.0f }, { sat::kTone, 100.0f },
                                  { sat::kOutputLevel, -1.40f } } } } },
 
         { "Drum Bus", {

@@ -363,10 +363,18 @@ const Golden kDefaults[]
       -18.1085793005, 0.246073037386,
       -18.1085793005, 0.246073037386, -18.0554981077, 0.247819900513,
       -18.1085793005, 0.246073037386, -18.1085793005, 0.246073037386 },
+    // BMO Saturator, recaptured on ICE QUEEN on 2026-10-03 with --print when
+    // TONE's default went from 100 to 55, the owner's decision before the
+    // 0.2.6 schema freeze. Against the row captured at 8fed835 the RMS
+    // figures fell by 1.557 dB (mono, both stereo-in duplicate sides, stereo
+    // L) and 1.319 dB (stereo R), and the peaks from 0.4176 to 0.2734 (0.4421
+    // to 0.3055 on stereo R). Nothing else in the module moved; the rack's
+    // defaults row below moved with it, and every other row printed within
+    // tolerance.
     { "sat",
-      -16.8591902532, 0.417550802231,
-      -16.8591902532, 0.417550802231, -16.3599694613, 0.442101210356,
-      -16.8591902532, 0.417550802231, -16.8591902532, 0.417550802231 },
+      -18.4162417982, 0.273352533579,
+      -18.4162417982, 0.273352533579, -17.6791165191, 0.305534929037,
+      -18.4162417982, 0.273352533579, -18.4162417982, 0.273352533579 },
     { "opto",
       -18.1622967448, 0.240351647139,
       -18.1782648998, 0.240072011948, -18.0459775451, 0.246936917305,
@@ -438,6 +446,11 @@ const Golden kDefaults[]
       -18.2410459358, 0.241076186299,
       -17.9906437489, 0.248789131641, -18.2275212722, 0.244729071856,
       -17.8824750839, 0.258103877306, -18.5916796098, 0.236923843622 },
+    // Recaptured with the BMO Saturator row above, for the same reason: the
+    // Saturator is the third slot of this chain. RMS fell by 1.281 dB (mono,
+    // stereo-in duplicate, mono -> stereo), 1.152 dB (stereo L) and 0.882 dB
+    // (stereo R); peaks from 0.3620 to 0.2635, 0.3618 to 0.2670 and 0.3819
+    // to 0.2934.
     { "rack",
       -17.4712492142, 0.361955910921,
       -17.5526169502, 0.361831098795, -16.9697582674, 0.381935656071,

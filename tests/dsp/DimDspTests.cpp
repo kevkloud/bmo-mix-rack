@@ -794,6 +794,177 @@ int main()
         check (peakSide (shuffled) > peakSide (flat), "shuffle above 1.0 widens the low end");
     }
 
+    //== BELOW glides rather than jumping ======================================
+    // BELOW sets the shuffler's corner, and it used to take a new corner in
+    // one sample at the next block. The shuffler's low band is a one-pole, and
+    // a corner that quadruples at once makes that pole catch up with its input
+    // in a few samples: with BLOOM at 3 that catch-up is scaled by two, and on
+    // a 100 Hz side tone the step was 2.64x the tone's own largest step, 1.80x
+    // at 300 Hz. The bound is the house one, 1.5x, over a full-range move each
+    // way, at BLOOM's extremes, at 44.1, 48 and 96 kHz.
+    {
+        const auto valuesFor = [] (float bloom, float below)
+        {
+            std::vector<float> v { 100.0f, bloom, below, 10.0f, 0.0f,
+                                   0.0f, 0.4f, 50.0f, 0.0f, 0.0f };
+            return v;
+        };
+
+        // A side-only tone (L = -R), the settings switching from `a` to `b` at
+        // sample `at`, in host blocks of `block`. Returns L, then R, then side.
+        const auto render = [] (double sr, int n, int block, float hz,
+                                const std::vector<float>& a, const std::vector<float>& b, int at)
+        {
+            DimDsp dsp;
+            dsp.setParams (a.data(), Index::count);
+            dsp.prepare (sr, block, 2);
+
+            std::vector<float> l ((size_t) n), r ((size_t) n);
+            for (int i = 0; i < n; ++i)
+            {
+                l[(size_t) i] = 0.125f * (float) std::sin (6.283185307179586 * hz * i / sr);
+                r[(size_t) i] = -l[(size_t) i];
+            }
+
+            for (int i = 0; i < n; i += block)
+            {
+                dsp.setParams ((i >= at ? b : a).data(), Index::count);
+                float* ch[2] { l.data() + i, r.data() + i };
+                dsp.process (ch, 2, std::min (block, n - i));
+            }
+
+            std::vector<float> s ((size_t) n);
+            for (size_t i = 0; i < s.size(); ++i)
+                s[i] = 0.5f * (l[i] - r[i]);
+
+            return std::vector<std::vector<float>> { l, r, s };
+        };
+
+        const auto worstStep = [] (const std::vector<float>& x, int from, int to)
+        {
+            float w = 0.0f;
+            for (int i = std::max (from, 1); i < to; ++i)
+                w = std::max (w, std::abs (x[(size_t) i] - x[(size_t) i - 1]));
+            return w;
+        };
+
+        double worst = 0.0;
+        const char* worstWhere = "";
+
+        for (double sr : { 44100.0, 48000.0, 96000.0 })
+            for (float bloom : { 1.0f, 3.0f })
+                for (float hz : { 30.0f, 100.0f, 300.0f })
+                    for (int dir = 0; dir < 2; ++dir)
+                    {
+                        const auto lo = valuesFor (bloom, 350.0f), hi = valuesFor (bloom, 1400.0f);
+                        const auto& a = dir == 0 ? lo : hi;
+                        const auto& b = dir == 0 ? hi : lo;
+
+                        const int n = (int) (sr * 0.5), settle = (int) (sr * 0.1), win = (int) (sr * 0.1);
+
+                        const auto steadyA = render (sr, n, 64, hz, a, a, n);
+                        const auto steadyB = render (sr, n, 64, hz, b, b, n);
+
+                        // Eight moments across a period of the tone, block-aligned.
+                        const int period = (int) (sr / hz);
+
+                        for (int m = 0; m < 8; ++m)
+                        {
+                            const int at = (settle + m * period / 8) / 64 * 64;
+                            const auto moved = render (sr, n, 64, hz, a, b, at);
+
+                            for (int c = 0; c < 3; ++c)
+                            {
+                                const auto steady = std::max (worstStep (steadyA[(size_t) c], settle, n),
+                                                              worstStep (steadyB[(size_t) c], settle, n));
+                                const auto ratio = worstStep (moved[(size_t) c], at, at + win) / steady;
+
+                                if (ratio > worst)
+                                {
+                                    worst = ratio;
+                                    worstWhere = dir == 0 ? "350 -> 1400" : "1400 -> 350";
+                                }
+                            }
+                        }
+                    }
+
+        if (worst >= 1.5)
+            std::cerr << "  BELOW " << worstWhere << ": worst step " << worst << "x steady\n";
+
+        check (worst < 1.5, "a full-range BELOW move is under 1.5x the signal's own step, either way, at BLOOM 1 and 3");
+    }
+    {
+        // The glide runs in samples, not in host blocks: the same automation
+        // at any block size is the same output, bit for bit. 225792 is a
+        // block boundary for every size here, so the move lands on the same
+        // sample in each.
+        constexpr int at = 441 * 512, n = at + 9600;
+        constexpr double sr = 48000.0;
+
+        const auto renderAt = [&] (int block)
+        {
+            const float a[Index::count] { 100.0f, 3.0f, 350.0f, 10.0f, 0.0f, 0.0f, 0.4f, 50.0f, 0.0f, 0.0f };
+            const float b[Index::count] { 100.0f, 3.0f, 1400.0f, 10.0f, 0.0f, 0.0f, 0.4f, 50.0f, 0.0f, 0.0f };
+
+            DimDsp dsp;
+            dsp.setParams (a, Index::count);
+            dsp.prepare (sr, block, 2);
+
+            std::vector<float> l ((size_t) n), r ((size_t) n);
+            for (int i = 0; i < n; ++i)
+            {
+                l[(size_t) i] = 0.125f * (float) std::sin (6.283185307179586 * 100.0 * i / sr);
+                r[(size_t) i] = 0.1f * (float) std::sin (6.283185307179586 * 150.0 * i / sr);
+            }
+
+            for (int i = 0; i < n; i += block)
+            {
+                dsp.setParams (i >= at ? b : a, Index::count);
+                float* ch[2] { l.data() + i, r.data() + i };
+                dsp.process (ch, 2, std::min (block, n - i));
+            }
+
+            l.insert (l.end(), r.begin(), r.end());
+            return l;
+        };
+
+        const auto reference = renderAt (512);
+
+        for (int block : { 1, 7, 32, 441 })
+            check (renderAt (block) == reference, "a BELOW move is the same output at any host block size");
+    }
+    {
+        // It lands on the setting exactly, at every rate, and stops: from
+        // then on the coefficient is the parameter's own, as it always was.
+        for (double sr : { 44100.0, 48000.0, 96000.0 })
+        {
+            DimDsp dsp;
+            float v[Index::count] { 100.0f, 3.0f, 350.0f, 10.0f, 0.0f, 0.0f, 0.4f, 50.0f, 0.0f, 0.0f };
+            dsp.setParams (v, Index::count);
+            dsp.prepare (sr, 512, 2);
+            dsp.setParams (v, Index::count);
+
+            std::vector<float> l (512, 0.1f), r (512, -0.1f);
+            float* ch[2] { l.data(), r.data() };
+
+            v[Index::shuffleFreq] = 1400.0f;
+            dsp.setParams (v, Index::count);
+            dsp.process (ch, 2, 64);
+            check (dsp.getCore().belowMoving() && dsp.getCore().belowHz() > 350.0f
+                       && dsp.getCore().belowHz() < 1400.0f,
+                   "BELOW is part way there 64 samples into a move");
+
+            for (int b = 0; b < (int) (sr * 0.05) / 512 + 1; ++b)
+            {
+                dsp.setParams (v, Index::count);
+                dsp.process (ch, 2, 512);
+            }
+
+            check (! dsp.getCore().belowMoving() && dsp.getCore().belowHz() == 1400.0f,
+                   "BELOW lands on 1400 exactly within 50 ms, and stops");
+        }
+    }
+
     //== Latency ===============================================================
     {
         DimDsp dsp;

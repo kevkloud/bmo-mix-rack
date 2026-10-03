@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/dsp/SwitchFade.h"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -286,6 +288,9 @@ public:
         detuneSm.prepare (sampleRate, 8.0);
         centsSm.prepare (sampleRate, 8.0);
 
+        // BELOW glides in a straight line over a fixed time. See setParams.
+        belowGlide.prepare (sampleRate, kBelowGlideMs);
+
         reset();
     }
 
@@ -373,7 +378,18 @@ public:
         // range fades to exactly nothing.
         centsSm.setTarget (std::clamp (std::abs (p.detuneCents), 0.0f, 1.0f));
 
-        shuffler.setFrequency (p.shuffleFreqHz);
+        // BELOW glides to a new corner instead of taking it at the next
+        // block. The shuffler's low band is a one-pole, and a corner that
+        // quadruples in one sample makes that pole catch up with its input in
+        // a few samples; BLOOM scales the catch-up, so at BLOOM 3 a 350 ->
+        // 1400 jump stepped a 100 Hz side tone 2.64x its own largest step, and
+        // 1.80x at 300 Hz. The glide is a straight line in Hz over
+        // kBelowGlideMs, run per sample in process(), so it takes the same
+        // time at any host block size; it lands on the target exactly, and
+        // from then on the coefficient is computed here, once per block, from
+        // the parameter itself -- the same arithmetic as before, so a BELOW
+        // that is not moving gives bit for bit what it always did.
+        belowGlide.setTarget (p.shuffleFreqHz);
 
         lfoInc = (float) (std::max (p.rateHz, 0.0f) / sampleRate);
 
@@ -387,8 +403,12 @@ public:
             asymSm.snap (asymCoeff (p.asymmetryPercent));
             detuneSm.snap (p.detuneOn ? 1.0f : 0.0f);
             centsSm.snap (std::clamp (std::abs (p.detuneCents), 0.0f, 1.0f));
+            belowGlide.snap (p.shuffleFreqHz);
             primed = true;
         }
+
+        if (! belowGlide.isMoving())
+            shuffler.setFrequency (belowGlide.value());
     }
 
     void process (float* const* channels, int numChannels, int numSamples)
@@ -449,6 +469,11 @@ public:
                 lfoPhase -= 1.0f;
 
             // -- Image -------------------------------------------------------
+            // Only while BELOW is gliding; the sample it lands on sets the
+            // exact target's coefficient, and after that nothing runs here.
+            if (belowGlide.isMoving())
+                shuffler.setFrequency (belowGlide.next());
+
             side = shuffler.process (side, shuffleSm.tick());
             side *= widthSm.tick();
 
@@ -536,6 +561,12 @@ public:
         asserted against. */
     float detuneLevel() const noexcept { return detuneSm.value(); }
 
+    /** Where BELOW's glide is, in Hz, and whether it is still moving.
+        Read-only, for tests: "lands exactly, then does no work" is asserted
+        against these. */
+    float belowHz() const noexcept     { return belowGlide.value(); }
+    bool  belowMoving() const noexcept { return belowGlide.isMoving(); }
+
 private:
     /** The knob's percentage as the shear coefficient, at half scale.
 
@@ -572,6 +603,10 @@ private:
     Shuffler     shuffler;
 
     Smoother widthSm, shuffleSm, diffuseSm, depthSm, rotSm, asymSm, detuneSm, centsSm;
+
+    /** How long BELOW takes to reach a new corner. See setParams. */
+    static constexpr double kBelowGlideMs = 20.0;
+    bmo::dsp::Ramp belowGlide;
 
     float lfoPhase = 0.0f, lfoInc = 0.0f;
     bool  primed = false;

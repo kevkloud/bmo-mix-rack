@@ -216,31 +216,60 @@ int main()
         bmo::PresetManager::setDirectoryForTesting ({});
     }
 
-    //== Every preset comes out at the level it was solved to ===================
-    // Until 2026-10-03 this asked every preset to come out near the level it
-    // went in, and every one did -- because the limiter was taking 1 to 10 dB
-    // off the voice's peaks. The owner's decision that day was to re-solve the
-    // presets off the limiter by MAKEUP alone (modules/vcomp/presets/
-    // FactoryPresets.h), which makes them quieter, so what is pinned now is the
-    // level each one comes out at, as measured here on ICE QUEEN when they were
-    // re-solved, at the same 3 dB tolerance. It still trips if the automatic
-    // makeup (autoMakeupDb, Detector.h) drifts, and now also if a preset's
-    // MAKEUP does. Print the figures with BMO_PRINT_PRESET_LEVELS=1.
+    //== Every preset comes out at its input's loudness =========================
+    // On the house track level -- the suite's voice held to -18 dBFS RMS and
+    // -12 dBFS peak -- which is what the presets' MAKEUP is solved against
+    // (Frosty, 2026-10-03; modules/vcomp/presets/FactoryPresets.h). Until that
+    // day this used the voice as it comes, peaking at -3.85 dBFS, and every
+    // preset passed only because the limiter was taking 1 to 10 dB off it.
+    // Each figure is what the preset measured here on ICE QUEEN when it was
+    // solved, held at the same 3 dB tolerance: it trips if the automatic makeup
+    // (autoMakeupDb, Detector.h) or a preset's MAKEUP drifts. Print the figures
+    // with BMO_PRINT_PRESET_LEVELS=1.
+    //
+    // They are not all 0, and the presets are: each comes out within 0.05 dB
+    // of its input on a fresh instance over 12 s. Here the presets are loaded
+    // one after another into one processor, whose reset() is the base
+    // AudioProcessor's and does nothing to the DSP, over 3 s with one phrase
+    // in it, so each figure carries the move from the preset before it -- 2.3
+    // dB for Fast Vocal (after In Front's AMOUNT, which ARC remembers) and
+    // Keep The Chest (whose LOW THRU comes in by its knob's way).
     {
         auto proc = createVcomp();
         proc->setPlayConfigDetails (2, 2, 48000.0, 512);
         proc->prepareToPlay (48000.0, 512);
 
-        const auto source = voice (512 * 300);
-        const auto sourceDb = rmsDb (source);
+        // The suite's voice, held to the house level: scaled and clipped so it
+        // sits at -18 dBFS RMS and peaks at -12.
+        const auto source = [&]
+        {
+            const auto raw = voice (512 * 300);
+            std::vector<float> held (raw.size());
+            const auto ceiling = juce::Decibels::decibelsToGain (-12.0);
+            double low = 0.1, high = 50.0;
+
+            for (int step = 0; step < 60; ++step)
+            {
+                const auto gain = std::sqrt (low * high);
+
+                for (size_t i = 0; i < raw.size(); ++i)
+                    held[i] = (float) juce::jlimit (-ceiling, ceiling, (double) raw[i] * gain);
+
+                (rmsDb (held) < -18.0 ? low : high) = gain;
+            }
+
+            return held;
+        }();
+        // Over the same blocks outputDb() measures, past the 20 it skips.
+        const auto sourceDb = rmsDb (source, 512 * 20);
         const auto& factory = proc->getPresets().getFactory();
         const bool print = std::getenv ("BMO_PRINT_PRESET_LEVELS") != nullptr;
 
         // Output RMS against the source's, dB, per preset, Init excepted.
         const std::map<juce::String, double> expected {
-            { "Lift",           -3.40 }, { "Forward",     -8.09 }, { "In Front", -9.48 },
-            { "Fast Vocal",    -11.21 }, { "Smooth Lead", -6.55 },
-            { "Keep The Chest", -4.67 }, { "Keep The Air", -5.69 }, { "Manual",   -7.46 },
+            { "Lift",           -0.13 }, { "Forward",     -0.62 }, { "In Front", -0.71 },
+            { "Fast Vocal",     -2.34 }, { "Smooth Lead",  0.00 },
+            { "Keep The Chest", -2.32 }, { "Keep The Air", -0.39 }, { "Manual",   -0.20 },
         };
 
         for (int index = 1; index < (int) factory.size(); ++index)
@@ -260,7 +289,7 @@ int main()
 
             if (pinned != expected.end())
                 checkClose (outDb - sourceDb, pinned->second, 3.0,
-                            "preset '" + name + "' comes out at the level it was solved to");
+                            "preset '" + name + "' comes out at its input's loudness, as solved");
         }
     }
 

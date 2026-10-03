@@ -59,7 +59,20 @@ void EqNetwork::setSettings (const EqSettings& s) noexcept
         gainRecip[(size_t) i] = 1.0f / gains[i];
     }
 
+    // A cut that is off is not run, so its state is whatever the signal left
+    // in it when it went off. Coming back on, that state would be played out
+    // as a burst of the old signal -- -6.5 dBFS from silence, measured -- so a
+    // cut that was off starts again from rest, as one never used does.
+    const auto hpfWasActive = hpfActive;
+    const auto lpfWasActive = lpfActive;
+
     hpfActive = s.hpfFreqHz > 0.0f;
+
+    if (hpfActive && ! hpfWasActive)
+    {
+        hpf1.reset();
+        hpf2.reset();
+    }
 
     if (hpfActive)
     {
@@ -72,6 +85,12 @@ void EqNetwork::setSettings (const EqSettings& s) noexcept
     }
 
     lpfActive = s.lpfFreqHz > 0.0f;
+
+    if (lpfActive && ! lpfWasActive)
+    {
+        lpf1.reset();
+        lpf2.reset();
+    }
 
     if (lpfActive)
     {

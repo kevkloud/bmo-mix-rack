@@ -167,6 +167,7 @@ public:
         std::fill (preLine.begin(), preLine.end(), 0.0f);
         for (auto& a : apLine) std::fill (a.begin(), a.end(), 0.0f);
         for (auto& f : filt) f = {};
+        for (auto& f : filtTo) f = {};
         writeIdx = 0; preIdx = 0;
         for (auto& i : apIdx) i = 0;
 
@@ -248,42 +249,61 @@ public:
             x = afterTwo + (x - afterTwo) * fourWeight;
 
             // Read, absorb, mix, write.
-            float y[N], mixed[N];
-            const auto w = fading ? raisedCosine (fadePos, fadeLength) : 0.0f;
-            if (fading)
-                blendFilters (w);
+            float mixed[N];
+            float l = 0.0f, r = 0.0f;
 
-            for (int i = 0; i < N; ++i)
+            if (! fading)
             {
-                auto d = read (i, lengths[i]);
-                if (fading)
-                    d = d * (1.0f - w) + read (i, fadeTo[i]) * w;
+                for (int i = 0; i < N; ++i)
+                {
+                    const auto y = absorb (filt[(size_t) i], read (i, lengths[i]));
+                    mixed[i] = y;
+                    l += outL[i] * y;
+                    r += outR[i] * y;
+                }
+                l *= levelNow; r *= levelNow;
+            }
+            else
+            {
+                // **A length move crossfades two whole paths, not their
+                // parts.** The old read goes through the old filters at the
+                // old level, the new read through the new filters at the new
+                // level, and only the results are mixed. Each path's loop
+                // gain is under one, so the mix is too. Blending the
+                // *coefficients* instead, as this did until 2026-10-03, does
+                // not keep a filter's gain-times-shelf product: Room at DECAY
+                // 0.1, LOW x 2.0, SIZE 0.5 -> 80 ends on a gain of 1e-5 under
+                // a +50 dB shelf, and half way there it was 0.35 under most
+                // of the shelf -- a burst 27 dB over the tail on either side.
+                const auto w = raisedCosine (fadePos, fadeLength);
+                float lOld = 0.0f, rOld = 0.0f, lNew = 0.0f, rNew = 0.0f;
 
-                y[i] = absorb (i, d);
-                mixed[i] = y[i];
+                for (int i = 0; i < N; ++i)
+                {
+                    const auto a = absorb (filt[(size_t) i],   read (i, lengths[i]));
+                    const auto b = absorb (filtTo[(size_t) i], read (i, fadeTo[i]));
+                    mixed[i] = a * (1.0f - w) + b * w;
+                    lOld += outL[i] * a;  rOld += outR[i] * a;
+                    lNew += outL[i] * b;  rNew += outR[i] * b;
+                }
+                l = (1.0f - w) * levelNow * lOld + w * levelTo * lNew;
+                r = (1.0f - w) * levelNow * rOld + w * levelTo * rNew;
             }
 
             hadamard (mixed);
-            float l = 0.0f, r = 0.0f;
 
             for (int i = 0; i < N; ++i)
-            {
                 lines[i][(size_t) writeIdx] = flush (mixed[i] + inSign[i] * x);
-                l += outL[i] * y[i];
-                r += outR[i] * y[i];
-            }
 
             if (++writeIdx == lineLength) writeIdx = 0;
 
-            const auto level = fading ? levelNow + (levelTo - levelNow) * w : levelNow;
-            l *= level; r *= level;
-
             if (fading && ++fadePos >= fadeLength)
             {
+                // The new path becomes the only one, filter state and all.
                 fading   = false;
                 lengths  = fadeTo;
                 levelNow = levelTo;
-                designAll();
+                filt     = filtTo;
             }
 
             // TYPE: down over one crossfade, swap at the bottom, up over
@@ -304,7 +324,7 @@ public:
                     sizeAtBuild = current.sizeM;
                     fading  = true;
                     fadePos = 0;
-                    designAll();
+                    beginFilterFade();
                     fourTarget = fourFor (current.type);
                 }
                 else if (dipPos >= 2 * half)
@@ -479,7 +499,7 @@ private:
             sizeAtBuild = current.sizeM;
             fading  = true;
             fadePos = 0;
-            designAll();
+            beginFilterFade();
         }
     }
 
@@ -624,9 +644,8 @@ private:
         return y;
     }
 
-    float absorb (int i, float x) noexcept
+    static float absorb (Filter& f, float x) noexcept
     {
-        auto& f = filt[(size_t) i];
         return (float) biquad (f.hb, f.ha, f.hz, biquad (f.lb, f.la, f.lz, (double) x * f.g));
     }
 
@@ -708,37 +727,21 @@ private:
         for (int i = 0; i < N; ++i)
             design ((float) lengths[(size_t) i], lo, hi, filt[(size_t) i]);
 
-        // A length move in flight: both ends of it, so the per-sample blend
-        // in `process` lands exactly where this would have.
+        // A length move in flight: the path it is fading to as well. Only
+        // coefficients are written, so its running state is left alone.
         if (fading)
             for (int i = 0; i < N; ++i)
-            {
-                design ((float) lengths[(size_t) i], lo, hi, filtFrom[(size_t) i]);
-                design ((float) fadeTo[(size_t) i],  lo, hi, filtTo[(size_t) i]);
-            }
+                design ((float) fadeTo[(size_t) i], lo, hi, filtTo[(size_t) i]);
     }
 
-    /** **The absorbent filters move with the lengths, sample by sample.** Each
-        line's loss is per pass, so a new length is a new filter -- and until
-        2026-10-02 the new design landed at the end of a SIZE crossfade in one
-        step, on every line at once, which on a sustained sine measured as a
-        step 3.2 times anything in the tail before it. Both ends are designed
-        when a move starts and every coefficient is blended across it with the
-        reads, so the end of the fade is where the blend already is. */
-    void blendFilters (float w) noexcept
+    /** A length move starts: design the path it is going to, from silence.
+        The new filters begin with empty state, which is exact -- their
+        weight in the crossfade is zero at this sample. See `process`. */
+    void beginFilterFade() noexcept
     {
-        const auto mix = [w] (double a, double b) { return a + (b - a) * (double) w; };
-        for (int i = 0; i < N; ++i)
-        {
-            auto& f = filt[(size_t) i];
-            const auto& a = filtFrom[(size_t) i];
-            const auto& b = filtTo[(size_t) i];
-            f.g = mix (a.g, b.g);
-            for (int k = 0; k < 3; ++k) { f.lb[k] = mix (a.lb[k], b.lb[k]); f.hb[k] = mix (a.hb[k], b.hb[k]); }
-            for (int k = 0; k < 2; ++k) { f.la[k] = mix (a.la[k], b.la[k]); f.ha[k] = mix (a.ha[k], b.ha[k]); }
-            f.loDc  = std::max (a.loDc, b.loDc);
-            f.hiNyq = std::max (a.hiNyq, b.hiNyq);
-        }
+        designAll();
+        for (auto& f : filtTo)
+            f.lz[0] = f.lz[1] = f.hz[0] = f.hz[1] = 0.0;
     }
 
     /** DECAY and the two multipliers glide 20 ms one-pole, stepped per
@@ -788,7 +791,7 @@ private:
     float fourWeight = 0.0f, fourTarget = 0.0f;   ///< 0 takes the diffusers after two, 1 after four
     float levelNow = 1.0f, levelTo = 1.0f;        ///< `levelFor`, crossfaded with the lengths
 
-    std::array<Filter, N> filt {}, filtFrom {}, filtTo {};
+    std::array<Filter, N> filt {}, filtTo {};   ///< `filtTo` is the path a length move is fading to
     std::array<float, 3> smoothed { 1.8f, 1.2f, 0.4f };
     std::array<float, 2> designedKnees { 0.0f, 0.0f };
 

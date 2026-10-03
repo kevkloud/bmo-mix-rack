@@ -144,3 +144,43 @@ with a test written first and shown failing:
   4.77–5.18 % of a core at 192 kHz / 32, SIZE 80, DENSITY 100, against a
   5 % budget. Frosty: 5.18 % is fine at 192 kHz, a high-fidelity rate where
   added cost should be expected. The budget at 48 kHz is unchanged.
+
+## QA's second pass, on `6067809`, 2026-10-03
+
+Both blockers held. The round had introduced one new one, and the fresh
+review found gaps in the tests. All on ICE QUEEN.
+
+- **`aa78b88`: `reset()` before `prepare()` never returned.** Since
+  `0911af7` `reset()` rebuilds the line lengths, and on a never-prepared
+  network the search had no candidate and no exit. Both processors call
+  `reset()` from `releaseResources()`, so a host releasing a plugin it never
+  prepared would hang. The search is now bounded, an unprepared network holds
+  no lengths, and processing one writes zeros. The test hung on `6067809`
+  (still running at 120 s) and passes now; the probe's `resetfirst` prints
+  `returned`.
+- **A full-range SIZE move burst 27 dB over either end.** QA measured it as
+  −22.3 → −8.9 dBFS and judged it not a blocker. Writing the test showed it
+  was a real overshoot: an instance held at SIZE 80, DECAY 0.1 sits at
+  −91 dBFS, yet the move peaked at −5.4 from −32.3. Blending the filter
+  coefficients does not keep a filter's gain-times-shelf product. A length
+  move now crossfades two whole paths, each with its own filters and level.
+  After: −32.1 dBFS in the test; the probe's `sizefade` reads −22.3 before
+  and −24.9 after. `jump` is unchanged to rounding on every row.
+- **The exact-silence check now runs in the suite CI runs**, not only under
+  `--long`: DECAY 0.3 s, every type, at 48, 96 and 192 kHz, must be exactly
+  0.0f within four seconds. It fails at all three rates with the ER flush
+  removed.
+- **The mid-move test compares the network, not just its lengths.** Each
+  line's realised filter gain, and 0.25 s of tail sample for sample, against
+  a fresh instance. Two flaws in it were found by trying to break it:
+  - the instance had been run on silence before the move, so there was
+    nothing for a faulty `reset()` to leave behind; it is run on noise now;
+  - a break that changes `reset()` for both instances proves nothing, so the
+    break used leaves filter state behind, which only the mid-move instance
+    has. With it, all three cases differ by about 0.006 and fail.
+- **Docs:** the last two "nothing has been heard" lines, the 192 kHz CPU
+  figure in `10` §6 and `11` §6, and Frosty's two rulings written into `10`
+  §4's as-built list, not only here.
+
+`build-dsp` and `build-full` figures are in the commit that carries this
+note.

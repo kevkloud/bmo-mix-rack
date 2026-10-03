@@ -415,7 +415,7 @@ injection into one line as belt and braces. **Freeze:** not in v1.
 
 ### As built in M3a (2026-10-02, on ICE QUEEN)
 
-`modules/reverb/dsp/LateNetwork.h` departs from this section in six places.
+`modules/reverb/dsp/LateNetwork.h` departs from this section in the places below.
 Each was forced by a measurement against `11` §6, and each is argued in full
 where it is coded. Everything else above stands.
 
@@ -443,9 +443,28 @@ where it is coded. Everything else above stands.
   The second exists because a network's energy at a given T60 grows as
   T60/τ̄: Hall at 1 m peaked +0.8 dBFS on pink noise at −18 dBFS RMS. Both
   are CALIBRATE.
-- **A length change blends the absorbent filters as well as the reads**,
-  sample by sample across the 30 ms. A redesign landing in one step at the
-  end of the fade measured as the largest step in the move.
+- **A length change crossfades two whole paths**: the old read through the
+  old filters at the old level, the new read through the new filters at the
+  new level, and only the results are mixed across the 30 ms. A redesign
+  landing in one step at the end of the fade measured as the largest step in
+  the move; blending the *coefficients* instead (tried first) does not keep a
+  filter's gain-times-shelf product, and burst 27 dB over either end on a
+  full-range SIZE move at DECAY 0.1, LOW × 2.0.
+
+Four more, from QA's two passes on PR #38 (2026-10-03):
+
+- **The absorbent filters run in double.** In float, at 96 and 192 kHz, the
+  rounded coefficients realised a DC loop gain of up to 1.0071 and the tail
+  grew without limit. The lines stay float.
+- **`reset()` and `prepare()` build from the current settings**, never from a
+  move in flight; an unprepared network holds no lengths and outputs zeros;
+  and the search for line lengths is bounded.
+- **The early reflections' one-poles flush below 1e−15 too**, so a silent
+  instance is exactly silent with flush-to-zero off.
+- **The level at the far corner is intended** (Frosty, 2026-10-03). Plate,
+  DECAY 20 s, both multipliers at 2.0, REVERB 0 dB, on noise at −18 dBFS RMS,
+  peaks at +3.4 to +4.1 dBFS. A 40 s tail holds that energy, nothing scales
+  the level by decay, and REVERB is the control for it.
 
 Two items are red and recorded, not hidden, both Plate: modal density, Σ*m*ᵢ
 = 0.146 s against 0.15 s (this section predicted it), and late-envelope
@@ -496,6 +515,15 @@ ops/sample on its own.
 comparable figure is BMO Tune RT at 0.934 % median, 48 kHz/128: **≤1.5 % of one
 core at 48 kHz/128 and ≤5 % at 192 kHz, per instance**, so eight slots stay under
 12 % and 40 %. Measure via `tools/measure/reverb/main.cpp`, do not infer.
+
+*As measured with the tail in (M3a, 2026-10-03, on an idle ICE QUEEN):* the
+worst case at 192 kHz / 32, SIZE 80, DENSITY 100, is **4.77–5.18 %** across
+the types, a hair past the 5 % line for Room and Plate. **Frosty accepts it
+at 192 kHz** — "a high-fidelity rate where added cost should be expected" —
+so the measured **5.18 %** stands as accepted. It is not a new budget:
+whatever M3b's EQ and modulation add on top is measured and brought to
+Frosty, not assumed to fit. 48 kHz / 128 stays at ≤1.5 % (measured
+1.10–1.22 %).
 
 **Memory** (float32): ER 0.25 s × 2 ch, pre-delay 0.25 s × 2 ch, FDN Σ ≈ 0.7 s
 with modulation headroom, diffuser and allpasses ≈ 0.1 s — ≈1.55 s

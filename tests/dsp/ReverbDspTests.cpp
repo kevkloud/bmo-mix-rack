@@ -3033,6 +3033,111 @@ int main (int argc, char** argv)
             check (silent, "and after 280 s every one of them is exactly silent");
     }
 
+    //== A short tail reaches exactly zero, in the suite CI runs ================
+    //
+    // The 280 s run above is behind --long, which ctest does not pass, so the
+    // early reflections' flush (their one-poles stuck at 1e-45) had no
+    // coverage where it counts (QA, 2026-10-03). DECAY 0.3 s reaches the
+    // flush in under two seconds, so this runs everywhere: every type at its
+    // own voicing, ER and tail both on, a 10 ms burst, four seconds, and the
+    // last quarter second must be exactly 0.0f.
+    for (const auto rate : { 48000.0, 96000.0, 192000.0 })
+        for (int t = 0; t < numTypes; ++t)
+        {
+            const auto& c = constantsFor (t);
+            DspCore core;
+            DspCore::Params p;
+            p.type = (Type) t;
+            p.sizeM = c.sizeM;
+            p.feed = c.feed * 0.01f;
+            p.erLevelDb = c.erLevelDb;
+            p.verbLevelDb = c.verbLevelDb;
+            p.dampLoFreqHz = c.dampLoFreqHz;
+            p.dampHiFreqHz = c.dampHiFreqHz;
+            p.decaySeconds = 0.3f;
+            p.dampLo = p.dampHi = 1.0f;
+            p.mix = 1.0f;
+            core.setParams (p);
+            core.prepare (rate, 512, 2);
+
+            std::vector<float> l (512), r (512);
+            float* chans[] { l.data(), r.data() };
+            const auto total = (long long) (4.0 * rate), burst = (long long) (0.01 * rate), tailFrom = (long long) (3.75 * rate);
+            float lastPeak = 0.0f, anyPeak = 0.0f;
+
+            for (long long n = 0; n < total; n += 512)
+            {
+                for (int i = 0; i < 512; ++i)
+                    l[(size_t) i] = r[(size_t) i] = n + i < burst ? noiseAt ((int) (n + i)) * 0.6928f : 0.0f;
+                core.process (chans, 2, 512);
+                for (int i = 0; i < 512; ++i)
+                {
+                    const auto a = std::max (std::abs (l[(size_t) i]), std::abs (r[(size_t) i]));
+                    anyPeak = std::max (anyPeak, a);
+                    if (n + i >= tailFrom) lastPeak = std::max (lastPeak, a);
+                }
+            }
+
+            const auto label = std::string (kTypeNames[t]) + " at " + std::to_string ((int) rate);
+            check (anyPeak > 0.0f, (label + ": the burst made a sound at all").c_str());
+            if (lastPeak != 0.0f)
+                std::cout << "  not silent: " << label << ", last quarter second peaks " << lastPeak << "\n";
+            check (lastPeak == 0.0f, (label + ": DECAY 0.3 s is exactly silent within four seconds").c_str());
+        }
+
+    //== A SIZE move across the whole range is no louder than either end =======
+    //
+    // QA's `sizefade`, 2026-10-03: Room, DECAY 0.1 s, LOW x 2.0, noise at
+    // -18 dBFS RMS, SIZE 0.5 -> 80 m. The second after the move peaked far
+    // above the second before it, and the suspicion was that blending the
+    // filters' coefficients through the crossfade overshoots. It did: an
+    // instance held at 80 m all along sits at -91 dBFS (each pass through a
+    // 167 ms line at DECAY 0.1 loses 100 dB), yet the move peaked at -5.4
+    // from -32.3, a burst 27 dB over either end. A crossfade between two
+    // states cannot be louder than the louder of them, and the second after
+    // the move still holds the old tail fading out, so that is the bound.
+    {
+        const auto peakDb = [] (float from, float to, bool move)
+        {
+            DspCore core;
+            DspCore::Params p;
+            p.decaySeconds = 0.1f;
+            p.dampLo = 2.0f;
+            p.erLevelDb = -40.0f;
+            p.verbLevelDb = 0.0f;
+            p.mix = 1.0f;
+            p.sizeM = from;
+            core.setParams (p);
+            core.prepare (48000.0, 512, 2);
+
+            std::vector<float> l (512), r (512);
+            float* chans[] { l.data(), r.data() };
+            float before = 0.0f, after = 0.0f;
+
+            for (int n = 0; n < 4 * 48000; n += 512)
+            {
+                if (move && n >= 2 * 48000) { p.sizeM = to; core.setParams (p); }
+                for (int i = 0; i < 512; ++i)
+                    l[(size_t) i] = r[(size_t) i] = noiseAt (n + i) * 0.4362f;
+                core.process (chans, 2, 512);
+                for (int i = 0; i < 512; ++i)
+                {
+                    const auto a = std::max (std::abs (l[(size_t) i]), std::abs (r[(size_t) i]));
+                    if (n + i >= 48000 && n + i < 2 * 48000) before = std::max (before, a);
+                    if (n + i >= 2 * 48000 && n + i < 3 * 48000) after = std::max (after, a);
+                }
+            }
+            return std::pair<double, double> { 20.0 * std::log10 (std::max (before, 1.0e-9f)), 20.0 * std::log10 (std::max (after, 1.0e-9f)) };
+        };
+
+        const auto moved = peakDb (0.5f, 80.0f, true);
+        const auto held  = peakDb (80.0f, 80.0f, false);
+        std::cout << "  SIZE 0.5 -> 80 m, Room, DECAY 0.1, LOW x 2.0: peak " << moved.first << " dBFS before, "
+                  << moved.second << " after; held at 80 m all along: " << held.second << " dBFS\n";
+        check (moved.second <= std::max (moved.first, held.second) + 1.0,
+               "the second after a full-range SIZE move is no louder than the tail before it or SIZE 80 held");
+    }
+
     //== reset() before prepare() returns, and an unprepared network is silent ==
     //
     // QA, 2026-10-03, PR #38, second pass. Both processors' releaseResources()
@@ -3100,12 +3205,60 @@ int main (int argc, char** argv)
             c->prepare (rate, 512, 2);
             return c;
         };
+        // Noise, not silence: an instance that had been running silence has
+        // nothing in its lines or filters for prepare() or reset() to leave
+        // behind, and the comparison below would pass whatever they did.
         const auto run = [] (DspCore& c, int blocks)
         {
-            std::vector<float> l (512, 0.0f), r (512, 0.0f);
+            std::vector<float> l (512), r (512);
             float* chans[] { l.data(), r.data() };
             for (int b = 0; b < blocks; ++b)
+            {
+                for (int i = 0; i < 512; ++i)
+                    l[(size_t) i] = r[(size_t) i] = noiseAt (b * 512 + i) * 0.5f;
                 c.process (chans, 2, 512);
+            }
+        };
+
+        // The same network, not just the same lengths: every line's filter
+        // realises the same gain as a fresh instance's, and the two give the
+        // same samples for the same noise. The tail alone -- ER fader off and
+        // SOURCE 0, so the tail hears only the dry -- because the ER
+        // generator's DENSITY glide starts where it was left and is M2's.
+        const auto tailOnly = [] (DspCore::Params& p)
+        {
+            p.erLevelDb = -40.0f;
+            p.verbLevelDb = 0.0f;
+            p.feed = 0.0f;
+            p.mix = 1.0f;
+        };
+        const auto sameNetwork = [] (DspCore& a, DspCore& b, const std::string& what)
+        {
+            bool filters = true;
+            for (int i = 0; i < DspCore::kNumLines; ++i)
+                for (const auto hz : { 0.0, 100.0, 1000.0, 10000.0 })
+                    filters = filters && a.lateNetwork().realisedGain (i, hz) == b.lateNetwork().realisedGain (i, hz);
+            check (filters, (what + ": every line's filter is a fresh instance's").c_str());
+
+            std::vector<float> al (512), ar (512), bl (512), br (512);
+            float worst = 0.0f, loudest = 0.0f;
+            for (int blk = 0; blk < 24; ++blk)
+            {
+                for (int i = 0; i < 512; ++i)
+                    al[(size_t) i] = ar[(size_t) i] = bl[(size_t) i] = br[(size_t) i] = noiseAt (blk * 512 + i) * 0.5f;
+                float* ca[] { al.data(), ar.data() };
+                float* cb[] { bl.data(), br.data() };
+                a.process (ca, 2, 512);
+                b.process (cb, 2, 512);
+                for (int i = 0; i < 512; ++i)
+                {
+                    worst   = std::max ({ worst, std::abs (al[(size_t) i] - bl[(size_t) i]), std::abs (ar[(size_t) i] - br[(size_t) i]) });
+                    loudest = std::max ({ loudest, std::abs (al[(size_t) i]), std::abs (bl[(size_t) i]) });
+                }
+            }
+            std::cout << "  " << what << ": tail peak " << loudest << ", largest difference from a fresh instance " << worst << "\n";
+            check (loudest > 1.0e-3f, (what + ": the comparison heard a tail at all").c_str());
+            check (worst == 0.0f, (what + ": and its tail is a fresh instance's, sample for sample").c_str());
         };
 
         // (a) and (b): a SIZE crossfade in flight, then prepare() at another
@@ -3113,6 +3266,7 @@ int main (int argc, char** argv)
         for (const auto newRate : { 44100.0, 96000.0 })
         {
             DspCore::Params p;
+            tailOnly (p);
             p.sizeM = 40.0f;
             auto core = fresh (96000.0, p);
             run (*core, 20);
@@ -3134,11 +3288,13 @@ int main (int argc, char** argv)
             check (got == want, ("prepare() at " + std::to_string ((int) newRate)
                                  + " mid-crossfade gives a fresh instance's lengths").c_str());
             check (inside, "and every line fits its buffer");
+            sameNetwork (*core, *fresh (newRate, p), "prepare() at " + std::to_string ((int) newRate) + " mid-crossfade");
         }
 
         // (c): reset() in the middle of a TYPE dip, Room to Plate.
         {
             DspCore::Params p;
+            tailOnly (p);
             auto core = fresh (48000.0, p);
             run (*core, 20);
             p.type = Type::plate;
@@ -3151,6 +3307,7 @@ int main (int argc, char** argv)
             check (lengthsOf (*core) == lengthsOf (*freshPlate), "reset() mid-dip gives Plate's lengths, not Room's");
             check (core->lateNetwork().diffuserWeight() == freshPlate->lateNetwork().diffuserWeight(),
                    "and Plate's four diffusers, not Room's two");
+            sameNetwork (*core, *fresh (48000.0, p), "reset() mid-dip");
         }
     }
 

@@ -1111,7 +1111,10 @@ and is on the open list.
   and expect it red** — `10` section 4 records eight lines covering Plate to
   barely 1 s, and the fix is 16 lines, a larger mean delay, or accepting
   sparsity.
-- **Nothing has been heard.** Not one setting.
+- **Heard, but not voiced.** The early reflections (M2) and the tail (M3a)
+  have both been through a listening pass. Only Room's constants are worked
+  out, and Room is the one Frosty heard as wrong: M4 is where every type is
+  fitted by ear.
 
 ## The build rules, which are not optional
 

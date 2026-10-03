@@ -8,7 +8,9 @@ AURORA, 2026-09-20/21.
 been built** on AURORA, on `frosty-add-bmo-linger`. `modules/reverb/params.h`
 and `modules/reverb/AGENTS.md` are the source of truth for what exists; this
 pack is the reasoning behind it, reconciled to the code on 2026-09-22. **The DSP
-is a marked placeholder and nothing has been heard** — not one setting.
+was a marked placeholder then. Since: the early reflections (M2) and the tail
+(M3a) are built and have each been through a listening pass**; the Reverb EQ,
+modulation and the type voicings are still to come.
 
 ## Decided
 

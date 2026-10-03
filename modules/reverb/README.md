@@ -6,10 +6,11 @@ Two spaces in one module — the early reflections that tell you where you are,
 and the tail that tells you how big it is — each with its own fader, so you can
 have one without the other. No latency.
 
-> **Not finished.** The panel, the parameters, the display and the early
-> reflections are real; the tail is not built yet, so REVERB's fader moves a
-> silent bus and the EQ page's curve is not yet in the sound. Nothing here has
-> been heard. See `AGENTS.md` and `docs/reverb/`.
+> **Not finished.** The panel, the parameters, the display, the early
+> reflections and the tail are real, and the early reflections and the tail
+> have been heard. The EQ page's curve and DARKEN are not yet in the sound,
+> the tail has no modulation yet, and only Room's voicing is worked out. See
+> `AGENTS.md` and `docs/reverb/`.
 
 ## The shape of it
 

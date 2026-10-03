@@ -413,6 +413,45 @@ control, no extra algorithms. **Denormals:** `juce::ScopedNoDenormals` is alread
 applied host-rate in both processors (`00` §2); add an alternating ±1e−20
 injection into one line as belt and braces. **Freeze:** not in v1.
 
+### As built in M3a (2026-10-02, on ICE QUEEN)
+
+`modules/reverb/dsp/LateNetwork.h` departs from this section in six places.
+Each was forced by a measurement against `11` §6, and each is argued in full
+where it is coded. Everything else above stands.
+
+- **Hadamard, not Householder.** Householder is maximally mixing at four
+  lines, not eight. At eight its diagonal is 0.75, so each line mostly feeds
+  itself, and the late envelope recurred at each type's shortest line
+  (autocorrelation up to 0.28, against 0.2). Hadamard, done as a fast
+  Walsh–Hadamard transform, brought it to 0.08–0.16 at about the same cost.
+  **The line count must now be a power of two: 16 stays open, 12 does not.**
+- **Second-order shelves, half an octave outside each knee.** First-order
+  shelves cannot meet "mid within 5 % whatever the multipliers" with knees
+  three octaves apart: the mid band read 25 % off at a 0.25 multiplier. RBJ
+  shelves at S = 1 (monotonic, so the clamp above still bounds them), placed
+  so each plateau starts at its knee, hold the mid within 1.5 %.
+- **The input diffusers may not ring longer than half of DECAY.** At
+  g = 0.66 and 18 ms an allpass rings 0.3 s on its own, so DECAY 0.3 s
+  measured 0.36 s. Each diffuser's gain is now capped by DECAY. Above about
+  1.1 s the cap never bites.
+- **Denormals are flushed, not injected.** A ±1e−20 injection means a reset
+  network is never silent, which breaks `11` §6's "zeros in, exactly zeros
+  out". Everything the network stores is zeroed below 1e−15 instead.
+- **SIZE scales τ̄ in proportion from each type's own SIZE, floored at
+  5 ms, and the tail's level by √(τ̄ / the type's τ̄).** The first is a
+  reading of `11` §1 ("the late network scales with the taps under SIZE").
+  The second exists because a network's energy at a given T60 grows as
+  T60/τ̄: Hall at 1 m peaked +0.8 dBFS on pink noise at −18 dBFS RMS. Both
+  are CALIBRATE.
+- **A length change blends the absorbent filters as well as the reads**,
+  sample by sample across the 30 ms. A redesign landing in one step at the
+  end of the fade measured as the largest step in the move.
+
+Two items are red and recorded, not hidden, both Plate: modal density, Σ*m*ᵢ
+= 0.146 s against 0.15 s (this section predicted it), and late-envelope
+autocorrelation of 0.202 against 0.2. M3b's modulation or M4's line count
+takes them back.
+
 ## 5. Parameter changes, bypass, tail reporting
 
 Type switch may be a large jump in sound (`01` D3) but must not click: 30 ms
@@ -430,8 +469,8 @@ over 150 ms in `reset()`; a real bypass needs a rack change (§8).
 (`SingleModuleProcessor.h:41`, `RackProcessor.h:124`); reverb is the first module
 for which that is wrong. Report
 **T_tail = preDelay_s + T_mid·max(1, *r*_lo, *r*_hi) + *t*_ER,max + 0.05 s**,
-from parameter values rather than DSP state, clamped to a 30 s ceiling so a
-20 s × 2.0 setting does not hand the host 40 s. Tails compound along a chain, so
+from parameter values rather than DSP state, clamped to a 40 s ceiling (30 s until 2026-10-02) so a
+setting at the corner (40.8 s of arithmetic) hands the host 40 s and no more. Tails compound along a chain, so
 the rack figure is the **sum** over occupied slots, not the maximum.
 
 ## 6. CPU and memory

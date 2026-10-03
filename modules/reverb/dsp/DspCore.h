@@ -6,6 +6,7 @@
 #include "core/dsp/ModuleDsp.h"
 #include "modules/reverb/dsp/EqNodes.h"
 #include "modules/reverb/dsp/ErGenerator.h"
+#include "modules/reverb/dsp/LateNetwork.h"
 #include "modules/reverb/dsp/TapTables.h"
 #include "modules/reverb/params.h"
 
@@ -42,17 +43,18 @@ enum class Type { room = 0, chamber, hall, cavern, plate, ambience };
 enum class ErMode { taps = 0, energy };
 
 //==============================================================================
-/** **M2: the early reflections play; the tail is silent.**
+/** **M3a: the early reflections and the tail play.**
 
     `ErGenerator.h` is the early-reflection generator -- image-source tables,
     the Size law and its crossfade, four order-banded poles, the density
     bridge and its feed-forward diffuser, seven VARIATION positions, the ER
     hi-cut -- and this class feeds it the mid of the input, takes the ER bus
     back at table level, and applies the two faders, the MIX law
-    and OUTPUT with 20 ms smoothing. The late network (M3) and the six type
-    blocks (M4) are still to come: REVERB's fader is smoothed and applied to a
-    bus that is all zeros, so it already behaves, and the Reverb EQ is not
-    yet in the signal path. Latency is zero, which is the *shipped* figure.
+    and OUTPUT with 20 ms smoothing. `LateNetwork.h` is the tail, fed by
+    SOURCE's balance of the dry mid and the ER bus and returned through
+    WIDTH and the REVERB fader. Still to come: M3b (the Reverb EQ and DARKEN,
+    modulation, the onset and truncation contours) and M4 (the six type
+    blocks). Latency is zero, which is the *shipped* figure.
 
     The spec is `docs/reverb/10-dsp-spec.md`; what the tests ask of it is
     `docs/reverb/11-integration-and-test-plan.md` section 6, whose ER block is
@@ -176,7 +178,8 @@ public:
     // (`ErGenerator::kRampWidth`, `kCrossfadeMs`); the late network will read
     // the rest.
 
-    /** Eight FDN lines, Householder matrix. **10 section 4 is the live risk
+    /** Eight FDN lines, Hadamard matrix (a power of two, see
+        `LateNetwork::hadamard`). **10 section 4 is the live risk
         here**: the mode-density rule scales with decay, Sum(m_i) >= 0.15 * T60
         * fs, so eight lines cover Hall to about 2.9 s and Plate to barely 1 s.
         The fix is 16 lines for the long-decay types, a larger mean delay, or
@@ -253,10 +256,14 @@ public:
 
         er.prepare (sampleRate, blockSize);
         pushErConfig();
+        late.prepare (sampleRate, blockSize);
 
         feed.assign ((size_t) blockSize, 0.0f);
         erL.assign ((size_t) blockSize, 0.0f);
         erR.assign ((size_t) blockSize, 0.0f);
+        tailIn.assign ((size_t) blockSize, 0.0f);
+        lateL.assign ((size_t) blockSize, 0.0f);
+        lateR.assign ((size_t) blockSize, 0.0f);
 
         smoothCoef = 1.0f - std::exp (-1.0f / (kSmoothingMs * 0.001f * (float) sampleRate));
         snapGains();
@@ -277,6 +284,7 @@ public:
     void reset()
     {
         er.reset();
+        late.reset();
         snapGains();
     }
 
@@ -290,6 +298,11 @@ public:
         measurement tool. */
     ErGenerator& earlyReflections() noexcept { return er; }
     const ErGenerator& earlyReflections() const noexcept { return er; }
+
+    /** The late network, likewise. */
+    using Late = LateNetwork<kNumLines>;
+    Late& lateNetwork() noexcept { return late; }
+    const Late& lateNetwork() const noexcept { return late; }
 
     //== The level laws =========================================================
 
@@ -321,7 +334,7 @@ public:
         placeholder decision -- it is where the tap belongs once there is a
         reverb, and putting it on the output would have to be undone.
 
-        **Until the Reverb EQ is in the path (M3) this shows the dry input,
+        **Until the Reverb EQ is in the path (M3b) this shows the dry input,
         and that is honest.** The EQ sits pre both generators, so the input
         and the point the EQ acts on are still the same samples; the ER now
         playing on the output is downstream of it. A reader who finds the
@@ -336,16 +349,16 @@ public:
         neither the sound nor the latency, and why. */
     AnalyserTap& eqAnalyser() noexcept { return eqTap; }
 
-    /** M2: the early reflections play; the tail is silent.
+    /** M3a: the early reflections and the tail.
 
         The analyser window is written from the input, which is still the
-        point the Reverb EQ will act on -- the EQ lands in M3 ahead of both
+        point the Reverb EQ will act on -- the EQ lands in M3b ahead of both
         generators, and until then the input and that point are the same
         samples. The ER generator is fed the mid of the input (a mono bus
-        feeds it directly), returns the ER bus at table level, and the two
-        faders, the MIX law and OUTPUT are applied here with 20 ms
-        one-pole smoothing on every gain. `verbLevel` is smoothed and applied
-        to a bus that is all zeros, so its fader already behaves. */
+        feeds it directly), returns the ER bus at table level, and the tail is
+        fed SOURCE's balance, (1 - d) * dry mid + d * ER mid; the two faders,
+        WIDTH, the MIX law and OUTPUT are applied here with 20 ms one-pole
+        smoothing on every gain. */
     void process (float* const* channelData, int numChannels, int numSamples)
     {
         eqTap.write (channelData, numChannels, numSamples);
@@ -369,15 +382,36 @@ public:
 
             er.process (feed.data(), erL.data(), erR.data(), n);
 
+            // SOURCE, 10 section 2: the tail is fed (1 - d) * direct + d * ER,
+            // the ER taken at table level, ahead of its fader, so the two
+            // faders stay independent. The ER bus has no point "before
+            // decorrelation" to tap -- VARIATION is built into the taps -- so
+            // its mid stands in, which is what a mono tail input hears anyway.
             for (int i = 0; i < n; ++i)
             {
-                gEr  += (tEr  - gEr)  * smoothCoef;
-                gDry += (tDry - gDry) * smoothCoef;
-                gWet += (tWet - gWet) * smoothCoef;
-                gOut += (tOut - gOut) * smoothCoef;
+                gFeed += (tFeed - gFeed) * smoothCoef;
+                tailIn[(size_t) i] = (1.0f - gFeed) * feed[(size_t) i]
+                                   + gFeed * 0.5f * (erL[(size_t) i] + erR[(size_t) i]);
+            }
 
-                const auto wetL = erL[(size_t) i] * gEr;
-                const auto wetR = erR[(size_t) i] * gEr;
+            late.process (tailIn.data(), lateL.data(), lateR.data(), n);
+
+            for (int i = 0; i < n; ++i)
+            {
+                gEr    += (tEr    - gEr)    * smoothCoef;
+                gVerb  += (tVerb  - gVerb)  * smoothCoef;
+                gWidth += (tWidth - gWidth) * smoothCoef;
+                gDry   += (tDry   - gDry)   * smoothCoef;
+                gWet   += (tWet   - gWet)   * smoothCoef;
+                gOut   += (tOut   - gOut)   * smoothCoef;
+
+                // WIDTH: M/S gain on the tail only (10 section 2); ER width is
+                // VARIATION's.
+                const auto mid  = 0.5f * (lateL[(size_t) i] + lateR[(size_t) i]);
+                const auto side = 0.5f * (lateL[(size_t) i] - lateR[(size_t) i]) * gWidth;
+
+                const auto wetL = erL[(size_t) i] * gEr + (mid + side) * gVerb;
+                const auto wetR = erR[(size_t) i] * gEr + (mid - side) * gVerb;
 
                 if (numChannels > 1)
                 {
@@ -460,7 +494,21 @@ private:
         er.setDensity (params.erDensity);
         er.setHiCut (params.erHiCutHz);
 
-        tEr  = faderGain (params.erLevelDb);
+        LateConfig lc;
+        lc.type         = (int) params.type;
+        lc.sizeM        = params.sizeM;
+        lc.preDelayMs   = params.preDelayMs;
+        lc.decaySeconds = params.decaySeconds;
+        lc.dampLo       = params.dampLo;
+        lc.dampHi       = params.dampHi;
+        lc.loKneeHz     = params.dampLoFreqHz;
+        lc.hiKneeHz     = params.dampHiFreqHz;
+        late.setConfig (lc);
+
+        tEr    = faderGain (params.erLevelDb);
+        tVerb  = faderGain (params.verbLevelDb);
+        tFeed  = std::clamp (params.feed, 0.0f, 1.0f);
+        tWidth = std::clamp (params.width, 0.0f, 2.0f);
         tDry = dryGainFor (params.mix);
         tWet = wetGainFor (params.mix);
         tOut = std::pow (10.0f, params.outputDb * 0.05f);
@@ -470,15 +518,17 @@ private:
         history to smooth from. */
     void snapGains() noexcept
     {
-        gEr = tEr; gDry = tDry; gWet = tWet; gOut = tOut;
+        gEr = tEr; gVerb = tVerb; gFeed = tFeed; gWidth = tWidth;
+        gDry = tDry; gWet = tWet; gOut = tOut;
     }
 
     ErGenerator er;
-    std::vector<float> feed, erL, erR;
+    Late late;
+    std::vector<float> feed, erL, erR, tailIn, lateL, lateR;
 
     float smoothCoef = 0.0f;
-    float tEr = 0.0f, tDry = 1.0f, tWet = 1.0f, tOut = 1.0f;
-    float gEr = 0.0f, gDry = 1.0f, gWet = 1.0f, gOut = 1.0f;
+    float tEr = 0.0f, tVerb = 0.0f, tFeed = 0.7f, tWidth = 1.0f, tDry = 1.0f, tWet = 1.0f, tOut = 1.0f;
+    float gEr = 0.0f, gVerb = 0.0f, gFeed = 0.7f, gWidth = 1.0f, gDry = 1.0f, gWet = 1.0f, gOut = 1.0f;
 
     /** The grid the three EQ nodes are designed on, at the running rate.
         Unused by the placeholder; rebuilt in `prepare` so the engine has it.

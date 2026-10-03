@@ -17,17 +17,24 @@ and the schema says thirty, and they are not the same thirty** — the
 control-set trim below cut six and the Reverb EQ added six others, neither
 edited `docs/`, so read this file for what the schema is.
 
-**The early reflections are real; the tail is not yet.** Milestone M2 landed
-on ICE QUEEN on 2026-09-24: `dsp/ErGenerator.h` plays the six image-source
-tables in `dsp/TapTables.h` through the Size law, four order-banded poles, the
-DENSITY bridge and its feed-forward diffuser, seven VARIATION positions and the
-ER hi-cut, and `dsp/DspCore.h` applies the faders, the MIX law (Frosty's, 2026-09-24: 50 % is input unchanged with the verb heard, 100 % is verb only for a send)
-and OUTPUT. `dsp/ImageSource.h` is the offline generator the tables were
-printed from. The late network (M3) and the type blocks (M4) are still to come,
-so REVERB's fader moves a silent bus and the Reverb EQ is not in the path.
-Latency is zero, which is the *shipped* figure and not a stand-in. **Nothing
-has been heard** — every figure in `testing-notes/linger-m2-er-2026-09-24.md`
-is rendered or measured. The DSP pass owns `dsp/` and nothing outside it, with
+**The early reflections and the tail are real; the Reverb EQ, modulation and
+the type voicings are not yet.** Milestone M2 landed on ICE QUEEN on
+2026-09-24: `dsp/ErGenerator.h` plays the six image-source tables in
+`dsp/TapTables.h` through the Size law, four order-banded poles, the DENSITY
+bridge and its feed-forward diffuser, seven VARIATION positions and the ER
+hi-cut, and `dsp/DspCore.h` applies the faders, the MIX law (Frosty's,
+2026-09-24: 50 % is input unchanged with the verb heard, 100 % is verb only for
+a send) and OUTPUT. `dsp/ImageSource.h` is the offline generator the tables
+were printed from. **M3a landed on 2026-10-02** (heard and passed):
+`dsp/LateNetwork.h` is the tail -- pre-delay, input diffusers, eight prime
+lines with Hadamard mixing, absorbent filters in double -- fed by SOURCE and
+returned through WIDTH and REVERB; `10` §4's "As built in M3a" lists where it
+departs from the spec. Still to come: M3b (the Reverb EQ and DARKEN in the
+path, modulation, the onset and truncation contours) and M4 (the type blocks).
+Latency is zero, which is the *shipped* figure and not a stand-in. **Both
+have been heard**: the early reflections at the M2 checkpoint
+(`testing-notes/linger-listening-set-2026-09-24.md`) and the tail at M3a's
+(`testing-notes/linger-listening-set-2026-10-02-m3a.md`). The DSP pass owns `dsp/` and nothing outside it, with
 one exception named below.
 
 **How the ER generator is put together**, in the order the signal meets it:
@@ -1087,14 +1094,14 @@ and is on the open list.
 
   The rack **sums** it over occupied slots rather than taking the maximum —
   slots are in series, so 4 s feeding 2 s rings for 6 — and **then clamps the
-  total at `bmo::kMaxTailSeconds`, the same thirty seconds a module clamps
+  total at `bmo::kMaxTailSeconds`, the same forty seconds a module clamps
   itself at.** The clamp arrived 2026-09-21 with Frosty's approval, and the
   case it exists for is the one the slot limit does not stop: `addModule`
   counts slots and never looks for duplicates, so eight BMO Lingers is a legal
   chain and eight honest thirties is a four-minute tail — free at transport
   stop, where over-reporting only idles the host, and not free for an offline
   bounce, where the figure is rendered onto the end of every export. Both
-  clamps read the one constant in `core/dsp/ModuleDsp.h`; do not write 30.0
+  clamps read the one constant in `core/dsp/ModuleDsp.h`; do not write 40.0
   anywhere else.
 - **The engine.** `11` section 1 names the headers it grows —
   `ErGenerator.h`, `TapTables.h`, `Fdn.h`, `Absorbent.h`. Milestones M2–M4.

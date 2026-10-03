@@ -832,8 +832,10 @@ void testRepeatedSpikesDoNotRatchet()
     to 520 ms when it was tried.
 
     Second, a hit that lasted counts. A full second at the louder level is
-    exposure, and the cell must still be holding some of it a second after the
-    level drops back, or this is a fast compressor with a slow one's name. */
+    exposure, and the cell must still be holding most of it a second after
+    the level drops back, or this is a fast compressor with a slow one's name.
+    The cells hold 7.85 dB (Tele) and 13.40 dB (Stressed) there; the bounds
+    are set so that half of either going missing fails. */
 void testAHeldLevelIsStillProgramme()
 {
     for (const auto mode : { Mode::La2a, Mode::Distressor })
@@ -856,9 +858,10 @@ void testAHeldLevelIsStillProgramme()
         const auto before = meanReduction (hit, kPrerollSec - 0.5, 0.5);
         const auto after  = meanReduction (hit, kPrerollSec + 2.0, 0.01) - before;
 
-        check (after > 1.0,
-               name + ": a second after a 1 s louder passage the cell is still holding some of it ("
-                 + std::to_string (after) + " dB)");
+        const auto holdsAtLeast = mode == Mode::La2a ? 5.5 : 9.5;
+        check (after > holdsAtLeast,
+               name + ": a second after a 1 s louder passage the cell is still holding "
+                 + std::to_string (after) + " dB of it (more than " + std::to_string (holdsAtLeast) + ")");
     }
 }
 

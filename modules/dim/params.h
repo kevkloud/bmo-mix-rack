@@ -138,7 +138,8 @@ inline const ParamSpecs& specs()
 
         // OUTPUT: a trim on both channels after everything else, the owner's
         // call of 2026-10-03. At the extremes this module reaches +7.2 dBFS
-        // peak and +15.3 dB of side gain with nothing to pull it back. An
+        // peak and +15.3 dB of side gain (measured at 200 Hz; +15.6 is the bound
+        // in the deep bass) with nothing to pull it back. An
         // automatic level match was considered and not chosen: it needs a
         // detector, and "matched" is ambiguous for a widener -- matched in
         // the mono sum, which this module leaves alone by design, or in the

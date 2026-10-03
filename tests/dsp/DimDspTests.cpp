@@ -1028,7 +1028,7 @@ int main()
         };
 
         float belowAtUnityBloom = 0.0f;
-        int   deadCases = 0, liveCases = 0;
+        int   bitIdenticalCases = 0, roundingCases = 0, liveCases = 0;
 
         for (bool generate : { false, true })
             for (float width : { 0.0f, 100.0f })
@@ -1071,25 +1071,32 @@ int main()
                             }
                             else if (c.index == Index::shuffleFreq && width > 0.0f)
                             {
-                                ++deadCases;
+                                ++roundingCases;
                                 belowAtUnityBloom = std::max (belowAtUnityBloom, maxDiff (a, b));
                             }
                             else
                             {
-                                ++deadCases;
+                                ++bitIdenticalCases;
                                 if (a != b)
                                     std::cerr << "  " << where << ": called dead, but the ends differ by "
                                               << maxDiff (a, b) << '\n';
-                                check (a == b, "a control its function calls dead leaves the output bit-identical");
+                                check (a == b, "a control its function calls dead leaves the output bit-identical (every dead case but BELOW at BLOOM 1.0)");
                             }
                         }
 
-        check (deadCases > 0 && liveCases > 0, "the dim table has both dead and live cases to check");
+        // The table is 80 cases: 36 live, 40 dead and compared bit for bit, and
+        // 4 dead only to rounding -- BELOW at BLOOM 1.0 with DIMENSION above 0,
+        // once per GENERATE and TURN position. Those four are bounded rather
+        // than compared, because the shuffler at unity is z * 1 + (s - z), which
+        // is not always exactly s; making it exact would move the default output.
+        // Counted, so the split cannot change without this line saying so.
+        check (liveCases == 36, "live cases, each moving the output: 36");
+        check (bitIdenticalCases == 40, "dead cases compared bit for bit: 40");
+        check (roundingCases == 4, "dead cases bounded at rounding (BELOW at BLOOM 1.0): 4");
 
-        // BELOW at BLOOM 1.0, the rounding exception: measured 5.96e-8 on
-        // ICE QUEEN, 2026-10-03 -- one float step at 0.5, -144 dBFS -- across
-        // 44 dead and 36 live cases above.
-        check (belowAtUnityBloom < 1.0e-6f, "BELOW at BLOOM 1.0 moves the output by rounding only");
+        // Measured 5.96e-8 on ICE QUEEN, 2026-10-03: one float step at 0.5,
+        // -144 dBFS.
+        check (belowAtUnityBloom < 1.0e-6f, "BELOW at BLOOM 1.0, the 4 cases not compared bit for bit, moves the output by under 1e-6 (rounding only)");
 
         // GENERATE is the switch and the panel never dims it; the four
         // controls that decide the dims are not themselves dimmed except as

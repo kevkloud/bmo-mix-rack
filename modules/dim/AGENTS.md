@@ -211,8 +211,8 @@ claim on the colour** — accents are allocated in `products/AGENTS.md` now.
   drifted before — *thirteen at once*, BMO Opto's three and all ten of the
   Saturator's (`testing-notes/opto-0.2.1-handoff.md` §4) — and the check
   that was skipped is whether any preset jumps in level against Init at the
-  same settings, or puts True Peak over the ceiling. Up to +15.5 dB is
-  reachable, and OUTPUT (2026-10-03) is a hand-set trim, not a catch: no
+  same settings, or puts True Peak over the ceiling. Up to +15.3 dB of side
+  gain is reachable, and OUTPUT (2026-10-03) is a hand-set trim, not a catch: no
   preset sets it, so nothing pulls a loud preset back on its own.
   **Audition all seven before this is called finished**, and treat a level
   jump as a preset bug rather than a voicing choice.
@@ -230,10 +230,12 @@ claim on the colour** — accents are allocated in `products/AGENTS.md` now.
   correctly and predicted the wrong cost.
 - **WIDTH at 0 silently disables everything above it**, DETUNE included, since
   WIDTH is downstream of generate. Measured: peak side 0.00000.
-- ~~No output trim, and up to +15.5 dB available~~ **Settled 2026-10-03 (the
+- ~~No output trim, and up to +15.3 dB available~~ **Settled 2026-10-03 (the
   owner): OUTPUT, ±24 dB in 0.1 dB steps, default 0, appended as the
   eleventh parameter and rack lane 11.** At the extremes the module reaches
-  +7.2 dBFS peak and +15.3 dB of side gain. It is the equaliser's trim --
+  +7.2 dBFS peak and +15.3 dB of side gain (DIMENSION 200 %, BLOOM 3, measured
+  on a 200 Hz side tone; the bound, deep in the bass, is 20 log10 6 = +15.6).
+  It is the equaliser's trim --
   per sample, in dB, landing exactly -- copied into `dsp/DspCore.h` because
   modules do not include one another, and at 0 dB with nothing moving it is
   out of the path, so everything saved before it plays bit for bit as it

@@ -257,3 +257,29 @@ jobs:
           name: BMO-${{ matrix.name }}-fingerprint
           path: fingerprint.txt
           if-no-files-found: ignore
+
+      # A plugin must unload. With the Textured surface on, it once did not:
+      # native images held by statics outlived every editor, and an in-process
+      # validation printed SUCCESS and then never exited (2026-10-02). ctest
+      # holds the source rule (ui_static_image); this holds the behaviour, on
+      # one single-module product with the surface written to Textured in this
+      # runner's own preference file. Windows only, where the hang was found.
+      # The validator is pinned by version and by the zip's SHA-256. After the
+      # uploads, like the fingerprint, so it marks the run without withholding
+      # the build.
+      - name: Unload with Textured on
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          curl -sSfL -o validator.zip https://github.com/Tracktion/pluginval/releases/download/v1.0.4/pluginval_Windows.zip
+          echo "c08e61ce3b96db41636f8ec7e76f4c7e2c13ebdac7fa1b5a1f52b4f32ec715ab  validator.zip" | sha256sum -c
+          unzip -q validator.zip -d validator
+          prefs="$(cygpath "$APPDATA")/LT3 Audio"
+          mkdir -p "$prefs"
+          printf '{\n  "appearance": "light",\n  "surface": "textured",\n  "finish": "house"\n}\n' > "$prefs/UI.json"
+          start=$SECONDS
+          rc=0
+          timeout -k 10 60 validator/pluginval.exe --strictness-level 5 --validate-in-process \
+            "build/products/util/BmoUtil_artefacts/Release/VST3/BMO Util.vst3" || rc=$?
+          echo "exit $rc after $((SECONDS - start)) s; 124 is the unload hang"
+          exit $rc

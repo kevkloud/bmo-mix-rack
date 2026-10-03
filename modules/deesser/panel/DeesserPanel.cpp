@@ -108,10 +108,11 @@ float BandSketch::responseDbAt (float hz) const noexcept
     const auto w0 = (double) freqHz;
 
     // A shelf's Q through effectiveQ, which is what the engine will design
-    // through: past 2 the shelf grows a resonant dip below its corner and
-    // climbs back above it, which is not a shelf. The knob still reads what it
-    // reads -- Q is one parameter whatever the shape. This picture drawing the
-    // raw Q is how the rule was found; see modules/deesser/params.h.
+    // through: a shelf runs at kShelfQ whatever the knob says, because any
+    // more grows a rise below its corner and a cut past RANGE above it. The
+    // knob still reads what it reads -- Q is one parameter whatever the shape.
+    // This picture drawing the raw Q is how the rule was found; see
+    // modules/deesser/params.h.
     const auto qq = (double) juce::jmax (0.1f, effectiveQ (shapeChoice, q));
 
     // The cut, as a linear gain: `range` is a depth, so it enters negative.

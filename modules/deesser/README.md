@@ -14,7 +14,7 @@ has to stand out before the module acts, and how deep the cut may go.
 | Control | What it does |
 |---|---|
 | **FREQ** | Where the sibilance is: 2 to 10 kHz. The band centre in Bell, the corner in Shelf. Male voices usually land around 3 to 6 kHz and female voices around 6 to 8. |
-| **Q** | How narrow the band is, 0.7 to 6. Narrow stays clear of the vowels underneath; wide covers a voice whose sibilance moves about. A shelf ignores anything past 2, where a shelf stops being a shelf. |
+| **Q** | How narrow the band is, 0.7 to 6. Narrow stays clear of the vowels underneath; wide covers a voice whose sibilance moves about. A shelf ignores it: it runs at one flat Q, so it never lifts anything on its way down. |
 | **THRESH** | How far the band has to stand out before the module acts, -24 to +24. **It reads "+3.0 dB over", and the word matters** -- see below. |
 | **RANGE** | The deepest the cut may go, 1 to 18 dB. Most work is done at 2 to 6. |
 | **SHAPE** | **BELL** takes out a notch at FREQ. **SHELF** takes everything above FREQ down together. |
@@ -62,7 +62,7 @@ as it takes and no more — 2 to 6 dB does most jobs, and if you are reaching fo
 
 **SHELF** is for a source that is already bright all over, where a notch would
 be heard as a notch. It takes the whole top end down together, so it dulls if
-you lean on it: shallower RANGE, and a low Q.
+you lean on it: keep RANGE shallow.
 
 There is no wet/dry control, and no mix knob is coming: a partial blend of a
 cut like this is just a shallower cut, which is what RANGE already is.

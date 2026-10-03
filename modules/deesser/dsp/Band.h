@@ -35,7 +35,7 @@ enum class Shape { bell = 0, highShelf };
 
     A shelf's Q goes through `effectiveQ` here as everywhere else, so the
     engine, the panel sketch and the tests cannot disagree about what a shelf
-    at Q 4 actually is. */
+    at Q 4 actually is: since 2026-10-04 it is a shelf at `kShelfQ`. */
 inline dsp::Biquad cutDesign (Shape shape, double hz, double q, double depthDb,
                               const dsp::DesignGrid& grid) noexcept
 {
@@ -200,7 +200,14 @@ struct Band
         of the settings, not of how hard the module happens to be working.
 
         The rate is part of what it was designed from: the same frequency is a
-        different filter at another rate. */
+        different filter at another rate.
+
+        **A shelf detects at the shelf's own Q**, `effectiveQ`, as the cut
+        does. At the knob's raw Q the high-pass resonated -- +7.96 dB at the
+        corner at the default 2.5, +15.56 at 6 -- so the detector heard the
+        band around the corner several times louder than the shelf it drives
+        would ever treat it. Only the shelf goes through it: a bell's Q is
+        passed exactly as it comes, so the bell's detector is the one it was. */
     void designSide (Shape shape, double hz, double q, double sampleRate) noexcept
     {
         if (shape == sideShape
@@ -209,7 +216,8 @@ struct Band
             && sampleRate == sideRate)
             return;
 
-        const auto design = detectorDesign (shape, hz, q, sampleRate);
+        const auto shaped = shape == Shape::highShelf ? (double) effectiveQ (highShelf, (float) q) : q;
+        const auto design = detectorDesign (shape, hz, shaped, sampleRate);
         const auto c = dsp::SvfCoeffs::fromBiquad (design);
 
         if (! design.isFinite() || ! design.isStable() || ! c.isStable())

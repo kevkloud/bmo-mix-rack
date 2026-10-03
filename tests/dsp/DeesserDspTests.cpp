@@ -1028,10 +1028,150 @@ void testResetLeavesNoStaleDesign()
     }
 }
 
+/** The largest rise above unity and the deepest cut of a design, in dB, over
+    20 Hz to 20 kHz on a fine log grid. */
+void extremesOf (const bmo::dsp::Biquad& b, double rate, double& boostDb, double& deepestDb)
+{
+    boostDb = -1000.0;
+    deepestDb = 0.0;
+
+    for (auto f = 20.0; f <= 20000.0; f *= 1.002)
+    {
+        const auto m = b.magnitudeDbAt (f, rate);
+        boostDb = std::max (boostDb, m);
+        deepestDb = std::max (deepestDb, -m);
+    }
+}
+
+/** **In SHELF shape there is no boost, and the cut never goes past RANGE**
+    (the owner, 2026-10-04).
+
+    The shelf ran at its knob's Q up to a cap of 2, and a shelf that resonant
+    rises above unity below its corner and dips past its depth above it. At
+    6.5 kHz and 48 kHz, RANGE 8 rose +3.53 dB at 4.5 kHz and cut 11.49 dB;
+    RANGE 18 rose +5.41 dB and cut 23.25. A de-esser that turns the presence
+    region up while it works, and cuts 5 dB deeper than the control that
+    claims to be the ceiling, is doing neither job it says it is.
+
+    Every corner from 2 to 10 kHz, every depth to 18 dB, the four rates, and
+    the knob at its minimum, its default and its maximum. */
+void testTheShelfNeverBoosts()
+{
+    auto worstBoost = -1000.0, worstPast = -1000.0;
+    std::string where;
+
+    for (const auto rate : { 44100.0, 48000.0, 96000.0, 192000.0 })
+    {
+        const auto grid = bmo::dsp::DesignGrid::make (rate);
+
+        for (auto hz = 2000.0; hz <= 10001.0; hz *= 1.25)
+            for (auto depth = 0.5; depth <= 18.01; depth += 0.5)
+                for (const auto knob : { 0.7, 2.5, 6.0 })
+                {
+                    double boost, deepest;
+                    extremesOf (cutDesign (Shape::highShelf, std::min (hz, 0.45 * rate), knob, depth, grid),
+                                rate, boost, deepest);
+
+                    if (boost > worstBoost)
+                    {
+                        worstBoost = boost;
+                        where = std::to_string ((int) rate) + " Hz, corner " + std::to_string ((int) hz)
+                              + ", depth " + std::to_string (depth) + ", Q " + std::to_string (knob);
+                    }
+
+                    worstPast = std::max (worstPast, deepest - depth);
+                }
+    }
+
+    check (worstBoost <= 0.05, "the shelf cut never rises above unity by more than 0.05 dB, worst "
+                                   + std::to_string (worstBoost) + " dB at " + where);
+    check (worstPast <= 0.05, "the shelf never cuts more than 0.05 dB past its depth, worst "
+                                  + std::to_string (worstPast) + " dB");
+}
+
+/** **The meter reads the cut the shelf actually makes.** The meter reports
+    the applied depth, and a resonant shelf cut deeper than that -- the
+    reviewer saw it read 18 where the cut was 23.3. Driven to RANGE by a steady
+    tone above the corner, the deepest point of the shelf the engine is running at
+    that moment is the meter's figure, at every rate. */
+void testTheShelfMeterReadsTheCut()
+{
+    for (const auto rate : { 44100.0, 48000.0, 96000.0, 192000.0 })
+        for (const auto range_ : { 8.0f, 18.0f })
+        {
+            DeesserDsp dsp;
+            dsp.prepare (rate, 512, 2);
+
+            auto v = defaults();
+            v[thresh] = -24.0f;
+            v[range]  = range_;
+            v[shape]  = (float) highShelf;
+            dsp.setParams (v.data(), (int) v.size());
+
+            std::vector<float> tone ((size_t) rate);
+            for (size_t i = 0; i < tone.size(); ++i)
+                tone[i] = (float) (0.18 * std::sin (2.0 * kPi * 10000.0 * (double) i / rate));
+
+            run (dsp, tone);
+
+            const auto meter = (double) dsp.currentGainReductionDb();
+            double boost, deepest;
+            extremesOf (cutDesign (Shape::highShelf, 6500.0, (double) v[q], meter,
+                                   bmo::dsp::DesignGrid::make (rate)),
+                        rate, boost, deepest);
+
+            const auto tag = std::to_string ((int) rate) + " Hz, RANGE " + std::to_string ((int) range_)
+                           + ": meter " + std::to_string (meter) + ", deepest cut " + std::to_string (deepest);
+
+            checkNear (meter, range_, 0.01, "a steady tone above the corner drives the shelf to RANGE, " + tag);
+            check (deepest <= meter + 0.05, "the shelf cuts no deeper than the meter says, " + tag);
+            check (deepest >= meter - 0.5, "and the meter does not overstate the cut, " + tag);
+        }
+}
+
+/** **The shelf's detector does not resonate either.** It listened through a
+    high-pass at the knob's raw Q, not the shelf's, so at the default Q of 2.5
+    it peaked +7.96 dB at the corner and at Q 6 +15.56 -- a detector that heard
+    the band around the corner several times louder than the shelf it drives
+    would ever treat it. It now runs at the shelf's own Q. Gain read by
+    driving tones through the band's sidechain as the engine designs it. */
+void testTheShelfDetectorDoesNotResonate()
+{
+    for (const auto knob : { 0.7, 2.5, 6.0 })
+    {
+        Band band;
+        band.designSide (Shape::highShelf, 6500.0, knob, kSampleRate);
+
+        auto loudest = -1000.0;
+
+        for (const auto ratio : { 0.75, 1.0, 1.25, 1.5, 2.0, 3.0 })
+        {
+            bmo::dsp::SvfState s;
+            auto peak = 0.0;
+
+            for (int i = 0; i < (int) kSampleRate; ++i)
+            {
+                const auto y = s.process (band.sideTaps, band.sideCoeffs,
+                                          std::sin (2.0 * kPi * 6500.0 * ratio * i / kSampleRate));
+                if (i > (int) kSampleRate / 2)
+                    peak = std::max (peak, std::abs (y));
+            }
+
+            loudest = std::max (loudest, 20.0 * std::log10 (peak));
+        }
+
+        check (loudest <= 0.05, "the shelf's detector has no resonant peak at knob Q "
+                                    + std::to_string (knob) + ", loudest " + std::to_string (loudest) + " dB");
+    }
+}
+
 int main()
 {
     testRePrepareMatchesAFreshInstance();
     testResetLeavesNoStaleDesign();
+    testTheShelfNeverBoosts();
+    testTheShelfMeterReadsTheCut();
+    testTheShelfDetectorDoesNotResonate();
 
     testLatencyIsZeroEverywhere();
     testQuietMaterialIsUntouched();

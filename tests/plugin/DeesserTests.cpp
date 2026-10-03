@@ -209,21 +209,27 @@ int main()
                            + juce::String (v));
     }
 
-    //== A shelf's Q is capped behind an unchanged knob =======================
+    //== A shelf runs at one Q behind an unchanged knob =======================
     //
     // Q is one parameter whatever the shape -- 0.7 to 6 on the knob in both,
-    // permanently -- and the shelf's own limit is applied behind it, which is
-    // BMO DEQ's idiom. The panel's band sketch is what found this: at the
-    // default Q of 2.5 the shelf drew a resonant dip below its corner and a
-    // climb back above it, which is not a shelf. Asserted here so the cap
-    // cannot quietly become a narrower *parameter* range instead.
+    // permanently -- and the shelf's own value is applied behind it, which is
+    // BMO DEQ's idiom. The panel's band sketch found the first problem, a
+    // resonant dip below the corner and a climb back above it at the default
+    // Q of 2.5; a cap of 2 still rose +3.5 dB and cut 5 dB past RANGE. The
+    // owner decided on 2026-10-04 that the shelf has no boost and never cuts
+    // past RANGE, so it runs at 0.707 whatever the knob says. These rows are
+    // the record of that decision, and they also keep the rule from quietly
+    // becoming a narrower *parameter* range instead.
     {
         check (P::specs()[P::Index::q].max == 6.0f, "the Q knob still reaches 6 in both shapes");
+        check (P::specs()[P::Index::q].min == 0.7f, "and still starts at 0.7");
+        checkClose (P::specs()[P::Index::q].def, 2.5, 1.0e-6, "and still defaults to 2.5");
         checkClose (P::effectiveQ (P::bell, 6.0f), 6.0, 1.0e-6, "a bell keeps the Q it is given");
-        checkClose (P::effectiveQ (P::highShelf, 6.0f), (double) P::kShelfMaxQ, 1.0e-6,
-                    "a shelf is capped at kShelfMaxQ");
-        checkClose (P::effectiveQ (P::highShelf, 1.0f), 1.0, 1.0e-6,
-                    "a shelf under the cap is left alone");
+        checkClose ((double) P::kShelfQ, 0.707, 1.0e-6, "a shelf runs at 0.707, the owner's decision");
+        checkClose (P::effectiveQ (P::highShelf, 6.0f), (double) P::kShelfQ, 1.0e-6,
+                    "a shelf asked for Q 6 runs at kShelfQ");
+        checkClose (P::effectiveQ (P::highShelf, 0.7f), (double) P::kShelfQ, 1.0e-6,
+                    "and so does a shelf asked for the knob's minimum: the knob is inert in shelf shape");
     }
 
     //== Latency: zero, at every setting ======================================

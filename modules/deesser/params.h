@@ -32,8 +32,9 @@ inline constexpr auto kModuleName = "BMO Defang";
 // concentrations without reaching into the vowel region.
 inline constexpr auto kFreq = "freq";
 
-// Q, whatever the shape. The engine clamps 0.1-40 behind it, as BMO DEQ caps a
-// shelf's Q behind an unchanged knob.
+// Q, one parameter whatever the shape. A bell runs at it, with the engine
+// clamping 0.1-40 behind it; a shelf runs at `kShelfQ` whatever it says, by
+// the owner's decision of 2026-10-04 (see `kShelfQ` below).
 inline constexpr auto kQ = "q";
 
 // THRESHOLD in **prominence dB, not dBFS** -- how far the band stands out
@@ -64,32 +65,48 @@ inline constexpr int kSchemaVersion = 1;
 
 enum ShapeChoice { bell = 0, highShelf, numShapes };
 
-/** The widest a shelf's Q goes, and **the panel's band sketch is what found
-    it**: rendered at the default Q of 2.5, the high shelf came back with a
-    resonant dip below its corner and a climb back up above it, which is not a
-    shelf and is not what RANGE says it is doing.
+/** The one Q a shelf runs at, whatever the knob says. **The owner's decision,
+    2026-10-04: in SHELF shape there is no boost, and the cut never goes past
+    RANGE.**
 
-    BMO DEQ carries the identical rule and the identical figure for the
-    identical reason (`modules/deq/params.h`, `kShelfMaxQ`): past about 2 a
-    shelf's resonant bump is where the matched design is weakest near Nyquist,
-    and at or under it the worst case is well inside a dB.
+    The panel's band sketch found the first problem -- at the default Q of 2.5
+    the shelf drew a resonant dip below its corner and a climb back above it --
+    and a cap of 2, BMO DEQ's figure, was put behind the knob. A cap of 2 still
+    let the shelf resonate: at 6.5 kHz and 48 kHz, RANGE 8 rose +3.53 dB at
+    4.5 kHz and cut 11.49 dB, and RANGE 18 rose +5.41 dB and cut 23.25. A
+    de-esser turning the presence region up while it works, and cutting 5 dB
+    past the control that claims to be its ceiling, is not what RANGE says.
+
+    **Why 0.707.** Scanned over corners 2-10 kHz, every depth to 18 dB, and
+    44.1, 48, 96 and 192 kHz, the largest rise above unity anywhere from 20 Hz
+    to 20 kHz is +0.00026 dB at 0.707, and the deepest cut never passes the
+    depth. The largest Q that keeps the rise under 0.05 dB is about 0.751, but
+    there the cut already goes 0.05 dB past RANGE; 0.707, the maximally flat
+    shelf, does neither.
+
+    **Fixed, not a cap.** The knob's own minimum is 0.7, so a cap at 0.707
+    would leave the bottom 1 % of the knob still moving the shelf by an amount
+    nothing could measure, and a knob the panel dims as inert would not quite
+    be. So the shelf ignores the knob outright, and Q is a control the
+    shelf makes inert (modules/AGENTS.md, inactive controls).
 
     **Q stays one parameter whatever the shape** -- 0.7 to 6 on the knob, in
-    both shapes, permanently -- and the shape's own limit is applied behind it.
-    That is DEQ's idiom exactly, and it is also the honest place for the
-    question 10 section 10.5 leaves open about whether the shelf wants a lower
-    RANGE ceiling than the bell: behind the knob, not on it.
+    both shapes, permanently -- and the shelf's own value is applied behind it.
+    This is a change to what the knob does to the audio, by decision; it is
+    not a schema change.
 
     It lives here rather than in the DSP so that there is one definition. The
-    engine, the sketch, and anything else that designs or draws this band all
-    read a shelf's Q through `effectiveQ`, and so they cannot disagree. */
-inline constexpr float kShelfMaxQ = 2.0f;
+    engine's cut, its detector, the sketch, and anything else that designs or
+    draws this band all read a shelf's Q through `effectiveQ`, and so they
+    cannot disagree. BMO DEQ keeps its own cap of 2 (`modules/deq/params.h`);
+    that one is not changed by this decision. */
+inline constexpr float kShelfQ = 0.707f;
 
-/** The Q this band actually runs at: its knob, or `kShelfMaxQ` for a shelf
-    asked for more. `shapeChoice` is the stored choice index (`ShapeChoice`). */
+/** The Q this band actually runs at: its knob for a bell, `kShelfQ` for a
+    shelf. `shapeChoice` is the stored choice index (`ShapeChoice`). */
 inline constexpr float effectiveQ (int shapeChoice, float q) noexcept
 {
-    return shapeChoice == highShelf && q > kShelfMaxQ ? kShelfMaxQ : q;
+    return shapeChoice == highShelf ? kShelfQ : q;
 }
 
 namespace detail

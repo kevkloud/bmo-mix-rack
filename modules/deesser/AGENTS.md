@@ -106,10 +106,13 @@ different unit.
 **The sketch is what found the shelf's Q cap.** Rendered at the default Q of
 2.5 the high shelf came back with a resonant dip below its corner and a climb
 back above it, which is not a shelf and is not what RANGE says it is doing.
-`params.h` now carries `kShelfMaxQ` and `effectiveQ`, the same rule and the
-same figure BMO DEQ carries for the same reason. **Q stays one parameter
-whatever the shape** — 0.7 to 6 on the knob in both — and the shelf's limit is
-applied behind it. Nothing but a render would have shown this: the schema test
+`params.h` carries `kShelfQ` and `effectiveQ`. It was first a cap of 2, BMO
+DEQ's figure, and a cap of 2 still rose +3.5 dB below the corner and cut 5 dB
+past RANGE; **since 2026-10-04, by the owner's decision, a shelf runs at 0.707
+whatever the knob says**, which rises nowhere and never cuts past RANGE.
+**Q stays one parameter whatever the shape** — 0.7 to 6 on the knob in both —
+and the shelf's value is applied behind it, so in shelf shape Q is a control
+the mode makes inert. Nothing but a render would have shown this: the schema test
 passed, the layout test passed, and the arithmetic was correct.
 
 ## The meter reports band reduction, not a wideband figure

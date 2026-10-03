@@ -7,8 +7,6 @@ namespace bmo::eq
 
 namespace
 {
-    float dbToGain (float db) noexcept { return std::pow (10.0f, db * 0.05f); }
-
     int supportedFactor (int factor) noexcept
     {
         return factor >= 8 ? 8 : factor >= 4 ? 4 : factor >= 2 ? 2 : 1;
@@ -78,9 +76,12 @@ void DspCore::prepare (double newSampleRate, int maxBlockSize, int numChannels,
     for (auto* s : { &hfFreqSm, &midFreqSm, &lfFreqSm })
         s->prepare (controlRate, 25.0);
 
-    for (auto* s : { &hfGainSm, &midGainSm, &lfGainSm,
-                     &inputGainSm, &outputLevelSm, &mixSm, &autoGainSm })
+    for (auto* s : { &hfGainSm, &midGainSm, &lfGainSm, &mixSm, &autoGainSm })
         s->prepare (controlRate, 20.0);
+
+    // The trims keep the 20 ms they always had, now in real time per sample.
+    inputTrim .prepare (sampleRate, 20.0);
+    outputTrim.prepare (sampleRate, 20.0);
 
     for (auto* r : { &eqInMix, &polarity, &hiQAmount })
         r->prepare (sampleRate, EqNetwork::kSwitchFadeMs);
@@ -218,8 +219,8 @@ void DspCore::setParams (const Params& p) noexcept
     midGainSm.setTarget (p.midGainDb);
     lfGainSm .setTarget (p.lfGainDb);
 
-    inputGainSm  .setTarget (dbToGain (p.inputGainDb));
-    outputLevelSm.setTarget (dbToGain (p.outputLevelDb));
+    inputTrim .setTarget (p.inputGainDb);
+    outputTrim.setTarget (p.outputLevelDb);
     mixSm        .setTarget (std::clamp (p.mixPercent, 0.0f, 100.0f) * 0.01f);
 
     // EQ In out of circuit stops the network, which then holds whatever the
@@ -242,8 +243,8 @@ void DspCore::setParams (const Params& p) noexcept
         hfGainSm .snap (p.hfGainDb);
         midGainSm.snap (p.midGainDb);
         lfGainSm .snap (p.lfGainDb);
-        inputGainSm  .snap (dbToGain (p.inputGainDb));
-        outputLevelSm.snap (dbToGain (p.outputLevelDb));
+        inputTrim    .snap (p.inputGainDb);
+        outputTrim   .snap (p.outputLevelDb);
         mixSm        .snap (std::clamp (p.mixPercent, 0.0f, 100.0f) * 0.01f);
         autoGainSm   .snap (1.0f);
         eqInMix      .snap (p.eqIn ? 1.0f : 0.0f);
@@ -394,8 +395,7 @@ void DspCore::process (float* const* channels, int numChannels, int numSamples) 
 
         updateCoefficients (activeChannels, n);
 
-        const auto inGain   = inputGainSm.tick();
-        const auto outGain  = outputLevelSm.tick() * autoGainSm.tick();
+        const auto autoGain = autoGainSm.tick();
         const auto wet      = mixSm.tick();
         const auto dryLevel = 1.0f - wet;
 
@@ -403,6 +403,9 @@ void DspCore::process (float* const* channels, int numChannels, int numSamples) 
         // frame rather than once per channel.
         for (int i = 0; i < n; ++i)
         {
+            const auto inGain  = inputTrim.next();
+            const auto outGain = outputTrim.next() * autoGain;
+
             if (oversamplingDip.ready())
             {
                 switchOversampling (activeChannels, inGain);

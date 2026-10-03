@@ -38,8 +38,53 @@ public:
         return current;
     }
 
+    /** At the target exactly: tick() would return the same value again. */
+    bool isSettled() const noexcept     { return ! (current < target) && ! (target < current); }
+
 private:
     float coeff = 1.0f, current = 0.0f, target = 0.0f;
+};
+
+//==============================================================================
+/** A trim: a level in dB, smoothed every sample, handed out as a gain.
+
+    The trims were smoothed once per 32-sample sub-block, and linearly in
+    gain. Both measured: Output -24 -> +24 dB rose 19.3 dB in its first
+    sample, and a block shorter than 32 samples still ticked the smoother
+    once, so the same move ran 32 times faster at a host block size of 1.
+    Ticked per sample, the move takes the same time at any block size;
+    smoothed in dB, a full-range move rises at most 0.05 dB in a sample at
+    44.1 kHz rather than front-loading it, so no sample of it steps the
+    signal by more than its own slope does at 100 Hz. Settled, the gain is
+    dbToGain of the parameter's own value, the figure it always was.
+*/
+class TrimSmoother
+{
+public:
+    void prepare (double sampleRate, double timeMs) noexcept { db.prepare (sampleRate, timeMs); }
+
+    void snap (float targetDb) noexcept
+    {
+        db.snap (targetDb);
+        gain = toGain (targetDb);
+    }
+
+    void setTarget (float targetDb) noexcept { db.setTarget (targetDb); }
+
+    /** One sample on. Settled, it returns the held gain without working. */
+    float next() noexcept
+    {
+        if (! db.isSettled())
+            gain = toGain (db.tick());
+
+        return gain;
+    }
+
+private:
+    static float toGain (float decibels) noexcept { return std::pow (10.0f, decibels * 0.05f); }
+
+    Smoother db;
+    float gain = 1.0f;
 };
 
 //==============================================================================
@@ -150,7 +195,8 @@ private:
 
     Smoother hfFreqSm, midFreqSm, lfFreqSm;     // smoothed in log2(Hz)
     Smoother hfGainSm, midGainSm, lfGainSm;
-    Smoother inputGainSm, outputLevelSm, mixSm, autoGainSm;
+    Smoother mixSm, autoGainSm;
+    TrimSmoother inputTrim, outputTrim;         // per sample, in dB
 
     // The switches' fades, at the host's rate. eqInMix is 0 out and 1 in;
     // polarity is the sign itself, ramped through zero; hiQAmount is 0 for

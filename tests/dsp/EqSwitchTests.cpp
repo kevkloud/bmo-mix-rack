@@ -34,19 +34,22 @@ namespace
 
     /** Render through one core, with the parameters chosen per block from
         the block's first sample. Both channels carry the same signal; the
-        left is returned. */
+        left is returned. A first block shorter than the rest, as hosts
+        sometimes send, lets a later sample start a block at any size. */
     std::vector<float> render (DspCore& core, std::vector<float> signal, int block,
                                const std::function<DspCore::Params (size_t)>& paramsAt,
-                               int numChannels = 2)
+                               int numChannels = 2, int firstBlock = 0)
     {
         std::vector<float> right = signal;
 
-        for (size_t start = 0; start < signal.size(); start += (size_t) block)
+        for (size_t start = 0; start < signal.size();)
         {
-            const auto n = (int) std::min ((size_t) block, signal.size() - start);
+            const auto size = (size_t) (start == 0 && firstBlock > 0 ? firstBlock : block);
+            const auto n = (int) std::min (size, signal.size() - start);
             core.setParams (paramsAt (start));
             float* channels[2] { signal.data() + start, right.data() + start };
             core.process (channels, numChannels, n);
+            start += (size_t) n;
         }
 
         return signal;
@@ -92,6 +95,54 @@ namespace
             const auto during = largestStep (y, sw, sw + (size_t) (0.25 * fs));
 
             worst = std::max (worst, during / std::max (before, after));
+        }
+
+        return worst;
+    }
+
+    /** A trim move judged against the signal at the level in use: the
+        largest sample-to-sample step after the move, against what the
+        steady signal's own largest step is at the gain each sample has.
+        A gain that moves smoothly scores about 1; one that jumps scores its
+        jump against the signal's own slope. The gain at each sample is read
+        off the same render with the trims held at 0 dB, so the chain must be
+        near linear: EQ out, 1x, and an input trim no higher than 0 dB. */
+    double trimStepRatio (double fs, int block, DspCore::Params a, DspCore::Params b, double hz)
+    {
+        constexpr double amplitude = 0.17782794;   // -18 dBFS RMS
+        const auto length = (size_t) (0.5 * fs);
+        const auto sw     = (size_t) (0.1 * fs) / (size_t) block * (size_t) block;
+
+        auto flat = a;
+        flat.inputGainDb = flat.outputLevelDb = 0.0f;
+
+        double worst = 0.0;
+
+        for (int k = 0; k < 4; ++k)
+        {
+            std::vector<float> x (length);
+            for (size_t i = 0; i < length; ++i)
+                x[i] = (float) (amplitude * std::sin (2.0 * kPi * hz * (double) i / fs + k * kPi / 4.0));
+
+            DspCore refCore, core;
+            refCore.prepare (fs, block, 1, flat.oversampling);
+            refCore.setParams (flat);
+            core.prepare (fs, block, 1, a.oversampling);
+            core.setParams (a);
+
+            const auto ref = render (refCore, x, block, [&] (size_t) { return flat; }, 1);
+            const auto y   = render (core, x, block, [&] (size_t s) { return s >= sw ? b : a; }, 1);
+
+            const auto own = largestStep (ref, (size_t) (0.05 * fs), length);
+
+            for (size_t n = sw + 1; n < length; ++n)
+            {
+                if (std::abs (ref[n]) < 0.25 * amplitude || std::abs (ref[n - 1]) < 0.25 * amplitude)
+                    continue;
+
+                const auto gain = std::max (std::abs (y[n] / ref[n]), std::abs (y[n - 1] / ref[n - 1]));
+                worst = std::max (worst, (double) std::abs (y[n] - y[n - 1]) / (gain * own));
+            }
         }
 
         return worst;
@@ -402,6 +453,87 @@ int main()
                                    + how[start] + " at " + rateName (fs) + (os == 1 ? ", 1x" : ", 2x")
                                    + " is " + std::to_string (first - settled) + " dB from where it settles");
                     }
+    }
+
+    //== 5. The trims move every sample, in the same time at any block size =
+    // The trims were smoothed once per 32-sample sub-block, linearly in gain:
+    // Output -24 -> +24 dB rose 19.3 dB in its first sample, 0 -> +6 dB
+    // arrived as 71 steps of 0.28 dB, and because a host block shorter than
+    // 32 samples still counted as a sub-block, the same move ran 32 times
+    // faster at a block size of 1. Judged against the signal at the level
+    // in use (trimStepRatio), at 100 Hz and 1 kHz, 44.1/48/96 kHz, host
+    // blocks 1/32/441/512: nothing above 1.5x.
+    {
+        struct Move { const char* name; float in0, in1, out0, out1; };
+        const Move moves[] { { "Output -24 -> +24", 0.0f, 0.0f, -24.0f, 24.0f },
+                             { "Output +24 -> -24", 0.0f, 0.0f, 24.0f, -24.0f },
+                             { "Output 0 -> +6",    0.0f, 0.0f, 0.0f, 6.0f },
+                             { "Input -24 -> 0",    -24.0f, 0.0f, 0.0f, 0.0f },
+                             { "Input 0 -> -24",    0.0f, -24.0f, 0.0f, 0.0f } };
+
+        for (double fs : { 44100.0, 48000.0, 96000.0 })
+            for (int block : { 1, 32, 441, 512 })
+                for (const auto& move : moves)
+                    for (double hz : { 100.0, 1000.0 })
+                    {
+                        DspCore::Params a;
+                        a.eqIn = false;
+                        a.oversampling = 1;
+                        a.inputGainDb = move.in0;
+                        a.outputLevelDb = move.out0;
+                        auto b = a;
+                        b.inputGainDb = move.in1;
+                        b.outputLevelDb = move.out1;
+
+                        const auto ratio = trimStepRatio (fs, block, a, b, hz);
+                        check (ratio < 1.5, std::string (move.name) + " at " + std::to_string ((int) hz) + " Hz, "
+                                                + rateName (fs) + ", block " + std::to_string (block)
+                                                + " steps " + ratioText (ratio) + " the signal's own at its level");
+                    }
+
+        // The same move at every block size is the same audio: the move lands
+        // on a sample that starts a block for all four (a shorter first block
+        // puts it there for 441), and the renders must agree to the bit.
+        for (double fs : { 44100.0, 48000.0, 96000.0 })
+            for (int which = 0; which < 2; ++which)
+            {
+                const auto sw = (size_t) (0.1 * fs) / 512 * 512;
+
+                DspCore::Params a;
+                a.eqIn = false;
+                a.oversampling = 1;
+                auto b = a;
+                if (which == 0) { a.outputLevelDb = -24.0f; b.outputLevelDb = 24.0f; }
+                else            { a.inputGainDb   = -24.0f; b.inputGainDb   = 0.0f; }
+
+                std::vector<float> x (sw + (size_t) (0.4 * fs));
+                for (size_t i = 0; i < x.size(); ++i)
+                    x[i] = (float) (0.17782794 * std::sin (2.0 * kPi * 100.0 * (double) i / fs));
+
+                const auto renderAt = [&] (int block)
+                {
+                    DspCore core;
+                    core.prepare (fs, block, 1, 1);
+                    core.setParams (a);
+                    return render (core, x, block, [&] (size_t s) { return s >= sw ? b : a; }, 1,
+                                   (int) (sw % (size_t) block));
+                };
+
+                const auto reference = renderAt (512);
+
+                for (int block : { 1, 32, 441 })
+                {
+                    const auto y = renderAt (block);
+
+                    double worst = 0.0;
+                    for (size_t i = sw; i < y.size(); ++i)
+                        worst = std::max (worst, (double) std::abs (y[i] - reference[i]));
+
+                    check (worst == 0.0, std::string (which ? "Input" : "Output") + " move at block "
+                                             + std::to_string (block) + ", " + rateName (fs)
+                                             + " differs from block 512 by " + std::to_string (worst));
+                }
+            }
     }
 
     if (failures == 0)

@@ -172,9 +172,12 @@ non-finite coefficient.
 
 **Smoothing:** the per-parameter constants are the *smooth* column of 11 §3's
 schema table and are not repeated here. Two rules belong to the DSP rather than
-to the schema: `freq` and `q` glide one-pole in the *log* domain, and `shape`
+to the schema: `freq` and `q` glide in the *log* domain, and `shape`
 crossfades the two contributions rather than jumping coefficients. The first
-set after prepare/reset is snapped.
+set after prepare/reset is snapped. As built (2026-10-03) every glide is a
+straight line over its column's time rather than a one-pole: it lands exactly
+and then does no work, which a one-pole never does (`DspCore.h`,
+`kFreqGlideMs`).
 
 ## 8. Metering
 

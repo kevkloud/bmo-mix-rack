@@ -1314,8 +1314,165 @@ void testListenCrossesOverWithoutAStep()
     }
 }
 
+/** **Every parameter glides, in real time, and a choice crosses over.**
+    Nothing was smoothed: a host's jump reached the next control tick whole,
+    and under an engaged cut the reviewer measured steps of 4.2x the steady
+    signal's own (FREQ), 5.9x (Q) and 2.6x (SHAPE). 11 section 3's smooth
+    column asks for 20 ms in the log domain on FREQ and Q, 10 ms on THRESHOLD
+    and RANGE, and a 20 ms crossfade on SHAPE.
+
+    Each parameter jumped end to end, both ways, under a tone the module is
+    cutting to RANGE, at three rates and three tone frequencies: the largest
+    step in the 80 ms after the jump, over the larger of the two steady
+    states' own largest steps either side, stays under 1.5. */
+void testEveryParameterGlides()
+{
+    struct Jump { const char* name; int index; float a, b; };
+    const Jump jumps[] { { "freq", freq, 2000.0f, 10000.0f }, { "freq", freq, 4000.0f, 6500.0f },
+                         { "q", q, 0.7f, 6.0f }, { "range", range, 1.0f, 18.0f },
+                         { "thresh", thresh, -24.0f, 24.0f }, { "shape", shape, 0.0f, 1.0f } };
+
+    const auto block = 64;
+
+    for (const auto rate : { 44100.0, 48000.0, 96000.0 })
+    {
+        const auto ms = [rate] (double m) { return (size_t) std::lround (m * 1.0e-3 * rate); };
+        const auto at = (size_t) block * ((size_t) (0.6 * rate / block) + 1);
+
+        for (const auto hz : { 1000.0, 5000.0, 7000.0 })
+        {
+            std::vector<float> tone ((size_t) (1.0 * rate));
+            for (size_t i = 0; i < tone.size(); ++i)
+                tone[i] = (float) (0.18 * std::sin (2.0 * kPi * hz * (double) i / rate));
+
+            for (const auto& j : jumps)
+                for (const auto upward : { true, false })
+                {
+                    auto v = defaults();
+                    v[thresh] = -24.0f;
+                    v[range]  = 18.0f;
+                    v[(size_t) j.index] = upward ? j.a : j.b;
+
+                    const auto y = renderWith (rate, tone, v, block, [&] (size_t n, std::vector<float>& p, DeesserDsp&)
+                    {
+                        if (n == at)
+                            p[(size_t) j.index] = upward ? j.b : j.a;
+                    });
+
+                    const auto steady = std::max ({ largestStep (y, at - ms (100), at),
+                                                    largestStep (y, at + ms (150), at + ms (250)), 1.0e-30 });
+                    const auto ratio = largestStep (y, at, at + ms (80)) / steady;
+
+                    check (ratio < 1.5, std::string (j.name) + " " + std::to_string (upward ? j.a : j.b) + " -> "
+                                            + std::to_string (upward ? j.b : j.a) + " steps " + std::to_string (ratio)
+                                            + "x under a " + std::to_string ((int) hz) + " Hz tone at "
+                                            + std::to_string ((int) rate) + " Hz");
+                }
+        }
+    }
+}
+
+/** **A glide lands exactly, and then does no more work.** Every control moved
+    at once, and the shape with them: 30 ms later -- past the longest glide --
+    nothing is still moving, and the band in use was last designed from the
+    settings themselves, bit for bit, so the design caches see nothing move
+    and the core is back to doing what it did before there were glides. */
+void testGlidesLandExactly()
+{
+    for (const auto rate : { 44100.0, 48000.0, 96000.0 })
+    {
+        const auto block = 64;
+        const auto at = (size_t) block * ((size_t) (0.3 * rate / block) + 1);
+
+        auto v = defaults();
+        v[thresh] = -24.0f;
+        v[range]  = 18.0f;
+
+        DeesserDsp dsp;
+        dsp.prepare (rate, block, 2);
+
+        std::vector<float> tone ((size_t) (0.5 * rate));
+        for (size_t i = 0; i < tone.size(); ++i)
+            tone[i] = (float) (0.18 * std::sin (2.0 * kPi * 7000.0 * (double) i / rate));
+
+        auto left = tone, right = tone;
+        auto glidingAfter = true;
+
+        for (size_t n = 0; n < tone.size(); n += (size_t) block)
+        {
+            if (n == at)
+            {
+                v[freq] = 3000.0f;  v[q] = 5.0f;  v[thresh] = -10.0f;  v[range] = 14.0f;
+                v[shape] = (float) highShelf;
+            }
+
+            dsp.setParams (v.data(), (int) v.size());
+
+            const auto count = (int) std::min ((size_t) block, tone.size() - n);
+            float* ch[2] { left.data() + n, right.data() + n };
+            dsp.process (ch, 2, count);
+
+            if (n + (size_t) count >= at + (size_t) (0.03 * rate) && n < at + (size_t) (0.03 * rate))
+                glidingAfter = dsp.getCore().isGliding();
+        }
+
+        const auto tag = " at " + std::to_string ((int) rate) + " Hz";
+        const auto& band = dsp.getCore().getBand();
+
+        check (! glidingAfter, "every glide has landed 30 ms after the move" + tag);
+        check (band.designedHz == 3000.0 && band.sideHz == 3000.0, "FREQ lands on its setting exactly" + tag);
+        check (band.designedQ == (double) 5.0f && band.sideQ == (double) 5.0f, "Q lands on its setting exactly" + tag);
+        check (band.designedShape == Shape::highShelf && band.sideShape == Shape::highShelf,
+               "the shape has crossed over completely" + tag);
+    }
+}
+
+/** **The same automation renders the same at any block size**, bit for bit:
+    every control and the shape moved, and listen engaged, at one sample, and
+    moved back at another, both on a boundary that blocks of 1, 7, 32, 441 and
+    512 share. The glides move a sample at a time and their targets change
+    only where a host moves them, so where the host splits its blocks cannot
+    show in the output. */
+void testAutomationIsBlockSizeInvariant()
+{
+    const size_t first = 225792, second = 2 * 225792;   // lcm of 7, 32, 441 and 512, twice
+    const auto source = essAt (kSampleRate, 10.0);
+
+    const auto renderAt = [&] (int block)
+    {
+        return renderWith (kSampleRate, source, defaults(), block, [&] (size_t n, std::vector<float>& p, DeesserDsp& d)
+        {
+            if (n == first)
+            {
+                p[freq] = 4000.0f;  p[q] = 1.2f;  p[thresh] = -6.0f;  p[range] = 14.0f;
+                p[shape] = (float) highShelf;
+                d.setSolo (0);
+            }
+
+            if (n == second)
+            {
+                p[freq] = 7000.0f;  p[q] = 4.0f;  p[thresh] = 2.0f;  p[range] = 3.0f;
+                p[shape] = (float) bell;
+                d.setSolo (-1);
+            }
+        });
+    };
+
+    const auto reference = renderAt (1);
+
+    for (const auto block : { 7, 32, 441, 512 })
+    {
+        const auto differ = differingSamples (renderAt (block), reference);
+        check (differ == 0, "automation at block " + std::to_string (block) + " renders as at block 1, "
+                                + std::to_string (differ) + " samples differ");
+    }
+}
+
 int main()
 {
+    testEveryParameterGlides();
+    testGlidesLandExactly();
+    testAutomationIsBlockSizeInvariant();
     testListenCrossesOverWithoutAStep();
     testRePrepareMatchesAFreshInstance();
     testResetLeavesNoStaleDesign();

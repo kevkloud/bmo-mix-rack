@@ -10,6 +10,7 @@
 #include <array>
 #include <atomic>
 #include <cmath>
+#include <utility>
 
 namespace bmo::deesser
 {
@@ -155,6 +156,24 @@ public:
         sustained tone at every rate; short enough to read as momentary. */
     static constexpr double kListenFadeMs = 10.0;
 
+    /** How long each control takes to arrive, the *smooth* column of
+        docs/deesser/11-integration-and-test-plan.md 3: FREQ and Q in the log
+        domain, THRESHOLD and RANGE in dB, SHAPE as a crossfade of the two
+        shapes' outputs. Milliseconds, converted at prepare(), so a move takes
+        the same time at every rate and in any host block size.
+
+        **Straight lines, not the one-pole 10 section 7 names.** The shared
+        `dsp::Ramp` lands exactly on its target and then does no work at all,
+        which a one-pole never does, and for a given time a straight line has
+        the smallest largest step of any monotone path (core/dsp/SwitchFade.h).
+        In the log domain a straight line is an exponential sweep in Hz, which
+        is what "log" asks for. */
+    static constexpr double kFreqGlideMs   = 20.0;
+    static constexpr double kQGlideMs      = 20.0;
+    static constexpr double kThreshGlideMs = 10.0;
+    static constexpr double kRangeGlideMs  = 10.0;
+    static constexpr double kShapeFadeMs   = 20.0;
+
 
     /** Where the high-frequency energy actually sits, in Hz, estimated with a
         handful of filters rather than a transform.
@@ -280,6 +299,11 @@ public:
         refTaps = dsp::SvfTaps::of (refCoeffs.g, refCoeffs.k);
 
         listenMix.prepare (rate, kListenFadeMs);
+        freqGlide  .prepare (rate, kFreqGlideMs);
+        qGlide     .prepare (rate, kQGlideMs);
+        threshGlide.prepare (rate, kThreshGlideMs);
+        rangeGlide .prepare (rate, kRangeGlideMs);
+        shapeMix   .prepare (rate, kShapeFadeMs);
 
         reset();
     }
@@ -292,6 +316,8 @@ public:
     void reset() noexcept
     {
         band.reset();
+        outgoing.reset();
+        shapeMix.snap (1.0f);
         detector.reset();
         reduction.reset();
 
@@ -350,21 +376,78 @@ public:
         // Hosts send anything, so every one of these is clamped rather than
         // trusted. `freqHz` additionally clamps to a fraction of Fs, so a
         // 10 kHz band at 44.1 kHz cannot reach for a pole it has no room for.
-        const auto hz = std::clamp ((double) params.freqHz, 2000.0,
-                                    std::min (10000.0, (double) kMaxFreqFraction * rate));
+        const auto maxHz = std::min (10000.0, (double) kMaxFreqFraction * rate);
+        const auto hz = std::clamp ((double) params.freqHz, 2000.0, maxHz);
         const auto q  = std::clamp ((double) params.q, (double) kMinQ, (double) kMaxQ);
         const auto rangeDb = std::clamp ((double) params.rangeDb, 0.0, (double) kMaxDepthDb);
-        const auto shape = params.shape;
+        const auto threshDb = params.threshDb;
 
-        band.designSide (shape, hz, q, rate);
+        // **Every control glides, in real time; the choice crosses over.** The
+        // targets are taken once a block and the glides move a sample at a
+        // time, so a move takes the same milliseconds whatever the host's
+        // block size, and the same automation renders bit-identically at any
+        // of them. A core that has processed nothing since prepare() or
+        // reset() has nowhere to glide from, so it starts at the settings.
+        if (primed)
+        {
+            freqGlide  .setTarget ((float) std::log (hz));
+            qGlide     .setTarget ((float) std::log (q));
+            threshGlide.setTarget (threshDb);
+            rangeGlide .setTarget ((float) rangeDb);
+
+            if (params.shape != activeShape)
+                beginShapeFade (params.shape);
+        }
+        else
+        {
+            freqGlide  .snap ((float) std::log (hz));
+            qGlide     .snap ((float) std::log (q));
+            threshGlide.snap (threshDb);
+            rangeGlide .snap ((float) rangeDb);
+
+            activeShape = params.shape;
+            shapeMix.snap (1.0f);
+        }
 
         GainComputer computer;
         computer.kneeDb = kKneeDb;
         computer.slope  = kSlope;
-        computer.rangeDb = rangeDb;
 
         for (int n = 0; n < numSamples; ++n)
         {
+            //== Where the controls are this sample =========================
+            //
+            // While a glide moves, the value is read off it; the sample it
+            // lands, and every sample after, the setting itself is used, bit
+            // for bit -- so a band at rest designs from exactly what it did
+            // before there were glides, and the design caches see nothing
+            // move and do no work.
+            freqGlide.next();
+            qGlide.next();
+            threshGlide.next();
+            rangeGlide.next();
+
+            const auto hzNow = freqGlide.isMoving()
+                                 ? std::clamp (std::exp ((double) freqGlide.value()), 2000.0, maxHz) : hz;
+            const auto qNow  = qGlide.isMoving()
+                                 ? std::clamp (std::exp ((double) qGlide.value()), (double) kMinQ, (double) kMaxQ) : q;
+            const auto threshNow = threshGlide.isMoving() ? (double) threshGlide.value() : (double) threshDb;
+            computer.rangeDb     = rangeGlide.isMoving()  ? (double) rangeGlide.value()  : rangeDb;
+
+            // The outgoing shape is run only while it is being faded out.
+            const auto mix    = shapeMix.next();
+            const auto fading = mix < 1.0f;
+
+            // The detector's filter follows the glides at the control tick,
+            // before this sample is detected through it.
+            if (sinceTick == 0)
+            {
+                band.designSide (activeShape, hzNow, qNow, rate);
+
+                if (fading)
+                    outgoing.designSide (outgoingShape, hzNow, qNow, rate);
+            }
+
             //== Detect, from the dry input =================================
             //
             // Power-summed across channels rather than mono-summed:
@@ -376,8 +459,16 @@ public:
             for (int c = 0; c < chans; ++c)
             {
                 const auto x = (double) channels[c][n];
-                const auto b = band.sideSample (c, x);
+                auto b = band.sideSample (c, x);
                 const auto r = refState[(size_t) c].process (refTaps, refCoeffs, x);
+
+                // While the shape crosses over, the detector hears the two
+                // shapes' bands in the same proportion as the output does.
+                if (fading)
+                {
+                    const auto was = outgoing.sideSample (c, x);
+                    b = was + (double) mix * (b - was);
+                }
 
                 bandPower += b * b;
                 refPower  += r * r;
@@ -390,14 +481,18 @@ public:
             // Hysteresis is applied to the threshold the detector is judged
             // against, so that having decided this is an ess the module is
             // slower to decide it has ended.
-            computer.thresholdDb = (double) params.threshDb - reduction.thresholdOffsetDb();
+            computer.thresholdDb = threshNow - reduction.thresholdOffsetDb();
 
             const auto applied = reduction.process (computer.reductionDb (prominence));
 
             //== Re-derive the cut, or walk toward the one already asked for ==
             if (sinceTick == 0)
             {
-                band.design (shape, hz, q, applied, grid, kControlInterval, ! primed);
+                band.design (activeShape, hzNow, qNow, applied, grid, kControlInterval, ! primed);
+
+                if (fading)
+                    outgoing.design (outgoingShape, hzNow, qNow, applied, grid, kControlInterval, false);
+
                 primed = true;
 
                 depthTwoTicksAgo = depthAtTick;
@@ -406,6 +501,9 @@ public:
             else
             {
                 band.advance();
+
+                if (fading)
+                    outgoing.advance();
             }
 
             if (++sinceTick >= kControlInterval)
@@ -501,14 +599,27 @@ public:
                 // sibilance being taken out. The filtered output would be the
                 // whole signal with a dip in it, which is not the thing worth
                 // auditioning. BMO DEQ's band solo does exactly this.
-                //
+                auto whole = (float) y, heard = (float) (y - x);
+
+                // A change of shape crosses the outgoing shape's output over to
+                // the new one's -- both paths, so listen crosses over with it.
+                if (fading)
+                {
+                    const auto was = outgoing.filterSample (c, x);
+                    const auto yWas = unity ? x : was;
+
+                    whole = dsp::crossfade ((float) yWas, whole, mix);
+                    heard = dsp::crossfade ((float) (yWas - x), heard, mix);
+                }
+
                 // At rest `crossfade` returns one side bit for bit, so a held
                 // listen, on or off, renders exactly as the hard switch did.
-                channels[c][n] = dsp::crossfade ((float) y, (float) (y - x), listenAt);
+                channels[c][n] = dsp::crossfade (whole, heard, listenAt);
             }
         }
 
         band.flushTiny();
+        outgoing.flushTiny();
         detector.flushTiny();
 
         for (auto& s : refState)
@@ -563,8 +674,48 @@ public:
     double sampleRate() const noexcept { return rate; }
     int activeChannels() const noexcept { return numActiveChannels; }
 
+    /** Whether any control, the shape or listen is still on its way. False
+        once every move has landed -- the point after which the core does no
+        more work for a move than it did before there were glides. */
+    bool isGliding() const noexcept
+    {
+        return freqGlide.isMoving() || qGlide.isMoving() || threshGlide.isMoving()
+            || rangeGlide.isMoving() || shapeMix.isMoving() || listenMix.isMoving();
+    }
+
+    /** The band the output is coming from, for tests that ask what it was
+        last designed from. */
+    const Band& getBand() const noexcept { return band; }
+
 private:
     static constexpr int kMaxChannels = 2;
+
+    /** A new shape: the band in use becomes the outgoing one, a copy of it
+        becomes the incoming one -- so the new shape starts from the old one's
+        state and the next tick walks its coefficients over -- and the output
+        crosses from the first to the second in `kShapeFadeMs`. Flicked back
+        before that finishes, the two swap roles and the blend turns round
+        from where it is, taking the full time again to arrive. */
+    void beginShapeFade (Shape to) noexcept
+    {
+        if (shapeMix.isMoving() && to == outgoingShape)
+        {
+            std::swap (band, outgoing);
+            std::swap (activeShape, outgoingShape);
+
+            const auto at = shapeMix.value();
+            shapeMix.snap (1.0f - at);
+            shapeMix.setTarget (1.0f);
+            return;
+        }
+
+        outgoing = band;
+        outgoingShape = activeShape;
+        activeShape = to;
+
+        shapeMix.snap (0.0f);
+        shapeMix.setTarget (1.0f);
+    }
 
     Params params;
     double rate = 48000.0;
@@ -572,6 +723,15 @@ private:
 
     dsp::DesignGrid grid {};
     Band band;
+
+    /** The shape being faded out, run only while `shapeMix` is moving. */
+    Band outgoing;
+    Shape activeShape = Shape::bell, outgoingShape = Shape::bell;
+
+    /** FREQ and Q glide in the log of their values, THRESHOLD and RANGE in
+        dB; `shapeMix` is how far the output has crossed to `activeShape`. */
+    dsp::Ramp freqGlide, qGlide, threshGlide, rangeGlide, shapeMix;
+
     Prominence detector;
     Reduction reduction;
 

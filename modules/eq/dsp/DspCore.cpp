@@ -194,8 +194,13 @@ void DspCore::reset() noexcept
     dryWrite = 0;
 
     // A dip in progress was hiding a change that no longer has anything to
-    // hide; a change still wanted is made at once by the next process().
+    // hide; a change still wanted is made at once by the next process(). The
+    // latency reported goes back to the factor that is running: a request
+    // dropped here and then withdrawn would otherwise leave the abandoned
+    // factor's figure behind, with nothing left to correct it.
     oversamplingDip.reset();
+    pendingFactor  = currentFactor;
+    latencySamples = Oversampler::latencyForFactor (currentFactor);
     running = false;
 
     // Auto Gain starts at its figure for the settings on the next block.
@@ -395,7 +400,7 @@ void DspCore::process (float* const* channels, int numChannels, int numSamples) 
 
         updateCoefficients (activeChannels, n);
 
-        const auto autoGain = autoGainSm.tick();
+        auto       autoGain = autoGainSm.tick();
         const auto wet      = mixSm.tick();
         const auto dryLevel = 1.0f - wet;
 
@@ -411,6 +416,13 @@ void DspCore::process (float* const* channels, int numChannels, int numSamples) 
                 switchOversampling (activeChannels, inGain);
                 oversamplingDip.changed();
                 factor = currentFactor;
+
+                // The new rate's Auto Gain figure, snapped at the bottom of
+                // the dip, applies from this sample, not from the next
+                // sub-block: otherwise up to 31 samples of the fade up would
+                // carry the old rate's figure and the next sub-block would
+                // step to the new one.
+                autoGain = autoGainSm.value();
             }
 
             // The dry ring is long enough for any factor, and read at the

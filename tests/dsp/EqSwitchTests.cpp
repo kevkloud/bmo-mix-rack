@@ -208,7 +208,7 @@ int main()
     // Measured on 6f6b8c3 against the steady signal's own largest step: Low
     // Cut 360 -> Off 62-74x, Phase 14.5x, EQ In off 3.4-4.2x (a step of a
     // whole unit of full scale with the mid at +18), Hi-Q 1.7-2.2x. The bound
-    // is 1.5x, at 44.1, 48 and 96 kHz, with and without oversampling, both
+    // is 1.5x, at 44.1, 48 and 96 kHz, at every oversampling factor, both
     // ways, for every cut choice. The cuts are driven where they bite and
     // shift phase most among the probe's tones: 100 Hz for Low Cut, 5 kHz for
     // High Cut.
@@ -222,12 +222,12 @@ int main()
         constexpr double kBound = 1.5;
 
         for (double fs : { 44100.0, 48000.0, 96000.0 })
-            for (int os : { 1, 2 })
+            for (int os : { 1, 2, 4, 8 })
             {
                 DspCore::Params base;
                 base.oversampling = os;
 
-                const auto where = " at " + rateName (fs) + (os == 1 ? ", 1x" : ", 2x");
+                const auto where = " at " + rateName (fs) + ", " + std::to_string (os) + "x";
                 const auto both = [&] (const std::string& name, DspCore::Params p, DspCore::Params q, double hz)
                 {
                     const auto on  = switchStepRatio (fs, p, q, hz);
@@ -429,6 +429,172 @@ int main()
                            "latency " + std::to_string (from) + "x -> " + std::to_string (to)
                                + "x is the new factor's from the first process() after the change");
                 }
+    }
+
+    //== 3b. After the dip the module is the new factor's, whatever happened
+    // Section 3 measures steps against a 1 kHz tone, which cannot see the dry
+    // and wet halves of Mix 50 landing out of line after the change -- a comb
+    // that is steady, so no step. Here the module after a change is held
+    // against a fresh instance at the new factor, on three tones across the
+    // band with the EQ and Auto Gain doing something: once the dip and the
+    // chain's own memory are past, the two must agree to float noise. And
+    // the dip is interrupted three ways -- prepare() and reset() at its
+    // midpoint, and the request withdrawn before the bottom -- each held
+    // against what a fresh instance does from that point.
+    {
+        DspCore::Params settings;
+        settings.mixPercent = 50.0f;
+        settings.midGainDb  = 6.0f;
+        settings.lfGainDb   = -4.0f;
+        settings.autoGain   = true;
+
+        const auto tones = [] (double fs, size_t length)
+        {
+            std::vector<float> x (length);
+            for (size_t i = 0; i < length; ++i)
+            {
+                const auto t = (double) i / fs;
+                x[i] = (float) (0.06 * std::sin (2.0 * kPi * 100.0 * t)
+                              + 0.06 * std::sin (2.0 * kPi * 1000.0 * t + 0.5)
+                              + 0.06 * std::sin (2.0 * kPi * 7000.0 * t + 1.0));
+            }
+            return x;
+        };
+
+        // y from `from` on against z, which starts `offset` samples into y.
+        const auto worstDifference = [] (const std::vector<float>& y, const std::vector<float>& z,
+                                         size_t from, size_t offset)
+        {
+            double worst = 0.0;
+            for (size_t i = from; i < y.size(); ++i)
+                worst = std::max (worst, (double) std::abs (y[i] - z[i - offset]));
+            return worst;
+        };
+
+        for (double fs : { 44100.0, 48000.0, 96000.0 })
+            for (int from : { 1, 2, 4, 8 })
+                for (int to : { 1, 2, 4, 8 })
+                {
+                    if (from == to)
+                        continue;
+
+                    auto a = settings; a.oversampling = from;
+                    auto b = settings; b.oversampling = to;
+
+                    const auto where = std::to_string (from) + "x -> " + std::to_string (to) + "x at " + rateName (fs);
+                    const auto length = (size_t) (0.8 * fs);
+                    const auto x = tones (fs, length);
+                    constexpr size_t block = 64;   // fine enough to land inside a 10 ms dip
+                    const auto sw  = (size_t) (0.2 * fs) / block * block;
+                    const auto mid = sw + (size_t) (0.005 * fs) / block * block;   // halfway down the dip
+
+                    // A completed change: from 0.4 s after it, a fresh instance
+                    // at the new factor, run from the start, is what it gives.
+                    {
+                        DspCore moved, fresh;
+                        moved.prepare (fs, (int) block, 1, from);
+                        moved.setParams (a);
+                        fresh.prepare (fs, (int) block, 1, to);
+                        fresh.setParams (b);
+
+                        const auto y = render (moved, x, (int) block, [&] (size_t s) { return s >= sw ? b : a; }, 1);
+                        const auto z = render (fresh, x, (int) block, [&] (size_t) { return b; }, 1);
+
+                        const auto worst = worstDifference (y, z, sw + (size_t) (0.4 * fs), 0);
+                        check (worst < 1.0e-6, "Mix 50 after oversampling " + where
+                                                   + " differs from a fresh instance at the new factor by "
+                                                   + std::to_string (worst));
+                    }
+
+                    // Interrupted at the midpoint of the fade down.
+                    for (int how = 0; how < 3; ++how)
+                    {
+                        const char* names[] { "prepare()", "reset()", "withdrawn" };
+
+                        DspCore core;
+                        core.prepare (fs, (int) block, 1, from);
+                        core.setParams (a);
+
+                        std::vector<float> y = x;
+                        for (size_t start = 0; start < length; start += block)
+                        {
+                            auto p = start >= sw ? b : a;
+
+                            if (start == mid && how == 0) core.prepare (fs, (int) block, 1, to);
+                            if (start == mid && how == 1) core.reset();
+                            if (start >= mid && how == 2) p = a;   // A -> B -> A before the bottom
+
+                            core.setParams (p);
+                            float* channels[1] { y.data() + start };
+                            core.process (channels, 1, (int) std::min (block, length - start));
+
+                            if (start == mid && how < 2)
+                                check (core.getLatencySamples() == bmo::Oversampler::latencyForFactor (to),
+                                       std::string (names[how]) + " mid-dip, " + where
+                                           + ": latency is the new factor's");
+                        }
+
+                        if (how == 2)
+                        {
+                            // Withdrawn: once the gain is back at 1, nothing
+                            // changed at all -- the instance never switched.
+                            DspCore never;
+                            never.prepare (fs, (int) block, 1, from);
+                            never.setParams (a);
+                            const auto z = render (never, x, (int) block, [&] (size_t) { return a; }, 1);
+
+                            const auto worst = worstDifference (y, z, mid + (size_t) (0.012 * fs), 0);
+                            check (worst == 0.0, "oversampling " + where + " withdrawn mid-dip differs from "
+                                                     "never switching by " + std::to_string (worst));
+                            check (core.getLatencySamples() == bmo::Oversampler::latencyForFactor (from),
+                                   "oversampling " + where + " withdrawn mid-dip: latency is the old factor's");
+                        }
+                        else
+                        {
+                            // prepare() or reset() mid-dip: from that point on,
+                            // exactly what a fresh instance at the new factor
+                            // gives on the same input.
+                            DspCore fresh;
+                            fresh.prepare (fs, (int) block, 1, to);
+                            fresh.setParams (b);
+                            const std::vector<float> rest (x.begin() + (long) mid, x.end());
+                            const auto z = render (fresh, rest, (int) block, [&] (size_t) { return b; }, 1);
+
+                            const auto worst = worstDifference (y, z, mid, mid);
+                            check (worst == 0.0, std::string (names[how]) + " mid-dip, " + where
+                                                     + ", differs from a fresh instance by " + std::to_string (worst));
+                        }
+                    }
+                }
+
+        // A request reset away and then withdrawn leaves nothing behind: the
+        // latency is the running factor's.
+        for (int from : { 1, 2, 4, 8 })
+            for (int to : { 1, 2, 4, 8 })
+            {
+                if (from == to)
+                    continue;
+
+                DspCore core;
+                core.prepare (48000.0, 64, 1, from);
+                auto p = settings;
+                p.oversampling = from;
+                core.setParams (p);
+
+                std::vector<float> buffer (64, 0.0f);
+                float* channels[1] { buffer.data() };
+                core.process (channels, 1, 64);
+
+                p.oversampling = to;   core.setParams (p); core.process (channels, 1, 64);
+                core.reset();
+                p.oversampling = from; core.setParams (p); core.process (channels, 1, 64);
+
+                check (core.getLatencySamples() == bmo::Oversampler::latencyForFactor (from),
+                       "oversampling " + std::to_string (from) + "x -> " + std::to_string (to)
+                           + "x, reset(), back to " + std::to_string (from) + "x: latency reports "
+                           + std::to_string (core.getLatencySamples()) + ", the running factor's is "
+                           + std::to_string (bmo::Oversampler::latencyForFactor (from)));
+            }
     }
 
     //== 4. Auto Gain is at its level from the first block ===================

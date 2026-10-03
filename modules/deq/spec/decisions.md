@@ -12,8 +12,10 @@ From the rack review. A Low Cut or High Cut at the Q knob's top (40) peaked
 the shelves' already is.** `kCutMaxQ` in `params.h`, read through
 `effectiveQ` by the engine, the curve and the panel alike.
 
-Resonance peak of the matched design at 48 kHz, worst of 100 Hz / 1 kHz /
-10 kHz, both cut shapes (`rack-probe` qcap mode, on ICE QUEEN):
+Resonance peak of the matched design at 48 kHz: the largest |H| of
+`designMatched` for a Low Cut and a High Cut with corners at 100 Hz, 1 kHz
+and 10 kHz, read at log-spaced points (ratio 1.0005) from 10 Hz to 0.499 fs,
+worst of the six, measured on ICE QUEEN:
 
 | Q | 0.71 | 0.75 | 0.8 | 1.0 | 1.3 | 2.0 | 4.36 | 40 |
 |---|---|---|---|---|---|---|---|---|

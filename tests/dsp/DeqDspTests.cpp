@@ -2268,6 +2268,137 @@ namespace
                              + kPlaceNames[b] + " dips the louder channel's contribution by 3 dB at most");
             }
     }
+
+    //==========================================================================
+    // Held settings render exactly what 6f6b8c3 rendered. Every fix of the
+    // 2026-10-03 review was held to this -- with nothing switching, settings
+    // held and no cut above its cap, the output is bit-identical to the code
+    // before the review -- and until round 2 only an outside probe checked
+    // it. Here it is pinned: twelve bands of every shape, placement and
+    // direction, with dynamics, and without them, at 44.1, 48 and 96 kHz.
+    //==========================================================================
+    std::vector<float> heldNoise (size_t n, uint32_t seed)
+    {
+        std::vector<float> out (n);
+        double lp = 0.0;
+        for (auto& x : out)
+        {
+            seed = seed * 1664525u + 1013904223u;
+            const auto w = (double) seed / 4294967296.0 * 2.0 - 1.0;
+            lp = 0.9 * lp + 0.1 * w;
+            x = (float) (0.06 * w + 0.25 * lp);
+        }
+        return out;
+    }
+
+    /** 0: twelve dynamic and static bands; 1: the same with DYN off on all;
+        2: as 1 with every dynamics knob moved to an extreme. */
+    Values heldSettings (int which)
+    {
+        Values p;
+        const int shapes[12] { 3, 1, 0, 0, 0, 2, 0, 1, 0, 0, 2, 4 };
+        for (int b = 0; b < kBands; ++b)
+        {
+            p.at (b, Control::on) = 1.0f; p.at (b, Control::shape) = (float) shapes[b];
+            p.at (b, Control::freq) = 40.0f * (float) (b + 1) * (float) (b + 1);
+            p.at (b, Control::gain) = b % 2 ? 4.5f : -6.0f;
+            p.at (b, Control::q) = shapes[b] >= 3 ? 0.5f : 0.4f + 0.3f * (float) b;
+            p.at (b, Control::place) = (float) (b % 3);
+            p.at (b, Control::dyn) = which == 0 && shapes[b] <= 2 ? 1.0f : 0.0f;
+            p.at (b, Control::dir) = (float) ((b / 2) % 2);
+            p.at (b, Control::thr) = which == 2 ? -60.0f : -45.0f + 3.0f * (float) b;
+            p.at (b, Control::range) = which == 2 ? 24.0f : (b % 3 == 0 ? 9.0f : -12.0f);
+            p.at (b, Control::ratio) = which == 2 ? 20.0f : 1.5f + (float) b;
+            p.at (b, Control::attack) = which == 2 ? 0.1f : 0.5f + 3.0f * (float) b;
+            p.at (b, Control::release) = which == 2 ? 5.0f : 20.0f + 150.0f * (float) b;
+        }
+        return p;
+    }
+
+    uint64_t heldHash (int which, double rate)
+    {
+        auto p = heldSettings (which);
+        const auto n = (size_t) rate;
+        auto l = heldNoise (n, 101u), r = heldNoise (n, 202u);
+
+        DeqDsp d;
+        d.setParams (p.v.data(), (int) p.v.size());
+        d.prepare (rate, 512, 2);
+        for (size_t pos = 0; pos < n; pos += 512)
+        {
+            d.setParams (p.v.data(), (int) p.v.size());
+            float* ch[2] { l.data() + pos, r.data() + pos };
+            d.process (ch, 2, (int) std::min ((size_t) 512, n - pos));
+        }
+
+        uint64_t h = 1469598103934665603ull;   // FNV-1a over the output's bits
+        for (const auto* ch : { &l, &r })
+            for (auto x : *ch)
+            {
+                uint32_t u;
+                std::memcpy (&u, &x, 4);
+                for (int k = 0; k < 4; ++k) { h ^= (u >> (8 * k)) & 0xffu; h *= 1099511628211ull; }
+            }
+        return h;
+    }
+
+    void testHeldSettingsAreUnchanged()
+    {
+        const double rates[] { 44100.0, 48000.0, 96000.0 };
+
+        // DYN off is the static EQ, to the bit, wherever the knobs are:
+        // anywhere, on any compiler.
+        for (double rate : rates)
+            check (heldHash (1, rate) == heldHash (2, rate),
+                   "Held: DYN off is the static EQ to the bit, whatever the dynamics knobs say, " + std::to_string ((int) rate) + " Hz");
+
+        // The renders themselves, against 6f6b8c3's, captured on ICE QUEEN
+        // from that tree with MSVC and the DLL runtime (/MD, as this build
+        // links) on 2026-10-03. Pinned for MSVC only: the last bits are a
+        // toolchain's and its maths library's -- the static runtime's exp or
+        // pow differs in the last place and moved one of these six -- and a
+        // hash has no tolerance (BusTests' tolerances say the same).
+#if defined (_MSC_VER)
+        const uint64_t pinned[2][3] {
+            { 0x6469a8ac3c9a84c7ull, 0xed2d470b3cb983d3ull, 0x09d0f80ac9c39876ull },   // dynamic
+            { 0x7db48dff20aedf88ull, 0x8aabeba150373086ull, 0x31897c8368849bd5ull },   // static
+        };
+
+        for (int which = 0; which < 2; ++which)
+            for (int i = 0; i < 3; ++i)
+            {
+                const auto got = heldHash (which, rates[i]);
+                if (got != pinned[which][i])
+                    std::cerr << "  held hash " << which << " at " << rates[i] << ": 0x" << std::hex << got << std::dec << '\n';
+                check (got == pinned[which][i], std::string ("Held: ") + (which == 0 ? "dynamic" : "static")
+                       + " bands render bit-identically to 6f6b8c3 at " + std::to_string ((int) rates[i]) + " Hz");
+            }
+#endif
+    }
+
+    /** reset() before prepare() returns, and leaves the module a wire. */
+    void testResetBeforePrepare()
+    {
+        auto p = heldSettings (0);
+        DeqDsp d;
+        d.reset();
+        d.setParams (p.v.data(), (int) p.v.size());
+        d.reset();
+
+        std::vector<float> l (64, 0.1f), r (64, -0.1f);
+        const auto inL = l, inR = r;
+        float* ch[2] { l.data(), r.data() };
+        d.process (ch, 2, 64);
+        check (l == inL && r == inR, "Before prepare: reset() returns and the module stays a wire");
+
+        DspCore e;
+        e.reset();
+        std::vector<double> x (64, 0.2);
+        const auto in = x;
+        double* one[1] { x.data() };
+        e.process (one, 1, 64);
+        check (x == in, "Before prepare: the engine's reset() returns and it stays a wire");
+    }
 }
 
 int main()
@@ -2295,6 +2426,8 @@ int main()
     testShapeChangeLeavesNoHole();
     testSoloHoleIsBounded();
     testPlacementDipIsBounded();
+    testHeldSettingsAreUnchanged();
+    testResetBeforePrepare();
 
     if (failures == 0)
         std::cout << "deq_dsp: all passed\n";

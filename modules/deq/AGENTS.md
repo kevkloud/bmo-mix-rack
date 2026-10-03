@@ -237,6 +237,17 @@ small.
 - **T4 zipper metric** (≤ −80 dB excess energy) is not implemented; the
   modulation tests assert stability, boundedness and gain-step overshoot.
 - **T9 SIMD across bands** not attempted. The per-sample loop is scalar.
+- **A frequency jump across a tone is not a step to fix.** Moving a +6 dB
+  bell from 100 Hz to 10 kHz at once under a 1 kHz tone reads 2.00x on the
+  switch-step measure, and that is the bell's own +6.02 dB passing over the
+  tone on its 10 ms glide: +3 dB reads 1.42x, +12 dB 3.91x, and no glide
+  length changes it, because the bell does pass through 1 kHz on the way
+  (2026-10-03 review, measured on ICE QUEEN). Left as it is.
+- **Every band changing shape at once costs while it lasts**: both shapes
+  are redesigned every 8 samples for the 20 ms of a change, 16.6 % of a
+  192 kHz / 32-sample block for twelve bands against 4.6 % idle (one band
+  changing, 5.6 %). Redesigning every 32 samples during a change would cut
+  that by about three quarters if it is ever wanted.
 - **Bell precision at f0 < 3e-4 Fs**: 2e-6 dB off the knob gain from
   cancellation in the zero fit. Inaudible; fixable by computing 1 ± a1 + a2
   from the pole radius and angle rather than from a1, a2.

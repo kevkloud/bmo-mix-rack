@@ -3,6 +3,7 @@
 #include "modules/deq/dsp/Filters.h"
 #include "modules/deq/dsp/Dynamics.h"
 #include "core/dsp/AnalyserTap.h"
+#include "core/dsp/SwitchFade.h"
 #include <array>
 #include <atomic>
 #include <memory>
@@ -25,6 +26,15 @@ inline constexpr int kControlInterval = 8;
 
 /** Static parameters glide to a new value over roughly this long. */
 inline constexpr double kSmoothingMs = 10.0;
+
+/** A switch -- shape, placement, DYN, direction, solo -- crosses over in this
+    long rather than stepping (core/dsp/SwitchFade.h, and the house rule in
+    core/AGENTS.md: under 1.5x the steady signal's largest step). A change
+    asked for while one is in progress waits for it, then crosses over from
+    there: the latest choice wins, at most one crossover late. DYN and
+    direction blend two gain laws rather than two filters, so they simply
+    turn round from where they are. */
+inline constexpr double kSwitchFadeMs = 10.0;
 
 /** A dynamic band is only redesigned when its gain offset has moved by more
     than this since the last design. Static settings are always followed
@@ -245,6 +255,26 @@ private:
         bool   live = false;         // enabled, or still fading out
         bool   hearing = false;      // the listener is running
 
+        // The listener's switches. dynMix is how far the dynamics are in use
+        // and dirMix how far toward Below, both read at control rate; each
+        // blends two offsets, so either turns round from where it is.
+        // placeMix crosses from `fromPlacement` to `placement`, per sample,
+        // for the detector's input and the band's output alike.
+        dsp::Ramp dynMix, dirMix, placeMix;
+        Placement placement = Placement::stereo, fromPlacement = Placement::stereo;
+
+        // The band's shape crossover: the filter as it was (coefficients
+        // frozen, state running on) fading out under the new one. The new one
+        // starts from the old one's state at the moment of the switch -- the
+        // same input at the same moment, through poles at the same frequency
+        // -- which is neither rest (a start-up transient the size of the
+        // signal) nor anything it heard before.
+        dsp::Ramp shapeMix;
+        Shape     shape = Shape::bell;  // the shape the filter is running
+        SvfCoeffs oldCoeffs;
+        SvfTaps   oldTaps;
+        SvfState  oldM, oldS;
+
         // What `next` was designed from, so a static band is not redesigned.
         Shape  designedShape = Shape::bell;
         double designedHz = -1.0, designedQ = -1.0, designedStatic = 1.0e9, designedOffset = 0.0;
@@ -275,8 +305,14 @@ private:
     DesignGrid grid;
     std::unique_ptr<Shared> shared = std::make_unique<Shared>();
     double rate = 48000.0, tickAlpha = 0.0;
-    int tickPhase = 0;
+    int tickPhase = 0, bandsInUse = 0;
     bool primed = false;
+
+    // Solo crosses over from what was being heard (-1: the whole EQ) to what
+    // is asked for. The first block after prepare()/reset() takes it as it is.
+    dsp::Ramp soloMix;
+    int soloFrom = -1, soloTo = -1;
+    bool soloPrimed = false;
 };
 
 } // namespace bmo::deq

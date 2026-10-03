@@ -67,6 +67,48 @@ namespace
         g.now  = from;
         g.step = (g.tick - from) / (double) kControlInterval;
     }
+
+    /** dsp::crossfade at the engine's double precision, on the same terms:
+        at either end it returns that input itself, bit for bit, and never
+        reads the other, so a switch at rest leaves the audio untouched. */
+    double blend (double from, double to, float position) noexcept
+    {
+        if (! (position > 0.0f))
+            return from;
+
+        if (! (position < 1.0f))
+            return to;
+
+        const auto p = (double) position;
+        return from * (1.0 - p) + to * p;
+    }
+
+    /** A band's contribution to L and R, H(L) - L and H(R) - R, from its M/S
+        pair, per placement. */
+    void placeContribution (Placement placement, double beta, double dM, double dS, double& wl, double& wr) noexcept
+    {
+        wl = dM + dS;
+        wr = dM - dS;
+
+        if (placement == Placement::mid)
+        {
+            wl = (1.0 - beta) * wl + beta * dM;
+            wr = (1.0 - beta) * wr + beta * dM;
+        }
+        else if (placement == Placement::side)
+        {
+            wl = (1.0 - beta) * wl + beta * dS;
+            wr = (1.0 - beta) * wr - beta * dS;
+        }
+    }
+
+    /** The level a detector placed here listens to. */
+    double placedLevel (Placement placement, double sm, double ss) noexcept
+    {
+        return placement == Placement::mid  ? sm
+             : placement == Placement::side ? ss
+                                            : sm + ss;
+    }
 }
 
 //==============================================================================
@@ -83,6 +125,12 @@ void DspCore::prepare (double sampleRate, int, int) noexcept
     shared->pre.prepare ((int) (0.35 * rate));
     shared->post.prepare ((int) (0.35 * rate));
 
+    for (auto& b : bands)
+        for (auto* r : { &b.dynMix, &b.dirMix, &b.placeMix, &b.shapeMix })
+            r->prepare (rate, kSwitchFadeMs);
+
+    soloMix.prepare (rate, kSwitchFadeMs);
+
     reset();
 }
 
@@ -93,6 +141,8 @@ void DspCore::reset() noexcept
 
     tickPhase = 0;
     primed = false;
+    soloMix.snap (1.0f);
+    soloPrimed = false;
 }
 
 void DspCore::resetBand (Band& b, bool listenerToo) noexcept
@@ -110,6 +160,9 @@ void DspCore::resetBand (Band& b, bool listenerToo) noexcept
 
     b.enable.snap (0.0);
 
+    b.shapeMix.snap (1.0f);
+    b.oldM.reset(); b.oldS.reset();
+
     if (listenerToo)
     {
         b.sideM.reset(); b.sideS.reset();
@@ -117,6 +170,7 @@ void DspCore::resetBand (Band& b, bool listenerToo) noexcept
         b.offsetDb = 0.0;
         b.sideHz = b.sideQ = -1.0;
         b.detAttack = b.detRelease = -1.0;
+        b.placeMix.snap (1.0f);
         b.hearing = false;
     }
 }
@@ -149,11 +203,8 @@ void DspCore::controlTick() noexcept
                 continue;
         }
 
-        const auto gain  = hasGain (s.shape);
         const auto hzT   = std::log2 (clampFrequency (s.frequencyHz, rate));
         const auto qT    = std::log (clampQ (s.q));
-        const auto gT    = gain ? clampGainDb (s.gainDb) : 0.0;
-        const auto betaT = s.placement == Placement::stereo ? 0.0 : std::clamp (s.msAmount, 0.0, 1.0);
 
         //== The listener: where the band is, and what its detector asks for ===
         //
@@ -161,6 +212,23 @@ void DspCore::controlTick() noexcept
         // glided from then on, band on or off: so a band switched on finds
         // its sidechain already where it would be had it been on all along.
         const auto snapListener = snapAll || ! b.hearing;
+
+        // A new placement crosses over from the one in use; one asked for
+        // during a crossover waits for it to finish.
+        if (snapListener)
+        {
+            b.placement = b.fromPlacement = s.placement;
+            b.placeMix.snap (1.0f);
+        }
+        else if (s.placement != b.placement && ! b.placeMix.isMoving())
+        {
+            b.fromPlacement = b.placement;
+            b.placement = s.placement;
+            b.placeMix.snap (0.0f);
+            b.placeMix.setTarget (1.0f);
+        }
+
+        const auto betaT = b.placement == Placement::stereo ? 0.0 : std::clamp (s.msAmount, 0.0, 1.0);
 
         beginInterval (b.logHz, hzT,   tickAlpha, snapListener);
         beginInterval (b.logQ,  qT,    tickAlpha, snapListener);
@@ -187,12 +255,30 @@ void DspCore::controlTick() noexcept
             }
         }
 
-        // The gain offset the detector asks for right now, while the band's
-        // dynamics are in use. Out of use it is exactly 0, which is what keeps
-        // DYN off bit-identical to a static EQ whatever the detector hears.
-        const auto dynamic = gain && s.dynamics.enabled;
+        // The gain offset the detector asks for right now, scaled by how far
+        // the band's dynamics are in use. Out of use it is exactly 0, which is
+        // what keeps DYN off bit-identical to a static EQ whatever the
+        // detector hears. DYN and the direction each blend two offsets over
+        // kSwitchFadeMs instead of jumping between them: the jump was a
+        // 12 dB coefficient change in 8 samples, 5x the steady step at 100 Hz.
+        const auto dynamic = hasGain (s.shape) && s.dynamics.enabled;
+        const auto below = s.dynamics.direction == Direction::below;
 
-        if (dynamic)
+        if (snapListener)
+        {
+            b.dynMix.snap (dynamic ? 1.0f : 0.0f);
+            b.dirMix.snap (below ? 1.0f : 0.0f);
+        }
+        else
+        {
+            b.dynMix.setTarget (dynamic ? 1.0f : 0.0f);
+            b.dirMix.setTarget (below ? 1.0f : 0.0f);
+        }
+
+        const auto inUse = b.dynMix.advance (kControlInterval);
+        const auto towardBelow = b.dirMix.advance (kControlInterval);
+
+        if (inUse > 0.0f)
         {
             const auto& d = s.dynamics;
 
@@ -200,10 +286,21 @@ void DspCore::controlTick() noexcept
             b.computer.ratio       = d.ratio;
             b.computer.kneeDb      = d.kneeDb;
             b.computer.rangeDb     = d.rangeDb;
-            b.computer.direction   = d.direction;
 
             const auto env = b.detector.envelope();
-            b.offsetDb = b.computer.offsetDb (20.0 * std::log10 (env + 1.0e-12));
+            const auto envDb = 20.0 * std::log10 (env + 1.0e-12);
+
+            auto offsetFor = [&b, envDb] (Direction direction)
+            {
+                b.computer.direction = direction;
+                return b.computer.offsetDb (envDb);
+            };
+
+            const auto offset = ! (towardBelow > 0.0f) ? offsetFor (Direction::above)
+                              : ! (towardBelow < 1.0f) ? offsetFor (Direction::below)
+                                                       : blend (offsetFor (Direction::above), offsetFor (Direction::below), towardBelow);
+
+            b.offsetDb = blend (0.0, offset, inUse);
         }
         else
         {
@@ -223,6 +320,30 @@ void DspCore::controlTick() noexcept
         const auto waking = ! b.live;
         const auto snapControls = snapAll || waking;
 
+        // A new shape crosses over from the filter in use (Band); one asked
+        // for during a crossover waits for it to finish.
+        auto crossing = false;
+
+        if (snapControls)
+        {
+            b.shape = s.shape;
+            b.shapeMix.snap (1.0f);
+        }
+        else if (s.shape != b.shape && ! b.shapeMix.isMoving())
+        {
+            b.oldCoeffs = b.next;          // where the glide in progress has arrived
+            b.oldTaps = SvfTaps::of (b.oldCoeffs.g, b.oldCoeffs.k);
+            b.oldM = b.m;
+            b.oldS = b.s;
+            b.shape = s.shape;
+            b.shapeMix.snap (0.0f);
+            b.shapeMix.setTarget (1.0f);
+            crossing = true;
+        }
+
+        const auto gain = hasGain (b.shape);
+        const auto gT   = gain ? clampGainDb (s.gainDb) : 0.0;
+
         beginInterval (b.gainDb, gT, tickAlpha, snapControls);
         beginInterval (b.enable, s.enabled ? 1.0 : 0.0, tickAlpha, snapAll);
         b.live = true;
@@ -230,7 +351,7 @@ void DspCore::controlTick() noexcept
         //== Coefficients: glide from the last target to a new one ==============
         b.cur = b.next;
 
-        const auto staticChanged = s.shape != b.designedShape || hz != b.designedHz || q != b.designedQ
+        const auto staticChanged = b.shape != b.designedShape || hz != b.designedHz || q != b.designedQ
                                 || b.gainDb.tick != b.designedStatic;
         const auto offsetMoved = std::abs (b.offsetDb - b.designedOffset) > kOffsetHysteresisDb
                               || (b.offsetDb == 0.0 && b.designedOffset != 0.0);
@@ -238,20 +359,34 @@ void DspCore::controlTick() noexcept
         if (staticChanged || offsetMoved)
         {
             const auto gainNow = gain ? clampGainDb (b.gainDb.tick + b.offsetDb) : 0.0;
-            b.next = SvfCoeffs::fromBiquad (designMatched (s.shape, hz, q, gainNow, grid));
-            b.designedShape = s.shape; b.designedHz = hz; b.designedQ = q;
+            b.next = SvfCoeffs::fromBiquad (designMatched (b.shape, hz, q, gainNow, grid));
+            b.designedShape = b.shape; b.designedHz = hz; b.designedQ = q;
             b.designedStatic = b.gainDb.tick; b.designedOffset = b.offsetDb;
         }
 
         b.appliedGainDb = gain ? clampGainDb (b.designedStatic + b.designedOffset) : 0.0;
 
-        if (snapControls)
+        // The incoming shape starts at its own design: the crossover is the
+        // glide.
+        if (snapControls || crossing)
             b.cur = b.next;
 
         b.step = perSampleStep (b.cur, b.next);
 
         b.m.flushTiny(); b.s.flushTiny();
+        b.oldM.flushTiny(); b.oldS.flushTiny();
     }
+
+    // The per-sample loop stops at the last band doing anything, so the
+    // engine's spare bands are not visited every sample to be skipped.
+    bandsInUse = 0;
+
+    for (int i = kMaxBands; i > 0; --i)
+        if (bands[(size_t) i - 1].hearing)
+        {
+            bandsInUse = i;
+            break;
+        }
 }
 
 //==============================================================================
@@ -273,8 +408,24 @@ void DspCore::processImpl (Sample* const* channels, int numChannels, int numSamp
     shared->pre.write (channels, numChannels, numSamples);
 
     // Read once, so a solo arriving mid-block cannot make a 4096-sample block
-    // differ from 4096 one-sample blocks. See kControlInterval.
-    const auto soloed = shared->solo.load (std::memory_order_relaxed);
+    // differ from 4096 one-sample blocks. See kControlInterval. A new one
+    // crosses over from what was being heard; one asked for during a
+    // crossover waits for it to finish (kSwitchFadeMs).
+    const auto requested = shared->solo.load (std::memory_order_relaxed);
+
+    if (! soloPrimed)
+    {
+        soloFrom = soloTo = requested;
+        soloMix.snap (1.0f);
+        soloPrimed = true;
+    }
+    else if (requested != soloTo && ! soloMix.isMoving())
+    {
+        soloFrom = soloTo;
+        soloTo = requested;
+        soloMix.snap (0.0f);
+        soloMix.setTarget (1.0f);
+    }
 
     for (int n = 0; n < numSamples; ++n)
     {
@@ -288,19 +439,19 @@ void DspCore::processImpl (Sample* const* channels, int numChannels, int numSamp
         const double xr = stereo ? (double) right[n] : xl;
         const auto dryM = 0.5 * (xl + xr), dryS = 0.5 * (xl - xr);
 
-        double yl = xl, yr = xr, accL = 0.0, accR = 0.0, soloL = 0.0, soloR = 0.0;
+        const auto soloCrossing = soloMix.isMoving();
+        double yl = xl, yr = xr, accL = 0.0, accR = 0.0, soloL = 0.0, soloR = 0.0, fromL = 0.0, fromR = 0.0;
 
-        for (int i = 0; i < kMaxBands; ++i)
+        for (int i = 0; i < bandsInUse; ++i)
         {
             auto& b = bands[(size_t) i];
 
             if (! b.hearing)
                 continue;
 
-            const auto& s = current.bands[(size_t) i];
-
             b.beta.now += b.beta.step;
             const auto beta = b.beta.now;
+            const auto placing = b.placeMix.isMoving() ? b.placeMix.next() : 1.0f;
 
             // The listener, band on or off and dynamics in use or not.
             {
@@ -310,9 +461,10 @@ void DspCore::processImpl (Sample* const* channels, int numChannels, int numSamp
                 // |L| and |R| of the band-limited signal peak together at
                 // |M| + |S|, so that is the linked stereo level.
                 const auto stereoLevel = sm + ss;
-                const auto placed = s.placement == Placement::mid  ? sm
-                                  : s.placement == Placement::side ? ss
-                                                                   : stereoLevel;
+                auto placed = placedLevel (b.placement, sm, ss);
+
+                if (placing < 1.0f)
+                    placed = blend (placedLevel (b.fromPlacement, sm, ss), placed, placing);
 
                 b.detector.process ((1.0 - beta) * stereoLevel + beta * placed);
             }
@@ -330,21 +482,31 @@ void DspCore::processImpl (Sample* const* channels, int numChannels, int numSamp
             const auto side = 0.5 * (inL - inR);
 
             const auto taps = SvfTaps::of (b.cur.g, b.cur.k);
-            const auto dM = b.m.process (taps, b.cur, mid) - mid;
-            const auto dS = stereo ? b.s.process (taps, b.cur, side) - side : 0.0;
+            auto dM = b.m.process (taps, b.cur, mid) - mid;
+            auto dS = stereo ? b.s.process (taps, b.cur, side) - side : 0.0;
 
-            // H(L) - L and H(R) - R, from the M/S pair.
-            auto wl = dM + dS, wr = dM - dS;
-
-            if (s.placement == Placement::mid)
+            // Crossing from the shape that was: the outgoing filter runs on
+            // at its last coefficients and fades out under the new one.
+            if (b.shapeMix.isMoving())
             {
-                wl = (1.0 - beta) * wl + beta * dM;
-                wr = (1.0 - beta) * wr + beta * dM;
+                const auto shaping = b.shapeMix.next();
+                const auto oldM = b.oldM.process (b.oldTaps, b.oldCoeffs, mid) - mid;
+                const auto oldS = stereo ? b.oldS.process (b.oldTaps, b.oldCoeffs, side) - side : 0.0;
+                dM = blend (oldM, dM, shaping);
+                dS = blend (oldS, dS, shaping);
             }
-            else if (s.placement == Placement::side)
+
+            // H(L) - L and H(R) - R, from the M/S pair, crossing from the
+            // placement that was if one is in progress.
+            double wl, wr;
+            placeContribution (b.placement, beta, dM, dS, wl, wr);
+
+            if (placing < 1.0f)
             {
-                wl = (1.0 - beta) * wl + beta * dS;
-                wr = (1.0 - beta) * wr - beta * dS;
+                double wasL, wasR;
+                placeContribution (b.fromPlacement, beta, dM, dS, wasL, wasR);
+                wl = blend (wasL, wl, placing);
+                wr = blend (wasR, wr, placing);
             }
 
             const auto e = b.enable.now;
@@ -355,7 +517,8 @@ void DspCore::processImpl (Sample* const* channels, int numChannels, int numSamp
             // This band on its own: what it adds or takes away, moving with
             // its detector. A band that is off never reaches here, so soloing
             // one is silence.
-            if (i == soloed) { soloL = e * wl; soloR = e * wr; }
+            if (i == soloTo) { soloL = e * wl; soloR = e * wr; }
+            if (soloCrossing && i == soloFrom) { fromL = e * wl; fromR = e * wr; }
         }
 
         if (! serial)
@@ -364,7 +527,16 @@ void DspCore::processImpl (Sample* const* channels, int numChannels, int numSamp
             yr = xr + accR;
         }
 
-        if (soloed >= 0)
+        if (soloCrossing)
+        {
+            // -1 on either side is the whole EQ.
+            const auto soloing = soloMix.next();
+            const auto wasL = soloFrom >= 0 ? fromL : yl, wasR = soloFrom >= 0 ? fromR : yr;
+            const auto nowL = soloTo >= 0 ? soloL : yl,   nowR = soloTo >= 0 ? soloR : yr;
+            yl = blend (wasL, nowL, soloing);
+            yr = blend (wasR, nowR, soloing);
+        }
+        else if (soloTo >= 0)
         {
             yl = soloL;
             yr = soloR;
@@ -458,7 +630,8 @@ std::complex<double> DspCore::staticResponseAt (double hz) const noexcept
 bool DspCore::allStateNormal() const noexcept
 {
     for (const auto& b : bands)
-        if (! (b.m.isNormal() && b.s.isNormal() && b.sideM.isNormal() && b.sideS.isNormal() && b.detector.isNormal()))
+        if (! (b.m.isNormal() && b.s.isNormal() && b.oldM.isNormal() && b.oldS.isNormal()
+               && b.sideM.isNormal() && b.sideS.isNormal() && b.detector.isNormal()))
             return false;
 
     return true;

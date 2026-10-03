@@ -1479,6 +1479,229 @@ namespace
             }
         }
     }
+
+    //==========================================================================
+    // Switches: every one fades. The house rule (core/AGENTS.md) is that the
+    // largest sample-to-sample step after a switch stays under 1.5x the steady
+    // signal's own largest step, heard or not.
+    //==========================================================================
+    using Setter = std::function<void (Values&, DeqDsp&)>;
+
+    struct Switch
+    {
+        std::string name;
+        Setter from, to;
+    };
+
+    /** Band 1 at `hz`: a +6 dB bell, Q 1, its dynamics ready to cut 12 dB
+        (threshold -40, ratio 4) but off. Band 2 an octave up, -4 dB, so a
+        solo has another band to move to. */
+    Values switchBase (float hz)
+    {
+        Values p;
+        p.at (0, Control::on) = 1.0f;   p.at (0, Control::shape) = 0.0f; p.at (0, Control::freq) = hz;
+        p.at (0, Control::gain) = 6.0f;
+        p.at (0, Control::q) = 1.0f;    p.at (0, Control::thr) = -40.0f; p.at (0, Control::ratio) = 4.0f;
+        p.at (0, Control::range) = -12.0f;
+        p.at (1, Control::on) = 1.0f;   p.at (1, Control::shape) = 0.0f; p.at (1, Control::freq) = 2.0f * hz;
+        p.at (1, Control::gain) = -4.0f; p.at (1, Control::q) = 2.0f;
+        return p;
+    }
+
+    std::vector<Switch> everySwitch()
+    {
+        std::vector<Switch> list;
+        auto value = [] (int band, Control c, float v) -> Setter
+        {
+            return [band, c, v] (Values& p, DeqDsp&) { p.at (band, c) = v; };
+        };
+        auto both = [] (Setter a, Setter b) -> Setter
+        {
+            return [a, b] (Values& p, DeqDsp& d) { a (p, d); b (p, d); };
+        };
+
+        for (int a = 0; a < 5; ++a)
+            for (int b = 0; b < 5; ++b)
+                if (a != b)
+                    list.push_back ({ std::string ("shape ") + kShapeNames[a] + " to " + kShapeNames[b],
+                                      value (0, Control::shape, (float) a), value (0, Control::shape, (float) b) });
+
+        for (int a = 0; a < 3; ++a)
+            for (int b = 0; b < 3; ++b)
+                if (a != b)
+                    list.push_back ({ std::string ("placement ") + kPlaceNames[a] + " to " + kPlaceNames[b],
+                                      value (0, Control::place, (float) a), value (0, Control::place, (float) b) });
+
+        list.push_back ({ "DYN on to off, in gain reduction", value (0, Control::dyn, 1.0f), value (0, Control::dyn, 0.0f) });
+        list.push_back ({ "DYN off to on, into gain reduction", value (0, Control::dyn, 0.0f), value (0, Control::dyn, 1.0f) });
+        list.push_back ({ "DIR above to below", both (value (0, Control::dyn, 1.0f), value (0, Control::dir, 0.0f)),
+                                                both (value (0, Control::dyn, 1.0f), value (0, Control::dir, 1.0f)) });
+        list.push_back ({ "DIR below to above", both (value (0, Control::dyn, 1.0f), value (0, Control::dir, 1.0f)),
+                                                both (value (0, Control::dyn, 1.0f), value (0, Control::dir, 0.0f)) });
+        list.push_back ({ "band On, on to off", value (0, Control::on, 1.0f), value (0, Control::on, 0.0f) });
+        list.push_back ({ "band On, off to on", value (0, Control::on, 0.0f), value (0, Control::on, 1.0f) });
+        list.push_back ({ "DEQ on to off", [] (Values& p, DeqDsp&) { p.at (kActive) = 1.0f; }, [] (Values& p, DeqDsp&) { p.at (kActive) = 0.0f; } });
+        list.push_back ({ "DEQ off to on", [] (Values& p, DeqDsp&) { p.at (kActive) = 0.0f; }, [] (Values& p, DeqDsp&) { p.at (kActive) = 1.0f; } });
+
+        for (int a = -1; a < 2; ++a)
+            for (int b = -1; b < 2; ++b)
+                if (a != b)
+                    list.push_back ({ "solo " + std::to_string (a + 1) + " to " + std::to_string (b + 1) + " (0 is none)",
+                                      [a] (Values&, DeqDsp& d) { d.setSolo (a); }, [b] (Values&, DeqDsp& d) { d.setSolo (b); } });
+
+        return list;
+    }
+
+    double largestStep (const std::vector<float>& x, size_t from, size_t to)
+    {
+        double m = 0.0;
+        for (size_t i = std::max<size_t> (from, 1); i < std::min (to, x.size()); ++i)
+            m = std::max (m, (double) std::abs (x[i] - x[i - 1]));
+        return m;
+    }
+
+    struct SwitchRender { std::vector<float> l, r; size_t flip; };
+
+    /** 0.6 s of a -18 dBFS RMS tone at `hz` on the left and 1.3 `hz` on the
+        right, or of nothing, through band 1 set up by `from`, with `to`
+        applied at the block nearest 0.3 s (and `then`, if given, `thenAfter`
+        samples later, to the block). Blocks of 64, so changes can land
+        mid-crossover. `quietFrom` silences the input from that sample on. */
+    SwitchRender renderSwitch (double rate, float hz, double phase, const Switch& sw, size_t quietFrom,
+                               const Setter& then = {}, size_t thenAfter = 0)
+    {
+        constexpr size_t block = 64;
+        const auto n = (size_t) (0.6 * rate) / block * block;
+        const auto flip = (size_t) (0.3 * rate) / block * block;
+        const auto amp = std::pow (10.0, -18.0 / 20.0) * std::sqrt (2.0);
+
+        SwitchRender out { std::vector<float> (n), std::vector<float> (n), flip };
+        for (size_t i = 0; i < std::min (n, quietFrom); ++i)
+        {
+            out.l[i] = (float) (amp * std::sin (2.0 * kPi * hz * (double) i / rate + phase));
+            out.r[i] = (float) (amp * std::sin (2.0 * kPi * 1.3 * hz * (double) i / rate + 0.7 * phase));
+        }
+
+        auto p = switchBase (hz);
+        DeqDsp d;
+        sw.from (p, d);
+        d.setParams (p.v.data(), (int) p.v.size());
+        d.prepare (rate, (int) block, 2);
+
+        for (size_t pos = 0; pos < n; pos += block)
+        {
+            if (pos == flip) sw.to (p, d);
+            if (then && pos == flip + thenAfter / block * block) then (p, d);
+
+            d.setParams (p.v.data(), (int) p.v.size());
+            float* ch[2] { out.l.data() + pos, out.r.data() + pos };
+            d.process (ch, 2, (int) block);
+        }
+
+        return out;
+    }
+
+    /** The largest step in the 30 ms after the flip over the steady signal's
+        own largest, measured before the flip and at the end of the render,
+        worst channel. */
+    double stepRatio (const SwitchRender& y, double rate)
+    {
+        const auto w = (size_t) (0.03 * rate);
+        double worst = 0.0;
+
+        for (const auto* ch : { &y.l, &y.r })
+        {
+            const auto steady = std::max ({ largestStep (*ch, y.flip - 4 * w, y.flip),
+                                            largestStep (*ch, ch->size() - 4 * w, ch->size()), 1.0e-12 });
+            worst = std::max (worst, largestStep (*ch, y.flip, y.flip + w) / steady);
+        }
+
+        return worst;
+    }
+
+    /** Every switch, every pair of choices, crosses over in 10 ms rather than
+        stepping: under 1.5x the steady signal's largest step at 44.1, 48 and
+        96 kHz, under a tone at the band and a decade below it, at four
+        phases. In silence a switch makes nothing; in the ring-down after a
+        signal it adds no burst. A change asked for during a crossover wins,
+        after at most one more crossover.
+
+        Review of 2026-10-03, at 100 Hz on the old code: Mid to Side 33x,
+        Side to Stereo 28x, Shape 6-19x, DYN off and DIR 5.0x, solo 38x. */
+    void testSwitchesFade()
+    {
+        const auto switches = everySwitch();
+
+        for (double rate : { 44100.0, 48000.0, 96000.0 })
+            for (float hz : { 100.0f, 1000.0f })
+                for (const auto& sw : switches)
+                {
+                    double worst = 0.0;
+                    for (int ph = 0; ph < 4; ++ph)
+                        worst = std::max (worst, stepRatio (renderSwitch (rate, hz, ph * kPi / 4.0, sw, (size_t) -1), rate));
+
+                    checkAtMost (worst, 1.5, "Switches: " + sw.name + " under a tone at " + std::to_string ((int) hz)
+                                 + " Hz, " + std::to_string ((int) rate) + " Hz, step over steady");
+                }
+
+        for (double rate : { 44100.0, 96000.0 })
+            for (const auto& sw : switches)
+            {
+                // Digital silence from the start: nothing comes out.
+                const auto silent = renderSwitch (rate, 100.0f, 0.0, sw, 0);
+                double peak = 0.0;
+                for (size_t i = 0; i < silent.l.size(); ++i)
+                    peak = std::max ({ peak, (double) std::abs (silent.l[i]), (double) std::abs (silent.r[i]) });
+                checkAtMost (peak, 0.0, "Switches: " + sw.name + " in silence makes nothing, " + std::to_string ((int) rate) + " Hz");
+
+                // Silence after a tone: the tone stops 5 ms before the switch,
+                // which lands in the bands' ring-down and adds no step larger
+                // than the ring-down's own since the tone stopped.
+                const auto stop = (size_t) (0.3 * rate) / 64 * 64 - (size_t) (0.005 * rate);
+                const auto quiet = renderSwitch (rate, 100.0f, 0.0, sw, stop);
+                const auto w = (size_t) (0.03 * rate);
+                double ratio = 0.0;
+                for (const auto* ch : { &quiet.l, &quiet.r })
+                    ratio = std::max (ratio, largestStep (*ch, quiet.flip, quiet.flip + w)
+                                             / std::max (largestStep (*ch, stop + 1, quiet.flip), 1.0e-9));
+                checkAtMost (ratio, 1.5, "Switches: " + sw.name + " in the ring-down after a tone, " + std::to_string ((int) rate) + " Hz");
+            }
+
+        // A change asked for mid-crossover: the latest wins, after a bounded
+        // wait, and nothing steps on the way. Shape Bell -> Low Shelf, then
+        // High Shelf 3 ms later, against Bell -> High Shelf at once; and the
+        // same for placement and solo.
+        {
+            const double rate = 48000.0;
+            const auto shapeTo = [] (float s) -> Setter { return [s] (Values& p, DeqDsp&) { p.at (0, Control::shape) = s; }; };
+            const auto placeTo = [] (float s) -> Setter { return [s] (Values& p, DeqDsp&) { p.at (0, Control::place) = s; }; };
+            const auto soloTo  = [] (int b)   -> Setter { return [b] (Values&, DeqDsp& d) { d.setSolo (b); }; };
+
+            struct Twice { const char* name; Setter from, first, latest; };
+            const Twice cases[] {
+                { "shape", shapeTo (0.0f), shapeTo (1.0f), shapeTo (2.0f) },
+                { "placement", placeTo (0.0f), placeTo (1.0f), placeTo (2.0f) },
+                { "solo", soloTo (-1), soloTo (0), soloTo (1) },
+            };
+
+            for (const auto& c : cases)
+            {
+                const Switch twice { c.name, c.from, c.first };
+                const Switch once { c.name, c.from, c.latest };
+                const auto a = renderSwitch (rate, 100.0f, 0.3, twice, (size_t) -1, c.latest, (size_t) (0.003 * rate));
+                const auto b = renderSwitch (rate, 100.0f, 0.3, once, (size_t) -1);
+
+                checkAtMost (stepRatio (a, rate), 1.5, std::string ("Switches: a second ") + c.name + " change mid-crossover does not step");
+
+                // By 60 ms the latest choice is what is playing.
+                const auto from = a.flip + (size_t) (0.06 * rate), to = a.flip + (size_t) (0.1 * rate);
+                checkAtMost (std::abs (rmsDb (a.l, from, to) - rmsDb (b.l, from, to)), 0.1,
+                             std::string ("Switches: the latest ") + c.name + " wins, left");
+                checkAtMost (std::abs (rmsDb (a.r, from, to) - rmsDb (b.r, from, to)), 0.1,
+                             std::string ("Switches: the latest ") + c.name + " wins, right");
+            }
+        }
+    }
 }
 
 int main()
@@ -1497,6 +1720,7 @@ int main()
     testSoloAndTap();
     testDynamicsComeBackCurrent();
     testAutoFromTheFirstBlock();
+    testSwitchesFade();
 
     if (failures == 0)
         std::cout << "deq_dsp: all passed\n";

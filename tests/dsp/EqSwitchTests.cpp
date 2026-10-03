@@ -250,6 +250,92 @@ int main()
         }
     }
 
+    //== 3. Changing the oversampling dips through zero instead of cutting ===
+    // A change of oversampling changes the latency, so no blend of before
+    // and after exists: the two are not aligned in time. It used to reset
+    // every stage on the spot, which gave 28-65 samples of silence (below
+    // 1e-4, 65 dB under the tone's peak) and then a jump the size of the
+    // latency change (6.8-9.4x the tone's own step). Wanted: a fade down,
+    // the change, a fade up, with no run of silence beyond the bottom of the
+    // dip, nothing above the 1.5x bound, and the latency reported for the
+    // new factor from the first process() after the change, exactly as
+    // before.
+    {
+        for (double fs : { 44100.0, 48000.0, 96000.0 })
+            for (int from : { 1, 2, 4, 8 })
+                for (int to : { 1, 2, 4, 8 })
+                {
+                    if (from == to)
+                        continue;
+
+                    for (float mix : { 100.0f, 50.0f })
+                    {
+                        DspCore::Params a;
+                        a.oversampling = from;
+                        a.mixPercent = mix;
+                        DspCore::Params b = a;
+                        b.oversampling = to;
+
+                        const auto where = std::to_string (from) + "x -> " + std::to_string (to) + "x at "
+                                         + rateName (fs) + ", mix " + std::to_string ((int) mix);
+
+                        const auto ratio = switchStepRatio (fs, a, b, 1000.0);
+                        check (ratio < 1.5, "oversampling " + where + " steps " + ratioText (ratio));
+
+                        // The longest run of silence after the change. A
+                        // dip touches zero at one sample, and where the
+                        // tone crosses zero there too the two together stay
+                        // under the threshold for about 0.07 ms at any rate
+                        // (the fade's length and the tone's slope per sample
+                        // both scale with it). 0.1 ms is the bound.
+                        DspCore core;
+                        core.prepare (fs, 512, 1, from);
+                        core.setParams (a);
+
+                        std::vector<float> x ((size_t) (0.5 * fs));
+                        for (size_t i = 0; i < x.size(); ++i)
+                            x[i] = (float) (0.17782794 * std::sin (2.0 * kPi * 1000.0 * (double) i / fs + 0.3));
+
+                        const auto sw = (size_t) (0.2 * fs) / 512 * 512;
+                        const auto y = render (core, x, 512, [&] (size_t s) { return s >= sw ? b : a; }, 1);
+
+                        int run = 0, longest = 0;
+                        for (size_t i = sw; i < y.size(); ++i)
+                        {
+                            run = std::abs (y[i]) < 1.0e-4f ? run + 1 : 0;
+                            longest = std::max (longest, run);
+                        }
+
+                        check (longest <= (int) (0.0001 * fs),
+                               "oversampling " + where + " leaves " + std::to_string (longest)
+                                   + " samples of silence");
+                    }
+
+                    // Reported latency: the new factor's from the first
+                    // process() after the change, as it always was.
+                    DspCore core;
+                    core.prepare (fs, 512, 2, from);
+                    DspCore::Params p;
+                    p.oversampling = from;
+                    core.setParams (p);
+
+                    std::vector<float> l (64, 0.0f), r (64, 0.0f);
+                    float* channels[2] { l.data(), r.data() };
+                    core.process (channels, 2, 64);
+
+                    check (core.getLatencySamples() == bmo::Oversampler::latencyForFactor (from),
+                           "latency before the change is the old factor's");
+
+                    p.oversampling = to;
+                    core.setParams (p);
+                    core.process (channels, 2, 1);
+
+                    check (core.getLatencySamples() == bmo::Oversampler::latencyForFactor (to),
+                           "latency " + std::to_string (from) + "x -> " + std::to_string (to)
+                               + "x is the new factor's from the first process() after the change");
+                }
+    }
+
     if (failures == 0)
         std::cout << "All EQ switch tests passed.\n";
 

@@ -93,7 +93,9 @@ public:
     void reset() noexcept;
 
     /** Round-trip delay of the oversampling filters, in samples at the host's
-        rate. Reported to the host so plugin delay compensation can undo it. */
+        rate. Reported to the host so plugin delay compensation can undo it.
+        After a change of oversampling it is the new factor's from the first
+        process() on, while the audio dips through the change. */
     int getLatencySamples() const noexcept { return latencySamples; }
 
     /** The rate the equaliser actually runs at, which is the host rate times
@@ -111,6 +113,11 @@ public:
 private:
     void updateCoefficients (int activeChannels, int numSamples) noexcept;
     void applyOversampling (int factor);
+    void switchOversampling (int activeChannels, float inGain) noexcept;
+
+    /** One host-rate sample through the oversampled chain, before the output
+        gain. Shared by process() and the warm-up of a new oversampling path. */
+    float runWet (size_t ch, float x, int factor, bool eqFading, float eqAmount) noexcept;
 
     double sampleRate = 44100.0;
     double effectiveRate = 44100.0;
@@ -128,9 +135,18 @@ private:
     std::array<Oversampler, 2>      oversamplers;
 
     // The dry path of the Mix control has to be delayed to match, or a partial
-    // blend combs and a full bypass fails to null.
+    // blend combs and a full bypass fails to null. The ring is one length for
+    // every factor, read at the running path's latency, and long enough --
+    // twice the longest latency -- to hold the whole span of the oversampling
+    // filters, which is what a new path is run over when the factor changes.
+    static constexpr int kDryRing = 2 * Oversampler::kMaxLatency + 2;
     std::vector<float> dryDelay;
-    int dryWrite = 0, dryLength = 1, dryStride = 0;
+    int dryWrite = 0, dryStride = 0, dryLatency = 0;
+
+    // A change of oversampling waits at the bottom of this dip; see process().
+    bmo::dsp::Dip oversamplingDip;
+    int pendingFactor = 1;
+    bool running = false;   // false until the first process() after prepare() or reset()
 
     Smoother hfFreqSm, midFreqSm, lfFreqSm;     // smoothed in log2(Hz)
     Smoother hfGainSm, midGainSm, lfGainSm;

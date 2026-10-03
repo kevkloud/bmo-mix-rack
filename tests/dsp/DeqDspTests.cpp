@@ -1929,6 +1929,107 @@ namespace
         play (20);
         check (ticks (2) == atReset, "Idle: after reset() a band that is off does no work again");
     }
+
+    /** The response of an SVF coefficient set at w (radians per sample): the
+        structure's own transfer function, H = m0 + m1 BP + m2 LP, with
+        BP = g (1 - z^-2) / D, LP = g^2 (1 + z^-1)^2 / D and
+        D = (1 + gk + g^2) + (2g^2 - 2) z^-1 + (1 - gk + g^2) z^-2. */
+    std::complex<double> svfResponseAt (const SvfCoeffs& c, double w)
+    {
+        const auto z1 = std::polar (1.0, -w), z2 = z1 * z1;
+        const auto g2 = c.g * c.g;
+        const auto d = (1.0 + c.g * c.k + g2) + (2.0 * g2 - 2.0) * z1 + (1.0 - c.g * c.k + g2) * z2;
+        return c.m0 + (c.m1 * c.g * (1.0 - z2) + c.m2 * g2 * (1.0 + z1) * (1.0 + z1)) / d;
+    }
+
+    /** A cut shape never has a resonant peak, at any instant: the cap on its
+        Q is applied to the Q the design actually uses, while Q glides and
+        through a change of shape, and a band coming into use starts at its
+        settings rather than gliding from wherever its smoothers were.
+
+        Round 2 of the review (2026-10-03): a preset turning a bell at Q 40
+        that had been switched off into a Low Cut that is on faded in
+        resonating, about +13 dB at the corner for about 5 ms; a bell at Q 40
+        changed to a cut while on resonated about +12 dB during the change,
+        because the cut was designed at the gliding Q. Checked on the
+        coefficients in use at every sample, at 64 frequencies from 10 Hz to
+        0.499 fs: never more than 0.05 dB over the passband. */
+    void testCutNeverResonates()
+    {
+        const double rate = 48000.0;
+
+        // The response formula first, against a design it can be checked by.
+        {
+            const auto bq = designMatched (Shape::bell, 1000.0, 2.0, 9.0, DesignGrid::make (rate));
+            const auto c = SvfCoeffs::fromBiquad (bq);
+            double worst = 0.0;
+            for (double hz : { 50.0, 700.0, 1000.0, 3000.0, 15000.0 })
+                worst = std::max (worst, std::abs (std::abs (svfResponseAt (c, 2.0 * kPi * hz / rate)) - std::abs (bq.responseAt (2.0 * kPi * hz / rate))));
+            checkAtMost (worst, 1.0e-9, "Cut peak: the SVF response formula matches the biquad");
+        }
+
+        auto peakDb = [rate] (const SvfCoeffs& c)
+        {
+            double peak = 0.0;
+            for (int k = 0; k < 64; ++k)
+            {
+                const auto hz = 10.0 * std::pow (0.499 * rate / 10.0, (double) k / 63.0);
+                peak = std::max (peak, std::abs (svfResponseAt (c, 2.0 * kPi * hz / rate)));
+            }
+            return toDb (peak);
+        };
+
+        struct Route { const char* name; void (*before) (Values&); void (*after) (Values&); bool cutIsOutgoing; };
+        const Route routes[] {
+            { "a bell at Q 40 changed to a Low Cut while on",
+              [] (Values& p) { p.at (0, Control::shape) = 0.0f; },
+              [] (Values& p) { p.at (0, Control::shape) = 3.0f; }, false },
+            { "a bell at Q 40 changed to a High Cut while on",
+              [] (Values& p) { p.at (0, Control::shape) = 0.0f; },
+              [] (Values& p) { p.at (0, Control::shape) = 4.0f; }, false },
+            { "a Low Cut changed to a bell at Q 40 while on",
+              [] (Values& p) { p.at (0, Control::shape) = 3.0f; },
+              [] (Values& p) { p.at (0, Control::shape) = 0.0f; }, true },
+            { "a preset turning an off bell at Q 40 into a Low Cut that is on",
+              [] (Values& p) { p.at (0, Control::shape) = 0.0f; p.at (0, Control::on) = 0.0f; },
+              [] (Values& p) { p.at (0, Control::shape) = 3.0f; p.at (0, Control::on) = 1.0f; }, false },
+        };
+
+        for (const auto& route : routes)
+        {
+            Values p;
+            p.at (0, Control::on) = 1.0f;      p.at (0, Control::shape) = 0.0f;
+            p.at (0, Control::freq) = 1000.0f; p.at (0, Control::gain) = 12.0f; p.at (0, Control::q) = 40.0f;
+
+            DeqDsp d;
+            d.setParams (p.v.data(), (int) p.v.size());
+            d.prepare (rate, 64, 1);
+
+            std::vector<float> x (1);
+            auto run = [&] (int samples, bool sample) -> double
+            {
+                double worst = -300.0;
+                for (int n = 0; n < samples; ++n)
+                {
+                    x[0] = 0.1f * (float) std::sin (0.13 * n);
+                    d.setParams (p.v.data(), (int) p.v.size());
+                    float* ch[1] { x.data() };
+                    d.process (ch, 1, 1);
+                    if (sample)
+                        worst = std::max (worst, peakDb (d.engine().bandCoefficients (0, route.cutIsOutgoing)));
+                }
+                return worst;
+            };
+
+            // Live as a bell first, so a band switched off has been listening.
+            run ((int) (0.1 * rate), false);
+            route.before (p);
+            run ((int) (0.2 * rate), false);
+            route.after (p);
+            const auto worst = run ((int) (0.05 * rate), true);
+            checkAtMost (worst, 0.05, std::string ("Cut peak: ") + route.name + ", every sample for 50 ms");
+        }
+    }
 }
 
 int main()
@@ -1952,6 +2053,7 @@ int main()
     testMeterReadsWhatIsApplied();
     testProcessBeforePrepare();
     testUnusedBandsCostNothing();
+    testCutNeverResonates();
 
     if (failures == 0)
         std::cout << "deq_dsp: all passed\n";

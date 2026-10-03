@@ -102,6 +102,14 @@ namespace
         }
     }
 
+    /** The Q a design of `shape` uses: a cut's stops at `cutMaxQ`
+        (Settings::cutMaxQ). */
+    double designQ (Shape shape, double q, double cutMaxQ) noexcept
+    {
+        const auto cut = shape == Shape::lowCut || shape == Shape::highCut;
+        return cut && q > cutMaxQ + 0.005 ? cutMaxQ : q;
+    }
+
     /** The level a detector placed here listens to. */
     double placedLevel (Placement placement, double sm, double ss) noexcept
     {
@@ -210,10 +218,14 @@ void DspCore::controlTick() noexcept
 
         //== The listener: where the band is, and what its detector asks for ===
         //
-        // Started from where it is asked to be the first time it runs, and
-        // glided from then on, band on or off: so a band switched on finds
-        // its sidechain already where it would be had it been on all along.
-        const auto snapListener = snapAll || ! b.hearing;
+        // Started from where it is asked to be the first time it runs and
+        // glided from then on, band on or off -- except that a band coming
+        // into use from fully out starts AT its settings, as it always did: a
+        // preset turning an off bell at Q 40 into a cut that is on must not
+        // glide down from 40 while it fades in (round 2 of the review). The
+        // fade in is what makes the entry smooth.
+        const auto waking = ! asleep && ! b.live;
+        const auto snapListener = snapAll || ! b.hearing || waking;
 
         // A new placement crosses over from the one in use; one asked for
         // during a crossover waits for it to finish.
@@ -319,7 +331,6 @@ void DspCore::controlTick() noexcept
         //
         // Waking up: its controls start where they are asked to be; only the
         // enable fade glides, from silence.
-        const auto waking = ! b.live;
         const auto snapControls = snapAll || waking;
 
         // A new shape crosses over from the filter in use (Band); one asked
@@ -361,7 +372,7 @@ void DspCore::controlTick() noexcept
         if (staticChanged || offsetMoved)
         {
             const auto gainNow = gain ? clampGainDb (b.gainDb.tick + b.offsetDb) : 0.0;
-            b.next = SvfCoeffs::fromBiquad (designMatched (b.shape, hz, q, gainNow, grid));
+            b.next = SvfCoeffs::fromBiquad (designMatched (b.shape, hz, designQ (b.shape, q, current.cutMaxQ), gainNow, grid));
             b.designedShape = b.shape; b.designedHz = hz; b.designedQ = q;
             b.designedStatic = b.gainDb.tick; b.designedOffset = b.offsetDb;
         }
@@ -616,7 +627,7 @@ double DspCore::currentGainReductionDb() const noexcept
 Biquad DspCore::bandDesign (int band) const noexcept
 {
     const auto& s = current.bands[(size_t) band];
-    return designMatched (s.shape, s.frequencyHz, s.q, s.gainDb, grid);
+    return designMatched (s.shape, s.frequencyHz, designQ (s.shape, s.q, current.cutMaxQ), s.gainDb, grid);
 }
 
 std::complex<double> DspCore::staticResponseAt (double hz) const noexcept

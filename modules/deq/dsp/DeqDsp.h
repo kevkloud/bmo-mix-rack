@@ -75,6 +75,7 @@ public:
         // off once they have been on; the engine's spare bands, and any band
         // never switched on, cost nothing (Settings::bandCount).
         settings.bandCount = kBands;
+        settings.cutMaxQ = kCutMaxQ;
 
         for (int b = 0; b < kBands; ++b)
         {

@@ -107,6 +107,15 @@ struct Settings
         whatever they last heard (see DspCore::Band). A band never switched on,
         or one past this count while it is off, costs nothing. */
     int bandCount = kMaxBands;
+
+    /** The most resonant a Low Cut or High Cut is designed, applied to the Q
+        each design actually uses -- while Q glides and through a change of
+        shape -- not only to the target: BMO DEQ sets its kCutMaxQ (params.h)
+        so a cut never has a resonant peak at any instant. A Q within 0.005
+        over it is left alone, the same half knob step of slack effectiveQ
+        allows, so the knob's own 0.71 runs as itself. The default leaves
+        cuts alone. */
+    double cutMaxQ = DesignLimits::kMaxQ;
 };
 
 //==============================================================================
@@ -202,6 +211,14 @@ public:
     /** How many samples this band's detector has heard since construction:
         a band that has never been switched on hears none. */
     std::uint64_t detectorTicks (int band) const noexcept { return bands[(size_t) band].listened; }
+
+    /** The coefficients a band is running this sample: its own, or with
+        `outgoing` those of the shape it is changing from (which stay where
+        they were once a change is over). */
+    SvfCoeffs bandCoefficients (int band, bool outgoing = false) const noexcept
+    {
+        return outgoing ? bands[(size_t) band].oldCoeffs : bands[(size_t) band].cur;
+    }
 
     /** No subnormal anywhere in filter or detector state. */
     bool allStateNormal() const noexcept;

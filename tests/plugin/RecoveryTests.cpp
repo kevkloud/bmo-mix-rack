@@ -92,12 +92,17 @@ struct Recorded
 // Measured on ICE QUEEN, 2026-10-03, at 3d62316, with `recovery_tests --print`.
 // Seconds from the bad sample to the last sample outside -60 dBFS of the
 // clean render. Opto and FET are the compressors whose own recovery this is.
+//
+// Opto's row was re-measured on 2026-10-04 on the merge with main through #40,
+// where a spike no longer charges the cell: 2.35, 7.67, 18.22 and 61.64 s
+// became the figures below, and the bound was tightened with them, as this
+// test's header asks when a module's recovery improves.
 constexpr Recorded kRecorded[] {
     //                 +60      +72      +96      4e9       settled
     { "util",    { 0.00,    0.00,    0.00,    0.00  }, 0.0 },
     { "eq",      { 0.27,    0.32,    0.41,    0.76  }, 0.0 },
     { "sat",     { 0.04,    0.05,    0.09,    0.03  }, 0.0 },
-    { "opto",    { 2.35,    7.67,    18.22,   61.64 }, 0.0 },
+    { "opto",    { 0.19,    0.27,    0.44,    1.10  }, 0.0 },
     { "dim",     { 0.00,    0.00,    0.00,    0.00  }, 0.0 },
     { "deq",     { 0.00,    0.00,    0.00,    0.00  }, 0.0 },
     { "ltvcomp", { 0.43,    0.44,    0.45,    0.50  }, 0.0 },

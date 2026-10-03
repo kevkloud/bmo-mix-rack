@@ -3,6 +3,7 @@
 #include "core/dsp/GainComputer.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 
 namespace bmo::opto
@@ -28,6 +29,238 @@ using dsp::kneeReductionDb;
 inline float coeffFor (float tauSec, double rate) noexcept
 {
     return 1.0f - std::exp (-1.0f / (float) (std::max (rate, 1.0) * (double) tauSec));
+}
+
+//==============================================================================
+/** The loudest the detector's input has been over the last 30 ms.
+
+    Both cells need to know what the signal is still reaching, as distinct
+    from what their envelope is still holding, and a rectified sample cannot
+    say: it passes through zero twice a cycle. The peak over a short window
+    can. Thirty milliseconds is one crest per window down to 33 Hz, so on any
+    note the cell will be given the window always contains a crest and this
+    reads as the level of the note, flat, rather than as its waveform.
+
+    Kept as sixteen slots, each holding the peak of its own stretch of the
+    window, so the cost is one compare a sample and sixteen once a slot,
+    whatever the sample rate. The window is therefore 30 ms long at its
+    shortest and one slot longer at its longest. */
+class RecentPeak
+{
+public:
+    void prepare (double sampleRate) noexcept
+    {
+        slotSamples = std::max (1, (int) std::lround (kWindowSec * std::max (sampleRate, 1.0) / kSlots));
+        reset();
+    }
+
+    void reset() noexcept
+    {
+        slots.fill (0.0f);
+        slotPeak = windowPeak = 0.0f;
+        filled = next = 0;
+    }
+
+    /** One rectified sample in, the window's peak out. */
+    float push (float levelLin) noexcept
+    {
+        slotPeak = std::max (slotPeak, levelLin);
+
+        if (++filled >= slotSamples)
+        {
+            slots[(size_t) next] = slotPeak;
+            next = (next + 1) % kSlots;
+            slotPeak = 0.0f;
+            filled = 0;
+            windowPeak = *std::max_element (slots.begin(), slots.end());
+        }
+
+        return std::max (windowPeak, slotPeak);
+    }
+
+private:
+    static constexpr int    kSlots     = 16;
+    static constexpr double kWindowSec = 0.030;
+
+    std::array<float, kSlots> slots {};
+    float slotPeak = 0.0f, windowPeak = 0.0f;
+    int slotSamples = 83;   // kWindowSec / kSlots at 44.1 kHz, until prepare() says otherwise
+    int filled = 0, next = 0;
+};
+
+/** The level the signal has kept up: the lowest the recent peak has been
+    over the last 60 ms.
+
+    The recent peak answers "what is the signal reaching"; this answers "what
+    has it gone on reaching", and the difference is the whole of a spike. A
+    20 ms burst lifts the recent peak for 50 ms, its own length and the 30 ms
+    window after it, and then it is gone. Sixty milliseconds is longer than
+    that, so the lowest value across it never sees the burst at all, while
+    anything that lasts longer comes through 60 ms late and otherwise intact.
+    It is what exposureDb() counts, so that a spike adds nothing to the charge
+    rather than a little.
+
+    Same sixteen slots as RecentPeak, for the same reason. */
+class KeptLevel
+{
+public:
+    void prepare (double sampleRate) noexcept
+    {
+        slotSamples = std::max (1, (int) std::lround (kWindowSec * std::max (sampleRate, 1.0) / kSlots));
+        reset();
+    }
+
+    void reset() noexcept
+    {
+        slots.fill (0.0f);
+        slotFloor = kNothingYet;
+        windowFloor = 0.0f;
+        filled = next = 0;
+    }
+
+    /** One recent-peak figure in, the lowest over the window out. Never more
+        than what went in. */
+    float push (float recentPeakLin) noexcept
+    {
+        slotFloor = std::min (slotFloor, recentPeakLin);
+
+        if (++filled >= slotSamples)
+        {
+            slots[(size_t) next] = slotFloor;
+            next = (next + 1) % kSlots;
+            slotFloor = kNothingYet;
+            filled = 0;
+            windowFloor = *std::min_element (slots.begin(), slots.end());
+        }
+
+        return std::min (windowFloor, slotFloor);
+    }
+
+private:
+    static constexpr int    kSlots      = 16;
+    static constexpr double kWindowSec  = 0.060;
+    static constexpr float  kNothingYet = 3.0e38f;
+
+    std::array<float, kSlots> slots {};
+    float slotFloor = kNothingYet, windowFloor = 0.0f;
+    int slotSamples = 165;   // kWindowSec / kSlots at 44.1 kHz, until prepare() says otherwise
+    int filled = 0, next = 0;
+};
+
+/** How far reduction has to stand above the charge before all of it releases
+    at the fast rate, and how far the envelope has to stand above the recent
+    peak before it counts as standing clear of the signal. Below either figure
+    the fast and slow rates blend, so each hand-over is a curve, not a corner. */
+inline constexpr float kUnbackedFullDb   = 3.0f;
+inline constexpr float kStandingClearLin = 1.1885f;   // 1.5 dB
+
+/** The release coefficient for one sample.
+
+    `backedCoeff` is the release the charge selects, exactly as it always
+    was, and it still governs everything the charge backs. That is all of the
+    reduction for as long as the signal is reaching the envelope, and whatever
+    the charge has caught up with once the signal falls away.
+
+    What is new is the reduction the charge does not back. The charge takes
+    0.3 s to count a hit, so a 20 ms spike raises the reduction by 11 to 13 dB
+    and the charge by well under one. Until this was written the release rate
+    was read off the charge's absolute size alone, and with programme already
+    holding 15 to 20 dB the charge sits at its ceiling: everything the spike
+    added inherited the slowest release the cell has, 3 to 4 s, and the
+    programme stayed turned down behind every spike for seconds. Now the part
+    of the reduction that stands above the charge comes back at the fast rate,
+    the same 60 ms the cell has always used for a hit too short to charge it.
+
+    Only once the envelope is standing clear of the signal, though. While the
+    signal is still reaching the envelope the reduction is being earned, the
+    charge is on its way to backing it, and releasing it fast would only make
+    the envelope sag between the crests of the note that is holding it up:
+    tried, that took Stressed from 56 ms to 520 ms to settle on a held step.
+    So a sustained note never takes this branch at all. */
+inline float releaseCoeffFor (float backedCoeff, float fastTauSec, double rate,
+                              float envelopeLin, float recentPeakLin,
+                              float reductionDb, float chargeDb) noexcept
+{
+    if (envelopeLin <= recentPeakLin || reductionDb <= chargeDb)
+        return backedCoeff;
+
+    const auto standing = envelopeLin / std::max (recentPeakLin, 1.0e-9f);
+    const auto clear    = std::min ((standing - 1.0f) / (kStandingClearLin - 1.0f), 1.0f);
+    const auto unbacked = std::min ((reductionDb - chargeDb) / kUnbackedFullDb, 1.0f);
+
+    return backedCoeff + (coeffFor (fastTauSec, rate) - backedCoeff) * clear * unbacked;
+}
+
+/** What the charge is allowed to count, in dB of reduction.
+
+    The charge is the cell's memory of how hard it has been driven, and what
+    drives it is the signal, not its own recovery from having been driven.
+    Fed the reduction itself, as it was, it went on counting all the while a
+    spike's reduction was coming back down, and ten spikes a second apart
+    walked the programme down by 8 to 12 dB. So it counts the reduction only
+    up to what the level the signal has kept up would ask of the static curve.
+    On a note that is being held that is the reduction, unchanged, from 60 ms
+    in; once the signal has fallen away it is whatever the level that remains
+    would earn; and for a spike it is nothing, because a spike is over before
+    it has kept anything up -- see KeptLevel.
+
+    Counting the recent peak here instead was the first form of this, and it
+    left a 20 ms spike worth 50 ms of charge: enough that ten of them still
+    sank the level 2.6 dB (Tele) and 6.1 dB (Stressed). */
+inline float exposureDb (float reductionDb, float envelopeLin, float keptLin, const Curve& curve) noexcept
+{
+    if (keptLin >= envelopeLin)
+        return reductionDb;
+
+    const auto keptDb = 20.0f * std::log10 (std::max (keptLin, 1.0e-6f));
+    return std::min (reductionDb, std::clamp (kneeReductionDb (keptDb, curve), 0.0f, 40.0f));
+}
+
+/** How many dB of reduction a cell has to be short by before its attack
+    starts to quicken, and by how many it is at its quickest. */
+inline constexpr float kAttackQuickenDb  = 6.0f;
+inline constexpr float kAttackQuickestDb = 12.0f;
+
+/** The attack coefficient for one sample that is pushing the envelope up.
+
+    Two stages. Within 6 dB of the reduction this sample's level asks of the
+    static curve, the attack is `steadyTauSec`, the 10 ms both cells have
+    always had, and every ordinary move is met at that pace: a three-round
+    blind test in September could not tell a uniformly faster attack from it,
+    so there is no reason to change what ordinary moves get. Beyond 12 dB
+    short it is `quickTauSec`, and between the two the rates blend.
+
+    The quick stage is for the case the 10 ms attack cannot meet. On top of
+    15 to 20 dB of standing reduction, an 18 dB spike asks for 12 to 16 dB
+    more, and a one-pole 10 ms attack has done almost none of it by the first
+    crest: the spike's peak came out 13.6 dB (Stressed) and 7.8 dB (Tele)
+    above where a held level settles. That is not the same request as the one
+    that was tested and refused. That candidate shortened the attack by how
+    hard the level overdrove the envelope, everywhere, with a 1 ms floor it
+    reached only far beyond anything a vocal does; this one leaves the attack
+    alone until the cell is a long way short of what is being asked, and then
+    does not stop at a compromise.
+
+    "Short by" is measured in reduction, not level, because it is the error
+    in gain that is heard.
+
+    **Only the feedforward cell uses this.** It was built for both and heard
+    in both, blind, on 2026-10-04, each build entered twice. In Stressed both
+    copies with the quick stage were ranked above both without it; in Tele
+    both copies with it were ranked below both without it. Tele keeps the
+    plain 10 ms attack and its 7.8 dB. */
+inline float attackCoeffFor (float steadyTauSec, float quickTauSec, double rate,
+                             float levelLin, float reductionDb, const Curve& curve) noexcept
+{
+    const auto steady  = coeffFor (steadyTauSec, rate);
+    const auto levelDb = 20.0f * std::log10 (std::max (levelLin, 1.0e-6f));
+    const auto shortBy = std::clamp (kneeReductionDb (levelDb, curve), 0.0f, 40.0f) - reductionDb;
+
+    if (shortBy <= kAttackQuickenDb)
+        return steady;
+
+    const auto quick = std::min ((shortBy - kAttackQuickenDb) / (kAttackQuickestDb - kAttackQuickenDb), 1.0f);
+    return steady + (coeffFor (quickTauSec, rate) - steady) * quick;
 }
 
 /** CRUSH, 0-100 on the panel, mapped to threshold only. LA-2A: ~3:1, a soft
@@ -81,13 +314,16 @@ inline Curve curveForDistressor (float crushPercent) noexcept
     dosage, sliding up toward kReleaseSlowMaxTauSec only after real sustained
     exposure). A short transient barely moves it; a long, loud hit does.
 
-    Attack is fixed at ~10 ms, per every source consulted -- there's no
-    evidence (here or in the digest) that the real cell's attack is
-    level-dependent the way its release is, so this doesn't invent one. */
+    Attack is fixed at ~10 ms, per every source consulted -- there is no
+    evidence that the real cell's attack is level-dependent the way its
+    release is. A quick stage for a cell far short of what is asked was
+    built for this cell too, and heard blind on 2026-10-04 with each build
+    entered twice: both copies with it were ranked below both without. So it
+    is not here. The other cell has it -- see attackCoeffFor(). */
 class La2aCell
 {
 public:
-    void prepare (double sampleRate) noexcept { rate = sampleRate; reset(); }
+    void prepare (double sampleRate) noexcept { rate = sampleRate; recentPeak.prepare (rate); keptLevel.prepare (rate); reset(); }
 
     void reset() noexcept
     {
@@ -95,6 +331,8 @@ public:
         gainLin     = 1.0f;
         reductionDb = 0.0f;
         chargeDb    = 0.0f;
+        recentPeak.reset();
+        keptLevel.reset();
         dosageSec   = 0.0f;
     }
 
@@ -125,7 +363,10 @@ public:
 
         const auto depth        = std::clamp (chargeDb / 20.0f, 0.0f, 1.0f);
         const auto releaseTau   = kReleaseFastTauSec + (slowTau - kReleaseFastTauSec) * depth;
-        const auto releaseCoeff = coeffFor (releaseTau, rate);
+        const auto recentLin    = recentPeak.push (levelLin);
+        const auto keptLin      = keptLevel.push (recentLin);
+        const auto releaseCoeff = releaseCoeffFor (coeffFor (releaseTau, rate), kReleaseFastTauSec, rate,
+                                                   envelopeLin, recentLin, reductionDb, chargeDb);
 
         envelopeLin += (rising ? attackCoeff : releaseCoeff) * (levelLin - envelopeLin);
 
@@ -133,9 +374,14 @@ public:
         reductionDb = std::clamp (kneeReductionDb (envelopeDb, curve), 0.0f, 40.0f);
         gainLin     = std::pow (10.0f, -reductionDb / 20.0f);
 
-        const auto chargeCoeff = reductionDb > chargeDb ? coeffFor (kChargeAttackTauSec, rate)
-                                                         : coeffFor (kReleaseSlowMinTauSec, rate);
-        chargeDb += chargeCoeff * (reductionDb - chargeDb);
+        // The charge rises toward what the signal is asking for and falls
+        // toward the reduction; between the two it holds. See exposureDb().
+        const auto exposure = exposureDb (reductionDb, envelopeLin, keptLin, curve);
+
+        if (exposure > chargeDb)
+            chargeDb += coeffFor (kChargeAttackTauSec, rate) * (exposure - chargeDb);
+        else if (reductionDb <= chargeDb)
+            chargeDb += coeffFor (kReleaseSlowMinTauSec, rate) * (reductionDb - chargeDb);
 
         // Dosage climbs for as long as the cell is meaningfully engaged and
         // forgets slowly once it isn't -- this is what lets a long hit reach
@@ -156,7 +402,7 @@ public:
     float currentGainLin() const noexcept { return gainLin; }
 
 private:
-    static constexpr float kAttackTauSec         = 0.010f;  // ~10 ms, fixed -- no source supports it moving
+    static constexpr float kAttackTauSec         = 0.010f;  // ~10 ms, fixed: the quick stage was heard here and refused
     static constexpr float kReleaseFastTauSec    = 0.06f;   // ~60 ms to the first 50% of recovery
     static constexpr float kReleaseSlowMinTauSec = 1.0f;    // slow tail floor: a hit just past "sustained"
 
@@ -193,6 +439,8 @@ private:
     float gainLin     = 1.0f;
     float reductionDb = 0.0f;
     float chargeDb    = 0.0f;
+    RecentPeak recentPeak;
+    KeptLevel  keptLevel;
     float dosageSec   = 0.0f;
 };
 
@@ -212,13 +460,14 @@ private:
     to justify claiming more precision than that.
 
     Feedforward: the detector reads the input directly, not the cell's own
-    output, matching the real unit's topology. Attack is static at ~10 ms
-    and does not lengthen with programme material, per the digest -- unlike
-    the LA-2A, this is stated explicitly rather than just unconfirmed. */
+    output, matching the real unit's topology. Attack is ~10 ms and does not
+    lengthen with programme material, per the digest. It does quicken when
+    the cell is more than 6 dB short of what is asked -- see
+    attackCoeffFor(), which is a measurement's doing and not the digest's. */
 class DistressorCell
 {
 public:
-    void prepare (double sampleRate) noexcept { rate = sampleRate; reset(); }
+    void prepare (double sampleRate) noexcept { rate = sampleRate; recentPeak.prepare (rate); keptLevel.prepare (rate); reset(); }
 
     void reset() noexcept
     {
@@ -226,6 +475,8 @@ public:
         gainLin     = 1.0f;
         reductionDb = 0.0f;
         chargeDb    = 0.0f;
+        recentPeak.reset();
+        keptLevel.reset();
     }
 
     /** One sample through the cell: feedforward, so the detector reads
@@ -243,11 +494,15 @@ public:
         const auto levelLin = std::abs (x);
         const auto rising   = levelLin > envelopeLin;
 
-        const auto attackCoeff = coeffFor (kAttackTauSec, rate);
+        const auto attackCoeff = rising ? attackCoeffFor (kAttackTauSec, kAttackQuickTauSec, rate, levelLin, reductionDb, curve)
+                                        : 0.0f;
 
         const auto depth        = std::clamp (chargeDb / 20.0f, 0.0f, 1.0f);
         const auto releaseTau   = kReleaseFastTauSec + (kReleaseSlowTauSec - kReleaseFastTauSec) * depth;
-        const auto releaseCoeff = coeffFor (releaseTau, rate);
+        const auto recentLin    = recentPeak.push (levelLin);
+        const auto keptLin      = keptLevel.push (recentLin);
+        const auto releaseCoeff = releaseCoeffFor (coeffFor (releaseTau, rate), kReleaseFastTauSec, rate,
+                                                   envelopeLin, recentLin, reductionDb, chargeDb);
 
         envelopeLin += (rising ? attackCoeff : releaseCoeff) * (levelLin - envelopeLin);
 
@@ -255,16 +510,26 @@ public:
         reductionDb = std::clamp (kneeReductionDb (envelopeDb, curve), 0.0f, 40.0f);
         gainLin     = std::pow (10.0f, -reductionDb / 20.0f);
 
-        const auto chargeCoeff = reductionDb > chargeDb ? coeffFor (kChargeAttackTauSec, rate)
-                                                         : coeffFor (kChargeReleaseTauSec, rate);
-        chargeDb += chargeCoeff * (reductionDb - chargeDb);
+        // The charge rises toward what the signal is asking for and falls
+        // toward the reduction; between the two it holds. See exposureDb().
+        const auto exposure = exposureDb (reductionDb, envelopeLin, keptLin, curve);
+
+        if (exposure > chargeDb)
+            chargeDb += coeffFor (kChargeAttackTauSec, rate) * (exposure - chargeDb);
+        else if (reductionDb <= chargeDb)
+            chargeDb += coeffFor (kChargeReleaseTauSec, rate) * (reductionDb - chargeDb);
     }
 
     float currentReductionDb() const noexcept { return reductionDb; }
     float currentGainLin() const noexcept { return gainLin; }
 
 private:
-    static constexpr float kAttackTauSec       = 0.010f; // ~10 ms, static -- confirmed non-adaptive
+    static constexpr float kAttackTauSec       = 0.010f; // ~10 ms: every move within 6 dB of what is asked
+
+    /** The quick stage, for a cell more than 12 dB short -- see
+        attackCoeffFor(). Half a millisecond, because nothing here shortens
+        it: a feedforward cell gets exactly the constant it is given. */
+    static constexpr float kAttackQuickTauSec  = 0.0005f;
     static constexpr float kReleaseFastTauSec  = 0.06f;
 
     /** This mode's slow ceiling. 20 s until 0.2.1, for the same reason
@@ -312,6 +577,8 @@ private:
     float gainLin     = 1.0f;
     float reductionDb = 0.0f;
     float chargeDb    = 0.0f;
+    RecentPeak recentPeak;
+    KeptLevel  keptLevel;
 };
 
 //==============================================================================

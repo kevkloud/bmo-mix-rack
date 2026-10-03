@@ -76,8 +76,13 @@ void DspCore::prepare (double newSampleRate, int maxBlockSize, int numChannels,
     for (auto* s : { &hfFreqSm, &midFreqSm, &lfFreqSm })
         s->prepare (controlRate, 25.0);
 
-    for (auto* s : { &hfGainSm, &midGainSm, &lfGainSm, &mixSm, &autoGainSm })
+    for (auto* s : { &hfGainSm, &midGainSm, &lfGainSm })
         s->prepare (controlRate, 20.0);
+
+    // Mix and Auto Gain keep the 20 ms they always had, now in real time per
+    // sample like the trims.
+    mixSm     .prepare (sampleRate, 20.0);
+    autoGainSm.prepare (sampleRate, 20.0);
 
     // The trims keep the 20 ms they always had, now in real time per sample.
     inputTrim .prepare (sampleRate, 20.0);
@@ -439,17 +444,10 @@ void DspCore::process (float* const* channels, int numChannels, int numSamples) 
 
         updateCoefficients (activeChannels, n);
 
-        auto       autoGain = autoGainSm.tick();
-        const auto wet      = mixSm.tick();
-        const auto dryLevel = 1.0f - wet;
-
         // Samples outermost so the shared dry-delay cursor advances once per
         // frame rather than once per channel.
         for (int i = 0; i < n; ++i)
         {
-            const auto inGain  = inputTrim.next();
-            const auto outGain = outputTrim.next() * autoGain;
-
             // The turn waits until the new path has heard the whole span of
             // its oversampling filters. A 10 ms fade down is 441 samples or
             // more at any rate this runs at, against 141 for 8x, so this only
@@ -459,14 +457,18 @@ void DspCore::process (float* const* channels, int numChannels, int numSamples) 
             {
                 switchOversampling();
                 oversamplingDip.changed();
-
-                // The new rate's Auto Gain figure, snapped at the bottom of
-                // the dip, applies from this sample, not from the next
-                // sub-block: otherwise up to 31 samples of the fade up would
-                // carry the old rate's figure and the next sub-block would
-                // step to the new one.
-                autoGain = autoGainSm.value();
             }
+
+            // The gains applied to the audio move every sample: the trims,
+            // Auto Gain and Mix. Mix and Auto Gain used to step once per
+            // sub-block, Mix's first step of a 0 -> 100 move 3.56 % of the
+            // way at 44.1 kHz. Each lands on its target and is then free.
+            // Read after the turn above, so Auto Gain's new-rate figure,
+            // snapped there, applies from this sample.
+            const auto inGain   = inputTrim.next();
+            const auto outGain  = outputTrim.next() * autoGainSm.next();
+            const auto wet      = mixSm.next();
+            const auto dryLevel = 1.0f - wet;
 
             // The dry ring is long enough for any factor, and read at the
             // latency of the path that is running.

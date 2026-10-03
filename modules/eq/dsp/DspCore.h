@@ -43,6 +43,54 @@ private:
 };
 
 //==============================================================================
+/** A one-pole smoother ticked every sample that lands on its target.
+
+    For a value applied straight to the audio, where Smoother's once-per-
+    sub-block step shows: Mix's first step of a 0 -> 100 move was 3.56 % of
+    the way at 44.1 kHz, held for 32 samples. A float32 one-pole does not
+    land on its own (see TrimSmoother); this one lands, exactly, once within
+    `landWithin` of the target or when a sample makes no progress, and then
+    returns the target without working. Snapped or landed, the value is the
+    target itself, bit for bit.
+*/
+class LandingSmoother
+{
+public:
+    explicit LandingSmoother (float landWithinValue) noexcept : landWithin (landWithinValue) {}
+
+    void prepare (double sampleRate, double timeMs) noexcept
+    {
+        const auto tau = std::max (timeMs, 0.01) * 0.001;
+        coeff = (float) (1.0 - std::exp (-1.0 / (std::max (sampleRate, 1.0) * tau)));
+    }
+
+    void snap (float v) noexcept        { current = target = v; }
+    void setTarget (float t) noexcept   { target = t; }
+    float value() const noexcept        { return current; }
+    bool isSettled() const noexcept     { return ! (current < target) && ! (target < current); }
+
+    /** One sample on. */
+    float next() noexcept
+    {
+        if (isSettled())
+            return current;
+
+        const auto moved = current + coeff * (target - current);
+
+        if (std::abs (target - moved) < landWithin || ! (moved < current || current < moved))
+            current = target;
+        else
+            current = moved;
+
+        return current;
+    }
+
+private:
+    float coeff = 1.0f, current = 0.0f, target = 0.0f;
+    float landWithin;
+};
+
+//==============================================================================
 /** A trim: a level in dB, smoothed every sample, handed out as a gain.
 
     The trims were smoothed once per 32-sample sub-block, and linearly in
@@ -267,7 +315,10 @@ private:
 
     Smoother hfFreqSm, midFreqSm, lfFreqSm;     // smoothed in log2(Hz)
     Smoother hfGainSm, midGainSm, lfGainSm;
-    Smoother mixSm, autoGainSm;
+    // Per sample. Mix lands within 1e-5 of its fraction and Auto Gain within
+    // 1e-5 of its linear gain: a last step of 1e-5 of the signal, or of the
+    // dry/wet difference, is 100 dB under anything they move.
+    LandingSmoother mixSm { 1.0e-5f }, autoGainSm { 1.0e-5f };
     TrimSmoother inputTrim, outputTrim;         // per sample, in dB
 
     // The switches' fades, at the host's rate. eqInMix is 0 out and 1 in;

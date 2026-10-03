@@ -855,6 +855,77 @@ int main()
             }
     }
 
+    //== 6b. Mix and Auto Gain move every sample, and land =================
+    // Mix and Auto Gain's applied gain were smoothed once per 32-sample
+    // sub-block: the first step of a Mix 0 -> 100 move was 3.56 % of the way
+    // at 44.1 kHz (3.28 % at 48, 1.65 % at 96), held for 32 samples. Where dry
+    // and wet differ most -- a 100 Hz tone through Low Cut 360, the wet nearly
+    // gone -- that stepped the output several times the tone's own step. Now
+    // both move every sample: bound 1.5x, both ways, 44.1/48/96 kHz. And both
+    // land: 250 ms after a move the output is a fresh instance's at the
+    // target, bit for bit.
+    {
+        for (double fs : { 44100.0, 48000.0, 96000.0 })
+        {
+            DspCore::Params dry;
+            dry.hpfIndex = 4;
+            dry.mixPercent = 0.0f;
+            auto wet = dry;
+            wet.mixPercent = 100.0f;
+
+            const auto up   = switchStepRatio (fs, dry, wet, 100.0);
+            const auto down = switchStepRatio (fs, wet, dry, 100.0);
+            check (up < 1.5, "Mix 0 -> 100 through Low Cut 360 at 100 Hz, " + rateName (fs) + ", steps " + ratioText (up));
+            check (down < 1.5, "Mix 100 -> 0 through Low Cut 360 at 100 Hz, " + rateName (fs) + ", steps " + ratioText (down));
+        }
+
+        // A band move changes the network's own state history, and a float
+        // IIR driven two ways need not round back to the same bits, so that
+        // one is held to 1e-6 (-105 dB re the tone) rather than to the bit;
+        // the rest move only a gain and must agree exactly.
+        struct Move { const char* name; DspCore::Params a, b; double tolerance; };
+        DspCore::Params busy;
+        busy.midGainDb = 12.0f;
+        busy.lfGainDb = 16.0f;
+
+        auto mix0 = busy;    mix0.mixPercent = 0.0f;
+        auto mix63 = busy;   mix63.mixPercent = 63.0f;
+        auto agOff = busy;
+        auto agOn = busy;    agOn.autoGain = true;
+        auto agMoved = agOn; agMoved.midGainDb = -6.0f;
+
+        const Move moves[] { { "Mix 0 -> 63", mix0, mix63, 0.0 }, { "Mix 63 -> 0", mix63, mix0, 0.0 },
+                             { "Mix 100 -> 0", busy, mix0, 0.0 }, { "Auto Gain off -> on", agOff, agOn, 0.0 },
+                             { "Auto Gain on, mid +12 -> -6", agOn, agMoved, 1.0e-6 } };
+
+        for (double fs : { 44100.0, 48000.0, 96000.0 })
+            for (const auto& move : moves)
+            {
+                std::vector<float> x ((size_t) (0.8 * fs));
+                for (size_t i = 0; i < x.size(); ++i)
+                    x[i] = (float) (0.17782794 * std::sin (2.0 * kPi * 440.0 * (double) i / fs));
+
+                const auto sw = (size_t) (0.1 * fs) / 512 * 512;
+
+                DspCore moved, fresh;
+                moved.prepare (fs, 512, 1, move.a.oversampling);
+                moved.setParams (move.a);
+                fresh.prepare (fs, 512, 1, move.b.oversampling);
+                fresh.setParams (move.b);
+
+                const auto y = render (moved, x, 512, [&] (size_t s) { return s >= sw ? move.b : move.a; }, 1);
+                const auto z = render (fresh, x, 512, [&] (size_t) { return move.b; }, 1);
+
+                double worst = 0.0;
+                for (size_t i = sw + (size_t) (0.4 * fs); i < y.size(); ++i)
+                    worst = std::max (worst, (double) std::abs (y[i] - z[i]));
+
+                check (worst <= move.tolerance, std::string (move.name) + " at " + rateName (fs)
+                                                    + ": 400 ms on, the output differs from a fresh instance at the target by "
+                                                    + std::to_string (worst));
+            }
+    }
+
     //== 7. An oversampling change costs no callback more than both paths ===
     // cd173eb warmed the new path at the bottom of the dip by running it over
     // 141 samples of missed input inside one callback: about 405 us, 242 % of

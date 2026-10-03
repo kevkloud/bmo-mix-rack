@@ -112,8 +112,16 @@ inline Sidechain blend (const Sidechain& a, const Sidechain& b, double t) noexce
     the published investigation describes -- "a plateau rather than the gentler
     slope of, e.g., 4:1", near-flat-topped, with reduction that can fall away
     again -- cannot come out of the divider law. 10 section 5 therefore
-    specifies a fitted collapse of sidechain gain above a breakpoint, reading
-    the previous sample's rectified output so the quadratic is unchanged.
+    specifies a fitted collapse of sidechain gain above a breakpoint, frozen
+    before the solve so the quadratic is unchanged.
+
+    Under all-buttons the level it is keyed on is **this** sample's cell
+    output as it stands before this sample's demand moves the control
+    (DspCore's processFrame), not the previous sample's rectifier. Read one
+    sample late, the first sample of every transient met the uncollapsed
+    network for a whole sample, however long a sample was, which made the
+    mode's timing depend on the rate. The previous-sample form survives only
+    in the ratio path, for the 5 ms crossfade out of all-buttons.
 
     Written against the demand the uncollapsed network would make rather than
     against a level in volts, because that is the quantity with a readable

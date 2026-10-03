@@ -147,6 +147,74 @@ namespace
             p = std::max (p, (double) std::abs (y[i]));
         return p;
     }
+
+    double largestStep (const std::vector<float>& y, size_t from, size_t to)
+    {
+        double m = 0.0;
+        for (size_t i = std::max<size_t> (from, 1); i < to && i < y.size(); ++i)
+            m = std::max (m, (double) std::abs (y[i] - y[i - 1]));
+        return m;
+    }
+
+    /** The bound the repository holds a switch to: the largest sample-to-
+        sample step in the 250 ms after it, against the steady signal's own
+        largest step before it and once everything has settled after it,
+        worst of four starting phases of a -18 dBFS RMS sine an eighth of a
+        cycle apart, so a switch cannot hide by landing where the two paths
+        happen to agree. `moves` is a list of (second, parameters): the
+        parameters in force from that time on, landing on the block
+        boundary at or before it. Block 64, as hosts often use, so that a
+        change lands somewhere other than where a 512 block would put it.
+
+        `widest`, when given, is a setting held throughout whose steady
+        signal also counts as the signal's own: for a move that passes
+        through a louder state than either end -- a gate sent to its rail
+        and straight back opens part of the way and closes again -- the
+        signal at its loudest is the one to compare a step with. */
+    double stepRatio (double fs, double hz, const std::vector<std::pair<double, Params>>& moves,
+                      const Params* widest = nullptr, double seconds = 1.2, double firstMove = 0.4)
+    {
+        constexpr double amplitude = 0.17782794 * 1.41421356;   // -18 dBFS RMS
+        double worst = 0.0;
+
+        for (int k = 0; k < 4; ++k)
+        {
+            std::vector<float> x ((size_t) (seconds * fs));
+            for (size_t i = 0; i < x.size(); ++i)
+                x[i] = (float) (amplitude * std::sin (2.0 * kPi * hz * (double) i / fs + k * kPi / 4.0));
+
+            std::vector<std::pair<size_t, Params>> at;
+            for (const auto& m : moves)
+                at.push_back ({ (size_t) (m.first * fs) / 64 * 64, m.second });
+
+            const auto y = render (fs, x, 64, [&] (size_t s)
+            {
+                auto p = at.front().second;
+                for (const auto& a : at)
+                    if (s >= a.first)
+                        p = a.second;
+                return p;
+            });
+
+            const auto sw     = (size_t) (firstMove * fs) / 64 * 64;
+            const auto last   = at.back().first;
+            const auto before = largestStep (y, sw - (size_t) (0.15 * fs), sw);
+            const auto after  = largestStep (y, y.size() - (size_t) (0.2 * fs), y.size());
+            const auto during = largestStep (y, sw, last + (size_t) (0.25 * fs));
+
+            auto own = std::max (before, after);
+
+            if (widest != nullptr)
+            {
+                const auto w = render (fs, x, 64, [&] (size_t) { return *widest; });
+                own = std::max (own, largestStep (w, y.size() - (size_t) (0.2 * fs), y.size()));
+            }
+
+            worst = std::max (worst, during / own);
+        }
+
+        return worst;
+    }
 }
 
 int main()
@@ -339,6 +407,67 @@ int main()
 
                 check (peak < 1.0e-6, std::string (side.name) + ", back in digital silence, at " + rateName (fs)
                                           + ": peaks at " + std::to_string (peak));
+            }
+    }
+
+    //== 2. GATE moves without a step, to its rails and back ================
+    //
+    // Moved to its rail, the gate used to drop its envelope in one sample:
+    // a closed gate snapped open, 19.6 dB in a sample, 144x the steady
+    // signal's own largest step at 1 kHz and 1062x at 150 Hz. At the rail it
+    // now opens at its own opening rate, the same 3 ms it opens at when a
+    // signal crosses its threshold, and is exactly inert again once open.
+    //
+    // A -18 dBFS RMS sine peaks at -15 dBFS, so GATE -10 holds it closed and
+    // GATE -40 leaves it open.
+    //
+    // At AMOUNT 0 the gate is the only thing acting, and that is where the
+    // bound is held. With the compressor working behind it, any opening --
+    // a signal crossing the threshold included -- hands the compressor a
+    // level it takes ATTACK to catch, and that overshoot is the compressor's
+    // onset, not a step in the gate: GATE -10 -> -40 at AMOUNT 55 measures
+    // 1.55x at 1 kHz and 1.80x at 150 Hz on the code that predates this
+    // section. So at AMOUNT 55 a move to the rail is held to that: no worse
+    // than the gate opening for a signal.
+    {
+        auto at = [] (float gateDb, float amount = 0.0f)
+        {
+            auto p = standard (amount);
+            p.gateDb = gateDb;
+            return p;
+        };
+
+        struct Move { const char* name; std::vector<std::pair<double, Params>> moves; };
+
+        const Move moves[] {
+            { "GATE -10 -> -60 (closed, to the rail)",          { { 0.0, at (-10.0f) }, { 0.4, at (-60.0f) } } },
+            { "GATE -10 -> -40 (closed, opens)",                { { 0.0, at (-10.0f) }, { 0.4, at (-40.0f) } } },
+            { "GATE -60 -> -10 (from the rail, closes)",        { { 0.0, at (-60.0f) }, { 0.4, at (-10.0f) } } },
+            { "GATE -40 -> -60 (open, to the rail)",            { { 0.0, at (-40.0f) }, { 0.4, at (-60.0f) } } },
+            { "GATE -10 -> -60 -> -10 (to the rail and back)",  { { 0.0, at (-10.0f) }, { 0.4, at (-60.0f) }, { 0.402, at (-10.0f) } } },
+            { "GATE -60 -> -10 -> -60 (closing, to the rail)",  { { 0.0, at (-60.0f) }, { 0.4, at (-10.0f) }, { 0.5, at (-60.0f) } } },
+        };
+
+        const auto open = at (kGateOffDb);
+
+        for (const auto fs : kRates)
+            for (const auto hz : { 150.0, 1000.0 })
+            {
+                for (const auto& m : moves)
+                {
+                    const auto ratio = stepRatio (fs, hz, m.moves, &open);
+                    check (ratio < 1.5, std::string (m.name) + ", " + fixed (hz, 0) + " Hz, at " + rateName (fs)
+                                            + " steps " + fixed (ratio) + "x the signal's own");
+                }
+
+                const auto openWorking = at (kGateOffDb, 55.0f);
+                const auto opens  = stepRatio (fs, hz, { { 0.0, at (-10.0f, 55.0f) }, { 0.4, at (-40.0f, 55.0f) } }, &openWorking);
+                const auto railed = stepRatio (fs, hz, { { 0.0, at (-10.0f, 55.0f) }, { 0.4, openWorking } }, &openWorking);
+
+                check (railed <= opens * 1.05,
+                       "GATE -10 -> -60 at AMOUNT 55, " + fixed (hz, 0) + " Hz, at " + rateName (fs) + " steps "
+                           + fixed (railed) + "x the signal's own, against " + fixed (opens)
+                           + "x for the gate opening to -40");
             }
     }
 

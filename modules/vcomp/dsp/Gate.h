@@ -123,11 +123,27 @@ public:
         // up to kGateHoldMs before it began to close, which a gate moved there
         // without that history does not. The envelope is not kept for later
         // either: it depends on the threshold, and at the rail there is none.
+        //
+        // **A gate that was shut when it reached the rail opens at its own
+        // opening rate**, the same kGateOpenMs it opens at when a signal
+        // crosses its threshold, rather than in one sample. It used to drop
+        // its envelope at once: 19.6 dB in a sample, 144x the steady signal's
+        // own largest step at 1 kHz and 1062x at 150 Hz. Once open it is
+        // exactly inert again, so a gate that stays at its rail costs the same
+        // as ever and passes the signal bit for bit.
         if (! active)
         {
-            attenuationDb = 0.0f;
             held = 0;
-            return 1.0f;
+
+            if (attenuationDb <= 0.0f)
+                return 1.0f;
+
+            attenuationDb *= openPole;
+
+            if (attenuationDb < kEnvelopeFloorDb)
+                attenuationDb = 0.0f;
+
+            return std::pow (10.0f, -attenuationDb / 20.0f);
         }
 
         const auto target = gateAttenuationDb (detectDb, threshold);

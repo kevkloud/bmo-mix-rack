@@ -508,6 +508,204 @@ int main()
                     }
     }
 
+    //== 5. An oversampling change costs no callback more than both paths ===
+    // The first version of the dip warmed the new path at the bottom by
+    // replaying 141 samples of missed input inside one callback: about
+    // 240 us, 1.4 blocks at 192 kHz / 32. The new path now runs alongside the
+    // old one on the live input while the dip goes down, so no callback does
+    // more than both paths' worth of a block. Counted, not timed: the work a
+    // callback does is the oversampled samples it processes, summed over
+    // channels and paths, and the bound is
+    //
+    //     channels x block x (old factor + new factor)
+    //
+    // with no slack, because nothing is processed but the live input. Away
+    // from a change a callback does exactly one path's worth.
+    {
+        for (double fs : { 48000.0, 192000.0 })
+            for (int block : { 32, 512 })
+                for (int from : kFactors)
+                    for (int to : kFactors)
+                    {
+                        if (from == to)
+                            continue;
+
+                        DspCore core;
+                        core.prepare (fs, block, 2, from);
+                        DspCore::Params p;
+                        p.oversampling = from;
+                        core.setParams (p);
+
+                        std::vector<float> l ((size_t) block), r ((size_t) block);
+                        float* channels[2] { l.data(), r.data() };
+
+                        const auto where = std::to_string (from) + "x -> " + std::to_string (to) + "x at "
+                                         + rateName (fs) + ", block " + std::to_string (block);
+                        const auto blocks = (int) (0.1 * fs) / block + 2;
+
+                        unsigned long long worst = 0, last = 0;
+                        bool steadyBefore = true;
+
+                        for (int b = 0; b < 3 * blocks; ++b)
+                        {
+                            for (int i = 0; i < block; ++i)
+                                l[(size_t) i] = r[(size_t) i] = 0.1f * std::sin (0.05f * (float) (b * block + i));
+
+                            if (b == blocks)
+                            {
+                                p.oversampling = to;
+                                core.setParams (p);
+                            }
+
+                            const auto before = core.oversampledSamplesProcessed();
+                            core.process (channels, 2, block);
+                            const auto work = core.oversampledSamplesProcessed() - before;
+
+                            if (b < blocks)
+                                steadyBefore = steadyBefore && work == 2ull * (unsigned long long) (block * from);
+                            else
+                                worst = std::max (worst, work);
+
+                            last = work;
+                        }
+
+                        const auto bound = 2ull * (unsigned long long) (block * (from + to));
+
+                        check (steadyBefore, where + ": a steady callback does one path's work");
+                        check (worst <= bound, where + ": a callback during the change processed " + std::to_string (worst)
+                                                   + " oversampled samples, past both paths' " + std::to_string (bound));
+                        check (last == 2ull * (unsigned long long) (block * to),
+                               where + ": after the change a callback does one path's work again ("
+                                   + std::to_string (last) + ")");
+                    }
+    }
+
+    //== 5b. An interrupted change leaves nothing behind ======================
+    // prepare() or reset() at the midpoint of the fade down must give, from
+    // that point on, exactly what a fresh instance at the new factor gives on
+    // the same input; a request withdrawn before the bottom must leave the
+    // output, once the gain is back at 1, exactly what it would have been had
+    // nothing been asked. Mix 50, Drive 60, a three-tone signal.
+    {
+        DspCore::Params settings;
+        settings.mixPercent  = 50.0f;
+        settings.driveAmount = 60.0f;
+
+        const auto tones = [] (double fs, size_t length)
+        {
+            std::vector<float> x (length);
+            for (size_t i = 0; i < length; ++i)
+            {
+                const auto t = (double) i / fs;
+                x[i] = (float) (0.06 * std::sin (2.0 * kPi * 100.0 * t)
+                              + 0.06 * std::sin (2.0 * kPi * 1000.0 * t + 0.5)
+                              + 0.06 * std::sin (2.0 * kPi * 7000.0 * t + 1.0));
+            }
+            return x;
+        };
+
+        for (double fs : { 44100.0, 48000.0, 96000.0 })
+            for (int from : kFactors)
+                for (int to : kFactors)
+                {
+                    if (from == to)
+                        continue;
+
+                    auto a = settings; a.oversampling = from;
+                    auto b = settings; b.oversampling = to;
+
+                    const auto where = std::to_string (from) + "x -> " + std::to_string (to) + "x at " + rateName (fs);
+                    const auto length = (size_t) (0.5 * fs);
+                    const auto x = tones (fs, length);
+                    constexpr size_t block = 64;   // fine enough to land inside a 10 ms dip
+                    const auto sw  = (size_t) (0.2 * fs) / block * block;
+                    const auto mid = sw + (size_t) (0.005 * fs) / block * block;
+
+                    for (int how = 0; how < 3; ++how)
+                    {
+                        const char* names[] { "prepare()", "reset()", "withdrawn" };
+
+                        DspCore core;
+                        core.prepare (fs, (int) block, 1, from);
+                        core.setParams (a);
+
+                        std::vector<float> y = x;
+                        for (size_t start = 0; start < length; start += block)
+                        {
+                            auto p = start >= sw ? b : a;
+
+                            if (start == mid && how == 0) core.prepare (fs, (int) block, 1, to);
+                            if (start == mid && how == 1) core.reset();
+                            if (start >= mid && how == 2) p = a;
+
+                            core.setParams (p);
+                            float* channels[1] { y.data() + start };
+                            core.process (channels, 1, (int) std::min (block, length - start));
+                        }
+
+                        double worst = 0.0;
+
+                        if (how == 2)
+                        {
+                            DspCore never;
+                            never.prepare (fs, (int) block, 1, from);
+                            never.setParams (a);
+                            const auto z = render (never, x, (int) block, [&] (size_t) { return a; });
+
+                            for (size_t i = mid + (size_t) (0.012 * fs); i < length; ++i)
+                                worst = std::max (worst, (double) std::abs (y[i] - z[i]));
+
+                            check (core.getLatencySamples() == bmo::Oversampler::latencyForFactor (from),
+                                   "oversampling " + where + " withdrawn mid-dip: latency is the old factor's");
+                        }
+                        else
+                        {
+                            DspCore fresh;
+                            fresh.prepare (fs, (int) block, 1, to);
+                            fresh.setParams (b);
+                            const std::vector<float> rest (x.begin() + (long) mid, x.end());
+                            const auto z = render (fresh, rest, (int) block, [&] (size_t) { return b; });
+
+                            for (size_t i = mid; i < length; ++i)
+                                worst = std::max (worst, (double) std::abs (y[i] - z[i - mid]));
+                        }
+
+                        check (worst == 0.0, "oversampling " + where + ", " + names[how] + " mid-dip, differs from "
+                                                 + (how == 2 ? "never switching" : "a fresh instance") + " by "
+                                                 + std::to_string (worst));
+                    }
+                }
+
+        // A request reset away and then withdrawn leaves nothing behind: the
+        // latency is the running factor's.
+        for (int from : kFactors)
+            for (int to : kFactors)
+            {
+                if (from == to)
+                    continue;
+
+                DspCore core;
+                core.prepare (48000.0, 64, 1, from);
+                auto p = settings;
+                p.oversampling = from;
+                core.setParams (p);
+
+                std::vector<float> buffer (64, 0.0f);
+                float* channels[1] { buffer.data() };
+                core.process (channels, 1, 64);
+
+                p.oversampling = to;   core.setParams (p); core.process (channels, 1, 64);
+                core.reset();
+                p.oversampling = from; core.setParams (p); core.process (channels, 1, 64);
+
+                check (core.getLatencySamples() == bmo::Oversampler::latencyForFactor (from),
+                       "oversampling " + std::to_string (from) + "x -> " + std::to_string (to)
+                           + "x, reset(), back to " + std::to_string (from) + "x: latency reports "
+                           + std::to_string (core.getLatencySamples()) + ", the running factor's is "
+                           + std::to_string (bmo::Oversampler::latencyForFactor (from)));
+            }
+    }
+
     if (failures == 0)
         std::cout << "All Saturator switch tests passed.\n";
 

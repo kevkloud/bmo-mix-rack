@@ -39,10 +39,13 @@ presets, preset levels).
   none of these is read at all, so a module with nothing switching renders
   bit-identically to one without them. Keep it that way: test `isMoving()` /
   `isIdle()` and take the plain path, never multiply by an idle gain.
-- **The oversampling change warms the new path inside one callback** (141
-  samples of replay at the new factor, `switchOversampling`). At 192 kHz with
-  32-sample blocks, Off -> 8x, that callback measured about 240 us, 1.4 blocks.
-  The suite is moving to a warm-up spread across the fade down; follow it.
+- **The new oversampling path warms alongside the old one.** There are two
+  copies of the oversampled region; on a change the spare is prepared at the
+  new factor and runs on the live input, its output discarded, while the dip
+  fades down, and they swap at the bottom. No callback does more than both
+  factors' work (SatSwitchTests section 5 counts it). Never warm a path in
+  one go: replaying 141 samples at the bottom, as the first version did, took
+  about 240 us, 1.4 blocks at 192 kHz / 32.
 - **Control periods run on the stream.** The smoothers and Auto Gain's
   detector advance once per `kSubBlock` (32) samples of audio, wherever the
   host's blocks fall: a period a block ends inside carries on into the next

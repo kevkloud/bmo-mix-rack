@@ -120,6 +120,13 @@ public:
 
     void process (float* const* channels, int numChannels, int numSamples) noexcept;
 
+    /** How many samples, at the oversampled rate and summed over channels and
+        paths, the oversampled region has processed since construction. A
+        count of the work rather than a clock: the switch tests bound what a
+        single callback may do with it, deterministically. Not used by the
+        audio. */
+    unsigned long long oversampledSamplesProcessed() const noexcept { return wetSamplesProcessed; }
+
     //== The character, in one place ==========================================
 
     /** DRIVE, 0-100 on the panel, mapped to the curve's drive.
@@ -271,7 +278,8 @@ public:
 
 private:
     void applyOversampling (int factor);
-    void switchOversampling (int activeChannels, float inGain, float drive, float tone) noexcept;
+    void beginWarming (int factor) noexcept;
+    void switchOversampling() noexcept;
     void updateAutoGain (double blockInput, double blockProcessed, int samples) noexcept;
 
     /** Auto Gain's figure from the detector's reading, or unity if it has
@@ -304,9 +312,9 @@ private:
 
         /** One host-rate sample through the oversampled region: up, the
             stage at each oversampled sample (or a wire with Sat In off),
-            down. Shared by process() and the warm-up of a new oversampling
-            path. While Sat In fades, the stage and the wire are blended at
-            `amount`, 1 being the stage. */
+            down. The live path and, during an oversampling change, the
+            standby one both go through here. While Sat In fades, the stage
+            and the wire are blended at `amount`, 1 being the stage. */
         float runWet (float driven, int factor, bool saturate,
                       bool fading = false, float amount = 1.0f) noexcept;
 
@@ -318,19 +326,36 @@ private:
     double sampleRate = 44100.0;
     double effectiveRate = 44100.0;
     int    latencySamples = 0;
+    unsigned long long wetSamplesProcessed = 0;
 
-    std::array<Channel, 2> channels;
+    // The oversampled region, both channels, twice over. One path is live;
+    // the other runs only while the oversampling changes, at the new factor
+    // on the same live input, so that when the dip turns the new path is
+    // already mid-stream. pathFactor is each path's factor.
+    std::array<std::array<Channel, 2>, 2> paths;
+    std::array<int, 2> pathFactor { 1, 1 };
+    int live = 0;
+
+    std::array<Channel, 2>& livePath() noexcept     { return paths[(size_t) live]; }
+    std::array<Channel, 2>& standbyPath() noexcept  { return paths[(size_t) (1 - live)]; }
+    void preparePath (std::array<Channel, 2>&, int factor) noexcept;
+
+    // While true the standby path runs at pendingFactor alongside the live
+    // one, and warmedSamples counts the host-rate samples it has heard.
+    bool warming = false;
+    int  warmedSamples = 0;
 
     // The dry path of the Mix control has to be delayed to match, or a partial
     // blend combs and a full bypass fails to null. The ring is one length for
-    // every factor, read at the running path's latency, and long enough --
-    // twice the longest latency -- to hold the whole span of the oversampling
-    // filters, which is what a new path is run over when the factor changes.
-    static constexpr int kDryRing = 2 * Oversampler::kMaxLatency + 2;
+    // every factor, long enough for the longest latency, and read at the live
+    // path's latency, so a change of factor moves the read point rather than
+    // resizing anything.
+    static constexpr int kDryRing = Oversampler::kMaxLatency + 2;
     std::vector<float> dryDelay;
     int dryWrite = 0, dryStride = 0, dryLatency = 0;
 
-    // A change of oversampling waits at the bottom of this dip; see process().
+    // A change of oversampling waits at the bottom of this dip while the
+    // standby path warms up alongside; see process().
     bmo::dsp::Dip oversamplingDip;
     int pendingFactor = 1;
     bool running = false;   // false until the first process() after prepare() or reset()

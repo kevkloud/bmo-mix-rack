@@ -28,6 +28,7 @@
 #include <string>
 #include <vector>
 #include <cstdint>
+#include <cstring>
 
 using namespace bmo::deesser;
 
@@ -824,8 +825,214 @@ void testThePitchEstimateFindsTheBand()
     }
 }
 
+//==============================================================================
+// Review fixes, 2026-10-03. Each test below failed on the code it was written
+// against; the commit that carries it says by how much.
+
+/** `essTest` at any rate: the same vowel, and a burst of noise through the
+    detector's own bandpass at 6.5 kHz, from the half-way point to seven
+    tenths. Fixed-seed, so two instances fed it compare sample for sample. */
+std::vector<float> essAt (double rate, double seconds, double burstGain = 1.6)
+{
+    const auto n = (size_t) (seconds * rate);
+    std::vector<float> out (n, 0.0f);
+
+    for (size_t i = 0; i < n; ++i)
+    {
+        const auto t = (double) i / rate;
+        out[i] = (float) (0.35 * std::sin (2.0 * kPi * 200.0 * t)
+                        + 0.20 * std::sin (2.0 * kPi * 400.0 * t)
+                        + 0.10 * std::sin (2.0 * kPi * 800.0 * t));
+    }
+
+    const auto coeffs = bmo::dsp::SvfCoeffs::fromBiquad (
+        detectorDesign (Shape::bell, 6500.0, 3.0, rate));
+    const auto taps = bmo::dsp::SvfTaps::of (coeffs.g, coeffs.k);
+
+    bmo::dsp::SvfState filter;
+    uint32_t seed = 0x5EEDu;
+
+    const auto first = (size_t) (0.5 * (double) n);
+    const auto last  = (size_t) (0.7 * (double) n);
+
+    for (size_t i = 0; i < n; ++i)
+    {
+        seed = seed * 1664525u + 1013904223u;
+        const auto white = (double) (int32_t) (seed >> 8) / 8388608.0 - 1.0;
+        const auto band  = filter.process (taps, coeffs, white);
+
+        if (i < first || i >= last)
+            continue;
+
+        const auto at = (double) (i - first) / (double) (last - first);
+        auto gain = 1.0;
+        if (at < 0.08)       gain = 0.5 - 0.5 * std::cos (kPi * at / 0.08);
+        else if (at > 0.92)  gain = 0.5 - 0.5 * std::cos (kPi * (1.0 - at) / 0.08);
+
+        out[i] += (float) (burstGain * gain * band);
+    }
+
+    return out;
+}
+
+/** How many samples of two renders differ at all. */
+size_t differingSamples (const std::vector<float>& a, const std::vector<float>& b)
+{
+    size_t count = a.size() == b.size() ? 0 : std::max (a.size(), b.size());
+
+    for (size_t i = 0; i < std::min (a.size(), b.size()); ++i)
+        if (std::memcmp (&a[i], &b[i], sizeof (float)) != 0)
+            ++count;
+
+    return count;
+}
+
+/** **A re-prepare at another rate is a fresh instance at that rate, bit for
+    bit.** A host re-prepares on a rate change without destroying the plugin,
+    and every design this module caches has to come back for the new rate.
+
+    The sidechain cached its design on shape, frequency and Q but not on the
+    rate, and prepare() did not clear it: after 96 kHz -> 48 kHz the detector
+    went on listening through a 96 kHz design and the reduction on a sibilant
+    burst was 0.00 dB where a fresh instance gave 4.89; after 48 -> 96 it
+    listened at 13 kHz instead of 6.5. The cut cached the same way, which
+    showed less because the depth moves and redesigns it -- but a band at rest
+    kept the old rate's coefficients and ran its state through them.
+
+    Every ordered pair of the four rates, the same rate included, with the
+    settings held and with a parameter change after the re-prepare. */
+void testRePrepareMatchesAFreshInstance()
+{
+    const double rates[] { 44100.0, 48000.0, 96000.0, 192000.0 };
+
+    auto v = defaults();
+    v[range] = 12.0f;
+
+    auto moved = v;
+    moved[freq] = 5000.0f;
+    moved[q] = 4.0f;
+
+    for (const auto from : rates)
+        for (const auto to : rates)
+            for (const auto change : { false, true })
+            {
+                DeesserDsp reused;
+                reused.prepare (from, 512, 2);
+                reused.setParams (v.data(), (int) v.size());
+                run (reused, essAt (from, 0.4));
+
+                reused.prepare (to, 512, 2);
+                const auto& after = change ? moved : v;
+                reused.setParams (after.data(), (int) after.size());
+                const auto a = run (reused, essAt (to, 0.4));
+
+                DeesserDsp fresh;
+                fresh.prepare (to, 512, 2);
+                fresh.setParams (after.data(), (int) after.size());
+                const auto b = run (fresh, essAt (to, 0.4));
+
+                const auto differ = differingSamples (a, b);
+
+                check (differ == 0,
+                       "a re-prepare from " + std::to_string ((int) from) + " to "
+                           + std::to_string ((int) to)
+                           + (change ? " with a parameter change" : " with the settings held")
+                           + " is a fresh instance, " + std::to_string (differ)
+                           + " samples differ");
+            }
+}
+
+/** **reset() leaves no stale design**, in each cache the band keeps.
+
+    The cut and the sidechain each remember what they were last designed from,
+    so that a band nobody is moving is not redesigned 6000 times a second.
+    Neither remembered the rate, so a reset followed by a design at another
+    rate with the same settings found nothing to do and kept the old one. One
+    row per cache, plus the followers' time constants, which prepare() sets
+    and which are pinned here so that a cache added to them later is caught. */
+void testResetLeavesNoStaleDesign()
+{
+    const auto gridA = bmo::dsp::DesignGrid::make (96000.0);
+    const auto gridB = bmo::dsp::DesignGrid::make (48000.0);
+
+    // The cut, at a depth that will not move between the two designs.
+    {
+        Band band;
+        band.design (Shape::bell, 6500.0, 2.5, 6.0, gridA, 8, true);
+        band.reset();
+        band.design (Shape::bell, 6500.0, 2.5, 6.0, gridB, 8, true);
+
+        Band fresh;
+        fresh.design (Shape::bell, 6500.0, 2.5, 6.0, gridB, 8, true);
+
+        check (std::memcmp (&band.cur, &fresh.cur, sizeof (band.cur)) == 0
+                   && std::memcmp (&band.next, &fresh.next, sizeof (band.next)) == 0,
+               "the cut is designed for the new rate after a reset");
+    }
+
+    // The sidechain, which does not follow the depth at all.
+    {
+        Band band;
+        band.designSide (Shape::bell, 6500.0, 2.5, 96000.0);
+        band.reset();
+        band.designSide (Shape::bell, 6500.0, 2.5, 48000.0);
+
+        Band fresh;
+        fresh.designSide (Shape::bell, 6500.0, 2.5, 48000.0);
+
+        check (std::memcmp (&band.sideCoeffs, &fresh.sideCoeffs, sizeof (band.sideCoeffs)) == 0,
+               "the sidechain is designed for the new rate after a reset");
+    }
+
+    // The sidechain again without a reset: a design asked for at another rate
+    // is a different design, whatever else is the same.
+    {
+        Band band;
+        band.designSide (Shape::bell, 6500.0, 2.5, 96000.0);
+        band.designSide (Shape::bell, 6500.0, 2.5, 48000.0);
+
+        Band fresh;
+        fresh.designSide (Shape::bell, 6500.0, 2.5, 48000.0);
+
+        check (std::memcmp (&band.sideCoeffs, &fresh.sideCoeffs, sizeof (band.sideCoeffs)) == 0,
+               "the sidechain's cache is keyed on the rate");
+    }
+
+    // The followers: prepared at one rate and then another, they are the
+    // followers of the second.
+    {
+        Prominence::Config pc;
+        Prominence reused, fresh;
+        reused.prepare (pc, 96000.0);
+        reused.process (0.3, 0.5);
+        reused.prepare (pc, 48000.0);
+        fresh.prepare (pc, 48000.0);
+
+        Reduction::Config rc;
+        Reduction reusedR, freshR;
+        reusedR.prepare (rc, 96000.0);
+        reusedR.process (8.0);
+        reusedR.prepare (rc, 48000.0);
+        freshR.prepare (rc, 48000.0);
+
+        auto same = true;
+
+        for (int i = 0; i < 4800; ++i)
+        {
+            const auto level = i < 2400 ? 0.3 : 0.01;
+            same = same && reused.process (level, 0.5) == fresh.process (level, 0.5);
+            same = same && reusedR.process (i < 2400 ? 8.0 : 0.0) == freshR.process (i < 2400 ? 8.0 : 0.0);
+        }
+
+        check (same, "the followers' time constants are the new rate's after a re-prepare");
+    }
+}
+
 int main()
 {
+    testRePrepareMatchesAFreshInstance();
+    testResetLeavesNoStaleDesign();
+
     testLatencyIsZeroEverywhere();
     testQuietMaterialIsUntouched();
     testSibilanceIsReduced();

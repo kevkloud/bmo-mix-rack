@@ -309,8 +309,15 @@ Two things this changed that are worth knowing:
 - **`kThruBodyOffsetDb` is 6 dB, and that one *is* a number somebody picked.**
   It says how far under the peaks the detector reads the chest and the air
   actually sit. Larger means more thru lift, smaller means less.
-- **The band-split crossfade.** Unchanged by this: engaging the split still
-  switches the crossover in rather than fading it.
+- **The band-split crossfade** is done (2026-10-03). Each side of the split
+  fades in and out over 10 ms with `dsp::crossfade`, a crossover already in
+  circuit glides to a new frequency over 20 ms (geometric in the warped
+  frequency; the TPT poles stay inside the unit circle all the way, worst
+  radius 0.99907 at 20 Hz and 96 kHz), and a side clears once it is all the
+  way out. With nothing moving the arithmetic is exactly what it was.
+  `vcomp_switch_tests` section 3 holds it. A 10 ms glide measured 1.59x on a
+  150 Hz tone for LOW THRU 21 -> 500, which is why the glide is longer than
+  the fade.
 - **A separate limiter on the thru path** was the third candidate and is not
   needed now. It only bit near full scale, and the thru band no longer gets
   anywhere near it.

@@ -471,6 +471,123 @@ int main()
             }
     }
 
+    //== 3. The band split moves without a step ===========================
+    //
+    // COMPLEX, LOW THRU and HIGH THRU used to switch the band split in and
+    // out, and move its crossovers, in one sample: on a 150 Hz tone LOW THRU
+    // 200 -> 20 stepped 104x the signal's own largest step, COMPLEX on ->
+    // off 144x, HIGH THRU 20k -> 6k 35x. A side of the split now fades in
+    // and out over 10 ms, and a crossover that is in circuit glides to a new
+    // frequency rather than jumping there.
+    //
+    // Every move across each control's whole range, from its rail and back
+    // to it and between two settings that are both in, with the other side
+    // in and out; COMPLEX both ways, with the four detector knobs moved as
+    // well and without; a move reversed 2 ms in. AMOUNT 55, so the two bands
+    // are taking different gains and the move is audible as a level change
+    // as well as a phase one.
+    {
+        auto at = [] (float lowHz, float highHz, bool complex = true)
+        {
+            auto p = complexMode (55.0f, 5.0f, 200.0f, true, kStandardSidechainHz, lowHz, highHz);
+            p.complex = complex;
+            return p;
+        };
+
+        auto knobs = complexMode (55.0f, 0.1f, 20.0f, false, 500.0f, 200.0f, 6000.0f);
+        auto knobsOff = knobs;
+        knobsOff.complex = false;
+
+        constexpr float lo = kLowThruOffHz, hi = kHighThruOffHz;
+
+        struct Move { const char* name; std::vector<std::pair<double, Params>> moves; };
+
+        std::vector<Move> moves {
+            { "COMPLEX off -> on (bands only)",       { { 0.0, at (200, 6000, false) }, { 0.4, at (200, 6000) } } },
+            { "COMPLEX on -> off (bands only)",       { { 0.0, at (200, 6000) }, { 0.4, at (200, 6000, false) } } },
+            { "COMPLEX off -> on (knobs moved)",      { { 0.0, knobsOff }, { 0.4, knobs } } },
+            { "COMPLEX on -> off (knobs moved)",      { { 0.0, knobs }, { 0.4, knobsOff } } },
+            { "LOW THRU 20 -> 200",                   { { 0.0, at (lo, hi) },   { 0.4, at (200, hi) } } },
+            { "LOW THRU 200 -> 20",                   { { 0.0, at (200, hi) },  { 0.4, at (lo, hi) } } },
+            { "LOW THRU 20 -> 500",                   { { 0.0, at (lo, hi) },   { 0.4, at (500, hi) } } },
+            { "LOW THRU 500 -> 20",                   { { 0.0, at (500, hi) },  { 0.4, at (lo, hi) } } },
+            { "LOW THRU 21 -> 500",                   { { 0.0, at (21, hi) },   { 0.4, at (500, hi) } } },
+            { "LOW THRU 500 -> 21",                   { { 0.0, at (500, hi) },  { 0.4, at (21, hi) } } },
+            { "LOW THRU 100 -> 400",                  { { 0.0, at (100, hi) },  { 0.4, at (400, hi) } } },
+            { "LOW THRU 21 -> 500, HIGH THRU 6k",     { { 0.0, at (21, 6000) }, { 0.4, at (500, 6000) } } },
+            { "LOW THRU 500 -> 20, HIGH THRU 6k",     { { 0.0, at (500, 6000) },{ 0.4, at (lo, 6000) } } },
+            { "LOW THRU 20 -> 300 -> 20",             { { 0.0, at (lo, hi) },   { 0.4, at (300, hi) }, { 0.402, at (lo, hi) } } },
+            { "HIGH THRU 20k -> 6k",                  { { 0.0, at (lo, hi) },   { 0.4, at (lo, 6000) } } },
+            { "HIGH THRU 6k -> 20k",                  { { 0.0, at (lo, 6000) }, { 0.4, at (lo, hi) } } },
+            { "HIGH THRU 20k -> 2k",                  { { 0.0, at (lo, hi) },   { 0.4, at (lo, 2000) } } },
+            { "HIGH THRU 2k -> 20k",                  { { 0.0, at (lo, 2000) }, { 0.4, at (lo, hi) } } },
+            { "HIGH THRU 19999 -> 2k",                { { 0.0, at (lo, 19999) },{ 0.4, at (lo, 2000) } } },
+            { "HIGH THRU 2k -> 19999",                { { 0.0, at (lo, 2000) }, { 0.4, at (lo, 19999) } } },
+            { "HIGH THRU 2k -> 19999, LOW THRU 200",  { { 0.0, at (200, 2000) },{ 0.4, at (200, 19999) } } },
+            { "HIGH THRU 2k -> 20k, LOW THRU 200",    { { 0.0, at (200, 2000) },{ 0.4, at (200, hi) } } },
+            { "HIGH THRU 20k -> 3k -> 20k",           { { 0.0, at (lo, hi) },   { 0.4, at (lo, 3000) }, { 0.402, at (lo, hi) } } },
+        };
+
+        // A knob dragged across its whole range and back, one new value a
+        // millisecond, as automation or a mouse delivers it: every block
+        // starts a new glide from wherever the last one had got to.
+        auto sweep = [&] (const char* name, bool low, float from, float to)
+        {
+            Move m { name, { { 0.0, low ? at (from, hi) : at (lo, from) } } };
+
+            for (int step = 1; step <= 400; ++step)
+            {
+                const auto there = step <= 200 ? step / 200.0 : (400 - step) / 200.0;
+                const auto hz = (float) (from * std::pow (to / from, there));
+                m.moves.push_back ({ 0.4 + step * 0.001, low ? at (hz, hi) : at (lo, hz) });
+            }
+
+            moves.push_back (m);
+        };
+
+        sweep ("LOW THRU dragged 21 -> 500 -> 21",    true,  21.0f,   500.0f);
+        sweep ("HIGH THRU dragged 2k -> 19999 -> 2k", false, 2000.0f, 19999.0f);
+
+        for (const auto fs : kRates)
+            for (const auto hz : { 150.0, 1000.0 })
+                for (const auto& m : moves)
+                {
+                    const auto ratio = stepRatio (fs, hz, m.moves, nullptr, 1.6);
+                    check (ratio < 1.5, std::string (m.name) + ", " + fixed (hz, 0) + " Hz, at " + rateName (fs)
+                                            + " steps " + fixed (ratio) + "x the signal's own");
+                }
+
+        // In silence: the same moves 0.75 s into digital silence after a
+        // tone, when the module's own tail has died away. A side that comes
+        // in starts from rest, and a crossover gliding through silence makes
+        // none of its own.
+        for (const auto fs : kRates)
+            for (const auto& m : moves)
+            {
+                std::vector<float> x ((size_t) (1.6 * fs));
+                for (size_t i = 0; i < (size_t) (0.4 * fs); ++i)
+                    x[i] = (float) (0.25 * std::sin (2.0 * kPi * 150.0 * (double) i / fs)
+                                    + 0.25 * std::sin (2.0 * kPi * 3000.0 * (double) i / fs));
+
+                std::vector<std::pair<size_t, Params>> moveAt;
+                for (const auto& mv : m.moves)
+                    moveAt.push_back ({ (size_t) ((mv.first > 0.0 ? mv.first + 0.75 : 0.0) * fs) / 64 * 64, mv.second });
+
+                const auto y = render (fs, x, 64, [&] (size_t s)
+                {
+                    auto p = moveAt.front().second;
+                    for (const auto& a : moveAt)
+                        if (s >= a.first)
+                            p = a.second;
+                    return p;
+                });
+
+                const auto peak = peakFrom (y, moveAt[1].first);
+                check (peak < 1.0e-6, std::string (m.name) + " in digital silence at " + rateName (fs)
+                                          + " puts out a peak of " + std::to_string (peak));
+            }
+    }
+
     if (failures == 0)
         std::cout << "All LTV Comp switch tests passed.\n";
 

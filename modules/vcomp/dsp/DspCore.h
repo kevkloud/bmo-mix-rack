@@ -205,12 +205,16 @@ public:
     void process (float* const* channelData, int numChannels, int numSamples) noexcept
     {
         const auto active = std::min (numChannels, numActiveChannels);
-        const auto split  = bandsActive (params);
 
         auto blockMaxReduction = 0.0f;
 
         for (int i = 0; i < numSamples; ++i)
         {
+            // Asked per sample rather than read off the parameters once a
+            // block: a side of the split fading out is still in circuit, and
+            // the fade ends wherever in a block it ends. Every channel's split
+            // is moved by the same calls, so the first speaks for all.
+            const auto split = channels[0].bands.inCircuit();
             const auto curve = curveFor (amountSmoother.tick());
 
             // **The automatic makeup applies to the whole sum, including the
@@ -364,19 +368,13 @@ private:
         release.setTimes (releaseMs, arcOn, rate);
         gate.setThreshold (params.gateDb);
 
-        const auto split = bandsActive (params);
-
+        // The split decides for itself which of its sides are in, fades
+        // them in and out, and clears a side once it is all the way out, so
+        // that it comes back from silence. See BandSplit.
         for (auto& ch : channels)
         {
             ch.sidechain.setCutoff (sidechainHz);
             ch.bands.setCutoffs (lowHz, highHz);
-
-            // Cleared while the split is bypassed, so that moving LOW THRU off
-            // its rail starts the crossover from silence rather than from
-            // whatever was in it when it was last switched out. Free: the
-            // filters are not running.
-            if (! split)
-                ch.bands.reset();
         }
     }
 

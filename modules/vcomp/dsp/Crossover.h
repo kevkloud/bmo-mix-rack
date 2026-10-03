@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/dsp/SwitchFade.h"
 #include "modules/vcomp/params.h"
 
 #include <algorithm>
@@ -62,6 +63,13 @@ namespace bmo::vcomp
     k)) about 9.5e-4, which is nowhere near the edge of float. */
 inline constexpr float kMaxCutoffOfNyquist = 0.98f;
 
+/** How long a crossover in circuit takes to glide to a new frequency, in ms.
+    See LinkwitzRiley4::glideTo. Twice the suite's 10 ms switch time on
+    purpose: a glide moves a band edge across the signal rather than blending
+    two settings of it, and at 10 ms LOW THRU 21 -> 500 stepped 1.59x the
+    signal's own largest step on a 150 Hz tone, 1.33x at 20 ms. */
+inline constexpr double kCrossoverGlideMs = 20.0;
+
 /** One TPT state variable section (Zavalishin, The Art of VA Filter Design),
     giving low-pass and high-pass outputs from the same state. TPT rather than
     a biquad because the coefficients stay well behaved when the cutoff is
@@ -111,6 +119,7 @@ public:
     void prepare (double rate) noexcept
     {
         sampleRate = std::max (rate, 1.0);
+        glideLength = std::max (1, (int) std::lround (sampleRate * kCrossoverGlideMs * 0.001));
         reset();
     }
 
@@ -120,18 +129,66 @@ public:
         for (auto& s : high) s.reset();
     }
 
+    /** Puts the crossover at `hz` at once, ending any glide. For a split that
+        is not running, or is starting from rest. */
     void setCutoff (float hz) noexcept
     {
-        const auto nyquist = (float) (sampleRate * 0.5);
-        const auto fc = std::clamp (hz, 10.0f, nyquist * kMaxCutoffOfNyquist);
-        const auto g  = std::tan (3.14159265358979323846f * fc / (float) sampleRate);
+        glideLeft = 0;
+        g = gTarget = warpedFor (hz);
+        applyWarped (g);
+    }
 
-        const auto a1 = 1.0f / (1.0f + g * (g + Svf::kK));
-        const auto a2 = g * a1;
-        const auto a3 = g * a2;
+    /** Moves the crossover to `hz` over kCrossoverGlideMs, from wherever it
+        is, for a split that is in circuit. Asking for the frequency already
+        being approached (or held) changes nothing, so this is safe to call
+        every block with the control's current value.
 
-        for (auto& s : low)  s.setCoefficients (a1, a2, a3);
-        for (auto& s : high) s.setCoefficients (a1, a2, a3);
+        **Glided, not crossfaded between two splits**, because the filter
+        stays well behaved while it moves. The TPT section's poles are the
+        bilinear transform of a Butterworth pair, so at every cutoff along the
+        way they sit inside the unit circle: the radius is
+        sqrt ((1 - k g + g^2) / (1 + k g + g^2)), largest at the bottom of
+        LOW THRU's range, 0.99907 at 20 Hz and 96 kHz. And the state is
+        trapezoidal integrator memory, not past outputs, so a coefficient
+        that changes does not turn old output into a new click -- which is
+        why this module uses TPT sections at all. A second split to fade
+        into would double the crossover's cost for the length of every move,
+        and a knob dragged across a block boundary would start a new fade
+        each block.
+
+        The glide is geometric in the warped frequency g = tan(pi fc / fs),
+        which is the frequency itself on a log scale everywhere but the top
+        octave: equal time for equal ratios, as the knob is laid out. */
+    void glideTo (float hz) noexcept
+    {
+        const auto target = warpedFor (hz);
+
+        if (! (target < gTarget) && ! (gTarget < target))
+            return;
+
+        gTarget    = target;
+        glideLeft  = glideLength;
+        glideRatio = std::pow (gTarget / g, 1.0f / (float) glideLength);
+    }
+
+    bool isGliding() const noexcept { return glideLeft > 0; }
+
+    /** One sample of a glide. Lands on the target exactly, so a crossover
+        that has finished moving has the coefficients it would have had if it
+        had been put there. */
+    void advanceGlide() noexcept
+    {
+        if (--glideLeft <= 0)
+        {
+            glideLeft = 0;
+            g = gTarget;
+        }
+        else
+        {
+            g *= glideRatio;
+        }
+
+        applyWarped (g);
     }
 
     void process (float x, float& lowOut, float& highOut) noexcept
@@ -159,8 +216,28 @@ public:
     }
 
 private:
+    float warpedFor (float hz) const noexcept
+    {
+        const auto nyquist = (float) (sampleRate * 0.5);
+        const auto fc = std::clamp (hz, 10.0f, nyquist * kMaxCutoffOfNyquist);
+        return std::tan (3.14159265358979323846f * fc / (float) sampleRate);
+    }
+
+    void applyWarped (float warped) noexcept
+    {
+        const auto a1 = 1.0f / (1.0f + warped * (warped + Svf::kK));
+        const auto a2 = warped * a1;
+        const auto a3 = warped * a2;
+
+        for (auto& s : low)  s.setCoefficients (a1, a2, a3);
+        for (auto& s : high) s.setCoefficients (a1, a2, a3);
+    }
+
     double sampleRate = 44100.0;
     Svf low[2], high[2];
+
+    float g = 0.0f, gTarget = 0.0f, glideRatio = 1.0f;
+    int   glideLength = 1, glideLeft = 0;
 };
 
 //==============================================================================
@@ -179,14 +256,25 @@ public:
         lower.prepare (rate);
         upper.prepare (rate);
         lowAlign.prepare (rate);
+        lowMix.prepare (rate, kBandSwitchMs);
+        highMix.prepare (rate, kBandSwitchMs);
         reset();
     }
 
+    /** Clears every filter and puts each side where its control last said,
+        with nothing fading or gliding. */
     void reset() noexcept
     {
+        lowMix.snap (lowMix.target());
+        highMix.snap (highMix.target());
+
         lower.reset();
         upper.reset();
         lowAlign.reset();
+
+        lower.setCutoff (lowCutoffHz);
+        upper.setCutoff (highCutoffHz);
+        lowAlign.setCutoff (highCutoffHz);
     }
 
     void setCutoffs (float lowHz, float highHz) noexcept
@@ -209,69 +297,160 @@ public:
         // at 300 and HIGH THRU at its rail, a 12 kHz tone was pumped by 4.7 dB
         // where it should have been the full 11.5, and the number was there in
         // a table next to three that were right.
-        splitLow  = lowHz  > kLowThruOffHz;
-        splitHigh = highHz < kHighThruOffHz;
-
-        lower.setCutoff (lowHz);
-        upper.setCutoff (highHz);
-        lowAlign.setCutoff (highHz);
+        const auto wantLow  = lowHz  > kLowThruOffHz;
+        const auto wantHigh = highHz < kHighThruOffHz;
 
         // A side that is out is cleared, so that it comes back from silence
-        // rather than replaying what it held when it went out. DspCore clears
-        // the whole split while it is bypassed, but a side left out while the
-        // other ran on used to keep its state frozen: with both sides in,
-        // HIGH THRU to its rail and back 0.8 s into digital silence put out a
-        // 0.13 peak, LOW THRU 0.05. Free: a side that is out is not running.
-        if (! splitLow)
+        // rather than replaying what it held when it went out. A side left out
+        // while the other ran on used to keep its state frozen: with both
+        // sides in, HIGH THRU to its rail and back 0.8 s into digital silence
+        // put out a 0.13 peak, LOW THRU 0.05. Out means faded all the way out,
+        // not merely asked to go: a side that is fading is still running.
+        if (! lowRunning())
             lower.reset();
 
-        if (! splitHigh)
+        if (! highRunning())
             upper.reset();
 
-        if (! (splitLow && splitHigh))
+        if (! (lowRunning() && highRunning()))
             lowAlign.reset();
+
+        // A side coming in from rest is put at its frequency; one already in
+        // circuit glides there. A side going out keeps the frequency it had
+        // while it fades: its rail means "not in circuit", not a frequency to
+        // glide towards. lowAlign is always where the upper split is.
+        if (wantLow)
+        {
+            if (lowRunning())  lower.glideTo (lowHz);
+            else               lower.setCutoff (lowHz);
+
+            lowCutoffHz = lowHz;
+        }
+
+        if (wantHigh)
+        {
+            if (highRunning()) { upper.glideTo (highHz);   lowAlign.glideTo (highHz); }
+            else               { upper.setCutoff (highHz); lowAlign.setCutoff (highHz); }
+
+            highCutoffHz = highHz;
+        }
+
+        lowMix.setTarget  (wantLow  ? 1.0f : 0.0f);
+        highMix.setTarget (wantHigh ? 1.0f : 0.0f);
     }
+
+    /** True while either side is in circuit or fading, and therefore while
+        process() has to be called at all. With both sides at rest at their
+        rails the whole split is skipped -- see DspCore::bandsActive(). */
+    bool inCircuit() const noexcept { return lowRunning() || highRunning(); }
 
     /** Splits `x` into the band to compress and the band that passes through.
 
         With one side at its rail there is only one crossover in circuit, so
         there is no second split for the low band's phase to be aligned to and
         `lowAlign` is not used -- the two bands are that one crossover's own
-        outputs and sum to its allpass by construction. */
+        outputs and sum to its allpass by construction.
+
+        **A side comes in and goes out over kBandSwitchMs.** It used to switch
+        in one sample, and a crossover in circuit is not the signal it
+        replaces -- it is an allpass of it, so the two disagree in phase
+        everywhere near the split: on a 150 Hz tone LOW THRU 200 -> 20 stepped
+        104x the signal's own largest step, COMPLEX on -> off 144x, HIGH THRU
+        20k -> 6k 35x. Fading, a side's own split blends with the signal it
+        was handed and its outer band comes up with it, and the low band is
+        aligned to the upper split in the same proportion as that split is
+        in. With nothing fading the arithmetic is exactly what it always was. */
     void process (float x, float& mid, float& thru) noexcept
     {
-        if (splitLow && splitHigh)
-        {
-            float below = 0.0f, rest = 0.0f, above = 0.0f;
+        if (lower.isGliding())
+            lower.advanceGlide();
 
+        if (upper.isGliding())
+        {
+            upper.advanceGlide();
+            lowAlign.advanceGlide();
+        }
+
+        const auto runLow  = lowRunning();
+        const auto runHigh = highRunning();
+
+        if (! lowMix.isMoving() && ! highMix.isMoving())
+        {
+            if (runLow && runHigh)
+            {
+                float below = 0.0f, rest = 0.0f, above = 0.0f;
+
+                lower.process (x, below, rest);
+                upper.process (rest, mid, above);
+
+                thru = lowAlign.allpass (below) + above;
+                return;
+            }
+
+            if (runLow)
+            {
+                lower.process (x, thru, mid);
+                return;
+            }
+
+            if (runHigh)
+            {
+                upper.process (x, mid, thru);
+                return;
+            }
+
+            // Not reached while DspCore calls this only while inCircuit(),
+            // and correct rather than merely unreachable if that changes.
+            mid = x;
+            thru = 0.0f;
+            return;
+        }
+
+        auto toUpper = x, below = 0.0f, lowAmount = 0.0f, highAmount = 0.0f, highBand = 0.0f;
+
+        if (runLow)
+        {
+            float rest = 0.0f;
             lower.process (x, below, rest);
-            upper.process (rest, mid, above);
 
-            thru = lowAlign.allpass (below) + above;
-            return;
+            lowAmount = lowMix.next();
+            toUpper   = dsp::crossfade (x, rest, lowAmount);
         }
 
-        if (splitLow)
+        mid = toUpper;
+
+        if (runHigh)
         {
-            lower.process (x, thru, mid);
-            return;
+            float inner = 0.0f, above = 0.0f;
+            upper.process (toUpper, inner, above);
+
+            highAmount = highMix.next();
+            mid        = dsp::crossfade (toUpper, inner, highAmount);
+            highBand   = above * highAmount;
         }
 
-        if (splitHigh)
-        {
-            upper.process (x, mid, thru);
-            return;
-        }
+        // The low band is aligned before its fade is applied, not after: an
+        // allpass fed a faded band would ring on past the end of the fade
+        // and be cut off when the side stops running.
+        auto lowBand = 0.0f;
 
-        // Not reached while DspCore::bandsActive() guards the call, and
-        // correct rather than merely unreachable if that ever changes.
-        mid = x;
-        thru = 0.0f;
+        if (runLow)
+            lowBand = (runHigh ? dsp::crossfade (below, lowAlign.allpass (below), highAmount) : below) * lowAmount;
+
+        thru = lowBand + highBand;
     }
 
 private:
+    /** How long a side of the split takes to come in or go out, in ms: the
+        suite's switch time. */
+    static constexpr double kBandSwitchMs = 10.0;
+
+    bool lowRunning() const noexcept  { return lowMix.isMoving()  || lowMix.value()  > 0.0f; }
+    bool highRunning() const noexcept { return highMix.isMoving() || highMix.value() > 0.0f; }
+
     LinkwitzRiley4 lower, upper, lowAlign;
-    bool splitLow = false, splitHigh = false;
+    dsp::Ramp lowMix, highMix;
+    float lowCutoffHz = kLowThruOffHz, highCutoffHz = kHighThruOffHz;
 };
 
 } // namespace bmo::vcomp

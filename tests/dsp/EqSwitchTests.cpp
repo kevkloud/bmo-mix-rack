@@ -212,6 +212,12 @@ int main()
     // ways, for every cut choice. The cuts are driven where they bite and
     // shift phase most among the probe's tones: 100 Hz for Low Cut, 5 kHz for
     // High Cut.
+    //
+    // The band this holds is 30 Hz and up, not everything: a fixed 10 ms
+    // fade adds a slope of about the signal's size over 10 ms, while a tone's
+    // own slope falls with its frequency, so below about 30 Hz Phase and a
+    // cut switching on cross 1.5x. Section 2c asserts the 25 Hz figures as a
+    // separate, documented bound (EqNetwork::kSwitchFadeMs says why 10 ms).
     {
         constexpr double kBound = 1.5;
 
@@ -263,6 +269,44 @@ int main()
                     both ("Hi-Q (mid +18)", wide, narrow, 1600.0);
                 }
             }
+    }
+
+    //== 2c. Below the band: the 25 Hz bound ===============================
+    // Not the 1.5x bound, by design: at 25 Hz a 10 ms fade is a quarter of a
+    // cycle, and Phase reaches 1.61x and Low Cut 1.58x (worst of 44.1, 48
+    // and 96 kHz, 1x and 2x, every choice, both ways; measured on ICE QUEEN
+    // at 54b0b72). The bound is 1.65x, that figure with 3 % margin, so
+    // a change that makes the low end worse fails here rather than passing
+    // silently below the band section 2 covers. Raising the fade to hold
+    // 1.5x at 25 Hz would slow every switch for every signal; that is the
+    // owner's decision, not this test's.
+    {
+        constexpr double kLowToneBound = 1.65;
+
+        double worstPhase = 0.0, worstCut = 0.0;
+
+        for (double fs : { 44100.0, 48000.0, 96000.0 })
+            for (int os : { 1, 2 })
+            {
+                DspCore::Params base;
+                base.oversampling = os;
+
+                auto flipped = base; flipped.phaseInvert = true;
+                worstPhase = std::max ({ worstPhase, switchStepRatio (fs, base, flipped, 25.0),
+                                                     switchStepRatio (fs, flipped, base, 25.0) });
+
+                for (int choice = 1; choice <= 4; ++choice)
+                {
+                    auto cut = base; cut.hpfIndex = choice;
+                    worstCut = std::max ({ worstCut, switchStepRatio (fs, base, cut, 25.0),
+                                                     switchStepRatio (fs, cut, base, 25.0) });
+                }
+            }
+
+        check (worstPhase < kLowToneBound, "Phase at 25 Hz steps " + ratioText (worstPhase)
+                                               + ", past its documented " + ratioText (kLowToneBound));
+        check (worstCut < kLowToneBound, "Low Cut at 25 Hz steps " + ratioText (worstCut)
+                                             + ", past its documented " + ratioText (kLowToneBound));
     }
 
     //== 2b. EQ In brought back in silence does not replay either ===========

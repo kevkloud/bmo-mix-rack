@@ -73,11 +73,26 @@ struct EqSettings
 class EqNetwork
 {
 public:
-    /** How long a switch in the EQ takes to cross over. Long enough that a
-        100 Hz tone through Low Cut 360 -- nearly all of it removed, and
-        what is left shifted by most of a cycle -- crosses inside the 1.5x
-        step bound with room to spare; short enough to sit well inside the
-        time a hand takes to move from one switch to the next. */
+    /** How long a switch in the EQ takes to cross over: Low Cut, High Cut,
+        EQ In, Phase and Hi-Q here and in DspCore, and each half of the dip
+        around an oversampling change.
+
+        Why 10 ms. Long enough that a 100 Hz tone through Low Cut 360 --
+        nearly all of it removed, and what is left shifted by most of a
+        cycle -- crosses at 1.03x, inside the 1.5x step bound with room to
+        spare; short enough to sit well inside the time a hand takes to move
+        from one switch to the next.
+
+        The limit, and it is a real one. A fade of fixed length adds a slope
+        of about the signal's own size over its length, while a tone's own
+        slope falls with its frequency, so every fixed fade has a frequency
+        below which it measures. For 10 ms that is about 30 Hz: at 30 Hz
+        Phase and a cut switching on reach 1.43x, at 25 Hz 1.61x and 1.58x,
+        at 20 Hz about 1.8x. eq_switch_tests holds the 1.5x bound from 30 Hz
+        up and asserts the 25 Hz figures as their own bound (section 2c).
+        Measured at 48 kHz, a 13 ms fade holds 25 Hz at 1.37x and a 17 ms
+        one holds 20 Hz at 1.41x -- but for every switch and every signal;
+        that trade is the owner's to make. */
     static constexpr double kSwitchFadeMs = 10.0;
 
     /** Sets the rate and starts from rest. The first setSettings() after

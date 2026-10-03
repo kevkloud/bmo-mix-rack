@@ -23,6 +23,11 @@ namespace
 void EqNetwork::prepare (double newSampleRate) noexcept
 {
     sampleRate = newSampleRate > 0.0 ? newSampleRate : 44100.0;
+
+    hpfMix.prepare (sampleRate, kSwitchFadeMs);
+    lpfMix.prepare (sampleRate, kSwitchFadeMs);
+    takeSwitchesAsFound = true;
+
     reset();
 }
 
@@ -36,6 +41,10 @@ void EqNetwork::reset() noexcept
     hpf2.reset();
     lpf1.reset();
     lpf2.reset();
+
+    // A fade in progress was carrying state that is now gone.
+    hpfMix.snap (hpfActive ? 1.0f : 0.0f);
+    lpfMix.snap (lpfActive ? 1.0f : 0.0f);
 }
 
 //==============================================================================
@@ -59,21 +68,45 @@ void EqNetwork::setSettings (const EqSettings& s) noexcept
         gainRecip[(size_t) i] = 1.0f / gains[i];
     }
 
-    // A cut that is off is not run, so its state is whatever the signal left
-    // in it when it went off. Coming back on, that state would be played out
-    // as a burst of the old signal -- -6.5 dBFS from silence, measured -- so a
-    // cut that was off starts again from rest, as one never used does.
-    const auto hpfWasActive = hpfActive;
-    const auto lpfWasActive = lpfActive;
+    // A cut switched on or off crosses over between the unfiltered signal and
+    // the filtered one rather than stepping between them: a 100 Hz tone
+    // through Low Cut 360, switched off, stepped 62-74 times the tone's own
+    // largest step. The filter runs until its fade out is complete, then
+    // stops. A cut that has stopped holds whatever the signal left in it,
+    // and coming back on would play that out -- -6.5 dBFS from silence,
+    // measured -- so a cut coming on from fully off starts from rest, as one
+    // never used does. One coming back during its own fade out has state
+    // that is still live, and keeps it.
+    const auto hpfOn = s.hpfFreqHz > 0.0f;
+    const auto lpfOn = s.lpfFreqHz > 0.0f;
 
-    hpfActive = s.hpfFreqHz > 0.0f;
+    if (takeSwitchesAsFound)
+    {
+        hpfMix.snap (hpfOn ? 1.0f : 0.0f);
+        lpfMix.snap (lpfOn ? 1.0f : 0.0f);
+        takeSwitchesAsFound = false;
+    }
 
-    if (hpfActive && ! hpfWasActive)
+    if (hpfOn && ! hpfMix.isMoving() && hpfMix.value() == 0.0f)
     {
         hpf1.reset();
         hpf2.reset();
     }
 
+    if (lpfOn && ! lpfMix.isMoving() && lpfMix.value() == 0.0f)
+    {
+        lpf1.reset();
+        lpf2.reset();
+    }
+
+    hpfMix.setTarget (hpfOn ? 1.0f : 0.0f);
+    lpfMix.setTarget (lpfOn ? 1.0f : 0.0f);
+
+    hpfActive = hpfOn;
+    lpfActive = lpfOn;
+
+    // Switching off leaves the coefficients alone, so the fade out runs the
+    // filter that was in.
     if (hpfActive)
     {
         // 18 dB/octave: a real pole plus a resonant complex pair. The Q on the
@@ -82,14 +115,6 @@ void EqNetwork::setSettings (const EqSettings& s) noexcept
         const auto hz = clampCutoff (s.hpfFreqHz, sampleRate);
         hpf1.setCutoff (hz, sampleRate);
         hpf2.setCutoff (hz, kHpfQ, sampleRate);
-    }
-
-    lpfActive = s.lpfFreqHz > 0.0f;
-
-    if (lpfActive && ! lpfWasActive)
-    {
-        lpf1.reset();
-        lpf2.reset();
     }
 
     if (lpfActive)
@@ -105,8 +130,15 @@ void EqNetwork::setSettings (const EqSettings& s) noexcept
 //==============================================================================
 float EqNetwork::processSample (float x) noexcept
 {
-    if (hpfActive)
+    if (hpfMix.isMoving())
+    {
+        const auto filtered = hpf2.processHighpass (hpf1.processHighpass (x));
+        x = bmo::dsp::crossfade (x, filtered, hpfMix.next());
+    }
+    else if (hpfActive)
+    {
         x = hpf2.processHighpass (hpf1.processHighpass (x));
+    }
 
     // Resolve the shared feedback loop. Each branch reports its response as
     // b_i = d_i * u + v_i, so u falls out in closed form.
@@ -136,8 +168,15 @@ float EqNetwork::processSample (float x) noexcept
     midBranch .update (u);
     highBranch.update (u);
 
-    if (lpfActive)
+    if (lpfMix.isMoving())
+    {
+        const auto filtered = lpf2.processLowpass (lpf1.process (OnePole::Output::lowpass, y));
+        y = bmo::dsp::crossfade (y, filtered, lpfMix.next());
+    }
+    else if (lpfActive)
+    {
         y = lpf2.processLowpass (lpf1.process (OnePole::Output::lowpass, y));
+    }
 
     return y;
 }

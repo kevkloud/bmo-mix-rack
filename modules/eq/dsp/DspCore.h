@@ -3,6 +3,7 @@
 #include "EqNetwork.h"
 #include "Saturation.h"
 #include "core/dsp/Oversampler.h"
+#include "core/dsp/SwitchFade.h"
 #include <array>
 #include <vector>
 
@@ -52,6 +53,14 @@ private:
     stepped selector glides between switch positions instead of clicking. If any
     residual artefact ever shows up, the fallback is to crossfade between two
     network instances over ~10 ms.
+
+    The switches are different: each changes the signal path rather than a
+    coefficient, so each crosses over in EqNetwork::kSwitchFadeMs instead of
+    stepping (core/dsp/SwitchFade.h). EQ In crosses between the network and
+    a straight wire, Phase ramps the polarity through zero, Hi-Q glides the
+    mid's Q geometrically from one width to the other, and the cuts cross
+    inside the network. With nothing switching, every one of them is idle
+    and the output is bit-identical to what it was before they existed.
 */
 class DspCore
 {
@@ -100,7 +109,7 @@ public:
     static constexpr int kSubBlock = 32;
 
 private:
-    void updateCoefficients (int activeChannels) noexcept;
+    void updateCoefficients (int activeChannels, int numSamples) noexcept;
     void applyOversampling (int factor);
 
     double sampleRate = 44100.0;
@@ -126,6 +135,11 @@ private:
     Smoother hfFreqSm, midFreqSm, lfFreqSm;     // smoothed in log2(Hz)
     Smoother hfGainSm, midGainSm, lfGainSm;
     Smoother inputGainSm, outputLevelSm, mixSm, autoGainSm;
+
+    // The switches' fades, at the host's rate. eqInMix is 0 out and 1 in;
+    // polarity is the sign itself, ramped through zero; hiQAmount is 0 for
+    // the normal width and 1 for Hi-Q, advanced a sub-block at a time.
+    bmo::dsp::Ramp eqInMix, polarity, hiQAmount;
 
     Params   params;
     EqSettings currentSettings;

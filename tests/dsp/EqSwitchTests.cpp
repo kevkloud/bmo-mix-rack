@@ -32,10 +32,12 @@ namespace
              + std::to_string ((int) std::lround (fs / 100.0) % 10) + " kHz";
     }
 
-    /** Stereo render through one core, with the parameters chosen per block
-        from the block's first sample. Both channels carry the same signal. */
+    /** Render through one core, with the parameters chosen per block from
+        the block's first sample. Both channels carry the same signal; the
+        left is returned. */
     std::vector<float> render (DspCore& core, std::vector<float> signal, int block,
-                               const std::function<DspCore::Params (size_t)>& paramsAt)
+                               const std::function<DspCore::Params (size_t)>& paramsAt,
+                               int numChannels = 2)
     {
         std::vector<float> right = signal;
 
@@ -44,10 +46,60 @@ namespace
             const auto n = (int) std::min ((size_t) block, signal.size() - start);
             core.setParams (paramsAt (start));
             float* channels[2] { signal.data() + start, right.data() + start };
-            core.process (channels, 2, n);
+            core.process (channels, numChannels, n);
         }
 
         return signal;
+    }
+
+    double largestStep (const std::vector<float>& y, size_t from, size_t to)
+    {
+        double m = 0.0;
+        for (size_t i = std::max<size_t> (from, 1); i < to && i < y.size(); ++i)
+            m = std::max (m, (double) std::abs (y[i] - y[i - 1]));
+        return m;
+    }
+
+    /** The bound the repository holds a switch to: the largest sample-to-
+        sample step after it, against the steady signal's own largest step
+        before and after, worst of four starting phases of a -18 dBFS RMS
+        sine (an eighth of a cycle apart, so across half a cycle) so a switch
+        cannot hide by landing where the two paths happen to agree. The
+        switch lands on a block boundary, as a host's does. */
+    double switchStepRatio (double fs, const DspCore::Params& a, const DspCore::Params& b,
+                            double hz, int block = 512)
+    {
+        constexpr double amplitude = 0.17782794;   // -18 dBFS RMS
+        const auto length = (size_t) (0.8 * fs);
+        const auto sw     = (size_t) (0.3 * fs) / (size_t) block * (size_t) block;
+
+        double worst = 0.0;
+
+        for (int k = 0; k < 4; ++k)
+        {
+            std::vector<float> x (length);
+            for (size_t i = 0; i < length; ++i)
+                x[i] = (float) (amplitude * std::sin (2.0 * kPi * hz * (double) i / fs + k * kPi / 4.0));
+
+            DspCore core;
+            core.prepare (fs, block, 1, a.oversampling);
+            core.setParams (a);
+
+            const auto y = render (core, x, block, [&] (size_t s) { return s >= sw ? b : a; }, 1);
+
+            const auto before = largestStep (y, sw - (size_t) (0.15 * fs), sw);
+            const auto after  = largestStep (y, (size_t) (0.6 * fs), length);
+            const auto during = largestStep (y, sw, sw + (size_t) (0.25 * fs));
+
+            worst = std::max (worst, during / std::max (before, after));
+        }
+
+        return worst;
+    }
+
+    std::string ratioText (double r)
+    {
+        return std::to_string (std::round (r * 100.0) / 100.0).substr (0, 5) + "x";
     }
 }
 
@@ -99,6 +151,103 @@ int main()
                                + " re-enabled in silence at " + rateName (fs)
                                + " must stay silent, peaked at " + std::to_string (peak));
                 }
+    }
+
+    //== 2. The switches fade rather than step ===============================
+    // Measured on 6f6b8c3 against the steady signal's own largest step: Low
+    // Cut 360 -> Off 62-74x, Phase 14.5x, EQ In off 3.4-4.2x (a step of a
+    // whole unit of full scale with the mid at +18), Hi-Q 1.7-2.2x. The bound
+    // is 1.5x, at 44.1, 48 and 96 kHz, with and without oversampling, both
+    // ways, for every cut choice. The cuts are driven where they bite and
+    // shift phase most among the probe's tones: 100 Hz for Low Cut, 5 kHz for
+    // High Cut.
+    {
+        constexpr double kBound = 1.5;
+
+        for (double fs : { 44100.0, 48000.0, 96000.0 })
+            for (int os : { 1, 2 })
+            {
+                DspCore::Params base;
+                base.oversampling = os;
+
+                const auto where = " at " + rateName (fs) + (os == 1 ? ", 1x" : ", 2x");
+                const auto both = [&] (const std::string& name, DspCore::Params p, DspCore::Params q, double hz)
+                {
+                    const auto on  = switchStepRatio (fs, p, q, hz);
+                    const auto off = switchStepRatio (fs, q, p, hz);
+                    check (on < kBound, name + " on" + where + " steps " + ratioText (on));
+                    check (off < kBound, name + " off" + where + " steps " + ratioText (off));
+                };
+
+                for (int choice = 1; choice <= 4; ++choice)
+                {
+                    auto p = base; p.hpfIndex = choice;
+                    both ("Low Cut " + std::to_string ((int) hpfFreqHz (choice)), base, p, 100.0);
+                }
+
+                for (int choice = 1; choice <= 5; ++choice)
+                {
+                    auto p = base; p.lpfIndex = choice;
+                    both ("High Cut " + std::to_string ((int) lpfFreqHz (choice)), base, p, 5000.0);
+                }
+
+                {
+                    auto p = base; p.phaseInvert = true;
+                    both ("Phase", base, p, 1000.0);
+                }
+
+                {
+                    auto in = base;  in.midGainDb = 18.0f;
+                    auto out = in;   out.eqIn = false;
+                    both ("EQ In (mid +18)", out, in, 1600.0);
+
+                    auto hin = base; hin.hfGainDb = 16.0f;
+                    auto hout = hin; hout.eqIn = false;
+                    both ("EQ In (high shelf +16)", hout, hin, 12000.0);
+                }
+
+                {
+                    auto wide = base; wide.midGainDb = 18.0f;
+                    auto narrow = wide; narrow.midHiQ = true;
+                    both ("Hi-Q (mid +18)", wide, narrow, 1600.0);
+                }
+            }
+    }
+
+    //== 2b. EQ In brought back in silence does not replay either ===========
+    // EQ In out of circuit stops the network, and a stopped network holds its
+    // state exactly as a stopped cut does: the same fault as section 1, one
+    // switch along.
+    {
+        for (double fs : { 44100.0, 48000.0, 96000.0, 192000.0 })
+        {
+            DspCore::Params in;
+            in.midGainDb = 18.0f;
+            DspCore::Params out = in;
+            out.eqIn = false;
+
+            DspCore core;
+            core.prepare (fs, 512, 2, in.oversampling);
+            core.setParams (in);
+
+            const auto offAt    = (size_t) (0.5 * fs) / 512 * 512 + 3 * 512;
+            const auto silentAt = (size_t) (0.75 * fs);
+            const auto onAt     = (size_t) (1.5 * fs) / 512 * 512;
+
+            std::vector<float> x ((size_t) (2.0 * fs));
+            for (size_t i = 0; i < silentAt; ++i)
+                x[i] = (float) (0.5 * std::sin (2.0 * kPi * 1600.0 * (double) i / fs));
+
+            const auto y = render (core, x, 512, [&] (size_t s)
+                                   { return s >= offAt && s < onAt ? out : in; });
+
+            double peak = 0.0;
+            for (size_t i = onAt; i < y.size(); ++i)
+                peak = std::max (peak, (double) std::abs (y[i]));
+
+            check (peak < 1.0e-6, "EQ In (mid +18) back in, in silence, at " + rateName (fs)
+                                      + " must stay silent, peaked at " + std::to_string (peak));
+        }
     }
 
     if (failures == 0)

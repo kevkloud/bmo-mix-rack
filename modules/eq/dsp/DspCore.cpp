@@ -49,6 +49,7 @@ namespace
         return a.midHiQ == b.midHiQ
             && exactly (a.hfFreqHz,  b.hfFreqHz)  && exactly (a.hfGainDb,  b.hfGainDb)
             && exactly (a.midFreqHz, b.midFreqHz) && exactly (a.midGainDb, b.midGainDb)
+            && exactly (a.midQ, b.midQ)
             && exactly (a.lfFreqHz,  b.lfFreqHz)  && exactly (a.lfGainDb,  b.lfGainDb)
             && exactly (a.hpfFreqHz, b.hpfFreqHz) && exactly (a.lpfFreqHz, b.lpfFreqHz);
     }
@@ -75,6 +76,14 @@ void DspCore::prepare (double newSampleRate, int maxBlockSize, int numChannels,
     for (auto* s : { &hfGainSm, &midGainSm, &lfGainSm,
                      &inputGainSm, &outputLevelSm, &mixSm, &autoGainSm })
         s->prepare (controlRate, 20.0);
+
+    for (auto* r : { &eqInMix, &polarity, &hiQAmount })
+        r->prepare (sampleRate, EqNetwork::kSwitchFadeMs);
+
+    // Taken as found, never faded in from whatever they held before.
+    eqInMix  .snap (params.eqIn ? 1.0f : 0.0f);
+    polarity .snap (params.phaseInvert ? -1.0f : 1.0f);
+    hiQAmount.snap (params.midHiQ ? 1.0f : 0.0f);
 
     applyOversampling (oversampleFactor);
 
@@ -158,6 +167,18 @@ void DspCore::setParams (const Params& p) noexcept
     outputLevelSm.setTarget (dbToGain (p.outputLevelDb));
     mixSm        .setTarget (std::clamp (p.mixPercent, 0.0f, 100.0f) * 0.01f);
 
+    // EQ In out of circuit stops the network, which then holds whatever the
+    // signal left in it, exactly as a cut does. Coming back in from fully out
+    // it starts from rest; coming back during its own fade out its state is
+    // still live and it keeps it.
+    if (settingsValid && p.eqIn && ! eqInMix.isMoving() && eqInMix.value() == 0.0f)
+        for (auto& n : networks)
+            n.reset();
+
+    eqInMix  .setTarget (p.eqIn ? 1.0f : 0.0f);
+    polarity .setTarget (p.phaseInvert ? -1.0f : 1.0f);
+    hiQAmount.setTarget (p.midHiQ ? 1.0f : 0.0f);
+
     if (! settingsValid)
     {
         hfFreqSm .snap (toLog2Hz (hfHz));
@@ -170,11 +191,14 @@ void DspCore::setParams (const Params& p) noexcept
         outputLevelSm.snap (dbToGain (p.outputLevelDb));
         mixSm        .snap (std::clamp (p.mixPercent, 0.0f, 100.0f) * 0.01f);
         autoGainSm   .snap (1.0f);
+        eqInMix      .snap (p.eqIn ? 1.0f : 0.0f);
+        polarity     .snap (p.phaseInvert ? -1.0f : 1.0f);
+        hiQAmount    .snap (p.midHiQ ? 1.0f : 0.0f);
     }
 }
 
 //==============================================================================
-void DspCore::updateCoefficients (int activeChannels) noexcept
+void DspCore::updateCoefficients (int activeChannels, int numSamples) noexcept
 {
     EqSettings s;
     s.hfFreqHz  = fromLog2Hz (hfFreqSm.tick());
@@ -186,6 +210,24 @@ void DspCore::updateCoefficients (int activeChannels) noexcept
     s.midHiQ    = params.midHiQ;
     s.hpfFreqHz = hpfFreqHz (params.hpfIndex);
     s.lpfFreqHz = lpfFreqHz (params.lpfIndex);
+
+    // Hi-Q glides the branch Q between the two widths, geometrically, rather
+    // than stepping it: a hard change of Q under a +18 dB mid stepped the
+    // output 1.7-3.4 times the signal's own largest step. Advanced by the
+    // sub-block's own length, so the glide takes the same time whatever
+    // the host's block size. Once it lands, midQ goes back to zero and the
+    // Q is derived exactly as it always was.
+    if (hiQAmount.isMoving())
+    {
+        const auto amount = hiQAmount.advance (numSamples);
+
+        if (hiQAmount.isMoving())
+        {
+            const auto normal = midBranchQ (s.midFreqHz, false);
+            const auto narrow = midBranchQ (s.midFreqHz, true);
+            s.midQ = normal * std::pow (narrow / normal, amount);
+        }
+    }
 
     const auto settingsChanged = ! (settingsValid && sameSettings (s, currentSettings));
 
@@ -220,14 +262,13 @@ void DspCore::process (float* const* channels, int numChannels, int numSamples) 
     if (params.oversampling != currentFactor)
         applyOversampling (params.oversampling);
 
-    const auto polarity = params.phaseInvert ? -1.0f : 1.0f;
-    const auto factor   = currentFactor;
+    const auto factor = currentFactor;
 
     for (int start = 0; start < numSamples; start += kSubBlock)
     {
         const auto n = std::min (kSubBlock, numSamples - start);
 
-        updateCoefficients (activeChannels);
+        updateCoefficients (activeChannels, n);
 
         const auto inGain   = inputGainSm.tick();
         const auto outGain  = outputLevelSm.tick() * autoGainSm.tick();
@@ -239,6 +280,13 @@ void DspCore::process (float* const* channels, int numChannels, int numSamples) 
         for (int i = 0; i < n; ++i)
         {
             const auto readIndex = (dryWrite + 1) % dryLength;
+
+            // Once per frame, shared by both channels. Idle, these are exactly
+            // the switches' positions and the paths below are the ones the
+            // module always had.
+            const auto eqFading = eqInMix.isMoving();
+            const auto eqAmount = eqInMix.next();
+            const auto sign     = polarity.next();
 
             for (int ch = 0; ch < activeChannels; ++ch)
             {
@@ -261,8 +309,12 @@ void DspCore::process (float* const* channels, int numChannels, int numSamples) 
                     v = preamp[(size_t) ch].process (v);
 
                     // EQ In takes only the equaliser out of circuit; the gain
-                    // stages and their iron stay in, as on the hardware.
-                    if (params.eqIn)
+                    // stages and their iron stay in, as on the hardware. It
+                    // crosses over rather than stepping: with the mid at +18
+                    // the two sides differ by most of full scale.
+                    if (eqFading)
+                        v = bmo::dsp::crossfade (v, networks[(size_t) ch].processSample (v), eqAmount);
+                    else if (params.eqIn)
                         v = networks[(size_t) ch].processSample (v);
 
                     v = outputAmp[(size_t) ch].process (v);
@@ -277,8 +329,10 @@ void DspCore::process (float* const* channels, int numChannels, int numSamples) 
                 // it was applied before the iron while the dry ring held the
                 // un-flipped input, so at Mix 50 % a flat EQ cancelled itself
                 // and at Mix 0 the switch did nothing -- the fault the
-                // Saturator fixed in its own DspCore, and the same fix.
-                data[i] = (processed * wet + delayed * dryLevel) * polarity;
+                // Saturator fixed in its own DspCore, and the same fix. The
+                // flip itself ramps through zero rather than stepping by twice
+                // the signal.
+                data[i] = (processed * wet + delayed * dryLevel) * sign;
             }
 
             dryWrite = (dryWrite + 1) % dryLength;

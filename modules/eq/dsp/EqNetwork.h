@@ -2,6 +2,7 @@
 
 #include "ModelTables.h"
 #include "Svf.h"
+#include "core/dsp/SwitchFade.h"
 #include <array>
 
 namespace bmo::eq
@@ -72,11 +73,23 @@ struct EqSettings
 class EqNetwork
 {
 public:
+    /** How long a switch in the EQ takes to cross over. Long enough that a
+        100 Hz tone through Low Cut 360 -- nearly all of it removed, and
+        what is left shifted by most of a cycle -- crosses inside the 1.5x
+        step bound with room to spare; short enough to sit well inside the
+        time a hand takes to move from one switch to the next. */
+    static constexpr double kSwitchFadeMs = 10.0;
+
+    /** Sets the rate and starts from rest. The first setSettings() after
+        this takes its switches as found rather than fading them in. */
     void prepare (double newSampleRate) noexcept;
+
+    /** Clears the filter state. The cuts stay as they are switched. */
     void reset() noexcept;
 
     /** Recompute coefficients. Cheap enough to call at control rate (see
-        DspCore, which calls it once per sub-block from smoothed values). */
+        DspCore, which calls it once per sub-block from smoothed values).
+        A cut switched on or off crosses over in kSwitchFadeMs. */
     void setSettings (const EqSettings&) noexcept;
 
     float processSample (float x) noexcept;
@@ -115,8 +128,15 @@ private:
     OnePole lpf1;
     Svf     lpf2;
 
+    // Whether each cut is switched in: the response the curve and Auto Gain
+    // read. The audio follows through hpfMix / lpfMix, 0 out and 1 in, which
+    // cross from the unfiltered signal to the filtered one and back, so the
+    // filter keeps running until its fade out has finished.
     bool hpfActive = false;
     bool lpfActive = false;
+
+    bmo::dsp::Ramp hpfMix, lpfMix;
+    bool takeSwitchesAsFound = true;
 };
 
 } // namespace bmo::eq

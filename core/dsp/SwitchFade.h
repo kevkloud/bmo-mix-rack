@@ -168,6 +168,14 @@ inline float crossfade (float oldPath, float newPath, float position) noexcept
     from the first sample after it reaches exactly zero; changed() starts the
     fade back up. One sample sits at zero between them. cancel() withdraws a
     request that has not been acted on and fades up from where the gain is.
+
+    Keep the work of the change out of the sample at the bottom. Anything
+    that needs time to become ready -- a new oversampling path whose filters
+    must fill, say -- should start at request() and run alongside the old
+    path, on the live input, while the gain goes down; the change at the
+    bottom is then only a swap. Doing it all at the bottom put 2.4 blocks'
+    worth of work into one 32-sample callback at 192 kHz in BMO EQ (see its
+    DspCore::process).
 */
 class Dip
 {

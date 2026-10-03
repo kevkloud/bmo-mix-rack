@@ -855,6 +855,81 @@ int main()
             }
     }
 
+    //== 7. An oversampling change costs no callback more than both paths ===
+    // cd173eb warmed the new path at the bottom of the dip by running it over
+    // 141 samples of missed input inside one callback: about 405 us, 242 % of
+    // a 32-sample block at 192 kHz. The new path now runs alongside the old
+    // one on the live input while the dip goes down, so no callback does
+    // more than both paths' worth of a block. Counted, not timed: the work a
+    // callback does is the oversampled samples it processes, summed over
+    // channels and paths, and the bound is
+    //
+    //     channels x block x (old factor + new factor) + kSlack, kSlack = 0
+    //
+    // -- no constant is needed, because nothing is processed but the live
+    // input. Away from a change a callback does exactly one path's worth:
+    // the second path stops when the dip turns.
+    {
+        constexpr unsigned long long kSlack = 0;
+
+        for (double fs : { 48000.0, 192000.0 })
+            for (int block : { 32, 512 })
+                for (int from : { 1, 2, 4, 8 })
+                    for (int to : { 1, 2, 4, 8 })
+                    {
+                        if (from == to)
+                            continue;
+
+                        DspCore core;
+                        core.prepare (fs, block, 2, from);
+                        DspCore::Params p;
+                        p.oversampling = from;
+                        core.setParams (p);
+
+                        std::vector<float> l ((size_t) block), r ((size_t) block);
+                        float* channels[2] { l.data(), r.data() };
+
+                        const auto where = std::to_string (from) + "x -> " + std::to_string (to) + "x at "
+                                         + rateName (fs) + ", block " + std::to_string (block);
+                        const auto blocks = (int) (0.1 * fs) / block + 2;
+
+                        unsigned long long worst = 0, last = 0;
+                        bool steadyBefore = true;
+
+                        for (int b = 0; b < 3 * blocks; ++b)
+                        {
+                            for (int i = 0; i < block; ++i)
+                                l[(size_t) i] = r[(size_t) i] = 0.1f * std::sin (0.05f * (float) (b * block + i));
+
+                            if (b == blocks)
+                            {
+                                p.oversampling = to;
+                                core.setParams (p);
+                            }
+
+                            const auto before = core.oversampledSamplesProcessed();
+                            core.process (channels, 2, block);
+                            const auto work = core.oversampledSamplesProcessed() - before;
+
+                            if (b < blocks)
+                                steadyBefore = steadyBefore && work == 2ull * (unsigned long long) (block * from);
+                            else
+                                worst = std::max (worst, work);
+
+                            last = work;
+                        }
+
+                        const auto bound = 2ull * (unsigned long long) (block * (from + to)) + kSlack;
+
+                        check (steadyBefore, where + ": a steady callback does one path's work");
+                        check (worst <= bound, where + ": a callback during the change processed " + std::to_string (worst)
+                                                   + " oversampled samples, past both paths' " + std::to_string (bound));
+                        check (last == 2ull * (unsigned long long) (block * to),
+                               where + ": after the change a callback does one path's work again ("
+                                   + std::to_string (last) + ")");
+                    }
+    }
+
     if (failures == 0)
         std::cout << "All EQ switch tests passed.\n";
 

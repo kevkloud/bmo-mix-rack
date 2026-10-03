@@ -64,11 +64,11 @@ void DspCore::prepare (double newSampleRate, int maxBlockSize, int numChannels,
 {
     sampleRate  = newSampleRate > 0.0 ? newSampleRate : 44100.0;
     maxBlock    = std::max (maxBlockSize, 1);
-    maxChannels = std::clamp (numChannels, 1, (int) networks.size());
+    maxChannels = std::clamp (numChannels, 1, (int) livePath().networks.size());
 
     // Sized for the highest factor, so a change of oversampling at run time
     // never has to allocate on the audio thread.
-    dryDelay.assign ((size_t) (kDryRing * (int) networks.size()), 0.0f);
+    dryDelay.assign ((size_t) (kDryRing * (int) livePath().networks.size()), 0.0f);
     dryStride = kDryRing;
 
     const auto controlRate = sampleRate / (double) kSubBlock;
@@ -101,28 +101,25 @@ void DspCore::prepare (double newSampleRate, int maxBlockSize, int numChannels,
 }
 
 //==============================================================================
-void DspCore::applyOversampling (int factor)
+void DspCore::WetPath::prepare (double hostRate, int newFactor) noexcept
 {
-    factor = supportedFactor (factor);
+    factor = supportedFactor (newFactor);
 
     for (auto& o : oversamplers)
         o.setFactor (factor);
 
-    currentFactor  = factor;
-    latencySamples = Oversampler::latencyForFactor (factor);
-    dryLatency     = latencySamples;
-    effectiveRate  = sampleRate * (double) factor;
+    const auto rate = hostRate * (double) factor;
 
     // None of these allocate; they only recompute coefficients, so this is
     // safe to call from the audio thread when the factor changes.
     for (size_t ch = 0; ch < networks.size(); ++ch)
     {
-        networks[ch].prepare (effectiveRate);
+        networks[ch].prepare (rate);
 
-        inputTransformer [ch].prepare (effectiveRate);
-        outputTransformer[ch].prepare (effectiveRate);
-        preamp           [ch].prepare (effectiveRate);
-        outputAmp        [ch].prepare (effectiveRate);
+        inputTransformer [ch].prepare (rate);
+        outputTransformer[ch].prepare (rate);
+        preamp           [ch].prepare (rate);
+        outputAmp        [ch].prepare (rate);
 
         // Calibration. The transformers are driven so a full-scale tone at the
         // bottom of the band sits near the knee; because the emphasis tilts
@@ -138,50 +135,9 @@ void DspCore::applyOversampling (int factor)
         preamp   [ch].setAsymmetry (kAmpAsymmetry);
         outputAmp[ch].setAsymmetry (kAmpAsymmetry);
     }
-
-    settingsValid = false;
 }
 
-//==============================================================================
-void DspCore::switchOversampling (int activeChannels, float inGain) noexcept
-{
-    // Called at the bottom of the dip, where the output is silent and every
-    // stage can start over at the new rate unheard.
-    applyOversampling (pendingFactor);
-
-    // applyOversampling() leaves the settings to be recomputed and the
-    // smoothers to be snapped on the next setParams(), which is right after
-    // prepare() and wrong here: it threw Auto Gain back to unity and every
-    // knob mid-move to its target. The settings in use are re-applied at the
-    // new rate instead, and only Auto Gain, whose figure depends on the rate,
-    // is re-read -- snapped, since nothing is audible to glide.
-    for (auto& n : networks)
-        n.setSettings (currentSettings);
-
-    settingsValid = true;
-
-    if (autoGainApplied)
-        autoGainSm.snap ((float) (1.0 / networks[0].broadbandGain()));
-
-    eqInMix.snap (params.eqIn ? 1.0f : 0.0f);
-
-    // The new path starts with empty filters, so on its own it would sit
-    // silent for its whole latency and then start abruptly, which the fade
-    // up would turn into a step. Running it over the input it has missed --
-    // the dry ring holds enough for twice the longest latency, which is the
-    // whole span of the oversampling filters -- leaves it mid-stream, as if
-    // it had always been running, and the fade up starts at once.
-    for (int ch = 0; ch < activeChannels; ++ch)
-    {
-        const auto* dry = dryDelay.data() + (size_t) ch * (size_t) dryStride;
-
-        for (int k = kDryRing - 1; k >= 1; --k)
-            runWet ((size_t) ch, dry[(size_t) ((dryWrite + kDryRing - k) % kDryRing)] * inGain,
-                    currentFactor, false, 1.0f);
-    }
-}
-
-void DspCore::reset() noexcept
+void DspCore::WetPath::reset() noexcept
 {
     for (auto& n : networks)           n.reset();
     for (auto& o : oversamplers)       o.reset();
@@ -189,6 +145,62 @@ void DspCore::reset() noexcept
     for (auto& t : outputTransformer)  t.reset();
     for (auto& a : preamp)             a.reset();
     for (auto& a : outputAmp)          a.reset();
+}
+
+//==============================================================================
+void DspCore::applyOversampling (int factor)
+{
+    livePath().prepare (sampleRate, factor);
+
+    currentFactor  = livePath().factor;
+    latencySamples = Oversampler::latencyForFactor (currentFactor);
+    dryLatency     = latencySamples;
+    effectiveRate  = sampleRate * (double) currentFactor;
+
+    warming = false;
+    settingsValid = false;
+}
+
+//==============================================================================
+void DspCore::beginWarming (int factor) noexcept
+{
+    // The standby path is cleared and set up at the new factor, with the
+    // settings in use, and from the next sample it hears the live input
+    // alongside the live path. Nothing it does reaches the output until the
+    // dip turns.
+    auto& standby = standbyPath();
+    standby.prepare (sampleRate, factor);
+
+    if (settingsValid)
+        for (auto& n : standby.networks)
+            n.setSettings (currentSettings);
+
+    warming       = true;
+    warmedSamples = 0;
+}
+
+void DspCore::switchOversampling() noexcept
+{
+    // Called at the bottom of the dip, where the output is silent: the path
+    // that has been running alongside at the new factor becomes the live one,
+    // already mid-stream, and the old one stops. Settings, smoothers and the
+    // knobs mid-move all carry on; only Auto Gain, whose figure depends on
+    // the rate, is re-read -- snapped, since nothing is audible to glide.
+    live          = 1 - live;
+    warming       = false;
+    currentFactor = livePath().factor;
+    dryLatency    = Oversampler::latencyForFactor (currentFactor);
+    effectiveRate = sampleRate * (double) currentFactor;
+
+    if (autoGainApplied)
+        autoGainSm.snap ((float) (1.0 / livePath().networks[0].broadbandGain()));
+
+    eqInMix.snap (params.eqIn ? 1.0f : 0.0f);
+}
+
+void DspCore::reset() noexcept
+{
+    livePath().reset();
 
     std::fill (dryDelay.begin(), dryDelay.end(), 0.0f);
     dryWrite = 0;
@@ -197,8 +209,10 @@ void DspCore::reset() noexcept
     // hide; a change still wanted is made at once by the next process(). The
     // latency reported goes back to the factor that is running: a request
     // dropped here and then withdrawn would otherwise leave the abandoned
-    // factor's figure behind, with nothing left to correct it.
+    // factor's figure behind, with nothing left to correct it. A standby path
+    // warming for that change stops.
     oversamplingDip.reset();
+    warming        = false;
     pendingFactor  = currentFactor;
     latencySamples = Oversampler::latencyForFactor (currentFactor);
     running = false;
@@ -233,8 +247,9 @@ void DspCore::setParams (const Params& p) noexcept
     // it starts from rest; coming back during its own fade out its state is
     // still live and it keeps it.
     if (settingsValid && p.eqIn && ! eqInMix.isMoving() && eqInMix.value() == 0.0f)
-        for (auto& n : networks)
-            n.reset();
+        for (auto& path : paths)
+            for (auto& n : path.networks)
+                n.reset();
 
     eqInMix  .setTarget (p.eqIn ? 1.0f : 0.0f);
     polarity .setTarget (p.phaseInvert ? -1.0f : 1.0f);
@@ -297,8 +312,15 @@ void DspCore::updateCoefficients (int activeChannels, int numSamples) noexcept
 
     if (settingsChanged)
     {
+        // A path warming for an oversampling change follows the knobs too,
+        // so it turns live with the settings the live one had.
         for (int ch = 0; ch < activeChannels; ++ch)
-            networks[(size_t) ch].setSettings (s);
+        {
+            livePath().networks[(size_t) ch].setSettings (s);
+
+            if (warming)
+                standbyPath().networks[(size_t) ch].setSettings (s);
+        }
 
         currentSettings = s;
         settingsValid   = true;
@@ -310,7 +332,7 @@ void DspCore::updateCoefficients (int activeChannels, int numSamples) noexcept
     // knob move then jumped the level by the whole compensation at once.
     autoGainApplied = params.autoGain;
 
-    const auto compensation = params.autoGain ? (float) (1.0 / networks[0].broadbandGain()) : 1.0f;
+    const auto compensation = params.autoGain ? (float) (1.0 / livePath().networks[0].broadbandGain()) : 1.0f;
     autoGainSm.setTarget (compensation);
 
     // The figure comes from the settings, not from the signal, so it is known
@@ -326,8 +348,18 @@ void DspCore::updateCoefficients (int activeChannels, int numSamples) noexcept
 }
 
 //==============================================================================
-float DspCore::runWet (size_t ch, float x, int factor, bool eqFading, float eqAmount) noexcept
+float DspCore::runWet (WetPath& path, size_t ch, float x, bool eqFading, float eqAmount) noexcept
 {
+    const auto factor = path.factor;
+    wetSamplesProcessed += (unsigned long long) factor;
+
+    auto& networks          = path.networks;
+    auto& inputTransformer  = path.inputTransformer;
+    auto& outputTransformer = path.outputTransformer;
+    auto& preamp            = path.preamp;
+    auto& outputAmp         = path.outputAmp;
+    auto& oversamplers      = path.oversamplers;
+
     float buffer[Oversampler::kMaxFactor] {};
     oversamplers[ch].upsample (x, buffer);
 
@@ -366,11 +398,16 @@ void DspCore::process (float* const* channels, int numChannels, int numSamples) 
 
     // A change of oversampling changes the latency, so the audio cannot pass
     // through it continuously: until 0.2.6 every stage was reset on the spot,
-    // which cut to 28-65 samples of silence and then jumped. It now dips:
-    // the old path fades out, the change is made at the bottom, and the new
-    // path, run over the input it missed, fades in. The latency reported is
-    // the new factor's from here on, as it always was, so a host that reads
-    // it after this block gets the figure the audio will have.
+    // which cut to 28-65 samples of silence and then jumped. It now dips. On
+    // the request the standby path is set up at the new factor and runs on
+    // the live input alongside the live path while the old one fades out;
+    // at the bottom the standby becomes live, already mid-stream, and fades
+    // in; the old path stops. So no callback does more than both factors'
+    // worth of work -- warming the new path in one go at the bottom, as the
+    // first version of this did, cost 2.4 blocks at 192 kHz / 32. The
+    // latency reported is the new factor's from the request on, as it always
+    // was, so a host that reads it after this block gets the figure the
+    // audio will have.
     if (const auto wanted = supportedFactor (params.oversampling); wanted != currentFactor && ! running)
     {
         // Nothing has been heard since prepare() or reset(), so there is
@@ -380,6 +417,9 @@ void DspCore::process (float* const* channels, int numChannels, int numSamples) 
     }
     else if (wanted != currentFactor)
     {
+        if (! warming || wanted != pendingFactor)
+            beginWarming (wanted);
+
         pendingFactor  = wanted;
         latencySamples = Oversampler::latencyForFactor (wanted);
         oversamplingDip.request();
@@ -389,10 +429,9 @@ void DspCore::process (float* const* channels, int numChannels, int numSamples) 
         // Changed back before the dip reached the bottom: nothing to change.
         pendingFactor  = currentFactor;
         latencySamples = Oversampler::latencyForFactor (currentFactor);
+        warming = false;
         oversamplingDip.cancel();
     }
-
-    auto factor = currentFactor;
 
     for (int start = 0; start < numSamples; start += kSubBlock)
     {
@@ -411,11 +450,15 @@ void DspCore::process (float* const* channels, int numChannels, int numSamples) 
             const auto inGain  = inputTrim.next();
             const auto outGain = outputTrim.next() * autoGain;
 
-            if (oversamplingDip.ready())
+            // The turn waits until the new path has heard the whole span of
+            // its oversampling filters. A 10 ms fade down is 441 samples or
+            // more at any rate this runs at, against 141 for 8x, so this only
+            // holds the gain at zero when the target changed late in a fade.
+            if (oversamplingDip.ready()
+                && warmedSamples >= 2 * Oversampler::latencyForFactor (pendingFactor) + 1)
             {
-                switchOversampling (activeChannels, inGain);
+                switchOversampling();
                 oversamplingDip.changed();
-                factor = currentFactor;
 
                 // The new rate's Auto Gain figure, snapped at the bottom of
                 // the dip, applies from this sample, not from the next
@@ -447,8 +490,12 @@ void DspCore::process (float* const* channels, int numChannels, int numSamples) 
                 dry[(size_t) dryWrite] = input;
                 const auto delayed = dry[(size_t) readIndex];
 
-                const auto processed = runWet ((size_t) ch, input * inGain, factor, eqFading, eqAmount)
+                const auto processed = runWet (livePath(), (size_t) ch, input * inGain, eqFading, eqAmount)
                                      * outGain;
+
+                // Heard and discarded: the new path keeping up with the input.
+                if (warming)
+                    runWet (standbyPath(), (size_t) ch, input * inGain, eqFading, eqAmount);
 
                 // Polarity flips the blend, not the wet path alone. Until 0.2.4
                 // it was applied before the iron while the dry ring held the
@@ -461,6 +508,9 @@ void DspCore::process (float* const* channels, int numChannels, int numSamples) 
             }
 
             dryWrite = (dryWrite + 1) % kDryRing;
+
+            if (warming)
+                ++warmedSamples;
         }
     }
 

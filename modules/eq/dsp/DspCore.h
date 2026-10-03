@@ -192,42 +192,75 @@ public:
 
     void process (float* const* channels, int numChannels, int numSamples) noexcept;
 
+    /** How many samples, at the oversampled rate and summed over channels and
+        paths, the oversampled chain has processed since construction. A count
+        of the work rather than a clock: the switch tests bound what a single
+        callback may do with it, deterministically. Not used by the audio. */
+    unsigned long long oversampledSamplesProcessed() const noexcept { return wetSamplesProcessed; }
+
     static constexpr int kSubBlock = 32;
 
 private:
+    /** The oversampled chain at one factor, both channels.
+
+        The signal chain of the original: input transformer, class-A preamp,
+        the equaliser, class-A output amp, output transformer. The nonlinear
+        stages sit inside the oversampled region because that is where they
+        alias; the equaliser is linear but rides along, which also spares the
+        1084's 16 kHz shelf the bilinear warping it would suffer at 48 kHz.
+
+        There are two of these. One is live; the other runs only while the
+        oversampling changes, at the new factor on the same live input, so
+        that when the dip turns the new path is already mid-stream. */
+    struct WetPath
+    {
+        std::array<EqNetwork, 2>        networks;
+        std::array<TransformerStage, 2> inputTransformer, outputTransformer;
+        std::array<ClassAStage, 2>      preamp, outputAmp;
+        std::array<Oversampler, 2>      oversamplers;
+        int factor = 1;
+
+        /** Factor and rate, every stage cleared. Allocation-free. */
+        void prepare (double hostRate, int newFactor) noexcept;
+        void reset() noexcept;
+    };
+
     void updateCoefficients (int activeChannels, int numSamples) noexcept;
     void applyOversampling (int factor);
-    void switchOversampling (int activeChannels, float inGain) noexcept;
+    void beginWarming (int factor) noexcept;
+    void switchOversampling() noexcept;
 
-    /** One host-rate sample through the oversampled chain, before the output
-        gain. Shared by process() and the warm-up of a new oversampling path. */
-    float runWet (size_t ch, float x, int factor, bool eqFading, float eqAmount) noexcept;
+    WetPath& livePath() noexcept     { return paths[(size_t) live]; }
+    WetPath& standbyPath() noexcept  { return paths[(size_t) (1 - live)]; }
+
+    /** One host-rate sample through a path's oversampled chain, before the
+        output gain. */
+    float runWet (WetPath&, size_t ch, float x, bool eqFading, float eqAmount) noexcept;
 
     double sampleRate = 44100.0;
     double effectiveRate = 44100.0;
     int    latencySamples = 0;
+    unsigned long long wetSamplesProcessed = 0;
 
-    std::array<EqNetwork, 2> networks;
+    std::array<WetPath, 2> paths;
+    int live = 0;
 
-    // The signal chain of the original: input transformer, class-A preamp, the
-    // equaliser, class-A output amp, output transformer. The nonlinear stages
-    // sit inside the oversampled region because that is where they alias; the
-    // equaliser is linear but rides along, which also spares the 1084's 16 kHz
-    // shelf the bilinear warping it would suffer at 48 kHz.
-    std::array<TransformerStage, 2> inputTransformer, outputTransformer;
-    std::array<ClassAStage, 2>      preamp, outputAmp;
-    std::array<Oversampler, 2>      oversamplers;
+    // While true the standby path runs at pendingFactor alongside the live
+    // one, and warmedSamples counts the host-rate samples it has heard.
+    bool warming = false;
+    int  warmedSamples = 0;
 
     // The dry path of the Mix control has to be delayed to match, or a partial
     // blend combs and a full bypass fails to null. The ring is one length for
-    // every factor, read at the running path's latency, and long enough --
-    // twice the longest latency -- to hold the whole span of the oversampling
-    // filters, which is what a new path is run over when the factor changes.
-    static constexpr int kDryRing = 2 * Oversampler::kMaxLatency + 2;
+    // every factor, long enough for the longest latency, and read at the live
+    // path's latency, so a change of factor moves the read point rather than
+    // resizing anything.
+    static constexpr int kDryRing = Oversampler::kMaxLatency + 2;
     std::vector<float> dryDelay;
     int dryWrite = 0, dryStride = 0, dryLatency = 0;
 
-    // A change of oversampling waits at the bottom of this dip; see process().
+    // A change of oversampling waits at the bottom of this dip while the
+    // standby path warms up alongside; see process().
     bmo::dsp::Dip oversamplingDip;
     int pendingFactor = 1;
     bool running = false;   // false until the first process() after prepare() or reset()

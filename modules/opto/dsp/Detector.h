@@ -88,6 +88,65 @@ private:
     int filled = 0, next = 0;
 };
 
+/** The level the signal has kept up: the lowest the recent peak has been
+    over the last 60 ms.
+
+    The recent peak answers "what is the signal reaching"; this answers "what
+    has it gone on reaching", and the difference is the whole of a spike. A
+    20 ms burst lifts the recent peak for 50 ms, its own length and the 30 ms
+    window after it, and then it is gone. Sixty milliseconds is longer than
+    that, so the lowest value across it never sees the burst at all, while
+    anything that lasts longer comes through 60 ms late and otherwise intact.
+    It is what exposureDb() counts, so that a spike adds nothing to the charge
+    rather than a little.
+
+    Same sixteen slots as RecentPeak, for the same reason. */
+class KeptLevel
+{
+public:
+    void prepare (double sampleRate) noexcept
+    {
+        slotSamples = std::max (1, (int) std::lround (kWindowSec * std::max (sampleRate, 1.0) / kSlots));
+        reset();
+    }
+
+    void reset() noexcept
+    {
+        slots.fill (0.0f);
+        slotFloor = kNothingYet;
+        windowFloor = 0.0f;
+        filled = next = 0;
+    }
+
+    /** One recent-peak figure in, the lowest over the window out. Never more
+        than what went in. */
+    float push (float recentPeakLin) noexcept
+    {
+        slotFloor = std::min (slotFloor, recentPeakLin);
+
+        if (++filled >= slotSamples)
+        {
+            slots[(size_t) next] = slotFloor;
+            next = (next + 1) % kSlots;
+            slotFloor = kNothingYet;
+            filled = 0;
+            windowFloor = *std::min_element (slots.begin(), slots.end());
+        }
+
+        return std::min (windowFloor, slotFloor);
+    }
+
+private:
+    static constexpr int    kSlots      = 16;
+    static constexpr double kWindowSec  = 0.060;
+    static constexpr float  kNothingYet = 3.0e38f;
+
+    std::array<float, kSlots> slots {};
+    float slotFloor = kNothingYet, windowFloor = 0.0f;
+    int slotSamples = 165;   // kWindowSec / kSlots at 44.1 kHz, until prepare() says otherwise
+    int filled = 0, next = 0;
+};
+
 /** How far reduction has to stand above the charge before all of it releases
     at the fast rate, and how far the envelope has to stand above the recent
     peak before it counts as standing clear of the signal. Below either figure
@@ -117,8 +176,7 @@ inline constexpr float kStandingClearLin = 1.1885f;   // 1.5 dB
     charge is on its way to backing it, and releasing it fast would only make
     the envelope sag between the crests of the note that is holding it up:
     tried, that took Stressed from 56 ms to 520 ms to settle on a held step.
-    So a sustained note never sees this branch at all, and comes out
-    sample-for-sample as it did before. */
+    So a sustained note never takes this branch at all. */
 inline float releaseCoeffFor (float backedCoeff, float fastTauSec, double rate,
                               float envelopeLin, float recentPeakLin,
                               float reductionDb, float chargeDb) noexcept
@@ -140,16 +198,22 @@ inline float releaseCoeffFor (float backedCoeff, float fastTauSec, double rate,
     Fed the reduction itself, as it was, it went on counting all the while a
     spike's reduction was coming back down, and ten spikes a second apart
     walked the programme down by 8 to 12 dB. So it counts the reduction only
-    up to what the signal's recent peak would ask of the static curve. While
-    the signal is reaching the envelope that is the reduction, unchanged; once
-    it has fallen away it is whatever the level that remains would earn. */
-inline float exposureDb (float reductionDb, float envelopeLin, float recentPeakLin, const Curve& curve) noexcept
+    up to what the level the signal has kept up would ask of the static curve.
+    On a note that is being held that is the reduction, unchanged, from 60 ms
+    in; once the signal has fallen away it is whatever the level that remains
+    would earn; and for a spike it is nothing, because a spike is over before
+    it has kept anything up -- see KeptLevel.
+
+    Counting the recent peak here instead was the first form of this, and it
+    left a 20 ms spike worth 50 ms of charge: enough that ten of them still
+    sank the level 2.6 dB (Tele) and 6.1 dB (Stressed). */
+inline float exposureDb (float reductionDb, float envelopeLin, float keptLin, const Curve& curve) noexcept
 {
-    if (recentPeakLin >= envelopeLin)
+    if (keptLin >= envelopeLin)
         return reductionDb;
 
-    const auto recentDb = 20.0f * std::log10 (std::max (recentPeakLin, 1.0e-6f));
-    return std::min (reductionDb, std::clamp (kneeReductionDb (recentDb, curve), 0.0f, 40.0f));
+    const auto keptDb = 20.0f * std::log10 (std::max (keptLin, 1.0e-6f));
+    return std::min (reductionDb, std::clamp (kneeReductionDb (keptDb, curve), 0.0f, 40.0f));
 }
 
 /** CRUSH, 0-100 on the panel, mapped to threshold only. LA-2A: ~3:1, a soft
@@ -209,7 +273,7 @@ inline Curve curveForDistressor (float crushPercent) noexcept
 class La2aCell
 {
 public:
-    void prepare (double sampleRate) noexcept { rate = sampleRate; recentPeak.prepare (rate); reset(); }
+    void prepare (double sampleRate) noexcept { rate = sampleRate; recentPeak.prepare (rate); keptLevel.prepare (rate); reset(); }
 
     void reset() noexcept
     {
@@ -218,6 +282,7 @@ public:
         reductionDb = 0.0f;
         chargeDb    = 0.0f;
         recentPeak.reset();
+        keptLevel.reset();
         dosageSec   = 0.0f;
     }
 
@@ -249,6 +314,7 @@ public:
         const auto depth        = std::clamp (chargeDb / 20.0f, 0.0f, 1.0f);
         const auto releaseTau   = kReleaseFastTauSec + (slowTau - kReleaseFastTauSec) * depth;
         const auto recentLin    = recentPeak.push (levelLin);
+        const auto keptLin      = keptLevel.push (recentLin);
         const auto releaseCoeff = releaseCoeffFor (coeffFor (releaseTau, rate), kReleaseFastTauSec, rate,
                                                    envelopeLin, recentLin, reductionDb, chargeDb);
 
@@ -260,7 +326,7 @@ public:
 
         // The charge rises toward what the signal is asking for and falls
         // toward the reduction; between the two it holds. See exposureDb().
-        const auto exposure = exposureDb (reductionDb, envelopeLin, recentLin, curve);
+        const auto exposure = exposureDb (reductionDb, envelopeLin, keptLin, curve);
 
         if (exposure > chargeDb)
             chargeDb += coeffFor (kChargeAttackTauSec, rate) * (exposure - chargeDb);
@@ -324,6 +390,7 @@ private:
     float reductionDb = 0.0f;
     float chargeDb    = 0.0f;
     RecentPeak recentPeak;
+    KeptLevel  keptLevel;
     float dosageSec   = 0.0f;
 };
 
@@ -349,7 +416,7 @@ private:
 class DistressorCell
 {
 public:
-    void prepare (double sampleRate) noexcept { rate = sampleRate; recentPeak.prepare (rate); reset(); }
+    void prepare (double sampleRate) noexcept { rate = sampleRate; recentPeak.prepare (rate); keptLevel.prepare (rate); reset(); }
 
     void reset() noexcept
     {
@@ -358,6 +425,7 @@ public:
         reductionDb = 0.0f;
         chargeDb    = 0.0f;
         recentPeak.reset();
+        keptLevel.reset();
     }
 
     /** One sample through the cell: feedforward, so the detector reads
@@ -380,6 +448,7 @@ public:
         const auto depth        = std::clamp (chargeDb / 20.0f, 0.0f, 1.0f);
         const auto releaseTau   = kReleaseFastTauSec + (kReleaseSlowTauSec - kReleaseFastTauSec) * depth;
         const auto recentLin    = recentPeak.push (levelLin);
+        const auto keptLin      = keptLevel.push (recentLin);
         const auto releaseCoeff = releaseCoeffFor (coeffFor (releaseTau, rate), kReleaseFastTauSec, rate,
                                                    envelopeLin, recentLin, reductionDb, chargeDb);
 
@@ -391,7 +460,7 @@ public:
 
         // The charge rises toward what the signal is asking for and falls
         // toward the reduction; between the two it holds. See exposureDb().
-        const auto exposure = exposureDb (reductionDb, envelopeLin, recentLin, curve);
+        const auto exposure = exposureDb (reductionDb, envelopeLin, keptLin, curve);
 
         if (exposure > chargeDb)
             chargeDb += coeffFor (kChargeAttackTauSec, rate) * (exposure - chargeDb);
@@ -452,6 +521,7 @@ private:
     float reductionDb = 0.0f;
     float chargeDb    = 0.0f;
     RecentPeak recentPeak;
+    KeptLevel  keptLevel;
 };
 
 //==============================================================================

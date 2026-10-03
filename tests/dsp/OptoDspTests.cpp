@@ -787,11 +787,11 @@ void testASpikeDoesNotLeaveADip()
         const auto second  = meanReduction (trace, end + 1.0, 0.01) - before;
 
         check (before > 10.0, name + " is holding heavy reduction before the spike (" + std::to_string (before) + " dB)");
-        check (quarter < 2.5,
-               name + ": 250 ms after an 18 dB, 20 ms spike the programme is back within 2.5 dB ("
+        check (quarter < 1.5,
+               name + ": 250 ms after an 18 dB, 20 ms spike the programme is back within 1.5 dB ("
                  + std::to_string (quarter) + " dB of extra reduction)");
-        check (second < 1.25,
-               name + ": 1 s after the spike little of it is left (" + std::to_string (second) + " dB of extra reduction)");
+        check (second < 0.25,
+               name + ": 1 s after the spike nothing of it is left (" + std::to_string (second) + " dB of extra reduction)");
     }
 }
 
@@ -815,8 +815,8 @@ void testRepeatedSpikesDoNotRatchet()
         const auto before = meanReduction (trace, kPrerollSec - 0.5, 0.5);
         const auto sunk   = meanReduction (trace, kPrerollSec + 9.0 - 0.01, 0.01) - before;
 
-        check (sunk < 6.5,
-               name + ": before the tenth spike the programme sits within 6.5 dB of where it started ("
+        check (sunk < 0.5,
+               name + ": before the tenth spike the programme sits within 0.5 dB of where it started ("
                  + std::to_string (sunk) + " dB lower)");
     }
 }

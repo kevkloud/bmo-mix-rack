@@ -153,12 +153,10 @@ public:
             outR[i]   = (i % 2 == 0 ? 1.0f : -1.0f) * ((i / 4) % 2 == 0 ? 1.0f : -1.0f) / std::sqrt ((float) N);
         }
 
+        // Whatever was in flight belongs to the old rate and buffer; reset()
+        // builds everything from `current` below.
         current = requested;
-        fourTarget = fourWeight = fourFor (current.type);
-        primeLengths (current, lengths);
-        levelNow = levelTo = levelFor (current);
-        sizeAtBuild = current.sizeM;
-        preDelaySamples = preDelayFor (current.preDelayMs);
+        fading = dipping = preFading = false;
 
         reset();
     }
@@ -172,12 +170,19 @@ public:
         writeIdx = 0; preIdx = 0;
         for (auto& i : apIdx) i = 0;
 
-        // A move in flight lands, as the ER generator's does: `current`
-        // already names where it was going.
-        if (fading)
-            lengths = fadeTo;
-        levelNow = levelTo;
-        fourWeight = fourTarget;
+        // **Everything the move would have reached is built from `current`,
+        // never copied from the move.** `current` already names where a SIZE
+        // crossfade or a TYPE dip was going, so a fresh build of it is where
+        // the move would have landed. Copying the crossfade's stored target
+        // instead -- as this did until QA's review of 2026-10-03 -- carried
+        // lengths from a higher rate into a smaller buffer through prepare()
+        // (reads at index -13,438), kept a stale SIZE after the setting had
+        // moved again, and left a TYPE dip cut short on the old type's
+        // lengths and diffusers.
+        primeLengths (current, lengths);
+        sizeAtBuild = current.sizeM;
+        levelNow = levelTo = levelFor (current);
+        fourWeight = fourTarget = fourFor (current.type);
         fading = dipping = preFading = false;
         fadePos = dipPos = prePos = 0;
         preDelaySamples = preDelayFor (current.preDelayMs);
@@ -309,6 +314,9 @@ public:
     //== For the tests and the measurement tool =================================
 
     int  lineLengthSamples (int i) const noexcept { return lengths[(size_t) i]; }
+    int  bufferLengthSamples() const noexcept { return lineLength; }
+    /** 0 while the diffusers are taken after two, 1 after four. */
+    float diffuserWeight() const noexcept { return fourWeight; }
     int  preDelayNow() const noexcept { return preDelaySamples; }
     bool isMoving() const noexcept { return fading || dipping || preFading; }
 

@@ -32,6 +32,7 @@
 #include <cstdint>
 #include <functional>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -3030,6 +3031,84 @@ int main (int argc, char** argv)
         check (! grew, "at 96 and 192 kHz the longest tail never grows from one 5 s window to the next");
         if (longRun)
             check (silent, "and after 280 s every one of them is exactly silent");
+    }
+
+    //== prepare() and reset() in the middle of a move land on a fresh instance ==
+    //
+    // QA, 2026-10-03, PR #38, blocker 2: reset() copied a crossfade's stale
+    // target lengths into the lines, and prepare() calls reset(). SIZE 40 ->
+    // 80 m at 96 kHz, then prepare() at 44.1 kHz mid-fade, left lengths of
+    // 14,771-24,953 in an 11,515-sample buffer: reads at index -13,438. And
+    // reset() in the middle of a TYPE dip left Plate on Room's lengths with
+    // two diffusers instead of four. In every case the network must come out
+    // exactly as a fresh instance at the settings it was last given.
+    {
+        const auto lengthsOf = [] (const DspCore& c)
+        {
+            std::vector<int> v;
+            for (int i = 0; i < DspCore::kNumLines; ++i)
+                v.push_back (c.lateNetwork().lineLengthSamples (i));
+            return v;
+        };
+        const auto fresh = [] (double rate, DspCore::Params p)
+        {
+            auto c = std::make_unique<DspCore>();
+            c->setParams (p);
+            c->prepare (rate, 512, 2);
+            return c;
+        };
+        const auto run = [] (DspCore& c, int blocks)
+        {
+            std::vector<float> l (512, 0.0f), r (512, 0.0f);
+            float* chans[] { l.data(), r.data() };
+            for (int b = 0; b < blocks; ++b)
+                c.process (chans, 2, 512);
+        };
+
+        // (a) and (b): a SIZE crossfade in flight, then prepare() at another
+        // rate, and at the same one.
+        for (const auto newRate : { 44100.0, 96000.0 })
+        {
+            DspCore::Params p;
+            p.sizeM = 40.0f;
+            auto core = fresh (96000.0, p);
+            run (*core, 20);
+            p.sizeM = 80.0f;
+            core->setParams (p);
+            run (*core, 1);
+            check (core->lateNetwork().isMoving(), "the SIZE crossfade is in flight when prepare() lands");
+
+            // The setting moves again before prepare(), so the crossfade's
+            // target is stale -- which is what reset() was copying in.
+            p.sizeM = 12.0f;
+            core->setParams (p);
+            core->prepare (newRate, 512, 2);
+            const auto want = lengthsOf (*fresh (newRate, p));
+            const auto got  = lengthsOf (*core);
+            bool inside = true;
+            for (auto m : got) inside = inside && m < core->lateNetwork().bufferLengthSamples();
+
+            check (got == want, ("prepare() at " + std::to_string ((int) newRate)
+                                 + " mid-crossfade gives a fresh instance's lengths").c_str());
+            check (inside, "and every line fits its buffer");
+        }
+
+        // (c): reset() in the middle of a TYPE dip, Room to Plate.
+        {
+            DspCore::Params p;
+            auto core = fresh (48000.0, p);
+            run (*core, 20);
+            p.type = Type::plate;
+            core->setParams (p);
+            run (*core, 1);
+            check (core->lateNetwork().isMoving(), "the TYPE dip is in flight when reset() lands");
+
+            core->reset();
+            const auto freshPlate = fresh (48000.0, p);
+            check (lengthsOf (*core) == lengthsOf (*freshPlate), "reset() mid-dip gives Plate's lengths, not Room's");
+            check (core->lateNetwork().diffuserWeight() == freshPlate->lateNetwork().diffuserWeight(),
+                   "and Plate's four diffusers, not Room's two");
+        }
     }
 
     //== The tail a host is told is at least the tail that rings ================

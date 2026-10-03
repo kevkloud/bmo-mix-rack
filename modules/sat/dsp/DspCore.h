@@ -2,6 +2,7 @@
 
 #include "Filters.h"
 #include "core/dsp/Oversampler.h"
+#include "core/dsp/SwitchFade.h"
 #include "Shaper.h"
 #include <array>
 #include <vector>
@@ -104,8 +105,15 @@ public:
     void reset() noexcept;
 
     /** Round-trip delay of the oversampling filters, in samples at the host's
-        rate. Reported to the host so plugin delay compensation can undo it. */
+        rate. Reported to the host so plugin delay compensation can undo it.
+        After a change of oversampling it is the new factor's from the first
+        process() on, while the audio dips through the change. */
     int getLatencySamples() const noexcept { return latencySamples; }
+
+    /** How long each side of a switch's fade takes. Ten milliseconds, as the
+        EQ's: long enough that a 1 kHz tone crosses any of these switches
+        well under the 1.5x step bound, short enough to read as immediate. */
+    static constexpr double kSwitchFadeMs = 10.0;
 
     /** Called once per block, before process(). Cheap: stores targets only. */
     void setParams (const Params&) noexcept;
@@ -263,6 +271,7 @@ public:
 
 private:
     void applyOversampling (int factor);
+    void switchOversampling (int activeChannels, float inGain, float drive, float tone) noexcept;
     void updateAutoGain (double blockInput, double blockProcessed, int samples) noexcept;
 
     struct Channel
@@ -284,6 +293,12 @@ private:
         const Character* character = nullptr;
         float process (float x) noexcept;
 
+        /** One host-rate sample through the oversampled region: up, the
+            stage at each oversampled sample (or a wire with Sat In off),
+            down. Shared by process() and the warm-up of a new oversampling
+            path. */
+        float runWet (float driven, int factor, bool saturate) noexcept;
+
         /** One harmonic generator: shape the band below the corner, keep what
             appears above it. */
         static float generate (AsymmetricShaper&, OnePole (&input)[2], OnePole& split, float x) noexcept;
@@ -296,9 +311,18 @@ private:
     std::array<Channel, 2> channels;
 
     // The dry path of the Mix control has to be delayed to match, or a partial
-    // blend combs and a full bypass fails to null.
+    // blend combs and a full bypass fails to null. The ring is one length for
+    // every factor, read at the running path's latency, and long enough --
+    // twice the longest latency -- to hold the whole span of the oversampling
+    // filters, which is what a new path is run over when the factor changes.
+    static constexpr int kDryRing = 2 * Oversampler::kMaxLatency + 2;
     std::vector<float> dryDelay;
-    int dryWrite = 0, dryLength = 1, dryStride = 0;
+    int dryWrite = 0, dryStride = 0, dryLatency = 0;
+
+    // A change of oversampling waits at the bottom of this dip; see process().
+    bmo::dsp::Dip oversamplingDip;
+    int pendingFactor = 1;
+    bool running = false;   // false until the first process() after prepare() or reset()
 
     Smoother inputGainSm, driveSm, mixSm, outputLevelSm, makeupSm, toneSm;
 

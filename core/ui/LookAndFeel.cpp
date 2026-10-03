@@ -119,79 +119,103 @@ namespace material
 
     /** A 256 x 128 tile of brushed grain: streaks along x, each row its own
         run of smoothed noise, wrapped so the tile repeats without a seam.
-        About the same amplitude as the powder, all of it in one direction. */
-    const juce::Image& brushedTile()
+        About the same amplitude as the powder, all of it in one direction.
+        One fixed seed, so every build of it is the same tile. */
+    juce::Image makeBrushedTile()
     {
-        static const juce::Image tile = []
+        constexpr int w = 256, h = 128, run = 40;
+        juce::Image img (juce::Image::ARGB, w, h, true);
+        juce::Random rng (0x42727573);
+        juce::Image::BitmapData bd (img, juce::Image::BitmapData::writeOnly);
+
+        std::vector<float> raw ((size_t) w), row ((size_t) w);
+
+        for (int y = 0; y < h; ++y)
         {
-            constexpr int w = 256, h = 128, run = 40;
-            juce::Image img (juce::Image::ARGB, w, h, true);
-            juce::Random rng (0x42727573);
-            juce::Image::BitmapData bd (img, juce::Image::BitmapData::writeOnly);
+            for (auto& v : raw)
+                v = rng.nextFloat() * 2.0f - 1.0f;
 
-            std::vector<float> raw ((size_t) w), row ((size_t) w);
-
-            for (int y = 0; y < h; ++y)
+            // A wrapped box blur along the row: long streaks, not dots.
+            for (int x = 0; x < w; ++x)
             {
-                for (auto& v : raw)
-                    v = rng.nextFloat() * 2.0f - 1.0f;
-
-                // A wrapped box blur along the row: long streaks, not dots.
-                for (int x = 0; x < w; ++x)
-                {
-                    auto sum = 0.0f;
-                    for (int k = -run / 2; k < run / 2; ++k)
-                        sum += raw[(size_t) ((x + k + w) % w)];
-                    row[(size_t) x] = sum / std::sqrt ((float) run);
-                }
-
-                const auto rowTone = (rng.nextFloat() * 2.0f - 1.0f) * 0.6f;
-
-                for (int x = 0; x < w; ++x)
-                {
-                    const auto v = juce::jlimit (-1.0f, 1.0f, row[(size_t) x] * 0.55f + rowTone
-                                                             + (rng.nextFloat() - 0.5f) * 0.25f);
-                    const auto a = (juce::uint8) juce::roundToInt (std::abs (v) * 255.0f * 0.045f);
-                    bd.setPixelColour (x, y, v > 0.0f ? juce::Colour (255, 255, 255).withAlpha (a)
-                                                      : juce::Colour (0, 0, 0).withAlpha (a));
-                }
+                auto sum = 0.0f;
+                for (int k = -run / 2; k < run / 2; ++k)
+                    sum += raw[(size_t) ((x + k + w) % w)];
+                row[(size_t) x] = sum / std::sqrt ((float) run);
             }
 
-            return img;
-        }();
+            const auto rowTone = (rng.nextFloat() * 2.0f - 1.0f) * 0.6f;
 
-        return tile;
+            for (int x = 0; x < w; ++x)
+            {
+                const auto v = juce::jlimit (-1.0f, 1.0f, row[(size_t) x] * 0.55f + rowTone
+                                                         + (rng.nextFloat() - 0.5f) * 0.25f);
+                const auto a = (juce::uint8) juce::roundToInt (std::abs (v) * 255.0f * 0.045f);
+                bd.setPixelColour (x, y, v > 0.0f ? juce::Colour (255, 255, 255).withAlpha (a)
+                                                  : juce::Colour (0, 0, 0).withAlpha (a));
+            }
+        }
+
+        return img;
     }
 
     /** A 128 px tile of fine, non-directional grain -- a powder-coat, not a
         photograph. Signed around zero and drawn at a few percent, so it moves
         the plate's luminance by about +/-1.5 % and no ink ratio by more than
-        a rounding step. One fixed seed, built once, so every render of it is
-        the same render. */
-    const juce::Image& grainTile()
+        a rounding step. One fixed seed, so every build of it is the same
+        tile and every render of it the same render. */
+    juce::Image makeGrainTile()
     {
-        static const juce::Image tile = []
-        {
-            constexpr int n = 128;
-            juce::Image img (juce::Image::ARGB, n, n, true);
-            juce::Random rng (0x424d4f);
-            juce::Image::BitmapData bd (img, juce::Image::BitmapData::writeOnly);
+        constexpr int n = 128;
+        juce::Image img (juce::Image::ARGB, n, n, true);
+        juce::Random rng (0x424d4f);
+        juce::Image::BitmapData bd (img, juce::Image::BitmapData::writeOnly);
 
-            for (int y = 0; y < n; ++y)
-                for (int x = 0; x < n; ++x)
-                {
-                    const auto v = rng.nextFloat() * 2.0f - 1.0f;
-                    const auto a = (juce::uint8) juce::roundToInt (std::abs (v) * 255.0f * 0.035f);
-                    bd.setPixelColour (x, y, v > 0.0f ? juce::Colour (255, 255, 255).withAlpha (a)
-                                                      : juce::Colour (0, 0, 0).withAlpha (a));
-                }
+        for (int y = 0; y < n; ++y)
+            for (int x = 0; x < n; ++x)
+            {
+                const auto v = rng.nextFloat() * 2.0f - 1.0f;
+                const auto a = (juce::uint8) juce::roundToInt (std::abs (v) * 255.0f * 0.035f);
+                bd.setPixelColour (x, y, v > 0.0f ? juce::Colour (255, 255, 255).withAlpha (a)
+                                                  : juce::Colour (0, 0, 0).withAlpha (a));
+            }
 
-            return img;
-        }();
-
-        return tile;
+        return img;
     }
 }
+
+/** Owned through `BmoLookAndFeel::materials`, so these live exactly as long
+    as some editor does. Each is built on first use and kept until then: a
+    tile is drawn under every textured plate, and a knob repaints on every
+    step of a drag. Only the message thread paints, so nothing here locks. */
+class MaterialImages final
+{
+public:
+    const juce::Image& brushedTile()
+    {
+        if (brushed.isNull())
+            brushed = material::makeBrushedTile();
+
+        return brushed;
+    }
+
+    const juce::Image& grainTile()
+    {
+        if (grain.isNull())
+            grain = material::makeGrainTile();
+
+        return grain;
+    }
+
+    /** The Textured knob's still layers, keyed by size, pixel scale, colours
+        and form; see drawRotarySlider. */
+    std::map<juce::String, juce::Image> knobLayers;
+
+private:
+    juce::Image brushed, grain;
+};
+
+BmoLookAndFeel::BmoLookAndFeel() { refreshColours(); }
 
 bool BmoLookAndFeel::textured() { return material::enabled(); }
 
@@ -242,7 +266,12 @@ void BmoLookAndFeel::paintPlateFinish (juce::Graphics& g, juce::Rectangle<int> a
                                              false));
     g.fillRect (r);
 
-    g.setTiledImageFill (finish == PlateFinish::brushed ? material::brushedTile() : material::grainTile(), 0, 0, 1.0f);
+    // Static, so a panel paints its plate without reaching for its editor's
+    // look and feel. While an editor is open this is that editor's set of
+    // images; with none open -- a tool painting a bare panel -- the tile is
+    // built for this call and freed after it, which costs time, not pixels.
+    const juce::SharedResourcePointer<MaterialImages> images;
+    g.setTiledImageFill (finish == PlateFinish::brushed ? images->brushedTile() : images->grainTile(), 0, 0, 1.0f);
     g.fillRect (r);
 
     // A machined edge: one lit line along the top, one shaded along the
@@ -638,7 +667,7 @@ void BmoLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int widt
                        + face.toString() + "/" + edgeColour.toString() + "/" + (enabled ? "1" : "0")
                        + (onePiece ? "/one" : "/ringed");
 
-        static std::map<juce::String, juce::Image> cache;
+        auto& cache = materials->knobLayers;
 
         auto found = cache.find (key);
 

@@ -203,11 +203,15 @@ inline void strokeInside (juce::Graphics& g, juce::Rectangle<float> area, float 
     g.drawRoundedRectangle (area.reduced (half), juce::jmax (0.0f, radius - half), weight);
 }
 
+/** The Textured surface's images: the two plate tiles and the knob layer
+    cache. Defined in LookAndFeel.cpp; see `BmoLookAndFeel::materials`. */
+class MaterialImages;
+
 //==============================================================================
 class BmoLookAndFeel final : public juce::LookAndFeel_V4
 {
 public:
-    BmoLookAndFeel() { refreshColours(); }
+    BmoLookAndFeel();
 
     /** Whether the Textured surface is in force. See ui::surface. */
     static bool textured();
@@ -298,6 +302,15 @@ public:
 
     /** The slashed O of a polarity switch. */
     static const juce::String& phaseGlyph();
+
+private:
+    /** The Textured images, shared by every look and feel alive and freed
+        with the last of them -- which is the last editor, since each editor
+        owns one. They are native images, and a native image holds the
+        graphics framework's shared device objects: held by a static, they
+        outlived every editor and releasing them at DLL unload hung the host
+        (tests/ui/StaticImageTests.cpp). */
+    juce::SharedResourcePointer<MaterialImages> materials;
 };
 
 } // namespace bmo::ui

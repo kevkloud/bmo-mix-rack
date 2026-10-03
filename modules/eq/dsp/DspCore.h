@@ -38,9 +38,6 @@ public:
         return current;
     }
 
-    /** At the target exactly: tick() would return the same value again. */
-    bool isSettled() const noexcept     { return ! (current < target) && ! (target < current); }
-
 private:
     float coeff = 1.0f, current = 0.0f, target = 0.0f;
 };
@@ -57,25 +54,67 @@ private:
     44.1 kHz rather than front-loading it, so no sample of it steps the
     signal by more than its own slope does at 100 Hz. Settled, the gain is
     dbToGain of the parameter's own value, the figure it always was.
+
+    It has to land, and a one-pole in float32 does not on its own: near
+    24 dB one float step is 1.9e-6 dB, and once the pole's increment is
+    under half of that it rounds away, leaving the level stalled short of
+    the target for ever (8.4e-4 dB at 44.1 kHz, 1.8e-3 at 96 kHz, 3.7e-3 at
+    192 kHz). So it lands on the target, exactly, when it is within
+    kLandDb or when a sample makes no progress, whichever comes first:
+    within 220 ms of any move across the full range. That last step is
+    1e-3 dB at 44.1 and 48 kHz, at most 1.8e-3 at 96 kHz and 3.7e-3 at
+    192 kHz -- a gain change of at most 4.2e-4, under a seventh of a 100 Hz
+    tone's own largest step at 192 kHz (3.3e-3 of its amplitude). Landed,
+    next() does no work.
 */
 class TrimSmoother
 {
 public:
-    void prepare (double sampleRate, double timeMs) noexcept { db.prepare (sampleRate, timeMs); }
+    static constexpr float kLandDb = 1.0e-3f;
+
+    void prepare (double sampleRate, double timeMs) noexcept
+    {
+        const auto tau = std::max (timeMs, 0.01) * 0.001;
+        coeff = (float) (1.0 - std::exp (-1.0 / (std::max (sampleRate, 1.0) * tau)));
+    }
 
     void snap (float targetDb) noexcept
     {
-        db.snap (targetDb);
-        gain = toGain (targetDb);
+        currentDb = targetDb;
+        setTarget (targetDb);
+        gain = targetGain;
     }
 
-    void setTarget (float targetDb) noexcept { db.setTarget (targetDb); }
+    void setTarget (float targetDb) noexcept
+    {
+        if (! (targetDb < this->targetDb) && ! (this->targetDb < targetDb))
+            return;
 
-    /** One sample on. Settled, it returns the held gain without working. */
+        this->targetDb = targetDb;
+        targetGain = toGain (targetDb);
+    }
+
+    /** At the target exactly: next() returns dbToGain (target) and does no work. */
+    bool isSettled() const noexcept { return ! (currentDb < targetDb) && ! (targetDb < currentDb); }
+
+    /** One sample on. */
     float next() noexcept
     {
-        if (! db.isSettled())
-            gain = toGain (db.tick());
+        if (isSettled())
+            return gain;
+
+        const auto moved = currentDb + coeff * (targetDb - currentDb);
+
+        if (std::abs (targetDb - moved) < kLandDb || ! (moved < currentDb || currentDb < moved))
+        {
+            currentDb = targetDb;
+            gain = targetGain;
+        }
+        else
+        {
+            currentDb = moved;
+            gain = toGain (moved);
+        }
 
         return gain;
     }
@@ -83,8 +122,8 @@ public:
 private:
     static float toGain (float decibels) noexcept { return std::pow (10.0f, decibels * 0.05f); }
 
-    Smoother db;
-    float gain = 1.0f;
+    float coeff = 1.0f, currentDb = 0.0f, targetDb = 0.0f;
+    float gain = 1.0f, targetGain = 1.0f;
 };
 
 //==============================================================================

@@ -536,6 +536,115 @@ int main()
             }
     }
 
+    //== 6. A trim lands exactly on its target, and the landing is not a step
+    // A one-pole in float32 stalls short of a target that is not zero: near
+    // 24 dB one float step is 1.9e-6 dB, and once the pole's increment falls
+    // under half of that it rounds away. On d8cdd5f that left a +/-24 dB move
+    // 8.4e-4 dB short at 44.1 kHz and 1.8e-3 at 96 kHz, for ever: the gain
+    // was never dbToGain of the setting, the output was never what a fresh
+    // instance at that setting gives, and the pow ran every sample. Wanted:
+    // exactly dbToGain (the figure a fresh instance snaps to) within 250 ms
+    // of any move -- 48 dB down to 1e-3 dB is 10.8 time constants of 20 ms,
+    // 216 ms -- held from then on, and the landing too small a step to measure against a
+    // 100 Hz tone.
+    {
+        struct Move { float from, to; };
+        const Move moves[] { { 0.0f, 6.0f }, { 0.0f, -24.0f }, { -24.0f, 24.0f },
+                             { 24.0f, -24.0f }, { 0.0f, -3.5f } };
+
+        const auto moveName = [] (const Move& m)
+        {
+            return std::to_string (m.from).substr (0, std::to_string (m.from).find ('.') + 2) + " -> "
+                 + std::to_string (m.to).substr (0, std::to_string (m.to).find ('.') + 2) + " dB";
+        };
+
+        for (double fs : { 44100.0, 48000.0, 96000.0, 192000.0 })
+            for (const auto& move : moves)
+            {
+                TrimSmoother trim;
+                trim.prepare (fs, 20.0);
+                trim.snap (move.from);
+                trim.setTarget (move.to);
+
+                const auto exact = std::pow (10.0f, move.to * 0.05f);
+                const auto landBy = (int) (0.25 * fs);
+
+                double landingStep = 0.0;
+                int landedAt = -1;
+                float previous = trim.next();
+
+                for (int n = 1; n < landBy + (int) fs; ++n)
+                {
+                    const auto g = trim.next();
+                    const auto stepDb = std::abs (20.0 * std::log10 ((double) g / (double) previous));
+
+                    if (landedAt < 0 && g == exact)
+                    {
+                        landedAt = n;
+                        landingStep = stepDb;
+                    }
+                    else if (landedAt > 0 && g != exact)
+                    {
+                        landedAt = -2;   // left the target again
+                    }
+
+                    previous = g;
+                }
+
+                const auto where = "trim " + moveName (move) + " at " + rateName (fs);
+                check (landedAt > 0 && landedAt <= landBy,
+                       where + " lands exactly on dbToGain of its target within 250 ms and stays"
+                           + (landedAt == -1 ? " (never landed)" : landedAt == -2 ? " (left it)"
+                                              : " (landed at " + std::to_string (landedAt) + " samples)"));
+                // The landing changes the gain by a fraction f, so it moves a
+                // tone of amplitude A by at most f * A in one sample. A 100 Hz
+                // tone's own largest step is 2 pi 100 / fs of A; the landing
+                // must take less than half of the 1.5x bound's headroom.
+                const auto fraction = std::pow (10.0, landingStep / 20.0) - 1.0;
+                const auto ownStep  = 2.0 * kPi * 100.0 / fs;
+                check (fraction < 0.25 * ownStep,
+                       where + " lands with a step of " + std::to_string (landingStep) + " dB, "
+                           + std::to_string (fraction / ownStep) + " of a 100 Hz tone's own step");
+            }
+
+        // Through the whole module: after an Output move the output is what
+        // a fresh instance held at the target gives, to the bit. Output is
+        // the last gain in the chain and nothing upstream depends on it, so
+        // the two must agree exactly once the trim has landed.
+        for (double fs : { 44100.0, 48000.0, 96000.0 })
+            for (const auto& move : moves)
+            {
+                DspCore::Params a;
+                a.outputLevelDb = move.from;
+                a.midGainDb = 6.0f;
+                auto b = a;
+                b.outputLevelDb = move.to;
+
+                std::vector<float> x ((size_t) (0.8 * fs));
+                for (size_t i = 0; i < x.size(); ++i)
+                    x[i] = (float) (0.17782794 * std::sin (2.0 * kPi * 440.0 * (double) i / fs));
+
+                const auto sw = (size_t) (0.1 * fs) / 512 * 512;
+
+                DspCore moved, fresh;
+                moved.prepare (fs, 512, 1, a.oversampling);
+                moved.setParams (a);
+                fresh.prepare (fs, 512, 1, b.oversampling);
+                fresh.setParams (b);
+
+                const auto y = render (moved, x, 512, [&] (size_t s) { return s >= sw ? b : a; }, 1);
+                const auto z = render (fresh, x, 512, [&] (size_t) { return b; }, 1);
+
+                double worst = 0.0;
+                for (size_t i = sw + (size_t) (0.25 * fs); i < y.size(); ++i)
+                    worst = std::max (worst, (double) std::abs (y[i] - z[i]));
+
+                check (worst == 0.0, "Output " + moveName (move) + " at " + rateName (fs)
+                                         + ": 250 ms on, the output differs from a fresh instance at the target by "
+                                         + std::to_string (worst));
+            }
+    }
+
     if (failures == 0)
         std::cout << "All EQ switch tests passed.\n";
 

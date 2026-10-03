@@ -1,12 +1,12 @@
 # BMO Opto — the spike that got through and the dip after it
 
-> **Outcome, 2026-10-04: adopted.** The release now gives back what a spike
+> **Outcome, 2026-10-03: adopted.** The release now gives back what a spike
 > adds, in both modes; Stressed gets a two-stage attack; Tele keeps its
 > 10 ms attack. Chosen blind, with the control this repository learned to use
 > in September. The three preset levels were re-solved. Nothing here changes
 > a parameter, a range, a default or a state tag, and latency is still 0.
 
-Measured and heard on **ICE QUEEN**, 2026-10-03 and 2026-10-04, on `main` at
+Measured and heard on **ICE QUEEN**, 2026-10-03, on `main` at
 `6f6b8c3`. No audio is in the repository: the listening set and the tools
 that made it are kept outside it.
 
@@ -122,7 +122,7 @@ that hold Opto (its own two and the rack's two) were regenerated for it, with
 no tolerance touched. This was found in review: the suite had not been run
 when the branch was first pushed.
 
-## Heard, 2026-10-04
+## Heard, 2026-10-03
 
 Source: a dry vocal take, 20 s, at its own level, crush 100, LINK on, COLOR
 off, every file RMS-matched to the dry within 0.005 dB. Four groups of four

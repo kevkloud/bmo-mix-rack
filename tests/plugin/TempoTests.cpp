@@ -682,9 +682,10 @@ int main()
     // file for a reason that has nothing to do with the tempo.
     {
         // Ids of modules that consume the tempo, and so are exempt from the
-        // byte-identity below. Empty until BMO Dwell; add "delay" (or whatever
-        // id it ships under) here in the same change that overrides setTempo.
-        const std::vector<juce::String> tempoConsumers {};
+        // byte-identity below. BMO Dwell, from 2026-10-01: SYNC maps its two
+        // NOTE divisions at the host's tempo (modules/dwell/dsp/DwellDsp.h),
+        // and its own suite, tests/dsp/DwellDspTests.cpp, carries the figures.
+        const std::vector<juce::String> tempoConsumers { "dwell" };
 
         const auto& registry = bmo::products::registry();
 
@@ -742,6 +743,134 @@ int main()
 
         expect (compared + (int) tempoConsumers.size() == (int) registry.size(),
                 "every registered module was compared or carved out by name");
+
+        // **The carve-out is not a free pass.** A consumer that hears the
+        // tempo only when it is asked to -- Dwell, only with SYNC on -- must
+        // still be byte-identical at its defaults, where SYNC is off; and it
+        // must actually differ when synced, or the carve-out is exempting a
+        // module that does not listen. Dwell's own suite has the figures; this
+        // is the host's-eye view of the same two facts.
+        for (const auto* def : registry)
+        {
+            if (! consumesTempo (*def) || juce::String (def->id) != "dwell")
+                continue;
+
+            const auto run = [&] (Host host, bool synced)
+            {
+                auto proc = makeProduct (*def);
+
+                if (synced)
+                {
+                    auto& params = proc->getEngine().params();
+                    params.setReal ("sync", 1.0f);
+                    params.setReal ("note", 3.0f);       // 1/16: short enough to land in the render
+                    params.setReal ("feedback", 60.0f);
+                    params.setReal ("mix", 50.0f);
+                }
+
+                return render (*proc, host);
+            };
+
+            const auto quiet = run (Host::none, false);
+            expect (identical (quiet, run (Host::steady, false)),
+                    "dwell with SYNC off is byte-identical with a playhead at 120 bpm");
+            expect (identical (quiet, run (Host::moving, false)),
+                    "dwell with SYNC off is byte-identical with a moving playhead");
+
+            expect (! identical (run (Host::none, true), run (Host::steady, true)),
+                    "dwell with SYNC on hears the playhead's tempo");
+        }
+
+        // **The same two facts with Dwell in a rack, among modules that do
+        // not listen** (2026-10-01). The carve-out above takes Dwell out of
+        // the rack walk below as well, which left a slot's tempo reaching a
+        // real consumer untested: the probes prove the plumbing, not that
+        // Dwell's own SYNC hears it through a slot.
+        {
+            const auto named = [&] (const char* id) -> const bmo::ModuleDef*
+            {
+                for (const auto* def : registry)
+                    if (juce::String (def->id) == id)
+                        return def;
+
+                return nullptr;
+            };
+
+            const auto* util  = named ("util");
+            const auto* dwell = named ("dwell");
+            const auto* eq    = named ("eq");
+
+            expect (util != nullptr && dwell != nullptr && eq != nullptr,
+                    "the rack case finds util, dwell and eq in the registry");
+
+            if (util != nullptr && dwell != nullptr && eq != nullptr)
+            {
+                const auto run = [&] (Host host, bool synced)
+                {
+                    auto rack = bmo::products::createRack();
+                    rack->addModule (*util);
+                    rack->addModule (*dwell);
+                    rack->addModule (*eq);
+
+                    if (synced)
+                    {
+                        auto& params = rack->getEngineAt (1)->params();
+                        params.setReal ("sync", 1.0f);
+                        params.setReal ("note", 3.0f);   // 1/16: 125 ms at 120 bpm, inside the render
+                        params.setReal ("feedback", 60.0f);
+                        params.setReal ("mix", 50.0f);
+                    }
+
+                    return render (*rack, host);
+                };
+
+                const auto quiet = run (Host::none, false);
+                expect (identical (quiet, run (Host::steady, false)),
+                        "dwell in a rack with SYNC off is byte-identical with a playhead at 120 bpm");
+                expect (identical (quiet, run (Host::moving, false)),
+                        "dwell in a rack with SYNC off is byte-identical with a moving playhead");
+
+                const auto synced = run (Host::steady, true);
+                expect (identical (synced, run (Host::steady, true)),
+                        "dwell in a rack with SYNC on renders the same twice at 120 bpm");
+                expect (! identical (run (Host::none, true), synced),
+                        "dwell in a rack with SYNC on hears the playhead's tempo through its slot");
+
+                // **The first tempo lands, in a slot too.** On tape, a 1/32 at
+                // 120 bpm (62.5 ms) synced from the 375 ms knob has to sound
+                // exactly like the same slot with TIME set to 62.5 ms: the
+                // first tempo after the slot's DSP is made lands the read
+                // rather than gliding it there over seconds. Without that, the
+                // two renders differ from the first repeat on.
+                const auto onTape = [&] (bool syncedTime)
+                {
+                    auto rack = bmo::products::createRack();
+                    rack->addModule (*util);
+                    rack->addModule (*dwell);
+                    rack->addModule (*eq);
+
+                    auto& params = rack->getEngineAt (1)->params();
+                    params.setReal ("character", 1.0f);
+                    params.setReal ("feedback", 60.0f);
+                    params.setReal ("mix", 50.0f);
+
+                    if (syncedTime)
+                    {
+                        params.setReal ("sync", 1.0f);
+                        params.setReal ("note", 0.0f);   // 1/32
+                    }
+                    else
+                    {
+                        params.setReal ("time", 62.5f);
+                    }
+
+                    return render (*rack, Host::steady);
+                };
+
+                expect (identical (onTape (true), onTape (false)),
+                        "dwell in a rack lands its first tempo: tape synced to 1/32 at 120 bpm renders as TIME 62.5 ms");
+            }
+        }
 
        #if BMO_TEMPO_TESTS_TUNE
         // BMO Tune RT runs on the same SingleModuleProcessor but is not in the

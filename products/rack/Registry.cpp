@@ -2,6 +2,7 @@
 #include "modules/deesser/Module.h"
 #include "modules/deq/Module.h"
 #include "modules/dim/Module.h"
+#include "modules/dwell/Module.h"
 #include "modules/eq/Module.h"
 #include "modules/fetcomp/Module.h"
 #include "modules/opto/Module.h"
@@ -25,6 +26,7 @@ const std::vector<const ModuleDef*>& registry()
         &vcomp::module(),
         &deesser::module(),
         &fetcomp::module(),
+        &dwell::module(),
         &reverb::module(),
     };
 

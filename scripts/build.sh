@@ -68,19 +68,19 @@ if [[ ${1:-} == --snapshots ]]; then
     # By the name `snapshot` takes, which is the module's id rather than the
     # product's display name -- BMO Defang is `deesser`, BMO Linger is `reverb`,
     # BMO FET is `fetcomp` -- except LTV Comp, which `snapshot` knows only as
-    # `ltvcomp`, never `vcomp`. One loop and one rack render, both covering the
-    # whole registry: the FET change added a second copy of each rather than
-    # extending these, and its rack render overwrote the first with a chain that
-    # was missing BMO Defang.
-    for module in eq sat util opto dim deq ltvcomp deesser fetcomp reverb; do
+    # `ltvcomp`, never `vcomp`. One loop covering the whole registry -- BMO Dwell
+    # is `dwell` -- and one rack render below: the FET change added a second copy
+    # of each rather than extending these, and its rack render overwrote the
+    # first with a chain that was missing BMO Defang.
+    for module in eq sat util opto dim deq ltvcomp deesser fetcomp dwell reverb; do
         "$snapshot" "$module" "snapshots/$module.png"
     done
 
-    # The rack has eight slots (`RackProcessor::kSlots`) and the registry has ten
-    # modules, so one rack render cannot hold them all: `addModule` refuses a
-    # ninth without a word, and the ten-module chain this used to name rendered
-    # exactly these eight. BMO FET and BMO Linger are the two left out, and each
-    # is covered by its own snapshot in the loop above. Written as eight so the
-    # picture is what the line says.
+    # The rack has eight slots (`RackProcessor::kSlots`) and the registry has
+    # eleven modules, so one rack render cannot hold them all: `addModule`
+    # refuses a ninth without a word, and the ten-module chain this used to name
+    # rendered exactly these eight. BMO FET, BMO Dwell and BMO Linger are the
+    # three left out, and each is covered by its own snapshot in the loop above.
+    # Written as eight so the picture is what the line says.
     "$snapshot" rack snapshots/rack.png chain=util,eq,sat,opto,dim,deq,ltvcomp,deesser
 fi

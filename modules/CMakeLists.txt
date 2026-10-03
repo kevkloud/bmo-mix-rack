@@ -96,6 +96,12 @@ bmo_add_module(fetcomp
     UI_SOURCES
         ${CMAKE_CURRENT_SOURCE_DIR}/fetcomp/panel/FetcompPanel.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/fetcomp/Module.cpp)
+bmo_add_module(dwell
+    DSP_SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/dwell/dsp/DspCore.cpp
+    UI_SOURCES
+        ${CMAKE_CURRENT_SOURCE_DIR}/dwell/panel/DwellPanel.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/dwell/Module.cpp)
 
 # BMO Linger is the third caller of the shared matched-Z filter design, after
 # BMO DEQ -- which still carries its own copy under modules/deq/dsp -- and BMO

@@ -188,12 +188,12 @@ namespace
     };
 
     // The rack's module ids, as products/rack/Registry.cpp registers them, in
-    // two chains because a rack has eight slots and there are ten modules. An
+    // two chains because a rack has eight slots and there are eleven modules. An
     // id the rack does not know is dropped by the rack itself, so a module
     // added later is simply not covered until it is listed here -- and the
     // rack's own line then says "thru" or stays the same, which is the cue.
     const juce::StringArray chainA { "eq", "sat", "opto", "dim", "deq", "vcomp", "util" };
-    const juce::StringArray chainB { "deesser", "fetcomp", "reverb", "eq", "util" };
+    const juce::StringArray chainB { "deesser", "fetcomp", "dwell", "reverb", "eq", "util" };
 
     std::vector<State> statesFor (const juce::PluginDescription& desc)
     {

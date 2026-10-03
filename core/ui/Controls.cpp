@@ -455,6 +455,12 @@ void Fader::setAccent (juce::Colour accent)
     repaint();
 }
 
+void PlainKnob::setCatch (double value, double halfWidthOfTravel)
+{
+    knob.setCatch (value, halfWidthOfTravel);
+    repaint();
+}
+
 //==============================================================================
 ConcentricBand::ConcentricBand (juce::RangedAudioParameter& selector, const ParamSpec& selectorSpec,
                                 juce::RangedAudioParameter* gain, juce::Colour accent,

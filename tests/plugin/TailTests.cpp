@@ -50,11 +50,21 @@ namespace
 constexpr double kRate  = 48000.0;
 constexpr int    kBlock = 512;
 
-/** The only module in the suite that reports a tail. Everything else in the
-    registry takes `ModuleDsp`'s zero default, and the walk below asserts that
-    this list is exactly one long -- so a module added later is checked for a
-    zero, or its author has to come here and say why not. */
-constexpr auto kRingingModule = "reverb";
+/** The modules in the suite that report a tail: BMO Linger, and BMO Dwell
+    from 2026-10-01. Everything else in the registry takes `ModuleDsp`'s zero
+    default, and the walk below asserts this list is exactly two long -- so a
+    module added later is checked for a zero, or its author has to come here
+    and say why not. */
+constexpr const char* kRingingModules[] { "reverb", "dwell" };
+
+bool rings (const char* id)
+{
+    for (const auto* r : kRingingModules)
+        if (juce::String (r) == id)
+            return true;
+
+    return false;
+}
 
 //== BMO Linger's stated figures ==============================================
 //
@@ -155,7 +165,7 @@ int main()
 
         for (const auto* def : bmo::products::registry())
         {
-            if (juce::String (def->id) == kRingingModule)
+            if (rings (def->id))
             {
                 ++ringing;
                 continue;
@@ -217,15 +227,70 @@ int main()
             }
         }
 
-        // The exception list is one long, and it is the reverb. A module added
-        // to the registry later is walked by the loop above whether or not
-        // anybody remembers this file exists.
-        check (ringing == 1,
-               "exactly one registered module is exempt from the zero, got "
+        // The exception list is two long: the reverb and the delay. A module
+        // added to the registry later is walked by the loop above whether or
+        // not anybody remembers this file exists.
+        check (ringing == 2,
+               "exactly two registered modules are exempt from the zero, got "
                    + juce::String (ringing));
-        check (bmo::products::registry().size() == 10,
-               "the registry still holds ten modules, got "
+        check (bmo::products::registry().size() == 11,
+               "the registry still holds eleven modules, got "
                    + juce::String ((int) bmo::products::registry().size()));
+    }
+
+    //== BMO Dwell's own figures ==============================================
+    //
+    // docs/delay/10 §9 and §11.6, worked by hand -- the derivations are beside
+    // the same figures in tests/dsp/DwellDspTests.cpp. Asserted here through
+    // the real product, its engine and the host-facing getter, which is a
+    // cache and has to have been refreshed by prepareToPlay.
+    {
+        auto proc = makeProduct (moduleNamed ("dwell"));
+        auto& params = proc->getEngine().params();
+        proc->setPlayConfigDetails (2, 2, kRate, kBlock);
+
+        const auto tailAfter = [&] (std::initializer_list<std::pair<const char*, float>> settings)
+        {
+            for (int i = 0; i < params.size(); ++i)
+                params.setReal (i, params.spec (i).def);
+
+            for (const auto& [id, value] : settings)
+                params.setReal (id, value);
+
+            proc->prepareToPlay (kRate, kBlock);
+            return proc->getTailLengthSeconds();
+        };
+
+        // From 2026-10-01 a lap is TIME plus the loop filters' own group
+        // delay (modules/dwell/dsp/Timing.h), under 3 ms a lap at the rails,
+        // so each figure is its laps times TIME lengthened by less than that;
+        // and the laps count down from the build-up a sustained input leaves.
+        const auto laps = [] (double tail, int count, double seconds)
+        {
+            return tail >= count * seconds && tail < count * (seconds + 0.003);
+        };
+
+        const auto atDefaults = tailAfter ({});
+        check (laps (atDefaults, 5, 0.375),
+               "dwell tells the host 5 laps of 375 ms at its defaults, got " + juce::String (atDefaults, 6));
+        // The engine read on its own -- live parameters, not the host-facing
+        // cache -- against the same hand-worked window, so a cache that went
+        // stale and an engine that read the wrong values both fail here.
+        check (laps (proc->getEngine().tailSeconds(), 5, 0.375),
+               "dwell's engine, read directly, is 5 laps of 375 ms at its defaults");
+
+        checkClose (tailAfter ({ { "feedback", 0.0f } }), 0.5, 1.0e-9,
+                    "dwell with no feedback floors at 0.5 s");
+        checkClose (tailAfter ({ { "feedback", 100.0f } }), 30.0, 1.0e-9,
+                    "dwell self-oscillating reports the 30 s ceiling");
+        // 11 laps from 2026-10-02: with the main delay ringing beside it the
+        // lane counts down 6 dB further, so the sum of the two is under the line.
+        check (laps (tailAfter ({ { "hold", 1.0f }, { "lane_gain", -40.0f } }), 11, 0.25),
+               "dwell's held THROW at -40 % outlasts its main delay: 11 laps of 250 ms");
+        checkClose (tailAfter ({ { "hold", 1.0f }, { "lane_gain", 0.0f } }), 30.0, 1.0e-9,
+                    "dwell's held FREEZE reports the ceiling");
+        check (laps (tailAfter ({ { "sync", 1.0f } }), 5, 2.0),
+               "dwell synced assumes the longest division: 5 laps of 2 s");
     }
 
     //== BMO Linger's own figures =============================================

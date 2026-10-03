@@ -21,6 +21,7 @@ Permanent. Allocate here before the first build of anything new.
 | BMO DEQ | `deq` | `Bpar` | `com.lt3audio.bmodeq` | `.bmodeq` |
 | BMO Defang | `deesser` | `Bdes` | `com.lt3audio.bmodefang` | `.bmodeesser` |
 | BMO FET | `fetcomp` | `Bfet` | `com.lt3audio.bmofet` | `.bmofetcomp` |
+| BMO Dwell | `dwell` | `Bdly` | `com.lt3audio.bmodwell` | `.bmodwell` |
 | BMO Linger | `reverb` | `Brvb` | `com.lt3audio.bmolinger` | `.bmoreverb` |
 | BMO Tune RT -- **not in the rack** | `tune` | `Btun` | `com.lt3audio.bmotunert` | `.bmotune` |
 | LTV Comp -- **not a BMO product** | `ltvcomp` | `Ltvc` | `com.lt3audio.ltvcomp` | `.ltvcomp` (reads `.bmovcomp`) |
@@ -142,10 +143,46 @@ lanes; the module's first 32 parameters take them and the rest are kept in
 the slot's state, off the host grid -- see `modules/AGENTS.md`, step 2. Which
 32 is Frosty's allocation, recorded in `modules/deq/params.h`.
 
-It is also the one module with **two widths**: 320 compact and 600 full. A
+It was the first module with **two widths**: 320 compact and 600 full. A
 rack opens it compact and standalone opens it full; the switch between them
 is on the host's bar, not on the panel (`ModuleDef::expandedWidth`,
-`ui::ExpandButton`). See `modules/deq/AGENTS.md`.
+`ui::ExpandButton`). See `modules/deq/AGENTS.md`. BMO Dwell was the second, at 280
+and 840 with an arrow on its own panel, until 2026-10-01; it is now BMO
+Linger's paged handheld at one width, 380, like Linger itself -- see
+`modules/dwell/AGENTS.md`. **DEQ is the only module with two widths.**
+
+**BMO Dwell is jade `#46c988`, inside the band and on the suite's own inks**
+(Frosty, 2026-10-01): **6.42:1** on `#2e2e32` and **1.83:1** on `#efefef`,
+measured off a rendered knob face with `Inspect.exe`. Its light-mode ink is the
+derived one (`#2a7851` on the pale plate), its lit buttons take the accent and
+its choice rows the utility azure, as every module's do.
+
+**It is the rack's tightest new pair, and that is known.** At 150.0 degrees it
+sits in the widest gap left -- 21.1 from BMO Util's green and 22.0 from BMO
+DEQ's teal -- under the 26.8 the teal and the utility azure already live with.
+On the dark plate the renders read it apart from both; on the pale plate the
+three greens read close. Chosen anyway, side by side with Util, over the
+alternative below.
+
+**How it got here, so it is not walked again.** The orchid `#f094e6`
+(2026-09-21) until BMO Linger merged at `#e694e0`, 2.1 degrees away. Then, the
+same day, **a bright yellow `#f8d030`** -- 9.05 / 1.30, out of band at both ends
+-- with a declared charcoal light-mode ink and cheek-red buttons, built,
+committed and reverted for jade on a side-by-side render. Indigo `#baa8f8` read
+as Dimension's lavender, violet `#e198f4` as Linger's family, and an in-band
+mustard `#d8ae06` lost what made the yellow worth having. The olive-gold
+`#b2bb54` and the pale gold `#e6e278` stay rejected.
+
+**`ui::declareLightInk` stays in core** -- an accent may name its own ink on a
+light ground, for every caption, track, mark and legend `accentInk` colours --
+because themes will want it. No module declares one today, and
+`tests/ui/LayoutTests.cpp` checks that Dwell does not.
+
+**"Dwell" is cleared to ship on a USPTO search alone** (`docs/delay/20`):
+no live mark in audio software or musical instruments; the nearest live class 9
+mark is a home-design media brand. EU, UK, WIPO and unregistered use were not
+checked. Frosty accepted that residual risk on 2026-09-21 and released the row
+above, which is permanent from here.
 
 **BMO Defang** is the de-esser, and the row above is its identity. `Bdes` was
 reserved here as "de-esser" and is spent on it. The module id stays `deesser`
@@ -237,12 +274,16 @@ of each; allocate them in the identity table above, not here.
 | `Blim` | **Limiter** | A ceiling-style limiter. Decide early whether it is true-peak and whether it uses lookahead; both bear on latency reporting. |
 | `Bclp` | **Clipper** | A hard/soft clipper. Distinct from `Bovr` (character) and `Blim` (ceiling by gain reduction): it shapes peaks by waveshaping. Oversampling is the main design question. |
 | `Bdyn` | dynamics (generic) | Left reserved with no brief. Largely superseded by the compressor, gate/expander and limiter slots above; retire it or give it a purpose before the next allocation. |
-| `Bdly` | delay | Being built as BMO Dwell (PR 35). Leave this row for that PR to remove when it allocates the code. |
 
-**`Bdes` is not on that list and must not go back on it.** The BMO FET change
-re-listed it as reserved "de-esser" while the table two sections up already
-gives it to BMO Defang; the table is right. Three codes have now been spent off
-the reserved list -- `Bdes`, `Bfet`, `Brvb` -- and the seven in the table above
+
+**`Bdes` and `Bdly` are not on that list and must not go back on it.** The BMO
+FET change re-listed `Bdes` as reserved "de-esser" while the table two sections
+up already gives it to BMO Defang, and BMO Linger's branch still carried `Bdly`
+"delay" when it merged beside BMO Dwell, which allocated it on 2026-09-21. The
+table is right both times: a code is reserved *or* in the table, never both,
+and a merge that unions two edits of this list re-reserves whatever each side
+spent. Four codes have now been spent off the reserved list -- `Bdes`, `Bfet`,
+`Brvb`, `Bdly` -- and the six in the table above
 are what is left.
 
 ## BMO EQ and BMO DEQ — settle BMO EQ's name
@@ -376,6 +417,7 @@ there are distinguishable ones.
 | *(not an accent)* utility azure `#4fb8e8` | | 198.8° | 6.02 | -- |
 | BMO DEQ | `#5ecfc0` teal | 172.0° | **7.19** | 1.64 |
 | BMO Defang | `#ea9f9a` muted coral | 3.8° | 6.39 | 1.84 |
+| BMO Dwell | `#46c988` jade | 150.0° | 6.42 | 1.83 |
 | BMO Linger | `#e694e0` mauve-orchid | 304.4° | 6.23 | 1.89 |
 | BMO Tune RT (not in the rack) | `#b6e35d` lime | 80.1° | **9.10** | **1.29** |
 | LTV Comp -- **unsigned, and on the LTV ground** | `#a2a8ff` periwinkle | 236.1° | 6.17 | 1.91 |

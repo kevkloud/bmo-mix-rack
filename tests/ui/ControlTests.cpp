@@ -321,6 +321,43 @@ int main()
         inner.removeChildComponent (&character);
     }
 
+    //== A declared light-ground ink ===========================================
+    //
+    // `ui::declareLightInk`: an accent may name its own ink on a light ground,
+    // and `accentInk` hands it back there -- and only there. Asserted with an
+    // accent no module uses, so this checks the mechanism, not a module.
+    {
+        using namespace bmo::ui;
+
+        const juce::Colour accent  { 0xff12ab34 };
+        const juce::Colour ink     { 0xff3a3a3e };
+        const juce::Colour pale    { 0xffefefef };
+        const juce::Colour screen  { 0xff464649 };   // meterFace: dark in both appearances
+        const juce::Colour other   { 0xff56ab12 };
+
+        overrideAppearance (false);
+
+        const auto derivedBefore = accentInk (accent, pale);
+        check (declaredLightInk (accent).isTransparent(), "an accent declares no ink until it is told to");
+
+        declareLightInk (accent, ink);
+
+        check (declaredLightInk (accent) == ink, "the declared ink is the one read back");
+        check (accentInk (accent, pale) == ink, "light appearance, light ground: the declared ink");
+        check (accentInk (accent, pale) != derivedBefore, "and it replaced the derived one");
+        check (accentInk (accent, screen) != ink,
+               "a dark ground in the light appearance keeps the derived ink -- the screen face is dark");
+        check (declaredLightInk (other).isTransparent(), "an accent that declared nothing is untouched");
+
+        overrideAppearance (true);
+        check (accentInk (accent, pale) != ink, "the dark appearance never takes the light-ground ink");
+
+        // Declaring again replaces rather than adding a second entry.
+        declareLightInk (accent, juce::Colour (0xff202020));
+        overrideAppearance (false);
+        check (accentInk (accent, pale) == juce::Colour (0xff202020), "a second declaration replaces the first");
+    }
+
     if (failures == 0)
         std::cout << "All ui control tests passed.\n";
 

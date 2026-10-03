@@ -35,13 +35,27 @@ unit. The ones that decide what this sounds like are the cell's
 voicings — and `kRatioThresholdDb`, which sets where the compressor starts and
 which every drive figure in the spec rides on.
 
-**Three things in the implementation are not what a first reading of the spec
+**Four things in the implementation are not what a first reading of the spec
 suggests, and each one was arrived at by measuring the version that was.**
 They are commented at length where they live, because each is a trap that
 looks correct and measures wrong: the release branch condition in
 `Detector.h::ReleaseStage::tick`, the plateau's envelope in
-`Calibration.h::kAllButtonsPlateauEnvelopeMs`, and the algebraic rather than
-`tanh` curve in `Stages.h::SoftStage`.
+`Calibration.h::kAllButtonsPlateauEnvelopeMs`, the algebraic rather than
+`tanh` curve in `Stages.h::SoftStage`, and where all-buttons' lag sits.
+
+**The lag sits after the attack one-pole, each with its own state, and it is
+the control's rise** (`Detector.h::ControlLag`, `DspCore.h::processFrame`):
+the attack stage follows the demand, the control rises toward it through the
+lag, and the release branches own the fall. Two one-poles that share one state
+are not two one-poles: each sample then moves by `alpha*(1 - L)`, a product of
+two per-sample steps, which is no time constant at any rate and shrinks with
+the square of it. That is how it was until 2026-10-03, and all-buttons' timing
+moved with the sample rate and the OVERSAMPLING choice (a DC step at attack 1:
+6.92 dB after 10 ms at 48 kHz, 4.42 at 192). Put the lag after the release's
+hold instead and one sample's peak is held at full value, so a single sample
+sets the reduction for a release time. The collapse it works with is keyed on
+this sample's level, not the previous sample's, for the same reason.
+`testAllButtonsTimingIsRateFree` fails if any of this comes back.
 
 Everything around the DSP was already real and shipped-shaped: the parameter
 schema is permanent, the panel is the panel, the registration is complete, and

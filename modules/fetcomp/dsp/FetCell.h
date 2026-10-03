@@ -142,11 +142,23 @@ struct SidechainState
     No iteration and no unit delay. `alpha = 1` is legal, which is what makes
     the 20 microsecond attack work at base rate: there the solve collapses to
     the static curve and delivers the correct steady-state gain on the **first
-    sample**, with no overshoot. */
-inline double solveCellOutput (double m, const CellState& s, const SidechainState& sc) noexcept
+    sample**, with no overshoot.
+
+    `solveCellOutputThrough` is the same solve written for a loop whose
+    applied control is not the attack one-pole's own state -- all-buttons,
+    where the lag stands between them. All the quadratic needs is how the
+    control the divider will apply this sample splits: `heldControl`, the part
+    that does not depend on this sample's demand (`(1-alpha)*c-` above), and
+    `step`, the fraction of the demand that reaches it (`alpha` above). Behind
+    a lag with survivor `L`, rising from control `c-` toward an attack stage
+    at `x-`, they are `L*c- + (1-L)*(1-alpha)*x-` and `(1-L)*alpha`. Solving
+    with the attack's own split instead predicts a reduction the divider is
+    not going to apply, by an amount that depends on the rate. */
+inline double solveCellOutputThrough (double m, const CellState& s, const SidechainState& sc,
+                                      double heldControl, double step) noexcept
 {
     const auto k = kCellConductance * s.factor;
-    const auto held = 1.0 + k * (s.bias + (1.0 - sc.attack) * s.control);
+    const auto held = 1.0 + k * (s.bias + heldControl);
 
     // Below threshold the sidechain is simply not asking for anything, and the
     // quadratic -- which assumes it is -- has to be discarded. Two evaluations
@@ -156,8 +168,8 @@ inline double solveCellOutput (double m, const CellState& s, const SidechainStat
         return held > 0.0 ? m / held : m;
     };
 
-    const auto b = k * sc.attack * sc.gain * sc.rectPole;
-    const auto a = held + k * sc.attack * sc.gain
+    const auto b = k * step * sc.gain * sc.rectPole;
+    const auto a = held + k * step * sc.gain
                             * ((1.0 - sc.rectPole) * s.rectifier - sc.threshold);
 
     double v;
@@ -185,6 +197,12 @@ inline double solveCellOutput (double m, const CellState& s, const SidechainStat
         return belowThreshold();
 
     return v;
+}
+
+/** The solve for the four ratios, whose attack one-pole is the control. */
+inline double solveCellOutput (double m, const CellState& s, const SidechainState& sc) noexcept
+{
+    return solveCellOutputThrough (m, s, sc, (1.0 - sc.attack) * s.control, sc.attack);
 }
 
 } // namespace bmo::fetcomp

@@ -34,8 +34,17 @@ inline constexpr double kSmoothingMs = 10.0;
     asked for while one is in progress waits for it, then crosses over from
     there: the latest choice wins, at most one crossover late. DYN and
     direction blend two gain laws rather than two filters, so they simply
-    turn round from where they are. */
+    turn round from where they are. A shape goes out to nothing and comes
+    in from nothing in series rather than as a blend of two outputs, which
+    can cancel (Band, DspCore::designAt). */
 inline constexpr double kSwitchFadeMs = 10.0;
+
+/** A change of shape takes this long: the shape leaving goes to nothing while
+    the one arriving comes from nothing, in series (DspCore::designAt). Twice
+    a switch, because what changes is two whole filters at once -- up to 24 dB
+    of gain and half a turn of phase at the band's frequency -- and the step
+    bound has to hold through all of it. */
+inline constexpr double kShapeChangeMs = 20.0;
 
 /** A dynamic band is only redesigned when its gain offset has moved by more
     than this since the last design. Static settings are always followed
@@ -289,17 +298,21 @@ private:
         dsp::Ramp dynMix, dirMix, placeMix;
         Placement placement = Placement::stereo, fromPlacement = Placement::stereo;
 
-        // The band's shape crossover: the filter as it was (coefficients
-        // frozen, state running on) fading out under the new one. The new one
-        // starts from the old one's state at the moment of the switch -- the
-        // same input at the same moment, through poles at the same frequency
-        // -- which is neither rest (a start-up transient the size of the
-        // signal) nor anything it heard before.
-        dsp::Ramp shapeMix;
-        Shape     shape = Shape::bell;  // the shape the filter is running
-        SvfCoeffs oldCoeffs;
-        SvfTaps   oldTaps;
+        // A change of shape (DspCore::designAt): the shape leaving and the
+        // shape arriving run in series, the one leaving going to nothing
+        // while the one arriving comes from nothing, so the band is the
+        // product of two filters and never a sum that can cancel. The one
+        // leaving keeps its state and runs on; the one arriving starts from
+        // rest at nothing -- a 0 dB design, or a cut wholly blended with its
+        // input -- whose output is its input whatever its state, so it has
+        // no start-up transient and nothing stale to replay.
+        dsp::Ramp shapeMix;             // how far the arriving shape has come
+        Shape     shape = Shape::bell;  // the shape arriving, or running
+        Shape     oldShape = Shape::bell;
+        double    oldGainDb = 0.0, oldHz = 1000.0, oldQ = 0.707;  // the leaving shape as it left
+        SvfCoeffs oldCoeffs, oldNext, oldStep;
         SvfState  oldM, oldS;
+        float     designedAmount = 1.0f;
 
         // What `next` was designed from, so a static band is not redesigned.
         Shape  designedShape = Shape::bell;
@@ -312,6 +325,15 @@ private:
     void processImpl (Sample* const* channels, int numChannels, int numSamples) noexcept;
 
     void controlTick() noexcept;
+
+    /** A design of `shape` a fraction `amount` of the way from nothing to its
+        settings, for a change of shape. A bell or shelf scales its gain in
+        dB, so it goes through the same filters its GAIN knob would. A cut,
+        which has no gain, moves its corner from the edge of the band (5 Hz
+        for a Low Cut, 0.499 fs for a High Cut) to its frequency on a log
+        scale, and is blended with its input over the first fifth of the way
+        (cutWeight); at an amount of 1 it is the band's ordinary design. */
+    SvfCoeffs designAt (Shape shape, double hz, double q, double gainDb, float amount) const noexcept;
 
     /** Back to rest: the band's filter always, its listener too when asked. */
     void resetBand (Band& b, bool listenerToo) noexcept;

@@ -2030,6 +2030,244 @@ namespace
             checkAtMost (worst, 0.05, std::string ("Cut peak: ") + route.name + ", every sample for 50 ms");
         }
     }
+
+    //==========================================================================
+    // Level through a switch. A blend of two different filters' outputs can
+    // cancel where they are out of phase, so a switch that does not step can
+    // still leave a hole: the transition is measured on its level, not only
+    // on its steps.
+    //==========================================================================
+
+    /** 0.5 s of a tone at `hz`, sin on the left and cos on the right, through
+        band 1 at 1 kHz set up by `base` and `from`, with `to` applied at the
+        block nearest 0.2 s (blocks of 64). While both channels see the same
+        processing, hypot (L, R) of the output is the magnitude of the
+        response to a complex tone -- an exact envelope, sample by sample,
+        through anything time-varying. Returns its square. */
+    std::vector<double> envelopeThrough (double rate, double hz, Values p, const Setter& from, const Setter& to,
+                                         size_t& flip, bool contributionOnly = false)
+    {
+        constexpr size_t block = 64;
+        const auto n = (size_t) (0.5 * rate) / block * block;
+        flip = (size_t) (0.2 * rate) / block * block;
+
+        std::vector<float> l (n), r (n);
+        for (size_t i = 0; i < n; ++i)
+        {
+            l[i] = (float) (0.1 * std::sin (2.0 * kPi * hz * (double) i / rate));
+            r[i] = (float) (0.1 * std::cos (2.0 * kPi * hz * (double) i / rate));
+        }
+        const auto inL = l, inR = r;
+
+        DeqDsp d;
+        from (p, d);
+        d.setParams (p.v.data(), (int) p.v.size());
+        d.prepare (rate, (int) block, 2);
+
+        for (size_t pos = 0; pos < n; pos += block)
+        {
+            if (pos == flip) to (p, d);
+            d.setParams (p.v.data(), (int) p.v.size());
+            float* ch[2] { l.data() + pos, r.data() + pos };
+            d.process (ch, 2, (int) block);
+        }
+
+        std::vector<double> e2 (n);
+        for (size_t i = 0; i < n; ++i)
+        {
+            const auto a = (double) l[i] - (contributionOnly ? (double) inL[i] : 0.0);
+            const auto b = (double) r[i] - (contributionOnly ? (double) inR[i] : 0.0);
+            e2[i] = a * a + b * b;
+        }
+        return e2;
+    }
+
+    double meanDb (const std::vector<double>& e2, size_t from, size_t to)
+    {
+        double s = 0.0;
+        for (size_t i = from; i < to; ++i) s += e2[i];
+        return 10.0 * std::log10 (std::max (s / (double) (to - from), 1.0e-300));
+    }
+
+    /** The lowest 2 ms mean level in the 40 ms after the flip, against the
+        lower of the steady levels before it and after it settles, dB. */
+    double worstHoleDb (const std::vector<double>& e2, size_t flip, double rate)
+    {
+        const auto w = (size_t) (0.002 * rate);
+        const auto before = meanDb (e2, flip - (size_t) (0.05 * rate), flip);
+        const auto after  = meanDb (e2, flip + (size_t) (0.1 * rate), flip + (size_t) (0.15 * rate));
+        double lowest = 1.0e9;
+        for (size_t i = flip; i + w <= flip + (size_t) (0.04 * rate); i += 4)
+            lowest = std::min (lowest, meanDb (e2, i, i + w));
+        return lowest - std::min (before, after);
+    }
+
+    /** A change of shape leaves no hole: for every ordered pair of shapes, at
+        the band's frequency and at 0.66 and 1.5 times it, with gains of -24,
+        0 and +24 dB and Q 0.71 and 2, the lowest 2 ms level during the change
+        is within 3 dB of the lower of the two steady levels, and no step
+        passes 1.5x. 3 dB is what an equal-gain blend of two signals in
+        quadrature gives; the worst measured is printed (1.39 dB on
+        2026-10-03, a -24 dB bell at Q 2 changed to a Low Cut, at 0.66 f0).
+
+        Round 2 of the review (2026-10-03): the shape crossover blended the
+        two filters' outputs, which cancel where they are out of phase -- Low
+        Cut against High Cut at the same corner is exact anti-phase there, a
+        full null at mid-fade; a -24 dB bell against a Low Cut reached -88.7 dB
+        at 0.66 f0. The step was gone and a 10 ms notch had replaced it. */
+    void testShapeChangeLeavesNoHole()
+    {
+        const double rate = 48000.0;
+        double worstAll = 0.0;
+
+        for (int a = 0; a < 5; ++a)
+            for (int b = 0; b < 5; ++b)
+            {
+                if (a == b)
+                    continue;
+
+                double worstPair = 0.0, worstStep = 0.0;
+                std::string where;
+
+                for (float gain : { -24.0f, 0.0f, 24.0f })
+                    for (float q : { 0.71f, 2.0f })
+                        for (double m : { 1.0, 0.66, 1.5 })
+                        {
+                            Values p;
+                            p.at (0, Control::on) = 1.0f;      p.at (0, Control::freq) = 1000.0f;
+                            p.at (0, Control::gain) = gain;    p.at (0, Control::q) = q;
+
+                            size_t flip = 0;
+                            const auto e2 = envelopeThrough (rate, 1000.0 * m, p,
+                                                             [a] (Values& v, DeqDsp&) { v.at (0, Control::shape) = (float) a; },
+                                                             [b] (Values& v, DeqDsp&) { v.at (0, Control::shape) = (float) b; }, flip);
+
+                            const auto hole = worstHoleDb (e2, flip, rate);
+                            const auto bound = -3.0;
+
+                            const auto label = std::string (kShapeNames[a]) + " to " + kShapeNames[b] + ", gain "
+                                             + std::to_string ((int) gain) + ", Q " + std::to_string (q) + ", at "
+                                             + std::to_string (m) + " f0";
+                            check (hole >= bound, "Shape change: no hole deeper than " + std::to_string ((int) -bound)
+                                                  + " dB under the lower level, " + label + " -- got " + std::to_string (hole));
+
+                            if (hole < worstPair) { worstPair = hole; where = label; }
+
+                            // And no step, measured the house way on a real tone.
+                            const Switch sw { label,
+                                [a, gain, q] (Values& v, DeqDsp&) { v.at (0, Control::shape) = (float) a; v.at (0, Control::freq) = 1000.0f;
+                                                                    v.at (0, Control::gain) = gain; v.at (0, Control::q) = q; },
+                                [b] (Values& v, DeqDsp&) { v.at (0, Control::shape) = (float) b; } };
+                            const auto step = stepRatio (renderSwitch (rate, (float) (1000.0 * m), 0.3, sw, (size_t) -1), rate);
+                            worstStep = std::max (worstStep, step);
+                            checkAtMost (step, 1.5, "Shape change: no step, " + label);
+                        }
+
+                worstAll = std::min (worstAll, worstPair);
+                std::cout << "  shape " << kShapeNames[a] << " to " << kShapeNames[b] << ": worst hole " << worstPair
+                          << " dB (" << where << "), worst step " << worstStep << "x\n";
+            }
+
+        std::cout << "  shape changes, worst hole over every pair: " << worstAll << " dB\n";
+    }
+
+    /** Solo is bounded, not fixed. It crosses between two different signals
+        -- the whole EQ, H x, and one band's contribution, (H - 1) x -- which
+        cancel wherever H is real and between 0 and 1, a cutting bell at its
+        own frequency, at p = H. No blend of the two is free of that: going
+        through the dry signal nulls the same way on its second leg, and
+        going through silence (a Dip) is a hole at every frequency instead of
+        at one. So solo keeps its 10 ms blend, and what is held here is its
+        bound: the output under 3 dB below the lower steady level for no more
+        than 11 ms, a -6 dB bell at its own frequency. */
+    void testSoloHoleIsBounded()
+    {
+        const double rate = 48000.0;
+        Values p;
+        p.at (0, Control::on) = 1.0f; p.at (0, Control::shape) = 0.0f; p.at (0, Control::freq) = 1000.0f;
+        p.at (0, Control::gain) = -6.0f; p.at (0, Control::q) = 1.0f;
+
+        for (int from : { -1, 0 })
+        {
+            const int to = from < 0 ? 0 : -1;
+            size_t flip = 0;
+            const auto e2 = envelopeThrough (rate, 1000.0, p, [from] (Values&, DeqDsp& d) { d.setSolo (from); },
+                                             [to] (Values&, DeqDsp& d) { d.setSolo (to); }, flip);
+
+            const auto lower = std::min (meanDb (e2, flip - (size_t) (0.05 * rate), flip),
+                                         meanDb (e2, flip + (size_t) (0.1 * rate), flip + (size_t) (0.15 * rate)));
+            size_t under = 0;
+            for (size_t i = flip; i < flip + (size_t) (0.04 * rate); ++i)
+                if (10.0 * std::log10 (std::max (e2[i], 1.0e-300)) < lower - 3.0)
+                    ++under;
+
+            checkAtMost ((double) under / rate * 1000.0, 11.0,
+                         std::string ("Solo: ") + (from < 0 ? "on" : "off") + " dips for no more than 11 ms");
+        }
+    }
+
+    /** Placement crosses over in the band's contribution, (1 - p) w_from +
+        p w_to, and Mid and Side contributions of a channel are the shares
+        (H - 1)(L + R) / 2 and (H - 1)(L - R) / 2. Their angle is 90 degrees or
+        less whenever the channel's own content is at least the other's
+        (Re (L+R)(L-R)* = |L|^2 - |R|^2), and then the blend dips at most 3 dB
+        under the lower of the two: pinned here for the louder channel. For
+        the quieter channel the two shares can be opposed and the
+        contribution can pass through zero on its way from one share to the
+        other; the band's output there stays the channel itself plus a small
+        contribution, and this is left as it is. */
+    void testPlacementDipIsBounded()
+    {
+        const double rate = 48000.0;
+        constexpr size_t block = 64;
+        const auto n = (size_t) (0.5 * rate) / block * block, flip = (size_t) (0.2 * rate) / block * block;
+
+        for (int a = 0; a < 3; ++a)
+            for (int b = 0; b < 3; ++b)
+            {
+                if (a == b)
+                    continue;
+
+                // Two renders in quadrature: the left channel's contribution
+                // as a complex envelope, left louder than right.
+                std::vector<double> parts[2];
+                for (int quad = 0; quad < 2; ++quad)
+                {
+                    std::vector<float> l (n), r (n);
+                    for (size_t i = 0; i < n; ++i)
+                    {
+                        const auto ph = 2.0 * kPi * 1000.0 * (double) i / rate + (quad ? kPi / 2.0 : 0.0);
+                        l[i] = (float) (0.1 * std::sin (ph));
+                        r[i] = (float) (0.05 * std::sin (ph + 1.0));
+                    }
+                    const auto inL = l;
+
+                    Values p;
+                    p.at (0, Control::on) = 1.0f; p.at (0, Control::shape) = 0.0f; p.at (0, Control::freq) = 1000.0f;
+                    p.at (0, Control::gain) = 12.0f; p.at (0, Control::q) = 1.0f; p.at (0, Control::place) = (float) a;
+
+                    DeqDsp d;
+                    d.setParams (p.v.data(), (int) p.v.size());
+                    d.prepare (rate, (int) block, 2);
+                    for (size_t pos = 0; pos < n; pos += block)
+                    {
+                        if (pos == flip) p.at (0, Control::place) = (float) b;
+                        d.setParams (p.v.data(), (int) p.v.size());
+                        float* ch[2] { l.data() + pos, r.data() + pos };
+                        d.process (ch, 2, (int) block);
+                    }
+
+                    parts[quad].resize (n);
+                    for (size_t i = 0; i < n; ++i) parts[quad][i] = (double) l[i] - (double) inL[i];
+                }
+
+                std::vector<double> e2 (n);
+                for (size_t i = 0; i < n; ++i) e2[i] = parts[0][i] * parts[0][i] + parts[1][i] * parts[1][i];
+
+                checkAtMost (-worstHoleDb (e2, flip, rate), 3.0, std::string ("Placement: ") + kPlaceNames[a] + " to "
+                             + kPlaceNames[b] + " dips the louder channel's contribution by 3 dB at most");
+            }
+    }
 }
 
 int main()
@@ -2054,6 +2292,9 @@ int main()
     testProcessBeforePrepare();
     testUnusedBandsCostNothing();
     testCutNeverResonates();
+    testShapeChangeLeavesNoHole();
+    testSoloHoleIsBounded();
+    testPlacementDipIsBounded();
 
     if (failures == 0)
         std::cout << "deq_dsp: all passed\n";

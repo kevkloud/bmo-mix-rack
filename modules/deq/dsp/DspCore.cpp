@@ -102,6 +102,11 @@ namespace
         }
     }
 
+    /** Butterworth: a shelf leaving or arriving in a change of shape takes
+        its Q toward this, so its own resonance does not dip or bump the
+        level on the way (DspCore::designAt). */
+    constexpr double kPlainQ = 0.7071067811865476;
+
     /** The Q a design of `shape` uses: a cut's stops at `cutMaxQ`
         (Settings::cutMaxQ). */
     double designQ (Shape shape, double q, double cutMaxQ) noexcept
@@ -135,8 +140,12 @@ void DspCore::prepare (double sampleRate, int, int) noexcept
     shared->post.prepare ((int) (0.35 * rate));
 
     for (auto& b : bands)
-        for (auto* r : { &b.dynMix, &b.dirMix, &b.placeMix, &b.shapeMix })
+    {
+        for (auto* r : { &b.dynMix, &b.dirMix, &b.placeMix })
             r->prepare (rate, kSwitchFadeMs);
+
+        b.shapeMix.prepare (rate, kShapeChangeMs);
+    }
 
     soloMix.prepare (rate, kSwitchFadeMs);
 
@@ -250,7 +259,7 @@ void DspCore::controlTick() noexcept
         b.hearing = true;
 
         const auto hz = std::exp2 (b.logHz.tick);
-        const auto q  = std::exp (b.logQ.tick);
+        auto q = std::exp (b.logQ.tick);
 
         {
             const auto& d = s.dynamics;
@@ -333,8 +342,9 @@ void DspCore::controlTick() noexcept
         // enable fade glides, from silence.
         const auto snapControls = snapAll || waking;
 
-        // A new shape crosses over from the filter in use (Band); one asked
-        // for during a crossover waits for it to finish.
+        // A new shape: the one in use leaves to nothing while the new one
+        // arrives from nothing, in series (Band). One asked for during a
+        // change waits for it to finish.
         auto crossing = false;
 
         if (snapControls)
@@ -344,20 +354,45 @@ void DspCore::controlTick() noexcept
         }
         else if (s.shape != b.shape && ! b.shapeMix.isMoving())
         {
-            b.oldCoeffs = b.next;          // where the glide in progress has arrived
-            b.oldTaps = SvfTaps::of (b.oldCoeffs.g, b.oldCoeffs.k);
-            b.oldM = b.m;
+            b.oldShape = b.shape;
+            b.oldGainDb = hasGain (b.shape) ? clampGainDb (b.designedStatic + b.designedOffset) : 0.0;
+            b.oldHz = b.designedHz;
+            b.oldQ = b.designedQ;
+            b.oldNext = b.next;            // where the glide in progress has arrived
+            b.oldM = b.m;                  // both carry on from the running state
             b.oldS = b.s;
             b.shape = s.shape;
             b.shapeMix.snap (0.0f);
             b.shapeMix.setTarget (1.0f);
             crossing = true;
+
+            // And at its own Q: a Q still gliding from the last shape's -- a
+            // cut's is capped at 0.71 -- would arrive as a different filter.
+            b.logQ.snap (qT);
+            q = std::exp (b.logQ.tick);
+        }
+
+        // How far the arriving shape will have come by the next tick, so the
+        // designs gliding toward it land on nothing and on the full setting
+        // exactly as the change ends.
+        const auto changing = b.shapeMix.isMoving();
+        const auto arrived = changing ? std::min (1.0f, b.shapeMix.value() + (float) kControlInterval / (float) b.shapeMix.lengthInSamples())
+                                      : 1.0f;
+
+        if (changing)
+        {
+            b.oldCoeffs = b.oldNext;
+            b.oldNext = designAt (b.oldShape, b.oldHz, b.oldQ, b.oldGainDb, 1.0f - arrived);
+            b.oldStep = perSampleStep (b.oldCoeffs, b.oldNext);
         }
 
         const auto gain = hasGain (b.shape);
         const auto gT   = gain ? clampGainDb (s.gainDb) : 0.0;
 
-        beginInterval (b.gainDb, gT, tickAlpha, snapControls);
+        // A shape arriving starts at its own gain: its amount is the fade, and
+        // a gain still gliding from the last shape's would put a second, later
+        // fade on top of it.
+        beginInterval (b.gainDb, gT, tickAlpha, snapControls || crossing);
         beginInterval (b.enable, s.enabled ? 1.0 : 0.0, tickAlpha, snapAll);
         b.live = true;
 
@@ -365,24 +400,27 @@ void DspCore::controlTick() noexcept
         b.cur = b.next;
 
         const auto staticChanged = b.shape != b.designedShape || hz != b.designedHz || q != b.designedQ
-                                || b.gainDb.tick != b.designedStatic;
+                                || b.gainDb.tick != b.designedStatic || arrived != b.designedAmount;
         const auto offsetMoved = std::abs (b.offsetDb - b.designedOffset) > kOffsetHysteresisDb
                               || (b.offsetDb == 0.0 && b.designedOffset != 0.0);
+        const auto gainNow = gain ? clampGainDb (b.gainDb.tick + b.offsetDb) : 0.0;
 
         if (staticChanged || offsetMoved)
         {
-            const auto gainNow = gain ? clampGainDb (b.gainDb.tick + b.offsetDb) : 0.0;
-            b.next = SvfCoeffs::fromBiquad (designMatched (b.shape, hz, designQ (b.shape, q, current.cutMaxQ), gainNow, grid));
+            b.next = designAt (b.shape, hz, q, gainNow, arrived);
             b.designedShape = b.shape; b.designedHz = hz; b.designedQ = q;
             b.designedStatic = b.gainDb.tick; b.designedOffset = b.offsetDb;
+            b.designedAmount = arrived;
         }
 
         b.appliedGainDb = gain ? clampGainDb (b.designedStatic + b.designedOffset) : 0.0;
 
-        // The incoming shape starts at its own design: the crossover is the
-        // glide.
-        if (snapControls || crossing)
+        // A band waking starts at its design; a shape arriving starts at
+        // nothing and glides toward the design.
+        if (snapControls)
             b.cur = b.next;
+        else if (crossing)
+            b.cur = designAt (b.shape, hz, q, gainNow, 0.0f);
 
         b.step = perSampleStep (b.cur, b.next);
 
@@ -503,18 +541,32 @@ void DspCore::processImpl (Sample* const* channels, int numChannels, int numSamp
             const auto side = 0.5 * (inL - inR);
 
             const auto taps = SvfTaps::of (b.cur.g, b.cur.k);
-            auto dM = b.m.process (taps, b.cur, mid) - mid;
-            auto dS = stereo ? b.s.process (taps, b.cur, side) - side : 0.0;
+            double dM, dS;
 
-            // Crossing from the shape that was: the outgoing filter runs on
-            // at its last coefficients and fades out under the new one.
-            if (b.shapeMix.isMoving())
+            if (! b.shapeMix.isMoving())
             {
-                const auto shaping = b.shapeMix.next();
-                const auto oldM = b.oldM.process (b.oldTaps, b.oldCoeffs, mid) - mid;
-                const auto oldS = stereo ? b.oldS.process (b.oldTaps, b.oldCoeffs, side) - side : 0.0;
-                dM = blend (oldM, dM, shaping);
-                dS = blend (oldS, dS, shaping);
+                dM = b.m.process (taps, b.cur, mid) - mid;
+                dS = stereo ? b.s.process (taps, b.cur, side) - side : 0.0;
+            }
+            else
+            {
+                // A change of shape: the shape arriving, coming from nothing,
+                // then the shape leaving, going to nothing, in series -- a
+                // product of two filters, which cannot cancel (designAt). The
+                // arriving one hears the band's input and carries on from the
+                // running state; the leaving one keeps its own, which is exactly
+                // right at first, since what it hears starts as that same input.
+                b.shapeMix.next();
+
+                b.oldCoeffs.g  += b.oldStep.g;  b.oldCoeffs.k  += b.oldStep.k;
+                b.oldCoeffs.m0 += b.oldStep.m0; b.oldCoeffs.m1 += b.oldStep.m1; b.oldCoeffs.m2 += b.oldStep.m2;
+                const auto oldTaps = SvfTaps::of (b.oldCoeffs.g, b.oldCoeffs.k);
+
+                const auto inM = b.m.process (taps, b.cur, mid);
+                const auto inS = stereo ? b.s.process (taps, b.cur, side) : 0.0;
+
+                dM = b.oldM.process (oldTaps, b.oldCoeffs, inM) - mid;
+                dS = stereo ? b.oldS.process (oldTaps, b.oldCoeffs, inS) - side : 0.0;
             }
 
             // H(L) - L and H(R) - R, from the M/S pair, crossing from the
@@ -622,6 +674,74 @@ double DspCore::currentGainReductionDb() const noexcept
         }
 
     return deepest;
+}
+
+SvfCoeffs DspCore::designAt (Shape shape, double hz, double q, double gainDb, float amount) const noexcept
+{
+    const auto designedQ = designQ (shape, q, current.cutMaxQ);
+
+    if (! (amount < 1.0f))
+        return SvfCoeffs::fromBiquad (designMatched (shape, hz, designedQ, gainDb, grid));
+
+    const auto a = (double) std::max (amount, 0.0f);
+    SvfCoeffs c;
+
+    if (hasGain (shape))
+    {
+        // A bell or shelf scales its gain in dB, through the filters its GAIN
+        // knob would give. A shelf also takes its Q down to Butterworth on the
+        // way, because a resonant shelf's response at its middle gains sits
+        // up to 4.5 dB under (or, cutting, over) both its setting and flat --
+        // a +12 dB shelf at Q 2 is -4.5 dB at 0.66 f0 where +24 dB is +0.7.
+        auto shapedQ = designedQ;
+
+        if (shape == Shape::lowShelf || shape == Shape::highShelf)
+        {
+            const auto plain = std::min (designedQ, kPlainQ);
+            shapedQ = std::exp (a * std::log (designedQ) + (1.0 - a) * std::log (plain));
+        }
+
+        c = SvfCoeffs::fromBiquad (designMatched (shape, hz, shapedQ, gainDb * a, grid));
+    }
+    else
+    {
+        // A cut has no gain to scale, and blending one with its input can dip:
+        // a second-order cut is in quadrature with its input at its corner.
+        // Instead its poles stay and its zeros walk from where the cut has
+        // them to the poles themselves, where the filter is its input. On
+        // the structure's outputs, x = hp + k bp + lp, so the cut is
+        // (A hp + B bp + C lp) and nothing is (hp + k bp + lp); the hp and lp
+        // weights move with alpha^2 and the bp weight with alpha, which keeps
+        // the numerator's coefficients positive -- its zeros stay in the
+        // left half-plane, off the frequency axis, so there is never a notch
+        // -- and moves the stopband 40 log10 alpha dB. alpha = cos (pi a / 2)
+        // is what keeps the level between the two ends: it is sqrt (1 - a) in
+        // the middle, which measured best for that, without the infinite
+        // slope sqrt has as the cut arrives, which stepped there; 1 - a
+        // stepped less but left 4.9 dB holes (DeqDspTests,
+        // testShapeChangeLeavesNoHole).
+        c = SvfCoeffs::fromBiquad (designMatched (shape, hz, designedQ, 0.0, grid));
+
+        const auto alpha = std::cos (0.5 * kPi * a), alpha2 = alpha * alpha;
+        const auto onHp = c.m0, onBp = c.m1 + c.k * c.m0, onLp = c.m2 + c.m0;
+        const auto hp = onHp + (1.0 - onHp) * alpha2;
+        const auto bp = onBp + (c.k - onBp) * alpha;
+        const auto lp = onLp + (1.0 - onLp) * alpha2;
+
+        c.m0 = hp;
+        c.m1 = bp - c.k * hp;
+        c.m2 = lp - hp;
+    }
+
+    // Nothing is exactly the input, whatever the state, so a shape arriving
+    // from rest has no start-up transient and one leaving can be dropped.
+    if (! (a > 0.0))
+    {
+        c.m0 = 1.0;
+        c.m1 = c.m2 = 0.0;
+    }
+
+    return c;
 }
 
 Biquad DspCore::bandDesign (int band) const noexcept

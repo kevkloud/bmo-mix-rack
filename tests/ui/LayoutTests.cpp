@@ -1826,7 +1826,44 @@ void checkDimPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
         { "DIMENSION 0, TURN 0",            true,  0.0f,   3.0f, 0.0f,  0, 0, 1, 0, 0, 1, 0 },
         { "DIMENSION 0, TURN 30",           true,  0.0f,   3.0f, 30.0f, 0, 0, 1, 0, 0, 1, 1 },
         { "GENERATE off, BLOOM 3, TURN 30", false, 100.0f, 3.0f, 30.0f, 0, 1, 1, 1, 1, 1, 1 },
+
+        // GENERATE on where nothing it makes reaches the output, and off in
+        // the same place: the switch is lit in the first and simply off in
+        // the second, never dimmed (checked below).
+        { "GENERATE on, DIMENSION 0, BLOOM 1",  true,  0.0f, 1.0f, 0.0f, 0, 0, 1, 0, 0, 1, 0 },
+        { "GENERATE off, DIMENSION 0, BLOOM 1", false, 0.0f, 1.0f, 0.0f, 0, 0, 1, 0, 0, 1, 0 },
         { "back to GENERATE off, BLOOM 1",  false, 100.0f, 1.0f, 0.0f,  0, 1, 1, 1, 0, 1, 1 },
+    };
+
+    // GENERATE is never dimmed -- Frosty, 2026-10-03: "don't dim the generate
+    // button if it is active". It is the switch, the way back in; at
+    // DIMENSION 0 it is still on, just not heard. So in every state it is
+    // enabled, not locked, at full alpha, and shows its parameter: lit when
+    // on, plainly off when off, as on main.
+    const auto generateShows = [&] (bool on, const juce::String& where)
+    {
+        auto* sw = dynamic_cast<bmo::ui::SwitchButton*> (findNamed (panel, "GENERATE"));
+
+        if (sw == nullptr)
+        {
+            check (false, who + " has no GENERATE switch");
+            return;
+        }
+
+        juce::ToggleButton* button = nullptr;
+        for (auto* child : sw->getChildren())
+            if (auto* b = dynamic_cast<juce::ToggleButton*> (child))
+                button = b;
+
+        check (button != nullptr, where + " GENERATE has a button");
+
+        if (button == nullptr)
+            return;
+
+        check (sw->isEnabled() && button->isEnabled(), where + " GENERATE is not dimmed");
+        check (sw->getAlpha() == 1.0f && button->getAlpha() == 1.0f, where + " GENERATE is at full strength");
+        check (! sw->isLockedOn(), where + " GENERATE is not locked");
+        check (button->getToggleState() == on, where + " GENERATE shows " + (on ? "on" : "off"));
     };
 
     for (const auto& s : states)
@@ -1855,6 +1892,8 @@ void checkDimPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
         check (D::shuffleIsLive (s.width) == (s.bloomLive == 1),              where + " shuffleIsLive agrees");
         check (D::shuffleFreqIsLive (s.width, s.bloom) == (s.below == 1),     where + " shuffleFreqIsLive agrees");
         check (D::asymmetryIsLive (s.width, s.turn) == (s.tilt == 1),         where + " asymmetryIsLive agrees");
+
+        generateShows (s.generate, where);
     }
 
     checkNear (params.getReal (D::Index::detune),      17.5,  1.0e-3, who + " a dim must not write DETUNE");

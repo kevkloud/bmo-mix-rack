@@ -152,6 +152,11 @@ void DimPanel::refreshDims()
     const auto generate = p.getReal (Index::detuneOn) > 0.5f;
     const auto widthPc  = p.getReal (Index::width);
 
+    // GENERATE itself is never touched here, in any state -- Frosty,
+    // 2026-10-03: "don't dim the generate button if it is active". At
+    // DIMENSION 0 it is still on, just not heard, so it stays lit; switched
+    // off it simply looks off. It is the way back into the stage, so a dim
+    // there would hide the one control that undoes the others' dims.
     cents      .setKnobEnabled (centsIsLive (generate, widthPc));
     diffuse    .setKnobEnabled (diffuseIsLive (widthPc));
     shuffle    .setKnobEnabled (shuffleIsLive (widthPc));

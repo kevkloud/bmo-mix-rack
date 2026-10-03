@@ -926,6 +926,66 @@ int main()
             }
     }
 
+    //== 6c. The knobs glide in the same real time at every host block size =
+    // The band smoothers (frequencies, gains, Hi-Q's glide) and Auto Gain's
+    // target advance once per 32-sample control period, and every process()
+    // call started a period of its own, so a host sending blocks shorter than
+    // 32 ran them faster in proportion -- 32 times at a block of 1. The same
+    // input and the same moves, landing at sample 225792 (441 x 512, a
+    // multiple of 1, 7, 32 and 441 too, so every host delivers them at the
+    // same sample), rendered at blocks 1, 7, 32 and 441 must equal block 512
+    // to the bit, at 44.1 and 48 kHz: every band and frequency, Hi-Q, Mix,
+    // the trims, Auto Gain, Phase, a cut, and the oversampling, all at once.
+    {
+        constexpr size_t sw = 225792;
+
+        DspCore::Params a;
+        a.hfGainDb = -6.0f; a.midGainDb = 4.0f; a.lfGainDb = -3.0f;
+        a.oversampling = 2;
+
+        auto b = a;
+        b.hfFreqIndex = 2;  b.hfGainDb = 12.0f;
+        b.midFreqIndex = 4; b.midGainDb = -15.0f; b.midHiQ = true;
+        b.lfFreqIndex = 3;  b.lfGainDb = 14.0f;
+        b.hpfIndex = 2;     b.mixPercent = 70.0f;
+        b.inputGainDb = 6.0f; b.outputLevelDb = -4.0f;
+        b.autoGain = true;  b.phaseInvert = true;
+        b.oversampling = 4;
+
+        for (double fs : { 44100.0, 48000.0 })
+        {
+            std::vector<float> x (sw + (size_t) (0.4 * fs));
+            for (size_t i = 0; i < x.size(); ++i)
+            {
+                const auto t = (double) i / fs;
+                x[i] = (float) (0.08 * std::sin (2.0 * kPi * 70.0 * t) + 0.05 * std::sin (2.0 * kPi * 1300.0 * t + 0.4)
+                              + 0.03 * std::sin (2.0 * kPi * 9000.0 * t + 1.1));
+            }
+
+            const auto renderAt = [&] (int block)
+            {
+                DspCore core;
+                core.prepare (fs, block, 1, a.oversampling);
+                core.setParams (a);
+                return render (core, x, block, [&] (size_t s) { return s >= sw ? b : a; }, 1);
+            };
+
+            const auto reference = renderAt (512);
+
+            for (int block : { 1, 7, 32, 441 })
+            {
+                const auto y = renderAt (block);
+
+                double worst = 0.0;
+                for (size_t i = sw; i < y.size(); ++i)
+                    worst = std::max (worst, (double) std::abs (y[i] - reference[i]));
+
+                check (worst == 0.0, "every knob moving at block " + std::to_string (block) + ", " + rateName (fs)
+                                         + ", differs from block 512 by " + std::to_string (worst));
+            }
+        }
+    }
+
     //== 7. An oversampling change costs no callback more than both paths ===
     // cd173eb warmed the new path at the bottom of the dip by running it over
     // 141 samples of missed input inside one callback: about 405 us, 242 % of

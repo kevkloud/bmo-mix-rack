@@ -334,6 +334,10 @@ private:
 
     int maxBlock = 0, maxChannels = 0;
     int currentFactor = 0;
+
+    // How far the stream is into the current control period; periods run
+    // across process() calls. See process().
+    int periodPos = 0;
 };
 
 } // namespace bmo::eq

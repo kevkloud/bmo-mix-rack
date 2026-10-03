@@ -224,6 +224,10 @@ void DspCore::reset() noexcept
 
     // Auto Gain starts at its figure for the settings on the next block.
     autoGainPrimed = false;
+
+    // The next sample starts a control period, as the first after prepare()
+    // does.
+    periodPos = 0;
 }
 
 //==============================================================================
@@ -438,11 +442,23 @@ void DspCore::process (float* const* channels, int numChannels, int numSamples) 
         oversamplingDip.cancel();
     }
 
-    for (int start = 0; start < numSamples; start += kSubBlock)
+    // The band smoothers and Auto Gain's target advance once per kSubBlock-
+    // sample control period, and the periods run on the stream rather than on
+    // the host's blocks: one that a block ends inside carries on into the
+    // next call. Until 0.2.6 every call started a period of its own, so a
+    // host sending blocks shorter than kSubBlock ran every glide faster in
+    // proportion -- 32 times at a block of 1. Blocks that are whole multiples
+    // of kSubBlock never ended a period early, so for them nothing changed.
+    // A knob delivered by a block that starts inside a period is read at the
+    // next period's start, at most kSubBlock - 1 samples later; the gains
+    // applied to the audio and the switches' fades act per sample and are
+    // not delayed.
+    for (int start = 0; start < numSamples;)
     {
-        const auto n = std::min (kSubBlock, numSamples - start);
+        if (periodPos == 0)
+            updateCoefficients (activeChannels, kSubBlock);
 
-        updateCoefficients (activeChannels, n);
+        const auto n = std::min (kSubBlock - periodPos, numSamples - start);
 
         // Samples outermost so the shared dry-delay cursor advances once per
         // frame rather than once per channel.
@@ -514,6 +530,9 @@ void DspCore::process (float* const* channels, int numChannels, int numSamples) 
             if (warming)
                 ++warmedSamples;
         }
+
+        periodPos = (periodPos + n) % kSubBlock;
+        start    += n;
     }
 
     running = true;

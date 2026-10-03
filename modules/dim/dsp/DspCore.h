@@ -129,6 +129,20 @@ public:
             i0 %= len; if (i0 < 0) i0 += len;
             auto i1 = i0 + 1; if (i1 >= len) i1 -= len;
 
+            // Linear interpolation, which is a gentle low-pass that moves with
+            // the fraction, and it costs more the closer a frequency is to
+            // the sample rate. Measured on one voice, as RMS against the
+            // input (10 and 25 cents agree to 0.01 dB):
+            //
+            //               44.1 k   48 k    96 k    192 k
+            //     10 kHz   -1.48   -1.23   -0.31   -0.08 dB
+            //     16 kHz   -3.71   -3.01   -0.79   -0.20 dB
+            //
+            // So the generated side is darker at the base rates than at the
+            // high ones. Only the generated side: the mid and any side the
+            // source already had never pass through here. Left as it is on
+            // purpose -- a better interpolator changes the sound of GENERATE
+            // at every rate, which is a voicing decision, not a fix.
             return buffer[(size_t) i0] + frac * (buffer[(size_t) i1] - buffer[(size_t) i0]);
         };
 
@@ -332,6 +346,15 @@ public:
         reset();
     }
 
+    /** Clears every voice, filter and smoother and starts over at the
+        parameters' settings. It is a step, not a fade: called in the middle
+        of a signal it moved the output 13.6x the signal's own largest step
+        with GENERATE on (a mono 220 Hz tone) and 21.3x at BLOOM 3 (220/150 Hz
+        pair). That is acceptable because nothing calls it mid-signal: the
+        engine calls it only when the host releases the plugin
+        (releaseResources), and prepare() calls it before any audio. A host
+        that resumes after releasing starts from silence or from a transport
+        jump, either of which is a discontinuity of its own. */
     void reset()
     {
         up.reset();

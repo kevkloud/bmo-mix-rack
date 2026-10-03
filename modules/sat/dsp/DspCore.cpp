@@ -258,6 +258,12 @@ void DspCore::reset() noexcept
     oversamplingDip.reset();
     running = false;
 
+    // The next sample starts a control period, as the first one after
+    // prepare() does; what the detector had heard of the unfinished one is
+    // dropped with the rest of the stream.
+    periodPos = periodSamples = 0;
+    periodInput = periodProcessed = 0.0;
+
     // Likewise a switch's fade: the stage starts over from rest either way,
     // so the switch is simply where it was going.
     satMix        .snap (satMix.target());
@@ -347,25 +353,46 @@ void DspCore::process (float* const* channelData, int numChannels, int numSample
     const auto polarity = params.phaseInvert ? -1.0f : 1.0f;
     auto factor = currentFactor;
 
-    for (int start = 0; start < numSamples; start += kSubBlock)
+    // The smoothers and Auto Gain's detector advance once per kSubBlock-sample
+    // control period, and the periods run on the stream rather than on the
+    // host's blocks: one that a block ends inside carries on into the next.
+    // Until 0.2.6 every call started a period of its own, so a host sending
+    // blocks shorter than kSubBlock ran every time constant faster in
+    // proportion -- at block 1, Auto Gain's 1.5 s detector acted on 200 ms
+    // sections. Blocks that are whole multiples of kSubBlock never ended a
+    // period early, so for them nothing has changed.
+    for (int start = 0; start < numSamples;)
     {
-        const auto n = std::min (kSubBlock, numSamples - start);
-
-        const auto inGain   = inputGainSm.tick();
-        const auto outGain  = outputLevelSm.tick();
-        const auto makeup   = makeupSm.tick();
-        const auto wet      = mixSm.tick();
-        const auto dryLevel = 1.0f - wet;
-        const auto drive    = driveSm.tick();
-        const auto tone     = toneSm.tick();
-
-        for (int ch = 0; ch < activeChannels; ++ch)
+        if (periodPos == 0)
         {
-            channels[(size_t) ch].setDrive (drive);
-            channels[(size_t) ch].setTone (tone, effectiveRate);
+            held.inGain  = inputGainSm.tick();
+            held.outGain = outputLevelSm.tick();
+            held.makeup  = makeupSm.tick();
+            held.wet     = mixSm.tick();
+            held.drive   = driveSm.tick();
+            held.tone    = toneSm.tick();
+
+            for (int ch = 0; ch < activeChannels; ++ch)
+            {
+                channels[(size_t) ch].setDrive (held.drive);
+                channels[(size_t) ch].setTone (held.tone, effectiveRate);
+            }
+
+            periodInput = periodProcessed = 0.0;
+            periodSamples = 0;
         }
 
-        double blockInput = 0.0, blockProcessed = 0.0;
+        const auto n = std::min (kSubBlock - periodPos, numSamples - start);
+
+        const auto inGain   = held.inGain;
+        const auto outGain  = held.outGain;
+        const auto makeup   = held.makeup;
+        const auto wet      = held.wet;
+        const auto dryLevel = 1.0f - wet;
+        const auto drive    = held.drive;
+        const auto tone     = held.tone;
+
+        double blockInput = periodInput, blockProcessed = periodProcessed;
 
         // Samples outermost so the shared dry-delay cursor advances once per
         // frame rather than once per channel.
@@ -436,7 +463,17 @@ void DspCore::process (float* const* channelData, int numChannels, int numSample
             dryWrite = (dryWrite + 1) % kDryRing;
         }
 
-        updateAutoGain (blockInput, blockProcessed, n * activeChannels);
+        periodInput     = blockInput;
+        periodProcessed = blockProcessed;
+        periodSamples  += n * activeChannels;
+        periodPos      += n;
+        start          += n;
+
+        if (periodPos == kSubBlock)
+        {
+            updateAutoGain (periodInput, periodProcessed, periodSamples);
+            periodPos = 0;
+        }
     }
 
     running = true;

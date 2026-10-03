@@ -336,6 +336,17 @@ private:
 
     Smoother inputGainSm, driveSm, mixSm, outputLevelSm, makeupSm, toneSm;
 
+    // The control period in progress: the smoothed values read at its start,
+    // how far into it the stream is, and what Auto Gain's detector has heard
+    // of it so far. It runs across process() calls; see process().
+    struct Held
+    {
+        float inGain = 1.0f, outGain = 1.0f, makeup = 1.0f, wet = 1.0f, drive = 1.0f, tone = 100.0f;
+    } held;
+
+    int    periodPos = 0, periodSamples = 0;
+    double periodInput = 0.0, periodProcessed = 0.0;
+
     /** Auto Gain's detector: the energy going into the saturation and the
         energy coming out of it, each averaged over about a second and a half.
 

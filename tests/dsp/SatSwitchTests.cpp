@@ -335,6 +335,79 @@ int main()
             }
     }
 
+    //== 3. The same audio at every host block size ==========================
+    // The smoothers and Auto Gain's detector advance once per 32-sample
+    // control period, and a host block shorter than that used to make every
+    // call a period of its own: at block 7 a +12 dB input step had reached
+    // +6.2 dB more 10 ms after it than at block 32, and at block 1 Auto Gain
+    // ran 32 times too fast and acted on 200 ms sections. The control periods
+    // now run on the stream, whatever the host's blocks, so the same input
+    // and the same automation give the same output, sample for sample.
+    // Every parameter moves at once at sample 225792, the least common
+    // multiple of the block sizes, so each host delivers it at the same
+    // sample.
+    {
+        for (double fs : { 44100.0, 48000.0 })
+            for (int scenario = 0; scenario < 3; ++scenario)
+            {
+                constexpr size_t change = 225792;
+
+                std::vector<float> x ((size_t) (5.5 * fs));
+                unsigned seed = 12345u;
+                for (auto& v : x)
+                {
+                    seed = seed * 1664525u + 1013904223u;
+                    v = 0.25f * ((float) (seed >> 8) / 8388608.0f - 1.0f);
+                }
+
+                const auto paramsAt = [&] (size_t s)
+                {
+                    DspCore::Params p;
+                    p.toneAmount = 100.0f;
+                    p.autoGain = scenario != 0;
+                    p.driveAmount = scenario == 1 ? 100.0f : 40.0f;
+
+                    if (scenario != 1 && s >= change)
+                    {
+                        p.inputGainDb   = 12.0f;
+                        p.driveAmount   = 100.0f;
+                        p.toneAmount    = 20.0f;
+                        p.mixPercent    = 60.0f;
+                        p.outputLevelDb = -6.0f;
+                        p.phaseInvert   = true;
+                        p.saturationIn  = scenario == 2;
+                        p.oversampling  = 2;
+                    }
+
+                    return p;
+                };
+
+                const auto renderAt = [&] (int block)
+                {
+                    DspCore core;
+                    core.prepare (fs, 512, 2, 1);
+                    core.setParams (paramsAt (0));
+                    return render (core, x, block, paramsAt, 2);
+                };
+
+                const auto reference = renderAt (512);
+                const char* names[] { "everything moves", "Auto Gain at Drive 100", "Auto Gain while everything moves" };
+
+                for (int block : { 1, 7, 32, 441 })
+                {
+                    const auto y = renderAt (block);
+
+                    double worst = 0.0;
+                    for (size_t i = 0; i < y.size(); ++i)
+                        worst = std::max (worst, (double) std::abs (y[i] - reference[i]));
+
+                    check (worst == 0.0, std::string (names[scenario]) + " at block " + std::to_string (block)
+                                             + ", " + rateName (fs) + " differs from block 512 by "
+                                             + std::to_string (worst));
+                }
+            }
+    }
+
     if (failures == 0)
         std::cout << "All Saturator switch tests passed.\n";
 

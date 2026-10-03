@@ -454,10 +454,19 @@ const Golden kSwept[]
       -11.7600009264, 0.487929016352,
       -17.4087591686, 0.290588617325, -14.7933936813, 0.392687320709,
       -14.3753664302, 0.361067473888, -11.7600009264, 0.487929016352 },
+    // Regenerated on ICE QUEEN, 2026-10-03, for this row and the rack row
+    // alone. 0.63 turns Auto Gain on, and its compensation for this setting is
+    // +2.28 dB (the cuts at 160 Hz and 10 kHz take more of the band than the
+    // boosts add). Auto Gain used to start from unity after prepare() and
+    // glide there over about 60 ms of this 85 ms render; it now starts at its
+    // figure (bdd8c37), so the render is louder: mono and L RMS -15.594 ->
+    // -15.122 dB (+0.472), peak 0.45324 -> 0.46397; stereo R RMS -7.209 ->
+    // -6.818 dB (+0.392), peak 0.90254 -> 0.94871. No other commit on the
+    // branch moved this row, and the defaults rows are byte-identical.
     { "eq",
-      -15.5938930361, 0.453235358,
-      -15.5938930361, 0.453235358, -7.20944735724, 0.902541100979,
-      -15.5938930361, 0.453235358, -15.5938930361, 0.453235358 },
+      -15.1218135793, 0.463965445757,
+      -15.1218135793, 0.463965445757, -6.81764535567, 0.948705196381,
+      -15.1218135793, 0.463965445757, -15.1218135793, 0.463965445757 },
     { "sat",
       -7.60426052625, 1.1754732132,
       -8.30132334629, 1.07108569145, -6.68785712242, 1.168405056,
@@ -517,6 +526,15 @@ const Golden kSwept[]
       -29.3107797472, 0.0665621832013,
       -29.3036605172, 0.065762847662, -29.6342359134, 0.064994379878,
       -29.0903900723, 0.0687288194895, -29.5277643484, 0.0643955394626 },
+    // Regenerated with the eq row above, for the same reason: BMO EQ is a slot
+    // in this chain with Auto Gain on, so its first 60 ms now carry the +2.28
+    // dB from the start, and the compressing slots after it turn that into
+    // these moves: RMS -0.028 to -0.041 dB, peaks +0.0023 to +0.0183 (and
+    // -0.0034 / -0.0027 on the duplicated pair). Before, from 6f6b8c3 on ICE
+    // QUEEN:
+    //   -12.3127826311, 1.16622364521,
+    //   -12.0186861044, 1.15730381012, -11.9707005038, 1.15666902065,
+    //   -12.5248895603, 1.1564694643, -12.4650833707, 1.15827429295
     { "rack",
       -11.6794488945, 1.15918135643,
       -11.2405694634, 1.15107154846, -11.1992268857, 1.15140509605,

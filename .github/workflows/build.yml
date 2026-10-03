@@ -271,7 +271,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: |
-          curl -sSfL -o validator.zip https://github.com/Tracktion/pluginval/releases/download/v1.0.4/pluginval_Windows.zip
+          curl -sSfL --max-time 120 --retry 2 -o validator.zip https://github.com/Tracktion/pluginval/releases/download/v1.0.4/pluginval_Windows.zip
           echo "c08e61ce3b96db41636f8ec7e76f4c7e2c13ebdac7fa1b5a1f52b4f32ec715ab  validator.zip" | sha256sum -c
           unzip -q validator.zip -d validator
           prefs="$(cygpath "$APPDATA")/LT3 Audio"

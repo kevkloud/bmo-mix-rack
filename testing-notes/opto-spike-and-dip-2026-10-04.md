@@ -101,6 +101,27 @@ are the same thing seen on the level-matching signal. About half of the CPU
 rise belongs to the switch fixes on the same branch, which run both cells all
 the time.
 
+**The quick attack is not only for spikes, and noise shows it.** The static
+curve is read on a sine and does not move. A signal with noise in it is
+different: its crests keep asking Stressed for more than 6 dB above what the
+10 ms attack is holding, so the quick stage is working most of the time and
+the cell settles lower. The `bus` suite's stimulus is a sine plus noise at
+-18 dBFS RMS, and its swept row puts Opto in Stressed at crush 63:
+
+| | RMS | peak |
+|---|---|---|
+| main | -18.482 dB | 0.428 |
+| after rule 1 | -18.482 | 0.428 |
+| after rule 2 | -18.328 | 0.428 |
+| after the quick attack (rules 3 and 4) | -20.095 | 0.337 |
+
+Rule 1 moves nothing on that stimulus, rule 2 lets 0.15 dB more through, and
+the quick attack takes 1.77 dB off: 1.61 dB lower in all. Tele's rows do not
+move with the attack at all. The four rows of `tests/plugin/BusTests.cpp`
+that hold Opto (its own two and the rack's two) were regenerated for it, with
+no tolerance touched. This was found in review: the suite had not been run
+when the branch was first pushed.
+
 ## Heard, 2026-10-04
 
 Source: a dry vocal take, 20 s, at its own level, crush 100, LINK on, COLOR

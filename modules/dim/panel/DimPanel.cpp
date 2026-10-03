@@ -1,4 +1,5 @@
 #include "DimPanel.h"
+#include "modules/dim/dsp/DspCore.h"
 #include "modules/dim/params.h"
 
 namespace bmo::dim
@@ -117,6 +118,33 @@ DimPanel::DimPanel (ui::ModuleContext ctx)
              &detuneOn, &cents, &diffuse, &width,
              &shuffle, &shuffleFreq, &rotation, &asymmetry })
         addAndMakeVisible (c);
+
+    // The four controls a dim depends on. GENERATE, DIMENSION and TURN are
+    // never dimmed themselves -- GENERATE is the way back in, and DIMENSION
+    // and TURN reach the output in every state.
+    const int deciders[] { Index::detuneOn, Index::width, Index::shuffle, Index::rotation };
+
+    for (size_t i = 0; i < dimAttachments.size(); ++i)
+        dimAttachments[i] = std::make_unique<juce::ParameterAttachment> (
+            context.params.param (deciders[i]), [this] (float) { refreshDims(); });
+
+    // Whatever the parameters already say, so a render and a reopened editor
+    // come up dimmed the way the session left them.
+    refreshDims();
+}
+
+void DimPanel::refreshDims()
+{
+    const auto& p = context.params;
+
+    const auto generate = p.getReal (Index::detuneOn) > 0.5f;
+    const auto widthPc  = p.getReal (Index::width);
+
+    cents      .setKnobEnabled (centsIsLive (generate, widthPc));
+    diffuse    .setKnobEnabled (diffuseIsLive (widthPc));
+    shuffle    .setKnobEnabled (shuffleIsLive (widthPc));
+    shuffleFreq.setKnobEnabled (shuffleFreqIsLive (widthPc, p.getReal (Index::shuffle)));
+    asymmetry  .setKnobEnabled (asymmetryIsLive (widthPc, p.getReal (Index::rotation)));
 }
 
 void DimPanel::resized()

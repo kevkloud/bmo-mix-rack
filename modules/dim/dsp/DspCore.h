@@ -225,6 +225,44 @@ private:
 };
 
 //==============================================================================
+/** Which controls the chain below ignores where the others stand.
+
+    The panel dims a control a mode makes inert (modules/AGENTS.md), and it
+    asks these rather than restating the rule, so the look and the sound
+    cannot disagree. DimDspTests renders each control at both ends of its
+    range in every state these call dead and asserts the output does not move,
+    and in every state they call live that it does. They take the parameters'
+    own values, so the panel passes what it reads and nothing is converted.
+
+    DIMENSION (width) multiplies the side after generate, diffuse and the
+    shuffler, so at 0 all three are dead whatever they hold. Rotation comes
+    after that and turns mid into side, so TURN is never dead, and asymmetry,
+    which reads the side after rotation, is dead at width 0 only while
+    rotation is 0 too. GENERATE (detuneOn) off injects nothing, so the cents
+    reach nothing. GENERATE itself is a switch and is never dimmed. */
+inline bool centsIsLive (bool detuneOn, float widthPercent) noexcept
+{
+    return detuneOn && widthPercent > 0.0f;
+}
+
+inline bool diffuseIsLive (float widthPercent) noexcept   { return widthPercent > 0.0f; }
+inline bool shuffleIsLive (float widthPercent) noexcept   { return widthPercent > 0.0f; }
+
+/** BELOW is the shuffler's corner, and at BLOOM 1.0 the shuffler is unity:
+    its low band times one plus its high band. Dead there -- but only to the
+    float rounding of that sum, not bit for bit; the low band still runs, and
+    z + (s - z) is not always exactly s. DimDspTests says by how much. */
+inline bool shuffleFreqIsLive (float widthPercent, float shuffleAmount) noexcept
+{
+    return widthPercent > 0.0f && shuffleAmount != 1.0f;
+}
+
+inline bool asymmetryIsLive (float widthPercent, float rotationDegrees) noexcept
+{
+    return widthPercent > 0.0f || rotationDegrees != 0.0f;
+}
+
+//==============================================================================
 /** BMO Dimension: split to mid/side, work on the side, sum back.
 
     Three stages in series on S -- generate, diffuse, image -- and a mid path

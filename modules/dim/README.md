@@ -80,10 +80,15 @@ The rest split on one line: whether your source already has side content.
 
 ## Things worth knowing before you use it
 
-- **DIMENSION at 0 turns the whole module off**, GENERATE included — it sits
-  downstream of everything else.
-- **DETUNE is inactive until GENERATE is switched on.** It is the only control on
-  the panel that does nothing where it stands, and the switch above its row says so.
+- **DIMENSION at 0 silences GENERATE, DRIFT and BLOOM** — it sits downstream
+  of all three. TURN still works there, because it comes after DIMENSION and
+  turns the centre itself, and TILT works whenever TURN is away from 0.
+- **A knob that does nothing where the others stand is dimmed**, and comes back
+  the moment it would do something again. Its value is kept and still
+  automates. DETUNE is dimmed until GENERATE is on; BELOW while BLOOM is at
+  1.0, where there is no shuffling for it to place; and at DIMENSION 0,
+  DETUNE, DRIFT, BLOOM and BELOW, and TILT too unless TURN is away from 0.
+  On a fresh instance that means DETUNE and BELOW start dimmed.
 - **There is no output trim yet**, and extreme BLOOM and DIMENSION together can
   add real level. Watch what leaves it.
 - **On a mono track it is a wire**, by design. There is no image to work on.

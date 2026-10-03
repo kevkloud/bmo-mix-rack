@@ -87,6 +87,14 @@ public:
 private:
     void paintPanel (juce::Graphics&) override;
 
+    /** Dims every knob the DSP ignores where GENERATE, DIMENSION, BLOOM and
+        TURN stand (modules/AGENTS.md: a control a mode makes inert is
+        dimmed). It asks the functions beside DspCore -- `centsIsLive` and
+        its siblings -- so the panel and the audio cannot disagree, and it
+        only ever calls `setKnobEnabled`: the value is never written, still
+        automates, and comes back live when the mode is left. */
+    void refreshDims();
+
     // The three knob pairs, as laid out, so paintPanel can group them.
     std::array<juce::Rectangle<int>, 3> pairBoxes;
 
@@ -94,6 +102,12 @@ private:
                   rotation, asymmetry;
 
     ui::SwitchButton detuneOn;
+
+    /** One per control that decides a dim. A host lane, a preset recall or
+        a rack slot moves these without a click, and the dims have to follow
+        it, so they are driven from the parameters rather than from the
+        controls. */
+    std::array<std::unique_ptr<juce::ParameterAttachment>, 4> dimAttachments;
 };
 
 } // namespace bmo::dim

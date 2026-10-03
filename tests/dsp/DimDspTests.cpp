@@ -965,6 +965,137 @@ int main()
         }
     }
 
+    //== The controls the panel dims are the ones the audio ignores ===========
+    // The panel dims a control a mode makes inert, and asks the functions
+    // beside DspCore which ones those are. This is what keeps those functions
+    // honest: in every combination of the four controls that decide it, each
+    // control is rendered at both ends of its range, and where its function
+    // says dead the two renders must be the same bits; where it says live
+    // they must differ, so a function that called everything dead would fail
+    // too. One exception, stated rather than hidden: BELOW at BLOOM 1.0 is
+    // dead only to float rounding, because the shuffler's z + (s - z) is not
+    // always exactly s, and making it exact would move the default output.
+    {
+        constexpr int    n  = 12000;
+        constexpr double sr = 48000.0;
+
+        // Mid at 110 Hz for the generate stage to read, side at 330 Hz for the
+        // rest to shape.
+        const auto renderWith = [] (const std::vector<float>& v)
+        {
+            DimDsp dsp;
+            dsp.setParams (v.data(), Index::count);
+            dsp.prepare (sr, 512, 2);
+
+            std::vector<float> l ((size_t) n), r ((size_t) n);
+            for (int i = 0; i < n; ++i)
+            {
+                const auto m = 0.3f * (float) std::sin (6.283185307179586 * 110.0 * i / sr);
+                const auto s = 0.2f * (float) std::sin (6.283185307179586 * 330.0 * i / sr);
+                l[(size_t) i] = m + s;
+                r[(size_t) i] = m - s;
+            }
+
+            for (int i = 0; i < n; i += 512)
+            {
+                dsp.setParams (v.data(), Index::count);
+                float* ch[2] { l.data() + i, r.data() + i };
+                dsp.process (ch, 2, std::min (512, n - i));
+            }
+
+            l.insert (l.end(), r.begin(), r.end());
+            return l;
+        };
+
+        const auto maxDiff = [] (const std::vector<float>& a, const std::vector<float>& b)
+        {
+            float m = 0.0f;
+            for (size_t i = 0; i < a.size(); ++i)
+                m = std::max (m, std::abs (a[i] - b[i]));
+            return m;
+        };
+
+        struct Control { int index; float lo, hi; const char* name; };
+
+        const Control controls[]
+        {
+            { Index::detune,      0.0f,    25.0f,   "DETUNE" },
+            { Index::diffuse,     0.0f,    100.0f,  "DRIFT" },
+            { Index::shuffle,     1.0f,    3.0f,    "BLOOM" },
+            { Index::shuffleFreq, 350.0f,  1400.0f, "BELOW" },
+            { Index::asymmetry,   -100.0f, 100.0f,  "TILT" },
+        };
+
+        float belowAtUnityBloom = 0.0f;
+        int   deadCases = 0, liveCases = 0;
+
+        for (bool generate : { false, true })
+            for (float width : { 0.0f, 100.0f })
+                for (float bloom : { 1.0f, 3.0f })
+                    for (float turn : { 0.0f, 30.0f })
+                        for (const auto& c : controls)
+                        {
+                            std::vector<float> v { width, bloom, 700.0f, 10.0f, generate ? 1.0f : 0.0f,
+                                                   50.0f, 0.4f, 50.0f, turn, 40.0f };
+
+                            bool live = true;
+                            switch (c.index)
+                            {
+                                case Index::detune:      live = centsIsLive (generate, width); break;
+                                case Index::diffuse:     live = diffuseIsLive (width); break;
+                                case Index::shuffle:     live = shuffleIsLive (width); break;
+                                case Index::shuffleFreq: live = shuffleFreqIsLive (width, bloom); break;
+                                case Index::asymmetry:   live = asymmetryIsLive (width, turn); break;
+                                default: break;
+                            }
+
+                            v[(size_t) c.index] = c.lo;
+                            const auto a = renderWith (v);
+                            v[(size_t) c.index] = c.hi;
+                            const auto b = renderWith (v);
+
+                            const auto where = std::string (c.name) + " with GENERATE "
+                                             + (generate ? "on" : "off") + ", DIMENSION "
+                                             + std::to_string ((int) width) + ", BLOOM "
+                                             + std::to_string ((int) bloom) + ", TURN "
+                                             + std::to_string ((int) turn);
+
+                            if (live)
+                            {
+                                ++liveCases;
+                                if (! (maxDiff (a, b) > 1.0e-4f))
+                                    std::cerr << "  " << where << ": called live, but both ends render the same\n";
+                                check (maxDiff (a, b) > 1.0e-4f, "a control its function calls live moves the output");
+                            }
+                            else if (c.index == Index::shuffleFreq && width > 0.0f)
+                            {
+                                ++deadCases;
+                                belowAtUnityBloom = std::max (belowAtUnityBloom, maxDiff (a, b));
+                            }
+                            else
+                            {
+                                ++deadCases;
+                                if (a != b)
+                                    std::cerr << "  " << where << ": called dead, but the ends differ by "
+                                              << maxDiff (a, b) << '\n';
+                                check (a == b, "a control its function calls dead leaves the output bit-identical");
+                            }
+                        }
+
+        check (deadCases > 0 && liveCases > 0, "the dim table has both dead and live cases to check");
+
+        // BELOW at BLOOM 1.0, the rounding exception: measured 5.96e-8 on
+        // ICE QUEEN, 2026-10-03 -- one float step at 0.5, -144 dBFS -- across
+        // 44 dead and 36 live cases above.
+        check (belowAtUnityBloom < 1.0e-6f, "BELOW at BLOOM 1.0 moves the output by rounding only");
+
+        // GENERATE is the switch and the panel never dims it; the four
+        // controls that decide the dims are not themselves dimmed except as
+        // above. DIMENSION and TURN are always live.
+        check (centsIsLive (true, 100.0f) && ! centsIsLive (false, 100.0f) && ! centsIsLive (true, 0.0f),
+               "DETUNE is live only with GENERATE on and DIMENSION above 0");
+    }
+
     //== Latency ===============================================================
     {
         DimDsp dsp;

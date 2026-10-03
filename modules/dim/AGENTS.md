@@ -98,6 +98,41 @@ imager on a mono bus has to be left as a wire** — `isBusesLayoutSupported`
 accepts mono, and folding L into R gives a signal whose side is zero by
 definition.
 
+## What the panel dims, and why
+
+The suite rule (`modules/AGENTS.md`): a control a mode makes inert is dimmed,
+never locked or written. Four controls decide it here, and the panel asks
+the functions beside `DspCore` in `dsp/DspCore.h` rather than restating them:
+
+| knob | dead when | function |
+|---|---|---|
+| DETUNE | GENERATE off, or DIMENSION 0 | `centsIsLive` |
+| DRIFT | DIMENSION 0 | `diffuseIsLive` |
+| BLOOM | DIMENSION 0 | `shuffleIsLive` |
+| BELOW | DIMENSION 0, or BLOOM 1.0 | `shuffleFreqIsLive` |
+| TILT | DIMENSION 0 **and** TURN 0 | `asymmetryIsLive` |
+
+DIMENSION multiplies the side after generate, diffuse and the shuffler, so
+at 0 they are all dead. TURN comes after it and turns mid into side, so TURN
+is never dead, and TILT, which reads the side after TURN, comes back to life
+the moment TURN leaves 0. DRIFT is **not** dead with GENERATE off: it works
+on any side content, and a stereo source has some. GENERATE is a switch and
+is never dimmed -- it is the way back in -- even at DIMENSION 0, where it
+too reaches nothing; that one is the owner's to decide.
+
+At the defaults GENERATE is off and BLOOM is 1.0, so **DETUNE and BELOW
+come up dimmed on a fresh instance.** That is the rule applied, not a
+side effect.
+
+`dim_dsp` renders every knob at both ends of its range in all sixteen
+combinations of the four deciders: where the function says dead the two
+renders are the same bits, and where it says live they differ. **BELOW at
+BLOOM 1.0 is the one exception**: dead to float rounding, not bit for bit,
+because the shuffler's `z * 1 + (s - z)` is not always exactly `s`. Measured
+at 5.96e-8, one float step at 0.5. Making it exact would move the default
+output, which is held bit-identical. `ui_layout_tests` holds the panel to a
+table written out by hand, standalone and in a rack.
+
 ## Asymmetry is a shear, and the fallback is named
 
 Gerzon's control, from the S1 manual, which constrains it in three sentences
@@ -190,7 +225,8 @@ claim on the colour** — accents are allocated in `products/AGENTS.md` now.
   neither was audible enough to earn its space, so both lost their controls and
   are fixed at their defaults.** The parameters stay in `params.h` — IDs are
   permanent and append-only, and a session that automated them must still load.
-  A stronger answer than `setKnobEnabled` dimming, which is still unused.
+  A stronger answer than `setKnobEnabled` dimming, which the panel uses for
+  the controls above that a mode leaves dead.
 - ~~ROTATE +30° moves the image left~~ **Settled 2026-09-09: the sign is
   negated in `setParams`, so + moves the image right like a pan knob.**
   Confirmed backwards by ear on a stereo source before the change.

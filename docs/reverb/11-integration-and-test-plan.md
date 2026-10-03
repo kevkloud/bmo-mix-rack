@@ -854,7 +854,7 @@ all of the above summed, at VARIATION 0 and 6.
 | **M2** ER generator | Image-source tables, Size law and crossfade, order-banded filters, diffuser, VARIATION, hi-cut, the Density bridge — tail silent | The whole ER block of §6 plus the ER-only listening items. **This milestone decides the module** |
 | **M3** late network | FDN, absorbent filters, damping over the per-type knees, EQ, pre-delay, SOURCE, modulation — plus the tail-onset and decay-truncation contours, which are now `TypeConstants::attack` and `decayShape` rather than knobs (§4a), and which the engine reads in `ReverbDsp::paramsFrom` | Modal density (incl. the Plate failure), T60, damping, echo density, ringing, modulation, pre-delay, level laws, phasing nulls, clicks |
 | **M4** types | Six v1 types and their constant blocks incl. reserved era fields | Every §6 test at every type; order frozen; Plate's line count resolved |
-| **M5** shared code | §2(a) as its own reviewed commit; (b)/(c) only if taken, byte-identical with BMO Dwell | Tail report ≥ measured and ≤30 s; existing modules proven unchanged by hash and schema test |
+| **M5** shared code | §2(a) as its own reviewed commit; (b)/(c) only if taken, byte-identical with BMO Dwell | Tail report ≥ measured and ≤ the ceiling (30 s then, 40 s since 2026-10-02); existing modules proven unchanged by hash and schema test |
 | **M6** acceptance | Invariance, stability, CPU/memory, CALIBRATE, listening | Those §6 blocks, recorded naming AURORA |
 
 **Done** = every milestone's exit test green in all three CI jobs on both

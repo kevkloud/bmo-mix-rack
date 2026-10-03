@@ -1,10 +1,10 @@
 # BMO Linger — the M3a listening set (the tail)
 
 **Rendered on ICE QUEEN, 2026-10-02**, from `frosty-linger-m3a` at
-`ef63a73` plus the render fixes below. The set is in
-`D:\VISUAL\PLUGINS\MIX RACK\LINGER\set-2026-10-02-m3a\` on ICE QUEEN,
-outside the repository: 43 files, 24-bit, at each source's own 44.1 kHz.
-**Nothing in it has been heard yet.** M3b waits on this pass.
+`ef63a73` plus the render fixes below. The set is `set-2026-10-02-m3a`, in
+the folder that holds Frosty's Linger clips on ICE QUEEN, outside the
+repository: 43 files, 24-bit, at each source's own 44.1 kHz. **Heard the same
+day; the answers are at the foot.**
 
 Every file is the engine that ships, rendered by `measure_reverb render`.
 **Every file is at OUTPUT −4 dB, the dry references included**, because at

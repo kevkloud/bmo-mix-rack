@@ -173,7 +173,7 @@ private:
 
         **Then clamped at `bmo::kMaxTailSeconds`, the same ceiling a module
         clamps its own figure at**, so the whole product has one rule: no BMO
-        Mix Rack instance ever reports more than thirty seconds. `addModule`
+        Mix Rack instance ever reports more than forty seconds. `addModule`
         checks the slot count and not for duplicates, so eight reverbs is a
         legal chain and the honest sum of eight maxed ones is four minutes --
         free at transport stop, where over-reporting only idles the host, and

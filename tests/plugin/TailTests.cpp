@@ -19,7 +19,7 @@
     sum of two written-down parts rather than "the sum of whatever the slots
     say".
 
-    **The rack clamps its total at thirty seconds too**, as of 2026-09-21, so
+    **The rack clamps its total at forty seconds too** (thirty until 2026-10-02), as of 2026-09-21, so
     the product has one rule instead of two. The sum is still what a chain
     under the ceiling reports -- the 8.5675 s two-slot figure is asserted after
     the clamp as well as before it -- and what the clamp stops is the case the
@@ -352,7 +352,7 @@ int main()
         // are in series. That is still true of the arithmetic and is no longer
         // what a host is told: `addModule` counts slots and never looks for
         // duplicates, so eight BMO Lingers is a legal chain and eight honest
-        // thirties is a four-minute tail -- which an offline bounce renders
+        // forties is a five-minute tail -- which an offline bounce renders
         // onto the end of every export. Frosty approved the rack clamp.
         rack->clearChain();
         rack->addModule (reverb);

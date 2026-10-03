@@ -160,7 +160,7 @@ public:
 
         `DspCore::tailSecondsFor` is the formula and its only copy -- pre-delay
         plus T_mid at the largest damping multiplier plus the last early
-        reflection plus 50 ms, clamped to 30 s (docs/reverb/10-dsp-spec.md 5).
+        reflection plus 50 ms, clamped to 40 s (docs/reverb/10-dsp-spec.md 5).
         This is only the unpacking in front of it, so a change to the
         arithmetic lands in one file and reaches the host through here without
         being retyped.

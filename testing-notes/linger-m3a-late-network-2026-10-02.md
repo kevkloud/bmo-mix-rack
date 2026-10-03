@@ -112,12 +112,10 @@ ICE QUEEN.
 
 ## What is owed
 
-**The listening checkpoint.** A set in gitignored `packages/reverb-listening/`:
-- decay and damping across the six types
-- the ER-to-tail handover
-- PRE-DELAY
-- SIZE moves under a sustained source
-- Plate on a vocal
-
-Frosty's clips are in `D:\VISUAL\PLUGINS\MIX RACK\LINGER`. Ask about the
-headphone amp's mono switch first. Then M3b.
+**The listening checkpoint: done the same day.** The set was rendered
+outside the repository, from Frosty's clips on ICE QUEEN, and heard with the
+amp in stereo; `testing-notes/linger-listening-set-2026-10-02-m3a.md` has the
+set and the answers. It covered decay and damping across the six types, the
+ER-to-tail handover, PRE-DELAY and Plate on a vocal. A SIZE move under a
+sustained source was **not** in it, because the render tool has no
+automation, and Frosty judged it not a concern. M3b is next.

@@ -22,6 +22,11 @@ belongs there is what a contributor would otherwise have to re-derive -- the
 invariant a module is built on, the laws it rejected and why, the faults its
 own tests could not see. What belongs *here* is anything every module shares.
 
+- [`sat/AGENTS.md`](sat/AGENTS.md) -- BMO Saturator. Why TONE defaults to
+  55 and every preset names its own, how its switches fade and why idle they
+  are not read at all, why control periods run on the stream rather than on
+  the host's blocks, and why Auto Gain keeps its reading through prepare()
+  but does not guess one for an instance that has heard nothing.
 - [`opto/AGENTS.md`](opto/AGENTS.md) -- BMO Opto, the levelling compressor.
   Why its two modes are two circuits and why a feedback cell cannot be handed
   a ratio, why both cells listen whichever one is heard, what makes its three

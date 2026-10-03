@@ -41,6 +41,10 @@ inline constexpr auto kDepth   = "depth";
 inline constexpr auto kRotation  = "rotation";
 inline constexpr auto kAsymmetry = "asymmetry";
 
+// A trim on what leaves the module, added 2026-10-04 at the end of the list,
+// where a new parameter has to go.
+inline constexpr auto kOutput = "output";
+
 // Order is reach-for-first, not signal order, per modules/AGENTS.md: the
 // controls a user opens this panel for go at the top. That is width, not
 // detune -- even though detune runs first in the chain. The panel lays out in
@@ -52,6 +56,7 @@ enum Index
     detune, detuneOn,
     diffuse, rate, depth,
     rotation, asymmetry,
+    output,
     count
 };
 
@@ -130,6 +135,18 @@ inline const ParamSpecs& specs()
         // modules/dim/dsp/DspCore.h, and the test that asserts a dead-centre
         // source comes through it unmoved.
         S::floatParam (kAsymmetry, "Tilt", -100.0f, 100.0f, 1.0f, 0.0f, F::Percent),
+
+        // OUTPUT: a trim on both channels after everything else, the owner's
+        // call of 2026-10-04. At the extremes this module reaches +7.2 dBFS
+        // peak and +15.3 dB of side gain with nothing to pull it back. An
+        // automatic level match was considered and not chosen: it needs a
+        // detector, and "matched" is ambiguous for a widener -- matched in
+        // the mono sum, which this module leaves alone by design, or in the
+        // stereo power it exists to change. Last in the list, because a new
+        // parameter goes at the end (root AGENTS.md); 0 dB is the default,
+        // so every session and preset saved before it plays as it did. It
+        // takes rack lane 11 of 32.
+        S::floatParam (kOutput, "Output", -24.0f, 24.0f, 0.1f, 0.0f, F::Decibels),
     };
 
     return s;

@@ -72,6 +72,10 @@ TURN turns: material on the right comes up and material on the left goes down.
 (It leaned left until 2026-09-16, when the sign was flipped to agree.) Its ends
 are marked L and R.
 
+**OUTPUT** — a trim on both channels after everything else, ±24 dB, 0 by
+default. Added 2026-10-04; a session or preset saved before it plays exactly
+as it did, and no factory preset sets it.
+
 ## Presets
 
 Init is a wire — a stereo imager that widened the moment you inserted it would
@@ -95,9 +99,11 @@ The rest split on one line: whether your source already has side content.
   1.0, where there is no shuffling for it to place; and at DIMENSION 0,
   DETUNE, DRIFT, BLOOM and BELOW, and TILT too unless TURN is away from 0.
   On a fresh instance that means DETUNE and BELOW start dimmed.
-- **There is no output trim yet**, and extreme BLOOM and DIMENSION together can
-  add real level. Watch what leaves it.
+- **Extreme BLOOM and DIMENSION together can add real level** — up to +7.2 dBFS
+  peak from a source at -18 dBFS RMS. **OUTPUT** (±24 dB, 0 by default) is there to
+  take it back; it is a hand-set trim, not an automatic match.
 - **On a mono track it is a wire**, by design. There is no image to work on.
+  OUTPUT still works there: it is a level, not part of the image.
 - **The detune stage throbs.** The two voices beat against each other, so the
   width pulses — roughly 12 Hz at the default, slower and deeper on bass. This
   is a known open question and is the main thing the module is being listened

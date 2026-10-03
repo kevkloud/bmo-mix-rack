@@ -508,10 +508,17 @@ const Golden kSwept[]
     // Against the row before, the RMS figures moved by up to 0.0059 dB and the
     // peaks by up to 2.4e-3 on 0.53 (0.04 dB). The mono figures did not move,
     // and the rack's swept row moved by 1e-4 dB, inside its tolerance.
+    //
+    // Regenerated again the same day for OUTPUT, the eleventh parameter,
+    // which 0.63 of normalised puts at +6.2 dB: every RMS figure is exactly
+    // 6.2 dB up and every peak 10^(6.2/20) = 2.042 times larger, the mono one
+    // included (the trim is a level, so it applies on a mono instance too).
+    // Nothing else in the row moved, and the defaults row, with OUTPUT at
+    // 0 dB, did not move at all.
     { "dim",
-      -18.0000001899, 0.237879320979,
-      -12.0786750775, 0.616845369339, -15.4782968843, 0.465581327677,
-      -23.1095590909, 0.200089350343, -12.858309682, 0.524151325226 },
+      -11.7999998243, 0.485687255859,
+      -5.87867470619, 1.25943660736, -9.278296506, 0.950595080853,
+      -16.9095587195, 0.408530026674, -6.65830929824, 1.07017970085 },
     { "deq",
       89.7000479803, 67366,
       84.7421622782, 53060.8125, 84.7421621754, 53060.8398438,

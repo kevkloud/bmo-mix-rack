@@ -30,6 +30,9 @@ namespace
         { P::kDepth,       "Drift Depth",    0.0f,  100.0f,  50.0f, 0 },
         { P::kRotation,    "Turn",         -45.0f,   45.0f,   0.0f, 0 },
         { P::kAsymmetry,   "Tilt",        -100.0f,  100.0f,   0.0f, 0 },
+        // Appended 2026-10-04, the owner's call: a trim on the output. Last,
+        // so nothing above moved; 0 dB, so nothing saved before it changes.
+        { P::kOutput,      "Output",       -24.0f,   24.0f,   0.0f, 0 },
     };
 }
 
@@ -64,6 +67,10 @@ int main()
         setValue (*proc, P::kAsymmetry, -25.0f);
         check (param (*proc, P::kAsymmetry).getCurrentValueAsText() == "-25 %",
                "Tilt reads as a signed percentage");
+
+        setValue (*proc, P::kOutput, -3.0f);
+        check (param (*proc, P::kOutput).getCurrentValueAsText() == "-3.0 dB",
+               "Output reads in decibels, the way every module's output does");
     }
 
     //== Latency ==============================================================
@@ -98,6 +105,7 @@ int main()
             { P::kDepth,        80.0f },
             { P::kRotation,    -12.5f },
             { P::kAsymmetry,    35.0f },
+            { P::kOutput,       -4.5f },
         };
 
         {
@@ -127,6 +135,13 @@ int main()
                 check (juce::String (s.id) != P::kRate && juce::String (s.id) != P::kDepth,
                        juce::String ("factory preset '") + preset.name
                            + "' does not set " + s.id + ", which has no control");
+
+        // OUTPUT arrived after the presets were written, and none of them
+        // sets it: each inherits 0 dB and plays exactly as it did.
+        for (const auto& preset : P::factory())
+            for (const auto& s : preset.settings)
+                check (juce::String (s.id) != P::kOutput,
+                       juce::String ("factory preset '") + preset.name + "' leaves OUTPUT at 0 dB");
     }
 
     //== A preset must not change how loud the track is ======================

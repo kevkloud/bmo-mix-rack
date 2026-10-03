@@ -63,8 +63,11 @@ namespace
                     "b5_freq", "b5_gain", "b5_q", "b5_thr", "b5_range",
                     "b6_freq", "b6_gain", "b6_q", "b6_thr", "b6_range",
                     "active" } },
+        // BMO Dimension's OUTPUT, added 2026-10-04, takes lane 11: appended,
+        // so the ten lanes before it mean what they always did.
         { "dim",  { "width", "shuffle", "shuffle_freq", "detune", "detune_on",
-                    "diffuse", "rate", "depth", "rotation", "asymmetry" } },
+                    "diffuse", "rate", "depth", "rotation", "asymmetry",
+                    "output" } },
         { "ltvcomp", { "amount", "gate", "output", "complex", "attack", "release",
                      "arc", "sidechain", "low_thru", "high_thru" } },
         // BMO Defang. Five parameters and no more: attack, release, mix,

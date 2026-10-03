@@ -43,6 +43,81 @@ private:
 };
 
 //==============================================================================
+/** OUTPUT: a level in dB, smoothed every sample, handed out as a gain.
+
+    The same behaviour as the equaliser's trims (modules/eq/dsp/DspCore.h,
+    whose comment has the measurements), kept here rather than shared
+    because modules do not include one another. Per sample, so a move takes
+    the same time at any host block size; in dB, so a full-range move does
+    not front-load its rise. A one-pole in float32 stalls short of a target
+    near 24 dB once its increment rounds away, so it lands on the target
+    exactly when within kLandDb or when a sample makes no progress. Landed,
+    next() does no work, and at 0 dB the caller leaves it out of the path
+    altogether (restsAtUnity). */
+class TrimSmoother
+{
+public:
+    static constexpr float kLandDb = 1.0e-3f;
+
+    void prepare (double sampleRate, double timeMs) noexcept
+    {
+        const auto tau = std::max (timeMs, 0.01) * 0.001;
+        coeff = (float) (1.0 - std::exp (-1.0 / (std::max (sampleRate, 1.0) * tau)));
+    }
+
+    void snap (float targetDb) noexcept
+    {
+        currentDb = targetDb;
+        setTarget (targetDb);
+        gain = targetGain;
+    }
+
+    void setTarget (float targetDb) noexcept
+    {
+        if (! (targetDb < this->targetDb) && ! (this->targetDb < targetDb))
+            return;
+
+        this->targetDb = targetDb;
+        targetGain = toGain (targetDb);
+    }
+
+    bool isSettled() const noexcept { return ! (currentDb < targetDb) && ! (targetDb < currentDb); }
+
+    /** Settled at exactly 0 dB: the caller skips the multiply entirely. */
+    bool restsAtUnity() const noexcept { return isSettled() && targetDb == 0.0f; }
+
+    float levelDb() const noexcept { return currentDb; }
+
+    /** One sample on. */
+    float next() noexcept
+    {
+        if (isSettled())
+            return gain;
+
+        const auto moved = currentDb + coeff * (targetDb - currentDb);
+
+        if (std::abs (targetDb - moved) < kLandDb || ! (moved < currentDb || currentDb < moved))
+        {
+            currentDb = targetDb;
+            gain = targetGain;
+        }
+        else
+        {
+            currentDb = moved;
+            gain = toGain (moved);
+        }
+
+        return gain;
+    }
+
+private:
+    static float toGain (float decibels) noexcept { return std::pow (10.0f, decibels * 0.05f); }
+
+    float coeff = 1.0f, currentDb = 0.0f, targetDb = 0.0f;
+    float gain = 1.0f, targetGain = 1.0f;
+};
+
+//==============================================================================
 /** A crossfading delay-line pitch shifter, one voice.
 
     A read pointer moving at a rate other than one sample per sample is a pitch
@@ -316,6 +391,7 @@ public:
         float depthPercent     = 50.0f;
         float rotationDegrees  = 0.0f;
         float asymmetryPercent = 0.0f;
+        float outputDb         = 0.0f;
     };
 
     void prepare (double sr, int, int)
@@ -342,6 +418,9 @@ public:
 
         // BELOW glides in a straight line over a fixed time. See setParams.
         belowGlide.prepare (sampleRate, kBelowGlideMs);
+
+        // OUTPUT on the equaliser's 20 ms, per sample, in dB.
+        outputTrim.prepare (sampleRate, 20.0);
 
         reset();
     }
@@ -451,6 +530,7 @@ public:
         // the parameter itself -- the same arithmetic as before, so a BELOW
         // that is not moving gives bit for bit what it always did.
         belowGlide.setTarget (p.shuffleFreqHz);
+        outputTrim.setTarget (p.outputDb);
 
         lfoInc = (float) (std::max (p.rateHz, 0.0f) / sampleRate);
 
@@ -465,6 +545,7 @@ public:
             detuneSm.snap (p.detuneOn ? 1.0f : 0.0f);
             centsSm.snap (std::clamp (std::abs (p.detuneCents), 0.0f, 1.0f));
             belowGlide.snap (p.shuffleFreqHz);
+            outputTrim.snap (p.outputDb);
             primed = true;
         }
 
@@ -482,8 +563,19 @@ public:
         // content and sum it straight back into the single channel, which is
         // the comb this module's whole topology exists to avoid: measured at
         // +1.17 dB and 0.67 of sample error before this guard.
+        //
+        // OUTPUT is the exception: it is a level, not imaging, and a mono
+        // track has as much use for a trim as a stereo one. At 0 dB it is
+        // not in the path, so the wire is still a wire.
         if (numChannels < 2 || channels[0] == nullptr || channels[1] == nullptr)
+        {
+            if (numChannels >= 1 && channels[0] != nullptr)
+                for (int i = 0; i < numSamples; ++i)
+                    if (! outputTrim.restsAtUnity())
+                        channels[0][i] *= outputTrim.next();
+
             return;
+        }
 
         auto* l = channels[0];
         auto* r = channels[1];
@@ -612,8 +704,21 @@ public:
             if (asym != 0.0f)
                 mid += asym * side;
 
-            l[i] = mid + side;
-            r[i] = mid - side;
+            auto outL = mid + side;
+            auto outR = mid - side;
+
+            // OUTPUT, after everything. Settled at 0 dB it is skipped rather
+            // than multiplied by one, so a session that never touches it is
+            // the module it was before the control existed.
+            if (! outputTrim.restsAtUnity())
+            {
+                const auto g = outputTrim.next();
+                outL *= g;
+                outR *= g;
+            }
+
+            l[i] = outL;
+            r[i] = outR;
         }
     }
 
@@ -627,6 +732,11 @@ public:
         against these. */
     float belowHz() const noexcept     { return belowGlide.value(); }
     bool  belowMoving() const noexcept { return belowGlide.isMoving(); }
+
+    /** Where OUTPUT is, in dB, and whether it is out of the path (settled at
+        exactly 0 dB). Read-only, for tests. */
+    float outputDb() const noexcept       { return outputTrim.levelDb(); }
+    bool  outputBypassed() const noexcept { return outputTrim.restsAtUnity(); }
 
 private:
     /** The knob's percentage as the shear coefficient, at half scale.
@@ -668,6 +778,8 @@ private:
     /** How long BELOW takes to reach a new corner. See setParams. */
     static constexpr double kBelowGlideMs = 20.0;
     bmo::dsp::Ramp belowGlide;
+
+    TrimSmoother outputTrim;   // OUTPUT, per sample, in dB
 
     float lfoPhase = 0.0f, lfoInc = 0.0f;
     bool  primed = false;

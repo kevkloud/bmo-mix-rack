@@ -33,6 +33,7 @@ public:
         p.depthPercent     = v[depth];
         p.rotationDegrees  = v[rotation];
         p.asymmetryPercent = v[asymmetry];
+        p.outputDb         = v[output];
 
         core.setParams (p);
     }

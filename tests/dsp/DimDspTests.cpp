@@ -807,6 +807,7 @@ int main()
         {
             std::vector<float> v { 100.0f, bloom, below, 10.0f, 0.0f,
                                    0.0f, 0.4f, 50.0f, 0.0f, 0.0f };
+            v.resize ((size_t) Index::count, 0.0f);   // later parameters at 0
             return v;
         };
 
@@ -1037,6 +1038,7 @@ int main()
                         {
                             std::vector<float> v { width, bloom, 700.0f, 10.0f, generate ? 1.0f : 0.0f,
                                                    50.0f, 0.4f, 50.0f, turn, 40.0f };
+                            v.resize ((size_t) Index::count, 0.0f);   // later parameters at 0
 
                             bool live = true;
                             switch (c.index)
@@ -1094,6 +1096,172 @@ int main()
         // above. DIMENSION and TURN are always live.
         check (centsIsLive (true, 100.0f) && ! centsIsLive (false, 100.0f) && ! centsIsLive (true, 0.0f),
                "DETUNE is live only with GENERATE on and DIMENSION above 0");
+    }
+
+    //== OUTPUT: a trim on what leaves the module =============================
+    // There was none, and at the extremes the module reaches +7.2 dBFS peak
+    // and +15.3 dB of side gain with nothing downstream of it to pull that
+    // back. It is a plain trim, per sample in dB, landing exactly, the same
+    // behaviour as the equaliser's; at 0 dB with nothing moving it is not in
+    // the path at all.
+    {
+        constexpr int kOut = Index::output;   // the eleventh parameter, the last
+
+        // The module at `rate`, `n` samples of a stereo pair, OUTPUT at `fromDb`
+        // until sample `at` and `toDb` after, in host blocks of `block`.
+        const auto renderTrim = [] (double rate, int n, int block, float fromDb, float toDb, int at,
+                                    bool mono = false)
+        {
+            std::vector<float> a ((size_t) kOut + 1, 0.0f), b;
+            const float base[] { 140.0f, 2.0f, 700.0f, 10.0f, 1.0f, 30.0f, 0.4f, 50.0f, 10.0f, 20.0f };
+            std::copy (std::begin (base), std::end (base), a.begin());
+            b = a;
+            a[(size_t) kOut] = fromDb;
+            b[(size_t) kOut] = toDb;
+
+            DimDsp dsp;
+            dsp.setParams (a.data(), kOut + 1);
+            dsp.prepare (rate, block, mono ? 1 : 2);
+
+            // -18 dBFS RMS, 100 Hz on the left and 150 Hz on the right.
+            const auto amp = 0.125892541f * 1.41421356f;
+            std::vector<float> l ((size_t) n), r ((size_t) n);
+            for (int i = 0; i < n; ++i)
+            {
+                l[(size_t) i] = amp * (float) std::sin (6.283185307179586 * 100.0 * i / rate);
+                r[(size_t) i] = amp * (float) std::sin (6.283185307179586 * 150.0 * i / rate);
+            }
+
+            for (int i = 0; i < n; i += block)
+            {
+                dsp.setParams ((i >= at ? b : a).data(), kOut + 1);
+                float* ch[2] { l.data() + i, r.data() + i };
+                dsp.process (ch, mono ? 1 : 2, std::min (block, n - i));
+            }
+
+            if (! mono)
+                l.insert (l.end(), r.begin(), r.end());
+
+            return l;
+        };
+
+        // Settled, the trim is the gain its dB says, on both channels, and
+        // the same on a mono instance -- it is a level, not imaging.
+        {
+            constexpr double sr = 48000.0;
+            constexpr int n = 24000;
+            const auto flat = renderTrim (sr, n, 512, 0.0f, 0.0f, n);
+
+            for (float db : { -24.0f, -6.0f, 6.0f, 24.0f })
+            {
+                const auto trimmed = renderTrim (sr, n, 512, db, db, n);
+                const auto g = std::pow (10.0f, db * 0.05f);
+
+                float worst = 0.0f;
+                for (size_t i = 0; i < flat.size(); ++i)
+                    worst = std::max (worst, std::abs (trimmed[i] - flat[i] * g));
+
+                check (worst < 1.0e-6f * std::max (1.0f, g), "OUTPUT scales both channels by its gain");
+
+                const auto monoFlat = renderTrim (sr, n, 512, 0.0f, 0.0f, n, true);
+                const auto monoTrim = renderTrim (sr, n, 512, db, db, n, true);
+                float worstMono = 0.0f;
+                for (int i = 0; i < n; ++i)
+                    worstMono = std::max (worstMono, std::abs (monoTrim[(size_t) i] - monoFlat[(size_t) i] * g));
+
+                check (worstMono < 1.0e-6f * std::max (1.0f, g), "OUTPUT scales a mono instance too");
+            }
+        }
+
+        // A full-range move either way is under 1.5x the signal's own largest
+        // step, at 44.1, 48 and 96 kHz, and the same at every host block size.
+        for (double sr : { 44100.0, 48000.0, 96000.0 })
+        {
+            const int n = (int) (sr * 1.0), at = (int) (sr * 0.2) / 512 * 512;
+
+            const auto worstStep = [] (const std::vector<float>& x, size_t from, size_t to)
+            {
+                float w = 0.0f;
+                for (size_t i = std::max<size_t> (from, 1); i < to; ++i)
+                    w = std::max (w, std::abs (x[i] - x[i - 1]));
+                return w;
+            };
+
+            for (int dir = 0; dir < 2; ++dir)
+            {
+                const auto lo = dir == 0 ? -24.0f : 24.0f, hi = dir == 0 ? 24.0f : -24.0f;
+                const auto moved   = renderTrim (sr, n, 512, lo, hi, at);
+                const auto steadyA = renderTrim (sr, n, 512, lo, lo, n);
+                const auto steadyB = renderTrim (sr, n, 512, hi, hi, n);
+
+                float ratio = 0.0f;
+                for (size_t c = 0; c < 2; ++c)
+                {
+                    const auto o = c * (size_t) n, settle = (size_t) (sr * 0.1);
+                    const auto steady = std::max (worstStep (steadyA, o + settle, o + (size_t) n),
+                                                  worstStep (steadyB, o + settle, o + (size_t) n));
+                    ratio = std::max (ratio, worstStep (moved, o + (size_t) at, o + (size_t) n) / steady);
+                }
+
+                if (ratio >= 1.5f)
+                    std::cerr << "  OUTPUT " << lo << " -> " << hi << " dB at " << sr << " Hz: "
+                              << ratio << "x steady\n";
+
+                check (ratio < 1.5f, "a full-range OUTPUT move is under 1.5x the signal's own step");
+            }
+        }
+
+        // It lands on its target exactly and stops, at every rate; and at
+        // 0 dB with nothing moving it is out of the path, from the start and
+        // again after a move back.
+        for (double sr : { 44100.0, 48000.0, 96000.0, 192000.0 })
+        {
+            DimDsp dsp;
+            float v[Index::count] { 100.0f, 1.0f, 700.0f, 10.0f, 0.0f, 0.0f, 0.4f, 50.0f, 0.0f, 0.0f, 0.0f };
+            dsp.setParams (v, Index::count);
+            dsp.prepare (sr, 512, 2);
+            dsp.setParams (v, Index::count);
+
+            check (dsp.getCore().outputBypassed(), "OUTPUT at 0 dB is out of the path from the start");
+
+            std::vector<float> l (512, 0.1f), r (512, -0.1f);
+            float* ch[2] { l.data(), r.data() };
+
+            const auto runFor = [&] (double seconds)
+            {
+                for (int b = 0; b < (int) (sr * seconds) / 512 + 1; ++b)
+                {
+                    dsp.setParams (v, Index::count);
+                    dsp.process (ch, 2, 512);
+                }
+            };
+
+            v[Index::output] = 24.0f;
+            runFor (0.3);
+            check (dsp.getCore().outputDb() == 24.0f && ! dsp.getCore().outputBypassed(),
+                   "OUTPUT lands on +24 dB exactly within 300 ms");
+
+            v[Index::output] = 0.0f;
+            runFor (0.3);
+            check (dsp.getCore().outputDb() == 0.0f && dsp.getCore().outputBypassed(),
+                   "OUTPUT lands back on 0 dB exactly and leaves the path");
+        }
+
+        // The same automation at any host block size is the same output, bit
+        // for bit. 225792 is a block boundary for every size here.
+        {
+            constexpr int at = 441 * 512, n = at + 14400;
+
+            for (int dir = 0; dir < 2; ++dir)
+            {
+                const auto lo = dir == 0 ? -24.0f : 24.0f, hi = -lo;
+                const auto reference = renderTrim (48000.0, n, 512, lo, hi, at);
+
+                for (int block : { 1, 7, 32, 441 })
+                    check (renderTrim (48000.0, n, block, lo, hi, at) == reference,
+                           "an OUTPUT move is the same output at any host block size");
+            }
+        }
     }
 
     //== Latency ===============================================================

@@ -89,30 +89,36 @@ void DspCore::prepare (double sampleRate, int, int) noexcept
 void DspCore::reset() noexcept
 {
     for (auto& b : bands)
-        resetBand (b);
+        resetBand (b, true);
 
     tickPhase = 0;
     primed = false;
 }
 
-void DspCore::resetBand (Band& b) noexcept
+void DspCore::resetBand (Band& b, bool listenerToo) noexcept
 {
     b.m.reset(); b.s.reset();
-    b.sideM.reset(); b.sideS.reset();
-    b.detector.reset();
 
     b.cur = b.next = SvfCoeffs {};
     b.step = kNoStep;
-    b.offsetDb = b.appliedGainDb = 0.0;
+    b.appliedGainDb = 0.0;
     b.live = false;
 
     b.designedHz = b.designedQ = -1.0;
     b.designedStatic = 1.0e9;
     b.designedOffset = 0.0;
-    b.sideHz = b.sideQ = -1.0;
-    b.detAttack = b.detRelease = -1.0;
 
     b.enable.snap (0.0);
+
+    if (listenerToo)
+    {
+        b.sideM.reset(); b.sideS.reset();
+        b.detector.reset();
+        b.offsetDb = 0.0;
+        b.sideHz = b.sideQ = -1.0;
+        b.detAttack = b.detRelease = -1.0;
+        b.hearing = false;
+    }
 }
 
 //==============================================================================
@@ -121,18 +127,26 @@ void DspCore::controlTick() noexcept
     const auto snapAll = ! primed;
     primed = true;
 
+    const auto listening = std::clamp (current.bandCount, 0, kMaxBands);
+
     for (int i = 0; i < kMaxBands; ++i)
     {
         const auto& s = current.bands[(size_t) i];
         auto& b = bands[(size_t) i];
+        const auto listens = i < listening;
 
         // A band that has faded out completely stops costing anything, and
-        // restarts from silence rather than from stale state.
-        if (! s.enabled && (snapAll || (b.enable.tick == 0.0 && b.enable.now == 0.0)))
+        // restarts from silence rather than from stale state. Its listener
+        // carries on if the band is one of the product's (Band, above).
+        const auto asleep = ! s.enabled && (snapAll || (b.enable.tick == 0.0 && b.enable.now == 0.0));
+
+        if (asleep)
         {
-            if (b.live)
-                resetBand (b);
-            continue;
+            if (b.live || (b.hearing && ! listens))
+                resetBand (b, ! listens);
+
+            if (! listens)
+                continue;
         }
 
         const auto gain  = hasGain (s.shape);
@@ -141,25 +155,21 @@ void DspCore::controlTick() noexcept
         const auto gT    = gain ? clampGainDb (s.gainDb) : 0.0;
         const auto betaT = s.placement == Placement::stereo ? 0.0 : std::clamp (s.msAmount, 0.0, 1.0);
 
-        // Waking up: controls start where they are asked to be; only the
-        // enable fade glides, from silence.
-        const auto waking = ! b.live;
-        const auto snapControls = snapAll || waking;
+        //== The listener: where the band is, and what its detector asks for ===
+        //
+        // Started from where it is asked to be the first time it runs, and
+        // glided from then on, band on or off: so a band switched on finds
+        // its sidechain already where it would be had it been on all along.
+        const auto snapListener = snapAll || ! b.hearing;
 
-        beginInterval (b.logHz,  hzT,   tickAlpha, snapControls);
-        beginInterval (b.logQ,   qT,    tickAlpha, snapControls);
-        beginInterval (b.gainDb, gT,    tickAlpha, snapControls);
-        beginInterval (b.beta,   betaT, tickAlpha, snapControls);
-        beginInterval (b.enable, s.enabled ? 1.0 : 0.0, tickAlpha, snapAll);
-        b.live = true;
+        beginInterval (b.logHz, hzT,   tickAlpha, snapListener);
+        beginInterval (b.logQ,  qT,    tickAlpha, snapListener);
+        beginInterval (b.beta,  betaT, tickAlpha, snapListener);
+        b.hearing = true;
 
         const auto hz = std::exp2 (b.logHz.tick);
         const auto q  = std::exp (b.logQ.tick);
 
-        //== Dynamics: the gain offset the detector asks for right now ==========
-        const auto dynamic = gain && s.dynamics.enabled;
-
-        if (dynamic)
         {
             const auto& d = s.dynamics;
 
@@ -175,6 +185,16 @@ void DspCore::controlTick() noexcept
                 b.sideTaps   = SvfTaps::of (b.sideCoeffs.g, b.sideCoeffs.k);
                 b.sideHz = hz; b.sideQ = q; b.sideShape = s.shape;
             }
+        }
+
+        // The gain offset the detector asks for right now, while the band's
+        // dynamics are in use. Out of use it is exactly 0, which is what keeps
+        // DYN off bit-identical to a static EQ whatever the detector hears.
+        const auto dynamic = gain && s.dynamics.enabled;
+
+        if (dynamic)
+        {
+            const auto& d = s.dynamics;
 
             b.computer.thresholdDb = d.thresholdDb;
             b.computer.ratio       = d.ratio;
@@ -189,6 +209,23 @@ void DspCore::controlTick() noexcept
         {
             b.offsetDb = 0.0;
         }
+
+        b.sideM.flushTiny(); b.sideS.flushTiny();
+        b.detector.flushTiny();
+
+        if (asleep)
+            continue;
+
+        //== The band ===========================================================
+        //
+        // Waking up: its controls start where they are asked to be; only the
+        // enable fade glides, from silence.
+        const auto waking = ! b.live;
+        const auto snapControls = snapAll || waking;
+
+        beginInterval (b.gainDb, gT, tickAlpha, snapControls);
+        beginInterval (b.enable, s.enabled ? 1.0 : 0.0, tickAlpha, snapAll);
+        b.live = true;
 
         //== Coefficients: glide from the last target to a new one ==============
         b.cur = b.next;
@@ -214,8 +251,6 @@ void DspCore::controlTick() noexcept
         b.step = perSampleStep (b.cur, b.next);
 
         b.m.flushTiny(); b.s.flushTiny();
-        b.sideM.flushTiny(); b.sideS.flushTiny();
-        b.detector.flushTiny();
     }
 }
 
@@ -259,19 +294,15 @@ void DspCore::processImpl (Sample* const* channels, int numChannels, int numSamp
         {
             auto& b = bands[(size_t) i];
 
-            if (! b.live)
+            if (! b.hearing)
                 continue;
 
             const auto& s = current.bands[(size_t) i];
 
-            b.cur.g  += b.step.g;  b.cur.k  += b.step.k;
-            b.cur.m0 += b.step.m0; b.cur.m1 += b.step.m1; b.cur.m2 += b.step.m2;
-            b.beta.now   += b.beta.step;
-            b.enable.now += b.enable.step;
-
+            b.beta.now += b.beta.step;
             const auto beta = b.beta.now;
 
-            if (hasGain (s.shape) && s.dynamics.enabled)
+            // The listener, band on or off and dynamics in use or not.
             {
                 const auto sm = std::abs (b.sideM.process (b.sideTaps, b.sideCoeffs, dryM));
                 const auto ss = stereo ? std::abs (b.sideS.process (b.sideTaps, b.sideCoeffs, dryS)) : 0.0;
@@ -285,6 +316,13 @@ void DspCore::processImpl (Sample* const* channels, int numChannels, int numSamp
 
                 b.detector.process ((1.0 - beta) * stereoLevel + beta * placed);
             }
+
+            if (! b.live)
+                continue;
+
+            b.cur.g  += b.step.g;  b.cur.k  += b.step.k;
+            b.cur.m0 += b.step.m0; b.cur.m1 += b.step.m1; b.cur.m2 += b.step.m2;
+            b.enable.now += b.enable.step;
 
             const auto inL = serial ? yl : xl;
             const auto inR = serial ? yr : xr;

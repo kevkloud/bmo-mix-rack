@@ -88,6 +88,15 @@ struct Settings
 {
     Topology topology = Topology::serial;
     std::array<BandSettings, kMaxBands> bands {};
+
+    /** How many of `bands` the product has: BMO DEQ's twelve. A band inside
+        it keeps its detector listening while the band is off or its dynamics
+        are, so dynamics coming back into use carry on from where a band that
+        never left would be, rather than from whatever they last heard (see
+        DspCore::Band). A band past it costs nothing until it is switched on.
+        The default is every band, which is right for anything that enables
+        bands freely and only costs CPU. */
+    int bandCount = kMaxBands;
 };
 
 //==============================================================================
@@ -202,6 +211,23 @@ private:
         }
     };
 
+    /** One band, in two halves with two lifetimes.
+
+        **The listener** -- frequency, Q and placement glides, the sidechain
+        filter, the detector and the gain offset it asks for -- runs for every
+        band inside Settings::bandCount whether or not the band is on and
+        whether or not its dynamics are, and only reset() clears it. Until the
+        2026-10-03 review it ran only while the dynamics were in use, so it
+        stood still while they were not and came back with a stale envelope:
+        a -12 dB cut lasting 3.5 s at release 2000 ms on a signal that had
+        gone quiet meanwhile. Listening costs the sidechain and the detector
+        for a band nobody is using, and buys a band whose dynamics, coming
+        back by any route, are where they would be had they never left. It
+        never reaches the audio of a band whose dynamics are off.
+
+        **The band itself** -- its filter, its design and its fades -- runs
+        only while the band is on or fading out, and a band that has faded
+        out completely starts again from rest. */
     struct Band
     {
         Glide logHz, logQ, gainDb, beta, enable;
@@ -217,6 +243,7 @@ private:
 
         double offsetDb = 0.0, appliedGainDb = 0.0;
         bool   live = false;         // enabled, or still fading out
+        bool   hearing = false;      // the listener is running
 
         // What `next` was designed from, so a static band is not redesigned.
         Shape  designedShape = Shape::bell;
@@ -229,7 +256,9 @@ private:
     void processImpl (Sample* const* channels, int numChannels, int numSamples) noexcept;
 
     void controlTick() noexcept;
-    void resetBand (Band& b) noexcept;
+
+    /** Back to rest: the band's filter always, its listener too when asked. */
+    void resetBand (Band& b, bool listenerToo) noexcept;
 
     /** What the panel and the audio thread share. Held behind a pointer for
         one reason: an atomic is neither copyable nor movable, and an engine is

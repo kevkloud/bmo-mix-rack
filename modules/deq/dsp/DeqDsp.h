@@ -58,6 +58,10 @@ public:
 
         const auto active = v[kActive] > 0.5f;
 
+        // The product's twelve keep their detectors listening while they are
+        // off; the engine's spare bands cost nothing (Settings::bandCount).
+        settings.bandCount = kBands;
+
         for (int b = 0; b < kBands; ++b)
         {
             auto at = [v, b] (Control c) { return v[indexOf (b, c)]; };

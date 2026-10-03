@@ -4,12 +4,14 @@
 // and why. modules/deq/AGENTS.md has the reasoning in full.
 
 #include "modules/deq/dsp/DspCore.h"
+#include "modules/deq/dsp/DeqDsp.h"
 #include "modules/deq/reference/Reference.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <iostream>
 #include <string>
 #include <utility>
@@ -1225,6 +1227,185 @@ namespace
                     "Topology: parallel coincident cuts give 1 + 2(G - 1)");
         check (h.real() < 0.0, "Topology: ... and invert polarity there");
     }
+
+    //==========================================================================
+    // The module as the suite drives it: DeqDsp, a params.h value array in,
+    // setParams before prepare() and then before every block, the order
+    // ModuleEngine uses.
+    //==========================================================================
+    struct Values
+    {
+        std::vector<float> v;
+
+        Values() { for (const auto& spec : specs()) v.push_back (spec.def); }
+
+        float& at (int band, Control c) { return v[(size_t) indexOf (band, c)]; }
+        float& at (int index)           { return v[(size_t) index]; }
+    };
+
+    /** One dynamic bell at 1 kHz with nothing static about it: Q 1, 0 dB,
+        threshold -40, ratio 20, so a loud tone is cut by the whole range. */
+    Values dynamicBell (float attackMs, float releaseMs)
+    {
+        Values p;
+        p.at (0, Control::on) = 1.0f;     p.at (0, Control::shape) = 0.0f;
+        p.at (0, Control::freq) = 1000.0f; p.at (0, Control::gain) = 0.0f;  p.at (0, Control::q) = 1.0f;
+        p.at (0, Control::dyn) = 1.0f;    p.at (0, Control::thr) = -40.0f;  p.at (0, Control::ratio) = 20.0f;
+        p.at (0, Control::range) = -12.0f;
+        p.at (0, Control::attack) = attackMs; p.at (0, Control::release) = releaseMs;
+        return p;
+    }
+
+    double rmsDb (const std::vector<float>& x, size_t from, size_t to)
+    {
+        double sum = 0.0;
+        for (size_t i = from; i < to; ++i) sum += (double) x[i] * (double) x[i];
+        return 10.0 * std::log10 (std::max (sum / (double) (to - from), 1.0e-300));
+    }
+
+    /** A band's dynamics coming back into use carry on from where a band that
+        had them in use throughout would be.
+
+        Review of 2026-10-03: the detector ran only while DYN was on, so it
+        stood still while its dynamics were out of use and came back holding
+        whatever it heard last -- a stale -12 dB for 3.5 s at release 2000 ms,
+        or a band coming back with no cut at all where one that had stayed on
+        is cutting by its whole range. Every way back in is held here: DYN,
+        the band's On, DEQ, a shape with no dynamics to one with, and all of
+        them at once, which is what loading a preset or restoring a session
+        does to the value array. Each against a reference that kept its
+        dynamics in use throughout, on the band's applied gain and on the
+        audio in 10 ms windows, from 60 ms after the return -- past the
+        switch's own fade -- to 1 s after it. */
+    void testDynamicsComeBackCurrent()
+    {
+        struct Way { const char* name; void (*use) (Values&, bool); };
+        const Way ways[] {
+            { "DYN",             [] (Values& p, bool on) { p.at (0, Control::dyn) = on ? 1.0f : 0.0f; } },
+            { "band On",         [] (Values& p, bool on) { p.at (0, Control::on) = on ? 1.0f : 0.0f; } },
+            { "DEQ",             [] (Values& p, bool on) { p.at (kActive) = on ? 1.0f : 0.0f; } },
+            { "Low Cut to Bell", [] (Values& p, bool on) { p.at (0, Control::shape) = on ? 0.0f : 3.0f; } },
+            { "all at once",     [] (Values& p, bool on) { p.at (0, Control::on) = p.at (0, Control::dyn) = on ? 1.0f : 0.0f;
+                                                           p.at (0, Control::shape) = on ? 0.0f : 3.0f; } },
+        };
+
+        struct Scene { const char* name; bool loudFirst; float attackMs, releaseMs; };
+        const Scene scenes[] {
+            { "loud then quiet, release 120 ms",  true,  5.0f,   120.0f },
+            { "loud then quiet, release 2000 ms", true,  5.0f,   2000.0f },
+            { "quiet then loud, attack 200 ms",   false, 200.0f, 120.0f },
+        };
+
+        for (double rate : { 48000.0, 96000.0 })
+            for (const auto& scene : scenes)
+            {
+                // Out of use from 1 s to 2.5 s; the level changes at 1.5 s,
+                // while nothing is listening on the old code.
+                const auto n = (size_t) (4.0 * rate), away = (size_t) rate, back = (size_t) (2.5 * rate);
+                const auto change = (size_t) (1.5 * rate);
+
+                std::vector<float> tone (n);
+                for (size_t i = 0; i < n; ++i)
+                {
+                    const auto loud = scene.loudFirst ? i < change : i >= change;
+                    tone[i] = (float) (std::pow (10.0, (loud ? -6.0 : -60.0) / 20.0) * std::sqrt (2.0)
+                                       * std::sin (2.0 * kPi * 1000.0 * (double) i / rate));
+                }
+
+                for (const auto& way : ways)
+                {
+                    auto run = [&] (bool keepInUse, std::vector<double>& gain, std::vector<float>& audio)
+                    {
+                        auto p = dynamicBell (scene.attackMs, scene.releaseMs);
+                        DeqDsp d;
+                        d.setParams (p.v.data(), (int) p.v.size());
+                        d.prepare (rate, 64, 1);
+
+                        audio = tone;
+                        gain.assign (n, 0.0);
+
+                        for (size_t pos = 0; pos < n; pos += 64)
+                        {
+                            if (! keepInUse)
+                                way.use (p, pos < away || pos >= back);
+
+                            d.setParams (p.v.data(), (int) p.v.size());
+                            float* ch[1] { audio.data() + pos };
+                            d.process (ch, 1, 64);
+
+                            for (size_t i = pos; i < pos + 64; ++i)
+                                gain[i] = d.engine().bandGainDb (0);
+                        }
+                    };
+
+                    std::vector<double> gain, gainRef;
+                    std::vector<float> audio, audioRef;
+                    run (false, gain, audio);
+                    run (true, gainRef, audioRef);
+
+                    const auto from = back + (size_t) (0.06 * rate), to = back + (size_t) rate;
+                    const auto window = (size_t) (0.01 * rate);
+                    double worstGain = 0.0, worstLevel = 0.0;
+
+                    for (size_t i = from; i < to; ++i)
+                        worstGain = std::max (worstGain, std::abs (gain[i] - gainRef[i]));
+
+                    for (size_t i = from; i + window <= to; i += window)
+                        worstLevel = std::max (worstLevel, std::abs (rmsDb (audio, i, i + window) - rmsDb (audioRef, i, i + window)));
+
+                    const auto label = std::string (way.name) + " back on, " + scene.name + ", " + std::to_string ((int) rate) + " Hz";
+                    checkAtMost (worstGain, 0.1, "Dynamics back in use: applied gain as if never away, " + label);
+                    checkAtMost (worstLevel, 0.1, "Dynamics back in use: the audio as if never away, " + label);
+                }
+            }
+
+        // The listening costs nothing in what DYN off means: a band with its
+        // dynamics off is the static EQ to the bit whatever its detector
+        // knobs say, and so is one with DYN on and no range to move through.
+        {
+            const Stereo in { pinkNoise (24000, -6.0, 71u), pinkNoise (24000, -6.0, 72u) };
+
+            auto renderValues = [&] (Values p)
+            {
+                DeqDsp d;
+                d.setParams (p.v.data(), (int) p.v.size());
+                d.prepare (48000.0, 512, 2);
+
+                std::vector<float> l (in.l.begin(), in.l.end()), r (in.r.begin(), in.r.end());
+                for (size_t pos = 0; pos < l.size(); pos += 512)
+                {
+                    d.setParams (p.v.data(), (int) p.v.size());
+                    float* ch[2] { l.data() + pos, r.data() + pos };
+                    d.process (ch, 2, (int) std::min ((size_t) 512, l.size() - pos));
+                }
+                l.insert (l.end(), r.begin(), r.end());
+                return l;
+            };
+
+            Values still;
+            for (int b = 0; b < kBands; ++b)
+            {
+                still.at (b, Control::on) = 1.0f; still.at (b, Control::shape) = (float) (b % 3);
+                still.at (b, Control::freq) = 60.0f * (float) (b + 1); still.at (b, Control::gain) = b % 2 ? 5.0f : -7.0f;
+                still.at (b, Control::q) = 0.7f + 0.2f * (float) b; still.at (b, Control::place) = (float) (b % 3);
+            }
+
+            auto knobsMoved = still;
+            for (int b = 0; b < kBands; ++b)
+            {
+                knobsMoved.at (b, Control::thr) = -60.0f; knobsMoved.at (b, Control::range) = 24.0f;
+                knobsMoved.at (b, Control::ratio) = 20.0f; knobsMoved.at (b, Control::dir) = 1.0f;
+                knobsMoved.at (b, Control::attack) = 0.1f; knobsMoved.at (b, Control::release) = 5.0f;
+            }
+
+            auto noRange = still;
+            for (int b = 0; b < kBands; ++b) { noRange.at (b, Control::dyn) = 1.0f; noRange.at (b, Control::range) = 0.0f; }
+
+            const auto a = renderValues (still);
+            check (a == renderValues (knobsMoved), "Dynamics back in use: DYN off is the static EQ to the bit, whatever the detector knobs say");
+            check (a == renderValues (noRange), "Dynamics back in use: DYN on with no range is the static EQ to the bit");
+        }
+    }
 }
 
 int main()
@@ -1241,6 +1422,7 @@ int main()
     testSerial();
     testTopologyBehaviour();
     testSoloAndTap();
+    testDynamicsComeBackCurrent();
 
     if (failures == 0)
         std::cout << "deq_dsp: all passed\n";

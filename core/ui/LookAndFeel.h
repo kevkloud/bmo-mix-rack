@@ -3,6 +3,8 @@
 #include "Tokens.h"
 #include "Fonts.h"
 
+#include <cmath>
+
 namespace bmo::ui
 {
 
@@ -59,6 +61,60 @@ public:
 
     void setDetents (int count) noexcept { detents = count; }
     int  getDetents() const noexcept     { return detents; }
+
+    //== A catch on a continuous knob =========================================
+    //
+    /** One value a **drag** settles onto when it comes within `halfWidth` of
+        it, measured as a fraction of the knob's own travel.
+
+        `setDetents` above is a different thing and stays a different thing: a
+        count of evenly spaced positions on a *choice* ring, which nothing
+        reads today. This is a single catch on an otherwise continuous control,
+        for a bipolar parameter whose centre is a value you have to be able to
+        find by hand -- BMO Dwell's lane gain, where 0 is exact unity and
+        either side of it the lane decays or builds. A knob you can only set by
+        eye cannot be set to unity, and unity is what the control is for.
+
+        **Opt-in, and it changes nothing for a knob that does not ask for it.**
+        `hasCatchPoint` is false everywhere else, so `snapValue` hands back
+        what it was given and every other control in the suite drags exactly as
+        it did.
+
+        **Dragging only.** `Slider` also routes the mouse wheel, the arrow keys
+        and *typed entry* through `snapValue` with `notDragging`, and a catch
+        on those would be wrong twice over: it would coarsen a deliberate fine
+        nudge, and it would refuse a number someone typed. Automation and
+        preset recall never come through here at all -- they set the parameter,
+        and the parameter is not rounded by this.
+
+        The **travel**, not the value: `valueToProportionOfLength` is the same
+        mapping the pointer goes through, so a catch on a logarithmic control
+        would subtend the same arc as one on a linear control. Nothing
+        logarithmic asks for one today, which is exactly why it is worth
+        spending the call now rather than dividing by the range. */
+    void setCatch (double value, double halfWidthOfTravel) noexcept
+    {
+        catchValue = value;
+        catchHalfWidth = juce::jlimit (0.0, 0.25, halfWidthOfTravel);
+        hasCatchPoint = true;
+    }
+
+    bool   hasCatch() const noexcept      { return hasCatchPoint; }
+    double getCatchValue() const noexcept { return catchValue; }
+
+    double snapValue (double attemptedValue, DragMode dragMode) override
+    {
+        if (! hasCatchPoint || dragMode == juce::Slider::notDragging)
+            return attemptedValue;
+
+        if (getRange().getLength() <= 0.0)
+            return attemptedValue;
+
+        const auto here   = valueToProportionOfLength (attemptedValue);
+        const auto centre = valueToProportionOfLength (catchValue);
+
+        return std::abs (here - centre) <= catchHalfWidth ? catchValue : attemptedValue;
+    }
 
     void setFaceScale (float s) noexcept { faceScale = s; }
     float getFaceScale() const noexcept  { return faceScale; }
@@ -174,6 +230,9 @@ private:
     int   stepMarks = 0;        ///< see setStepMarks; 0 is the dotted arc
     int   stepLabelEvery = 0;   ///< number every nth mark; 0 draws them bare
     int   stepFirstLabel = 1;   ///< what the first mark is numbered
+    bool   hasCatchPoint = false;   ///< see setCatch
+    double catchValue = 0.0;
+    double catchHalfWidth = 0.0;
     float faceScale = 1.0f;
     float trackRadius = 0.0f;
 };
@@ -203,11 +262,15 @@ inline void strokeInside (juce::Graphics& g, juce::Rectangle<float> area, float 
     g.drawRoundedRectangle (area.reduced (half), juce::jmax (0.0f, radius - half), weight);
 }
 
+/** The Textured surface's images: the two plate tiles and the knob layer
+    cache. Defined in LookAndFeel.cpp; see `BmoLookAndFeel::materials`. */
+class MaterialImages;
+
 //==============================================================================
 class BmoLookAndFeel final : public juce::LookAndFeel_V4
 {
 public:
-    BmoLookAndFeel() { refreshColours(); }
+    BmoLookAndFeel();
 
     /** Whether the Textured surface is in force. See ui::surface. */
     static bool textured();
@@ -298,6 +361,15 @@ public:
 
     /** The slashed O of a polarity switch. */
     static const juce::String& phaseGlyph();
+
+private:
+    /** The Textured images, shared by every look and feel alive and freed
+        with the last of them -- which is the last editor, since each editor
+        owns one. They are native images, and a native image holds the
+        graphics framework's shared device objects: held by a static, they
+        outlived every editor and releasing them at DLL unload hung the host
+        (tests/ui/StaticImageTests.cpp). */
+    juce::SharedResourcePointer<MaterialImages> materials;
 };
 
 } // namespace bmo::ui

@@ -78,6 +78,17 @@ namespace
         // table in docs/fet-comp/11-integration-and-test-plan.md section 2.
         { "fetcomp", { "input", "output", "attack", "release", "ratio", "mix",
                        "voicing", "oversampling" } },
+        // **Twenty-seven, five under a slot's lanes**: every one of BMO Dwell's
+        // parameters gets one, with room to append. The order is permanent.
+        // It was thirty-three, one row over the ceiling, until the lane was
+        // given the main delay's voicing on 2026-09-22 and `link` and the six
+        // `lane_` voicing rows came out of the middle of this list.
+        { "dwell", { "time", "sync", "note", "feedback", "character", "stereo",
+                     "low_cut", "high_cut", "mod_rate", "mod_depth",
+                     "drive", "duck", "mix", "send", "lane_gain", "hold", "chop",
+                     "fx", "fx_type", "fx_amount",
+                     "lane_level", "lane_time", "lane_note",
+                     "lane_fx", "lane_fx_type", "lane_fx_amount", "fx_link" } },
         // BMO Linger. **Thirty parameters against a slot's thirty-two lanes**,
         // so the whole schema gets a lane, none of BMO DEQ's SlotOverflow
         // machinery is needed, and two are left over. It was thirty with two
@@ -240,8 +251,8 @@ int main()
         auto rack = createRack();
         const auto& registry = rack->getRegistry();
 
-        check (registry.size() == 10,
-               "the registry holds util, eq, sat, opto, dim, deq, vcomp, deesser, fetcomp and reverb");
+        check (registry.size() == 11,
+               "the registry holds util, eq, sat, opto, dim, deq, vcomp, deesser, fetcomp, dwell and reverb");
 
         // A bank is a module's host lanes, so it stops at 32 even if the
         // module does not. Past that, its golden schema test pins the order.
@@ -277,7 +288,7 @@ int main()
     // `ModuleDsp::analyser()` returns null by default and BMO DEQ was its only
     // overrider until BMO Linger's EQ page got a spectrum on 2026-09-21. A
     // virtual with a default is exactly the kind of change that looks free and
-    // is only free if nobody else quietly picks it up, so the seven that have no
+    // is only free if nobody else quietly picks it up, so the eight that have no
     // tap are named here rather than assumed.
     //
     // Through the rack, one slot at a time, because that is where a wrong
@@ -290,7 +301,7 @@ int main()
 
         const Tapped kTaps[] {
             { "util", false }, { "eq", false }, { "sat", false }, { "opto", false },
-            { "dim", false }, { "ltvcomp", false }, { "fetcomp", false },
+            { "dim", false }, { "ltvcomp", false }, { "fetcomp", false }, { "dwell", false },
             // BMO DEQ's is post-EQ; BMO Linger's is at the point the Reverb EQ
             // acts on, and shows the dry input until there is a reverb under
             // it (modules/reverb/dsp/DspCore.h, `eqAnalyser`); BMO Defang's is

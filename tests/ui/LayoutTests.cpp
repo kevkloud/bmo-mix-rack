@@ -25,6 +25,9 @@
 #include "modules/deesser/panel/DeesserPanel.h"
 #include "modules/deesser/params.h"
 #include "products/dim/Product.h"
+#include "products/dwell/Product.h"
+#include "modules/dwell/params.h"
+#include "modules/dwell/panel/DwellPanel.h"
 #include "products/eq/Product.h"
 #include "products/fetcomp/Product.h"
 #include "modules/fetcomp/params.h"
@@ -39,6 +42,7 @@
 #include "products/util/Product.h"
 #include "products/rack/Product.h"
 
+#include "core/ui/ExpandButton.h"
 #include "core/ui/LookAndFeel.h"
 #include "core/ui/ModulePanel.h"
 
@@ -1056,6 +1060,324 @@ void checkDeqBandToggle (bmo::ui::ModulePanel& panel, const juce::String& who)
     checkDeqNodeSolo (panel, who, soloCalls);
 
     ctx.setSolo = realSolo;
+}
+
+//== BMO Dwell =================================================================
+//
+// **BMO Linger's paged handheld, one width, 380** (Frosty, 2026-10-01: "go with
+// option one and bring Lane's fx to its tab"). It replaced a nine-control face
+// at 280 and a three-column reveal at 840; option 3 -- the old face kept, with
+// the hidden sixteen behind tabs under it -- was rendered beside it and not
+// taken.
+//
+// What is asserted, page by page, with the captions written out here rather
+// than read off the panel, so a panel that quietly lost a control fails:
+//
+// - **The foot is on every page**: TIME, FEEDBACK, MIX and SYNC, the DELAY
+//   rule, and nothing of any page's below it.
+// - **Each page carries exactly its own controls**, and every other page's are
+//   unparented rather than hidden -- Linger's rule, because a hidden component
+//   still has bounds and every walker here reads them.
+// - **The two FX stages sit in the same cells** on LANE and FX, so turning
+//   between the pages moves nothing but what the controls are bound to.
+// - **Every knob on every page prints its value.**
+// - **The page is view state**: no parameter moves when it turns, and a
+//   parameter moving does not turn it.
+// - **The picture is the engine's law**, checked against the law written out
+//   independently below.
+
+/** Every knob on BMO Dwell prints its value, on whatever page is showing.
+
+    Until 2026-10-01 seven of them did not -- DRIVE, RATE, DEPTH, DUCK, both
+    cuts and both AMOUNTs -- which is a spec deviation (`docs/delay/13` §4
+    asks for Hertz on the cuts and RATE, dB on DUCK) and meant HI CUT at
+    6 kHz and at 18 kHz could only be told apart by dragging it. Turning one
+    back off would move nothing else, and nothing but this would notice. */
+void checkDwellValues (bmo::ui::ModulePanel& panel, const juce::String& who)
+{
+    std::vector<bmo::ui::PlainKnob*> knobs;
+    collectKnobs (panel, knobs);
+
+    auto shown = 0;
+
+    for (auto* knob : knobs)
+        if (knob->isVisible() && knob->getParentComponent() != nullptr)
+        {
+            ++shown;
+            check (knob->isShowingValue(), who + " knob '" + knob->getName() + "' shows no value");
+        }
+
+    // And the faders: LO CUT, HI CUT and DUCK on TONE are `ui::Fader`s from
+    // 2026-10-01, and a fader's ticks are deliberately unlabelled, so its
+    // printed value is the only number it has.
+    for (auto* child : panel.getChildren())
+        if (auto* fader = dynamic_cast<bmo::ui::Fader*> (child))
+            check (fader->isShowingValue(), who + " fader '" + fader->getName() + "' shows no value");
+
+    check (shown > 0, who + " has no knobs to check");
+}
+
+void checkDwellPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
+{
+    namespace D = bmo::dwell;
+
+    auto* dwellPanel = dynamic_cast<D::DwellPanel*> (&panel);
+    check (dwellPanel != nullptr, who + " is not a DwellPanel");
+
+    if (dwellPanel == nullptr)
+        return;
+
+    auto& params = panel.getContext().params;
+
+    //== One width, and nothing to expand into ================================
+    checkEquals (panel.getWidth(), 380, who + " opens at its one width");
+    check (! panel.getContext().def.isExpandable(), who + " a paged module has nothing to expand into");
+    checkEquals (panel.getContext().def.expandedWidth, 0, who + " declares no second width");
+
+    //== Suite inks: Dwell declares no light-ground ink of its own ===========
+    //
+    // Jade, on the inks the suite derives (Frosty, 2026-10-01). Dwell carried
+    // a declared charcoal for a few hours under a bright yellow; the mechanism
+    // stays in core for themes, and this says Dwell is not using it.
+    check (bmo::ui::declaredLightInk (panel.getContext().def.accent).isTransparent(),
+           who + " declares a light-ground ink; jade is meant to run on the derived one");
+
+    //== The captions, page by page, written out ==============================
+    const char* const foot[] { "TIME", "FEEDBACK", "MIX", "SYNC" };
+
+    const char* const tonePage[] { "CLEAN", "TAPE", "BUCKET", "STEREO", "PING-PONG", "DUAL",
+                                   "LO CUT", "HI CUT", "DUCK" };
+
+    const char* const lanePage[] { "SEND", "HOLD", "CHOP", "LANE.DIFFUSE", "LANE.PAN", "LANE.CRUSH",
+                                   "LANE TAIL", "LANE TIME", "LANE LEVEL",
+                                   "LANE FX", "LANE AMOUNT SMEAR", "FX LINK" };
+
+    const char* const fxPage[] { "DIFFUSE", "PAN", "CRUSH", "DRIVE", "RATE", "DEPTH", "FX", "AMOUNT SMEAR" };
+
+    /** **Every parameter has a control, and this is the sum that says so.**
+        A choice row is one parameter for three cells, NOTE shares TIME's
+        cell, and LANE NOTE shares LANE TIME's -- wired 2026-10-01 so that no
+        parameter is left without a control while SYNC ships disabled. */
+    {
+        constexpr int kFootParams = 5;   // time, note, feedback, mix, sync
+        constexpr int kToneParams = 5;   // character, stereo, two cuts, duck
+        constexpr int kLaneParams = 11;  // send, hold, chop, lane fx type, tail, time, note, level, lane fx, amount, link
+        constexpr int kFxParams   = 6;   // fx type, drive, rate, depth, fx, amount
+
+        checkEquals (kFootParams + kToneParams + kLaneParams + kFxParams,
+                     (int) D::Index::count,
+                     who + " every parameter has a control on some page");
+    }
+
+    //== SYNC swaps both engines' time for their note, together ===============
+    //
+    // One switch governs both engines (params.h), so the foot's TIME and the
+    // lane's TIME give way to their NOTEs at once. SYNC ships disabled, but
+    // the parameter can still be written -- by a preset or a host -- and the
+    // panel has to show the knob that is live.
+    {
+        const auto syncWas = params.getReal (D::Index::sync);
+
+        params.setReal (D::Index::sync, 1.0f);
+        panel.setUiState ("page", "lane");   // lays the panel out again
+
+        check (findNamed (panel, "NOTE") != nullptr, who + " SYNC on: the foot shows no NOTE");
+        check (findNamed (panel, "LANE NOTE") != nullptr, who + " SYNC on: the lane shows no NOTE");
+        check (findNamed (panel, "LANE TIME") == nullptr, who + " SYNC on: the lane still shows TIME");
+        checkDwellValues (panel, who + " sync on");
+
+        params.setReal (D::Index::sync, syncWas);
+        panel.setUiState ("page", "lane");
+
+        check (findNamed (panel, "LANE TIME") != nullptr, who + " SYNC off: the lane's TIME did not come back");
+        check (findNamed (panel, "LANE NOTE") == nullptr, who + " SYNC off: the lane still shows NOTE");
+
+        panel.setUiState ("page", "tone");
+    }
+
+    struct PageSpec { D::Page page; const char* name; const char* const* names; size_t count; };
+
+    const PageSpec pages[] {
+        { D::Page::tone, "tone", tonePage, std::size (tonePage) },
+        { D::Page::lane, "lane", lanePage, std::size (lanePage) },
+        { D::Page::fx,   "fx",   fxPage,   std::size (fxPage) },
+    };
+
+    // The DELAY rule, which the foot carries on every page.
+    int footRuleY = -1;
+
+    for (const auto& r : panel.getRules())
+        if (r.text == "DELAY")
+            footRuleY = r.row.getY();
+
+    check (footRuleY > 0, who + " has no DELAY rule over the foot");
+
+    // Snapshot every parameter, so turning pages can be shown to move none.
+    std::vector<float> before;
+    for (int i = 0; i < params.size(); ++i)
+        before.push_back (params.getReal (i));
+
+    for (const auto& spec : pages)
+    {
+        const auto where = who + " " + spec.name;
+
+        check (panel.setUiState ("page", spec.name), where + " was refused as a page");
+        check (dwellPanel->getPage() == spec.page, where + " did not become the page");
+
+        for (const auto* name : foot)
+        {
+            const auto* c = findNamed (panel, name);
+            check (c != nullptr && ! c->getBounds().isEmpty(), where + " lost the foot's " + name);
+
+            if (c != nullptr && juce::String (name) != "SYNC")
+                check (c->getY() >= footRuleY, where + " " + name + " is above the DELAY rule");
+        }
+
+        for (const auto& other : pages)
+            for (size_t i = 0; i < other.count; ++i)
+            {
+                const juce::String name (other.names[i]);
+                auto* c = findNamed (panel, name);
+
+                if (other.page == spec.page)
+                {
+                    check (c != nullptr, where + " has no " + name);
+
+                    if (c != nullptr)
+                    {
+                        check (! c->getBounds().isEmpty(), where + " " + name + " has no bounds");
+                        check (panel.getLocalBounds().contains (c->getBoundsInParent())
+                                   || c->getParentComponent() != &panel,
+                               where + " " + name + " escapes the panel");
+                        check (c->getBottom() <= footRuleY || c->getParentComponent() != &panel,
+                               where + " " + name + " runs into the foot");
+                    }
+                }
+                else
+                {
+                    check (c == nullptr, where + " still carries " + juce::String (other.name)
+                                             + "'s " + name);
+                }
+            }
+
+        checkDwellValues (panel, where);
+
+        // The screen's menu says the same page the panel is on.
+        check (dwellPanel->getScreen().getPage() == spec.page, where + " the screen shows another page");
+    }
+
+    for (int i = 0; i < params.size(); ++i)
+        check (params.getReal (i) == before[(size_t) i],
+               who + " turning pages moved parameter " + params.spec (i).id);
+
+    //== TONE's faders run the height of both grid rows =======================
+    //
+    // 2 x 108 = 216 px each, in three 120 px columns -- the whole grid, which
+    // is what filled the page when DRIVE, RATE and DEPTH moved to FX. A fader
+    // laid into one row would leave the gap this replaced.
+    {
+        panel.setUiState ("page", "tone");
+
+        for (const auto* name : { "LO CUT", "HI CUT", "DUCK" })
+        {
+            const auto* f = dynamic_cast<bmo::ui::Fader*> (findNamed (panel, name));
+            check (f != nullptr, who + " TONE's " + name + " is not a fader");
+
+            if (f != nullptr)
+                checkEquals (f->getHeight(), 216, who + " TONE's " + name + " fader height");
+        }
+    }
+
+    //== The two FX stages share cells ========================================
+    {
+        panel.setUiState ("page", "lane");
+        const auto laneOn     = findNamed (panel, "LANE FX")->getBounds();
+        const auto laneAmount = findNamed (panel, "LANE AMOUNT SMEAR")->getBounds();
+        const auto laneTypes  = findNamed (panel, "LANE.DIFFUSE")->getParentComponent()->getBounds();
+
+        panel.setUiState ("page", "fx");
+        const auto fxOn     = findNamed (panel, "FX")->getBounds();
+        const auto fxAmount = findNamed (panel, "AMOUNT SMEAR")->getBounds();
+        const auto fxTypes  = findNamed (panel, "DIFFUSE")->getParentComponent()->getBounds();
+
+        check (laneOn == fxOn, who + " the lane's FX gate is at " + laneOn.toString()
+                                   + " and the main's at " + fxOn.toString());
+        check (laneAmount == fxAmount, who + " the two AMOUNTs are in different cells");
+        check (laneTypes == fxTypes, who + " the two type rows are in different places");
+    }
+
+    //== The bezel and the screen =============================================
+    {
+        const auto bezel = dwellPanel->getBezelBox();
+        const auto glass = dwellPanel->getScreenBox();
+
+        check (panel.getLocalBounds().contains (bezel), who + " the bezel escapes the panel");
+        check (bezel.contains (glass), who + " the screen is not inside its bezel");
+
+        if (auto* display = findNamed (panel, "DISPLAY"))
+            check (display->getBounds() == glass, who + " the screen is not where the bezel put it");
+        else
+            check (false, who + " has no DISPLAY");
+    }
+
+    //== The menu band turns the page, and the page is view state =============
+    {
+        auto& screen = dwellPanel->getScreen();
+
+        check (screen.onPageChosen != nullptr, who + " the screen's menu is not wired to the panel");
+
+        if (screen.onPageChosen)
+        {
+            screen.onPageChosen (D::Page::lane);
+            check (dwellPanel->getPage() == D::Page::lane, who + " the menu did not turn to LANE");
+            check (findNamed (panel, "LANE TAIL") != nullptr, who + " LANE's controls did not follow the menu");
+        }
+
+        // A parameter moving does not turn the page, and does not resize.
+        params.setReal (D::Index::fx, 1.0f);
+        check (dwellPanel->getPage() == D::Page::lane, who + " switching fx on turned the page");
+        checkEquals (panel.getWidth(), 380, who + " switching fx on resized the panel");
+        params.setReal (D::Index::fx, before[(size_t) D::Index::fx]);
+
+        panel.setUiState ("page", "tone");
+    }
+
+    //== The picture is the engine's law ======================================
+    //
+    // Written out here, not called: 10 §3's FEEDBACK law at P_c = 1 is
+    // g = 1.05 fb^1.6, and the train runs from the first repeat at 0 dB to the
+    // last at or above -60. A screen that drew anything else -- a guessed
+    // fb/97, an RMS figure -- would disagree with this at one of these.
+    {
+        auto& screen = dwellPanel->getScreen();
+        screen.setPage (D::Page::tone);
+
+        for (const auto fb : { 20.0f, 60.0f, 90.0f })
+        {
+            params.setReal (D::Index::feedback, fb);
+
+            const auto g = 1.05 * std::pow (fb * 0.01, 1.6);
+            const auto expected = 1 + (int) std::floor (-60.0 / (20.0 * std::log10 (g)) + 1.0e-9);
+
+            checkEquals (screen.repeatsToFloor(), expected,
+                         who + " repeats to -60 at FEEDBACK " + juce::String (fb, 0));
+        }
+
+        // Past unity it holds or builds, and says so rather than counting.
+        params.setReal (D::Index::feedback, 100.0f);
+        checkEquals (screen.repeatsToFloor(), -1, who + " FEEDBACK 100 builds, and has no count");
+        check (screen.readout().contains ("BUILDS"), who + " FEEDBACK 100 reads " + screen.readout());
+
+        // The lane at its detent is exact unity: FREEZE holds.
+        screen.setPage (D::Page::lane);
+        params.setReal (D::Index::laneGain, 0.0f);
+        checkEquals (screen.loopGain(), 1.0, who + " the lane at FREEZE is not unity");
+        check (screen.readout().contains ("HOLDS"), who + " the lane at FREEZE reads " + screen.readout());
+
+        params.setReal (D::Index::feedback, before[(size_t) D::Index::feedback]);
+        params.setReal (D::Index::laneGain, before[(size_t) D::Index::laneGain]);
+        panel.setUiState ("page", "tone");
+    }
 }
 
 /** Every switch label fits its switch.
@@ -3294,6 +3616,10 @@ int main (int argc, char** argv)
                              return std::unique_ptr<juce::AudioProcessor> (p.release());
                          } },
 
+        // BMO Dwell, **once**: it was here twice while it was expandable (280
+        // and 840); it is a paged handheld at one width from 2026-10-01, and
+        // `checkDwellPanel` walks its pages instead.
+        { "dwell", +[] () -> std::unique_ptr<juce::AudioProcessor> { return createDwell(); } },
         // BMO Linger, **once**. It was here twice while it was expandable, one
         // row per width; the panel is a paged handheld as of 2026-09-21 and
         // has one width, so a second row would be the same 380 px panel under
@@ -3454,6 +3780,14 @@ int main (int argc, char** argv)
 
     withPanel (named ("deq"), [] (bmo::ui::ModulePanel& panel) { checkEquals (panel.getWidth(), 600, "deq opens full standalone"); });
     withPanel (named ("deq compact"), [] (bmo::ui::ModulePanel& panel) { checkEquals (panel.getWidth(), 320, "deq compact width"); });
+
+    // BMO Dwell: the paged handheld, walked once per page, plus the screen and
+    // its arithmetic. Its own panel, because this one moves parameters and the
+    // checks above read a panel that has not been touched.
+    withPanel (named ("dwell"), [] (bmo::ui::ModulePanel& panel)
+    {
+        checkDwellPanel (panel, "dwell");
+    });
 
     //== Textured knob forms ================================================
     //

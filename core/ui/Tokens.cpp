@@ -2,6 +2,7 @@
 #include "core/state/PresetManager.h"
 #include <array>
 #include <cmath>
+#include <vector>
 
 namespace bmo::ui
 {
@@ -330,14 +331,55 @@ Tokens darkTokens() noexcept
     return t;
 }
 
+namespace
+{
+    /** Declared light-ground inks, accent to ink. A handful at most, written
+        once from `module()` before anything paints and only read after. */
+    std::vector<std::pair<juce::uint32, juce::uint32>>& lightInks()
+    {
+        static std::vector<std::pair<juce::uint32, juce::uint32>> inks;
+        return inks;
+    }
+}
+
+void declareLightInk (juce::Colour accent, juce::Colour ink)
+{
+    for (auto& [a, i] : lightInks())
+        if (a == accent.getARGB())
+        {
+            i = ink.getARGB();
+            return;
+        }
+
+    lightInks().emplace_back (accent.getARGB(), ink.getARGB());
+}
+
+juce::Colour declaredLightInk (juce::Colour accent) noexcept
+{
+    for (const auto& [a, i] : lightInks())
+        if (a == accent.getARGB())
+            return juce::Colour (i);
+
+    return {};
+}
+
 juce::Colour accentInk (juce::Colour accent, juce::Colour ground) noexcept
 {
     // The other half of faceOf. On the dark plate the cap takes the accent
     // whole and the ink takes the wash; on the pale one it is the other way
     // round. The wash is written out here rather than calling faceOf, which
     // would hand back the accent in this appearance and defeat the swap.
-    return isDarkMode() ? accent.interpolatedWith (current.knobTint, 0.5f)
-                        : accentTextOn (accent, ground);
+    if (isDarkMode())
+        return accent.interpolatedWith (current.knobTint, 0.5f);
+
+    // An accent that declared its own light-ground ink gets it, on a light
+    // ground only -- the screen face is dark in both appearances and keeps the
+    // derived ink. See declareLightInk.
+    if (relativeLuminance (ground) > 0.18f)
+        if (const auto declared = declaredLightInk (accent); ! declared.isTransparent())
+            return declared;
+
+    return accentTextOn (accent, ground);
 }
 
 juce::Colour accentInk (juce::Colour accent) noexcept

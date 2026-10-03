@@ -36,6 +36,9 @@ add_test(NAME deesser_dsp COMMAND deesser_dsp_tests)
 bmo_add_dsp_tool(fetcomp_dsp_tests dsp/FetcompDspTests.cpp)
 target_link_libraries(fetcomp_dsp_tests PRIVATE bmo_fetcomp_dsp)
 add_test(NAME fetcomp_dsp COMMAND fetcomp_dsp_tests)
+bmo_add_dsp_tool(dwell_dsp_tests dsp/DwellDspTests.cpp)
+target_link_libraries(dwell_dsp_tests PRIVATE bmo_dwell_dsp)
+add_test(NAME dwell_dsp COMMAND dwell_dsp_tests)
 
 bmo_add_dsp_tool(reverb_dsp_tests dsp/ReverbDspTests.cpp)
 target_link_libraries(reverb_dsp_tests PRIVATE bmo_reverb_dsp)
@@ -117,6 +120,10 @@ bmo_add_tool(fetcomp_tests plugin/FetcompTests.cpp)
 target_link_libraries(fetcomp_tests PRIVATE bmo_fetcomp)
 add_test(NAME fetcomp COMMAND fetcomp_tests)
 
+bmo_add_tool(dwell_tests plugin/DwellTests.cpp)
+target_link_libraries(dwell_tests PRIVATE bmo_dwell)
+add_test(NAME dwell COMMAND dwell_tests)
+
 bmo_add_tool(reverb_tests plugin/ReverbTests.cpp)
 target_link_libraries(reverb_tests PRIVATE bmo_reverb)
 # The one plugin test that restores from a thread other than the message
@@ -128,7 +135,7 @@ target_compile_definitions(reverb_tests PRIVATE JUCE_MODAL_LOOPS_PERMITTED=1)
 add_test(NAME reverb COMMAND reverb_tests)
 
 bmo_add_tool(rack_tests plugin/RackTests.cpp ${BMO_ROOT}/products/rack/Registry.cpp)
-target_link_libraries(rack_tests PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp bmo_deesser bmo_fetcomp bmo_reverb)
+target_link_libraries(rack_tests PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp bmo_deesser bmo_fetcomp bmo_dwell bmo_reverb)
 # As reverb_tests: the off-thread restore needs a message loop to grant its
 # MessageManagerLock and to deliver what it queued.
 target_compile_definitions(rack_tests PRIVATE JUCE_MODAL_LOOPS_PERMITTED=1)
@@ -138,7 +145,7 @@ add_test(NAME rack COMMAND rack_tests)
 # golden renders that prove mono-in/stereo-out cost the existing layouts
 # nothing. Linked like rack_tests because it walks the registry.
 bmo_add_tool(bus_tests plugin/BusTests.cpp ${BMO_ROOT}/products/rack/Registry.cpp)
-target_link_libraries(bus_tests PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp bmo_deesser bmo_fetcomp bmo_reverb)
+target_link_libraries(bus_tests PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp bmo_deesser bmo_fetcomp bmo_dwell bmo_reverb)
 add_test(NAME bus COMMAND bus_tests)
 
 # Tail-length reporting, across every product at once: the exact zero every
@@ -146,7 +153,7 @@ add_test(NAME bus COMMAND bus_tests)
 # the rack's sum over its occupied slots. Linked like bus_tests because it
 # walks the registry.
 bmo_add_tool(tail_tests plugin/TailTests.cpp ${BMO_ROOT}/products/rack/Registry.cpp)
-target_link_libraries(tail_tests PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp bmo_deesser bmo_fetcomp bmo_reverb)
+target_link_libraries(tail_tests PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp bmo_deesser bmo_fetcomp bmo_dwell bmo_reverb)
 add_test(NAME tail COMMAND tail_tests)
 
 # The host's tempo, handed to every module once per block: the order and the
@@ -154,7 +161,7 @@ add_test(NAME tail COMMAND tail_tests)
 # and every registered module byte-identical with and without a playhead.
 # Linked like tail_tests because it walks the registry.
 bmo_add_tool(tempo_tests plugin/TempoTests.cpp ${BMO_ROOT}/products/rack/Registry.cpp)
-target_link_libraries(tempo_tests PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp bmo_deesser bmo_fetcomp bmo_reverb)
+target_link_libraries(tempo_tests PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp bmo_deesser bmo_fetcomp bmo_dwell bmo_reverb)
 # BMO Tune RT runs on the same SingleModuleProcessor but is not in the rack's
 # registry, so it is linked in by hand -- and only when the build has it, so
 # the rack-alone configuration (BMO_BUILD_TUNE=OFF) still builds this suite.
@@ -168,7 +175,7 @@ add_test(NAME tempo COMMAND tempo_tests)
 # rendering happens, but Tokens.h includes juce_gui_basics, so a UI assertion
 # cannot run in the DSP-only job whatever docs/ui-workflow-brief.md §4 says.
 bmo_add_tool(ui_layout_tests ui/LayoutTests.cpp ${BMO_ROOT}/products/rack/Registry.cpp)
-target_link_libraries(ui_layout_tests PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp bmo_deesser bmo_fetcomp bmo_reverb)
+target_link_libraries(ui_layout_tests PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp bmo_deesser bmo_fetcomp bmo_dwell bmo_reverb)
 add_test(NAME ui_layout COMMAND ui_layout_tests)
 
 # The shared controls in core/ui, asserted on their own rather than through a
@@ -190,6 +197,13 @@ target_include_directories(snapshot_io_tests PRIVATE ${BMO_ROOT})
 add_test(NAME snapshot_io COMMAND snapshot_io_tests)
 
 endif()
+
+# No juce::Image with static storage in the UI code: a source scan, because the
+# fault it holds (an image outliving every editor hangs the host at unload)
+# needs a loaded plugin to show. JUCE-free, and outside the rack switch, since
+# it reads products/ and every module's panel whatever this build compiles.
+bmo_add_dsp_tool(ui_static_image_tests ui/StaticImageTests.cpp)
+add_test(NAME ui_static_image COMMAND ui_static_image_tests ${BMO_ROOT})
 
 # Tune's real panel, laid out with no display. Its layout is asserted here
 # rather than in ui/LayoutTests.cpp, which walks the rack's registry.

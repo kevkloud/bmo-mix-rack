@@ -399,6 +399,18 @@ const Golden kDefaults[]
       -20.6458693267, 0.178372368217,
       -20.7609701573, 0.175070211291, -20.7124848796, 0.176500663161,
       -20.6458693267, 0.178372368217, -20.6458693267, 0.178372368217 },
+    // BMO Dwell, captured on AURORA on 2026-10-01 when it merged beside BMO
+    // Linger. **Bit-identical to the input, and it is not because Dwell is a
+    // wire.** The render is kLength = 4096 samples, 85 ms, and Dwell's default
+    // TIME is 375 ms, so no repeat lands inside it; what is left is the dry,
+    // which `docs/delay/10` requires to be bit-exact unity for MIX 0-50 %, and
+    // MIX defaults to 35 %. This row is that requirement holding, not a delay
+    // being measured. A first capture, not a before/after: Dwell did not exist
+    // at 8fed835.
+    { "dwell",
+      -18.0000001899, 0.237879320979,
+      -18.0000001899, 0.237879320979, -17.9999997391, 0.239933893085,
+      -18.0000001899, 0.237879320979, -18.0000001899, 0.237879320979 },
     // BMO Linger. **A wire, and that is the whole of what this row says
     // today**: its DSP is a marked placeholder, so the numbers are the
     // unaltered input and they are LTV Comp's, BMO DEQ's and the wire's alike.
@@ -479,6 +491,15 @@ const Golden kSwept[]
       -14.1968014623, 0.385867774487,
       -14.3174488279, 0.38244971633, -14.2261054655, 0.383085817099,
       -14.1968014623, 0.385867774487, -14.1968014623, 0.385867774487 },
+    // BMO Dwell at 0.63 of normalised. 0.745 dB under its defaults row, and
+    // that is MIX at 63 % fading the dry -- the dry only starts to fall above
+    // 50 % -- rather than any repeat: TIME at 0.63 of its log travel is still
+    // far longer than the 85 ms render. A delay's repeats are not something
+    // this file can see; DwellDspTests is where they are measured.
+    { "dwell",
+      -18.7454683134, 0.218314856291,
+      -18.7454683134, 0.218314856291, -18.7454678563, 0.220200449228,
+      -18.7454683134, 0.218314856291, -18.7454683134, 0.218314856291 },
     // Identical to its defaults row, and it should be: at 0.63 of normalised
     // every one of BMO Linger's thirty parameters is somewhere else, and a
     // placeholder does not care. This is the row that will move furthest.

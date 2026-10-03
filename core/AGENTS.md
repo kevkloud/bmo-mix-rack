@@ -154,5 +154,13 @@ rack/     SlotParameter (one generic host parameter, remapped live),
   a panel draws into the plate goes through `BmoLookAndFeel::fillEngraved`.
   `docs/ui-material-proposal.md` has the design, the costs and the knob
   allocation table.
+- **No `juce::Image` with static storage in UI code** -- not a function-local
+  static, not a namespace-scope one, not a static container of them. A
+  native image holds the graphics framework's shared device objects; held by
+  a static it outlives every editor, and releasing it at DLL unload hung the
+  host (found 2026-10-02, with the Textured surface on). An image belongs to
+  a component, or to `BmoLookAndFeel`'s `MaterialImages`, which every look
+  and feel shares through `juce::SharedResourcePointer` and which goes with
+  the last editor. `ui_static_image` reads the sources and fails on one.
 - Tokens are the only place colours live. A panel that needs a colour
   takes it from `ui::tokens()` or from its module's `accent`.

@@ -48,6 +48,13 @@ own tests could not see. What belongs *here* is anything every module shares.
   why the accent and the switch colours are both documented exceptions, why the
   GR meter is not widened for a 30 dB design target, and what the placeholder
   DSP owes the real one.
+- [`dwell/AGENTS.md`](dwell/AGENTS.md) -- BMO Dwell, the delay: a main delay
+  and a parallel throw lane (SEND / HOLD / CHOP), one engine type instanced
+  twice. DSP complete, unheard in a host. What is frozen in the permanent
+  schema and why NOTE's index order is not "least to most" like the other
+  lists; why latency is 0 and why reporting the delay time as latency is the
+  trap; what ships disabled (SYNC); and why `fx` the parameter and the
+  revealed view are tied but not the same.
 - [`reverb/AGENTS.md`](reverb/AGENTS.md) -- BMO Linger, the reverb. Panel and
   schema so far; the DSP is a marked placeholder. **Thirty parameters against a
   slot's thirty-two lanes**, so a thirty-first has to be argued rather than

@@ -450,11 +450,15 @@ const Golden kDefaults[]
     // Saturator is the third slot of this chain. RMS fell by 1.281 dB (mono,
     // stereo-in duplicate, mono -> stereo), 1.152 dB (stereo L) and 0.882 dB
     // (stereo R); peaks from 0.3620 to 0.2635, 0.3618 to 0.2670 and 0.3819
-    // to 0.2934.
+    // to 0.2934. Recaptured again on ICE QUEEN, 2026-10-03, when this work
+    // was brought onto a main that already carried BMO Opto's new cell: the
+    // Saturator's TONE is still the only cause (the row is unchanged through
+    // every EQ commit), and the figures against main's row are -1.2808 dB
+    // (mono, duplicate, mono -> stereo), -1.1536 (L) and -0.8833 (R).
     { "rack",
-      -17.4712492142, 0.361955910921,
-      -17.5526169502, 0.361831098795, -16.9697582674, 0.381935656071,
-      -17.4712492142, 0.361955910921, -17.4712492142, 0.361955910921 },
+      -18.752053514, 0.263523042202,
+      -18.7062172701, 0.267028808594, -17.8530324334, 0.293390482664,
+      -18.752053514, 0.263523042202, -18.752053514, 0.263523042202 },
 };
 
 // BMO DEQ's swept row is loud on purpose and is not a fault: 0.63 turns all 24
@@ -548,10 +552,16 @@ const Golden kSwept[]
     //   -12.3127826311, 1.16622364521,
     //   -12.0186861044, 1.15730381012, -11.9707005038, 1.15666902065,
     //   -12.5248895603, 1.1564694643, -12.4650833707, 1.15827429295
+    // Recaptured on ICE QUEEN, 2026-10-03, when this work was brought onto a
+    // main whose BMO Opto (slot four) had gained its quick attack stage. The
+    // same Auto Gain commit is the only one that moves it, but the new cell
+    // answers the louder start more strongly: against main's row, RMS -0.040
+    // (mono), -0.077 / -0.074 (stereo L / R), -0.044 / -0.041 (duplicate and
+    // mono -> stereo L / R) dB, and every peak up by 0.0028 to 0.0075.
     { "rack",
-      -11.6794488945, 1.15918135643,
-      -11.2405694634, 1.15107154846, -11.1992268857, 1.15140509605,
-      -11.8107135636, 1.1467539072, -11.771661916, 1.14582884312 },
+      -11.7195631752, 1.16198933125,
+      -11.317069677, 1.15757536888, -11.2731589041, 1.15886342525,
+      -11.854487306, 1.15360951424, -11.8121786505, 1.15331184864 },
 };
 
 const Golden* goldenFor (const Golden* table, size_t n, const char* id)

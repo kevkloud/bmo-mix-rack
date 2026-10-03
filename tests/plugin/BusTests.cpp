@@ -540,10 +540,17 @@ const Golden kSwept[]
       -7.16919915094, 0.988553106785,
       -10.8123103775, 0.853308975697, -9.8115626611, 0.988553166389,
       -7.16919915094, 0.988553106785, -7.16919915094, 0.988553106785 },
+    // BMO Defang at 0.63 of normalised is in SHELF shape, and on 2026-10-04
+    // the owner decided a shelf has no boost and never cuts past RANGE: it
+    // runs at Q 0.707 whatever the knob says, and its detector at the same Q.
+    // Regenerated on ICE QUEEN with --print for this row alone, as the record
+    // of that decision: RMS up by 0.05-0.10 dB, peaks by under 0.0032, the
+    // resonant shelf having cut deeper than RANGE. The defaults row (Bell) did
+    // not move.
     { "deesser",
-      -18.1231178049, 0.234146103263,
-      -18.0548834769, 0.236055493355, -18.0545154892, 0.239385798573,
-      -18.1231178049, 0.234146103263, -18.1231178049, 0.234146103263 },
+      -18.0229176871, 0.237327337265,
+      -18.0033021984, 0.23783005774, -18.0033560106, 0.239815115929,
+      -18.0229176871, 0.237327337265, -18.0229176871, 0.237327337265 },
     { "fetcomp",
       -14.1968014623, 0.385867774487,
       -14.3174488279, 0.38244971633, -14.2261054655, 0.383085817099,

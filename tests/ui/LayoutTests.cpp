@@ -4045,6 +4045,11 @@ int main (int argc, char** argv)
     withPanel (named ("dim"), [] (bmo::ui::ModulePanel& panel)
     {
         checkDimPanel (panel, "dim");
+
+        // OUTPUT (2026-10-04) sits where every module's output knob sits,
+        // rows 602..679, at the trim size, so it lines up across a rack.
+        checkOutputSection   (panel, "dim");
+        checkTrimKnobHeights (panel, "dim", { "OUTPUT" });
     });
 
     // BMO Util reserves the output section and adopts neither half of it. This

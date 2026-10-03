@@ -79,6 +79,10 @@ DimPanel::DimPanel (ui::ModuleContext ctx)
       asymmetry   (context.params.param (Index::asymmetry),   "TILT",
                    ui::Knob::Style::character, 0.62f, context.def.accent),
 
+      // A trim, so the suite's trim knob: utility style, as BMO EQ's and the
+      // Saturator's OUTPUT are.
+      output      (context.params.param (Index::output),      "OUTPUT"),
+
       // Not a bypass, not mono, not polarity -- so `switchAlt`, per the table
       // in modules/AGENTS.md. GENERATE rather than DETUNE: the switch turns on
       // the one stage that makes width from nothing, and a mono source needs
@@ -114,9 +118,14 @@ DimPanel::DimPanel (ui::ModuleContext ctx)
     for (auto* k : { &rotation, &asymmetry })
         k->setEndMarks (ui::Knob::EndMarks::leftRight);
 
+    // One-piece in the Textured surface whatever its size, as every input,
+    // output and volume knob is (Frosty, 2026-09-25), and the one trim size.
+    output.setTexturedForm (ui::Knob::TexturedForm::onePiece);
+    styleTrimKnob (output);
+
     for (auto* c : std::initializer_list<juce::Component*> {
              &detuneOn, &cents, &diffuse, &width,
-             &shuffle, &shuffleFreq, &rotation, &asymmetry })
+             &shuffle, &shuffleFreq, &rotation, &asymmetry, &output })
         addAndMakeVisible (c);
 
     // The four controls a dim depends on. GENERATE, DIMENSION and TURN are
@@ -152,6 +161,20 @@ void DimPanel::resized()
     auto area = getLocalBounds().reduced (kPad, 4);
     clearRules();
 
+    // OUTPUT, off the foot first (2026-10-04). The knob lands on the suite's
+    // output row, 602..679, so it lines up with BMO EQ's and the Saturator's
+    // in a rack. Not the whole of takeOutputSection: this module has no
+    // output switches, and the 28 px switch row it would leave empty is more
+    // than this column can give without shrinking a control. So a bare rule
+    // straight over the knob instead, the way the section's own rule sits
+    // over its switches; what it costs is the blocks above moving closer
+    // together, through the derived gap below.
+    {
+        auto foot = area.removeFromBottom (kRuleRow + kTrimKnobRow + kFootMargin);
+        addRule (foot.removeFromTop (kRuleRow), {});
+        output.setBounds (foot.removeFromTop (kTrimKnobRow));
+    }
+
     // Two legends, set in the gaps the rhythm below already leaves, so no
     // control moves for them. SOURCE over what makes width from a mono
     // source, WIDTH over what shapes the width that exists -- Frosty,
@@ -175,11 +198,13 @@ void DimPanel::resized()
     };
 
     // Opto's rhythm: every block placed from the top on one derived gap, with a
-    // margin above the first and below the last, so the spacing stays even if a
-    // block's height changes later. Five blocks and five derived gaps -- the
-    // sixth, inside SOURCE, is the fixed kSourceGap.
+    // margin above the first, so the spacing stays even if a block's height
+    // changes later. Four derived gaps -- the fixed kSourceGap is inside
+    // SOURCE. There were five, the fifth a margin under the last block, until
+    // OUTPUT took the foot on 2026-10-04: its rule's own half-height is that
+    // margin now, and the column could not spare a second one.
     const auto content = kSwitchHeight + kSourceGap + kPairKnobHeight * 3 + kValueRow + kBigKnobHeight;
-    const auto gap     = juce::jmax (kSwitchGap, (area.getHeight() - content) / 5);
+    const auto gap     = juce::jmax (kSwitchGap, (area.getHeight() - content) / 4);
 
     legendIn (area.removeFromTop (gap), "SOURCE");
 

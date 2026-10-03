@@ -101,6 +101,9 @@ private:
     ui::PlainKnob width, shuffle, shuffleFreq, cents, diffuse,
                   rotation, asymmetry;
 
+    /** OUTPUT, 2026-10-04: the suite's trim knob, on the suite's output row. */
+    ui::PlainKnob output;
+
     ui::SwitchButton detuneOn;
 
     /** One per control that decides a dim. A host lane, a preset recall or

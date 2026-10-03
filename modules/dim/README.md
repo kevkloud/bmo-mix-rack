@@ -56,7 +56,13 @@ S1 recommends 600–700 Hz.
 
 **TURN** (Rotation) — the whole soundfield turned, without changing the
 relative levels of anything standing on it. Positive degrees move the image
-**right**, like a pan knob. Its ends are marked L and R.
+**right**, like a pan knob. Its ends are marked L and R. **At its ends it
+breaks mono:** at full L a centre source lands hard left, 3 dB down in a mono
+sum, and anything hard-panned *left* comes out in anti-phase and disappears
+from a mono sum entirely (measured at −180 dB); full R does the same to
+anything hard-panned right. It is the one control here that can take
+something out of the mono sum altogether — everywhere else the centre comes
+through to within −143.5 dBFS.
 
 **TILT** (Asymmetry) — left against right, with centre material left exactly
 where it is. This is not a balance control and not a pan; a dead-centre vocal

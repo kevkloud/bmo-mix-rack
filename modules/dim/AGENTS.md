@@ -42,7 +42,17 @@ writing into `mid`, stop: you are about to spend the reason this module exists.
 **Two exceptions are deliberate**, both identity at their defaults:
 
 - **Rotation** turns the whole soundfield, so it moves centre material off
-  centre. It is meant to.
+  centre. It is meant to. **At either end of TURN it also cancels material
+  outright**, and that is the one real exception to the mono promise. The
+  range is ±45°, a 45° rotation of the mid/side pair -- not the "quarter
+  turn" `params.h` used to call it. At −45 (the L end) the output is
+  `L = (L + R)/√2`, `R = (R − L)/√2`: a centre source lands hard left and
+  3.01 dB down in the mono sum, a source hard-panned **left** comes out in
+  anti-phase and **vanishes from the mono sum (−180.4 dB, measured)**, and a
+  hard-right one comes up 3.01 dB. +45 is the mirror image. Everywhere else
+  in the module the mid is preserved to −143.5 dBFS at worst (every other
+  control at its maximum, on a chorused source). The range stays, by the
+  owner's call on 2026-10-04; the docs say what it does instead.
 - **Asymmetry** does not move the centre. A source with no side content passes
   it untouched; only material already off centre changes level. The mono sum
   moves for *that* reason, not because the centre moved.

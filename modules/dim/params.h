@@ -107,9 +107,19 @@ inline const ParamSpecs& specs()
 
         // ROTATION: the whole stereo stage turned, without changing the
         // relative levels of anything standing on it. Degrees, and the S1's
-        // own control is unbounded in principle -- this stops at a quarter
-        // turn either way, past which the image is inverted rather than
-        // rotated.
+        // own control is unbounded in principle -- this stops at 45 either
+        // way. That is not a quarter turn, which is what this comment said
+        // until 2026-10-04: it is a 45-degree rotation of the mid/side pair,
+        // and at the end of it the image is already inverted on one side.
+        // At -45 (the L end) the output is L = (L + R) / sqrt 2 and
+        // R = (R - L) / sqrt 2: a centre source lands hard left, 3.01 dB down
+        // in the mono sum, and a source hard-panned LEFT comes out in
+        // anti-phase and cancels in the mono sum completely (measured
+        // -180.4 dB). +45 is the mirror image: hard-RIGHT material cancels.
+        // The range stays -- the owner's call, 2026-10-04 -- and this is the
+        // one place the module's mono promise does not hold even for
+        // material that was in the sum to begin with; see
+        // modules/dim/AGENTS.md.
         S::floatParam (kRotation, "Turn", -45.0f, 45.0f, 0.5f, 0.0f),
 
         // ASYMMETRY: left against right, with centre material left where it

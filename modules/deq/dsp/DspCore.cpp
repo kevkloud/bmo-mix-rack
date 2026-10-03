@@ -192,7 +192,8 @@ void DspCore::controlTick() noexcept
 
         // A band that has faded out completely stops costing anything, and
         // restarts from silence rather than from stale state. Its listener
-        // carries on if the band is one of the product's (Band, above).
+        // carries on if the band is one of the product's and has been live
+        // since reset() (Band, above); one never switched on does no work.
         const auto asleep = ! s.enabled && (snapAll || (b.enable.tick == 0.0 && b.enable.now == 0.0));
 
         if (asleep)
@@ -200,7 +201,7 @@ void DspCore::controlTick() noexcept
             if (b.live || (b.hearing && ! listens))
                 resetBand (b, ! listens);
 
-            if (! listens)
+            if (! listens || ! b.hearing)
                 continue;
         }
 
@@ -475,6 +476,7 @@ void DspCore::processImpl (Sample* const* channels, int numChannels, int numSamp
                     placed = blend (placedLevel (b.fromPlacement, sm, ss), placed, placing);
 
                 b.detector.process ((1.0 - beta) * stereoLevel + beta * placed);
+                ++b.listened;
             }
 
             if (! b.live)

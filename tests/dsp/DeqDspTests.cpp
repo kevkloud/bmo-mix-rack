@@ -1873,6 +1873,62 @@ namespace
             check (fl == inL && fr == inR, "Before prepare: the module passes the signal through untouched");
         }
     }
+
+    /** A band that has never been switched on does no work. Its detector
+        starts listening the first time the band is live and keeps listening
+        until reset(), which is all the stale-state fix needs: a band that has
+        never been live has nothing to be stale about. Round 2 of the review
+        (2026-10-03) measured the earlier rule -- all twelve listening at the
+        defaults, where the module is a wire -- at 0.72 % -> 2.70 % of a block
+        at 192 kHz / 32. Counted in detector ticks, not time. */
+    void testUnusedBandsCostNothing()
+    {
+        const double rate = 48000.0;
+        Values p;
+        DeqDsp d;
+        d.setParams (p.v.data(), (int) p.v.size());
+        d.prepare (rate, 512, 2);
+
+        std::vector<float> l (512), r (512);
+        auto play = [&] (int blocks)
+        {
+            for (int k = 0; k < blocks; ++k)
+            {
+                for (size_t i = 0; i < l.size(); ++i) { l[i] = 0.1f * (float) std::sin (0.03 * (double) i); r[i] = -l[i]; }
+                d.setParams (p.v.data(), (int) p.v.size());
+                float* ch[2] { l.data(), r.data() };
+                d.process (ch, 2, 512);
+            }
+        };
+
+        auto ticks = [&] (int band) { return d.engine().detectorTicks (band); };
+        auto allQuiet = [&] (int except)
+        {
+            for (int b = 0; b < kMaxBands; ++b)
+                if (b != except && ticks (b) != 0)
+                    return false;
+            return true;
+        };
+
+        play (100);
+        check (allQuiet (-1), "Idle: at the defaults no band's detector runs");
+
+        // Band 3 on for a moment, then off: it keeps listening, nobody else starts.
+        p.at (2, Control::on) = 1.0f;
+        play (4);
+        p.at (2, Control::on) = 0.0f;
+        play (20);
+        const auto heard = ticks (2);
+        play (20);
+        check (ticks (2) == heard + 20 * 512, "Idle: a band that has been on keeps its detector listening once off");
+        check (allQuiet (2), "Idle: the bands never switched on still do no work");
+
+        // reset() forgets it.
+        d.reset();
+        const auto atReset = ticks (2);
+        play (20);
+        check (ticks (2) == atReset, "Idle: after reset() a band that is off does no work again");
+    }
 }
 
 int main()
@@ -1895,6 +1951,7 @@ int main()
     testCutQIsCapped();
     testMeterReadsWhatIsApplied();
     testProcessBeforePrepare();
+    testUnusedBandsCostNothing();
 
     if (failures == 0)
         std::cout << "deq_dsp: all passed\n";

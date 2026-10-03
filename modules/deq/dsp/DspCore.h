@@ -5,6 +5,7 @@
 #include "core/dsp/AnalyserTap.h"
 #include "core/dsp/SwitchFade.h"
 #include <array>
+#include <cstdint>
 #include <atomic>
 #include <memory>
 #include <complex>
@@ -100,12 +101,11 @@ struct Settings
     std::array<BandSettings, kMaxBands> bands {};
 
     /** How many of `bands` the product has: BMO DEQ's twelve. A band inside
-        it keeps its detector listening while the band is off or its dynamics
-        are, so dynamics coming back into use carry on from where a band that
-        never left would be, rather than from whatever they last heard (see
-        DspCore::Band). A band past it costs nothing until it is switched on.
-        The default is every band, which is right for anything that enables
-        bands freely and only costs CPU. */
+        it that has been live since reset() keeps its detector listening while
+        the band is off or its dynamics are, so dynamics coming back into use
+        carry on from where a band that never left would be, rather than from
+        whatever they last heard (see DspCore::Band). A band never switched on,
+        or one past this count while it is off, costs nothing. */
     int bandCount = kMaxBands;
 };
 
@@ -199,6 +199,10 @@ public:
     double bandEnvelope (int band) const noexcept   { return bands[(size_t) band].detector.envelope(); }
     double bandGainDb (int band) const noexcept     { return bands[(size_t) band].appliedGainDb; }
 
+    /** How many samples this band's detector has heard since construction:
+        a band that has never been switched on hears none. */
+    std::uint64_t detectorTicks (int band) const noexcept { return bands[(size_t) band].listened; }
+
     /** No subnormal anywhere in filter or detector state. */
     bool allStateNormal() const noexcept;
 
@@ -224,16 +228,20 @@ private:
     /** One band, in two halves with two lifetimes.
 
         **The listener** -- frequency, Q and placement glides, the sidechain
-        filter, the detector and the gain offset it asks for -- runs for every
-        band inside Settings::bandCount whether or not the band is on and
-        whether or not its dynamics are, and only reset() clears it. Until the
-        2026-10-03 review it ran only while the dynamics were in use, so it
-        stood still while they were not and came back with a stale envelope:
-        a -12 dB cut lasting 3.5 s at release 2000 ms on a signal that had
-        gone quiet meanwhile. Listening costs the sidechain and the detector
-        for a band nobody is using, and buys a band whose dynamics, coming
-        back by any route, are where they would be had they never left. It
-        never reaches the audio of a band whose dynamics are off.
+        filter, the detector and the gain offset it asks for -- starts the
+        first time a band inside Settings::bandCount is live, then runs
+        whether or not the band is on and whether or not its dynamics are,
+        and only reset() stops it. A band never switched on has nothing that
+        could be stale and does no work (round 2 of the review: all twelve
+        listening at the defaults cost 0.72 % -> 2.70 % of a 192 kHz / 32
+        block). Until the 2026-10-03 review it ran only while the dynamics
+        were in use, so it stood still while they were not and came back with
+        a stale envelope: a -12 dB cut lasting 3.5 s at release 2000 ms on a
+        signal that had gone quiet meanwhile. Listening costs the sidechain
+        and the detector for a band that has been used and is now off, and
+        buys a band whose dynamics, coming back by any route, are where they
+        would be had they never left. It never reaches the audio of a band
+        whose dynamics are off.
 
         **The band itself** -- its filter, its design and its fades -- runs
         only while the band is on or fading out, and a band that has faded
@@ -254,6 +262,7 @@ private:
         double offsetDb = 0.0, appliedGainDb = 0.0;
         bool   live = false;         // enabled, or still fading out
         bool   hearing = false;      // the listener is running
+        std::uint64_t listened = 0;  // samples the detector has heard (detectorTicks)
 
         // The listener's switches. dynMix is how far the dynamics are in use
         // and dirMix how far toward Below, both read at control rate; each

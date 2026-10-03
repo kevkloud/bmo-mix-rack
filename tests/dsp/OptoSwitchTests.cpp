@@ -138,12 +138,116 @@ void testAModeRoundTripComesBackWhereItWouldHaveBeen()
     }
 }
 
+//==============================================================================
+/** The bound the repository holds a switch to: the largest sample-to-sample
+    step in the quarter second after it, against the steady signal's own
+    largest step before it and once it has settled again. Worst of four
+    starting phases an eighth of a cycle apart, so a switch cannot hide by
+    landing where the two sides happen to agree. L carries the programme at
+    -18 dBFS RMS and R the same signal `rightScale` times as large; the
+    figure is read on `channel`. The switch lands on a block boundary, as a
+    host's does, after three seconds for the cells to settle. */
+double switchStepRatio (const DspCore::Params& a, const DspCore::Params& b, int channel = 0,
+                        double rightScale = 1.0, double amplitude = kProgrammeAmp)
+{
+    const auto sw = blockAt (3.0);
+    double worst = 0.0;
+
+    for (int k = 0; k < 4; ++k)
+    {
+        const auto l = sine (220.0, 5.0, amplitude, k * kPi / 4.0);
+        auto r = l;
+        for (auto& v : r) v = (float) (v * rightScale);
+
+        const auto out = render (l, r, [&] (size_t s) { return s >= sw ? b : a; });
+        const auto& y  = channel == 0 ? out.first : out.second;
+
+        const auto before = largestStep (y, sw - (size_t) (0.15 * kSampleRate), sw);
+        const auto after  = largestStep (y, (size_t) (4.7 * kSampleRate), y.size());
+        const auto during = largestStep (y, sw, sw + (size_t) (0.25 * kSampleRate));
+
+        worst = std::max (worst, during / std::max (before, after));
+    }
+
+    return worst;
+}
+
+/** Mode is two different circuits at two different levels, and moving
+    between them in one sample stepped the output by 45 to 156 times the
+    signal's own largest step. */
+void testModeCrossesOverWithoutAStep()
+{
+    for (const auto crush : { 60.0f, 100.0f })
+    {
+        const auto toStressed = switchStepRatio (params (Mode::La2a, crush), params (Mode::Distressor, crush));
+        const auto toTele     = switchStepRatio (params (Mode::Distressor, crush), params (Mode::La2a, crush));
+
+        check (toStressed < 1.5, "Tele -> Stressed at crush " + std::to_string ((int) crush)
+                                   + " steps by " + std::to_string (toStressed) + " times the signal's own step (under 1.5)");
+        check (toTele < 1.5,     "Stressed -> Tele at crush " + std::to_string ((int) crush)
+                                   + " steps by " + std::to_string (toTele) + " times the signal's own step (under 1.5)");
+    }
+}
+
+/** Link decides whose cell sets the quieter channel's gain, and the two
+    answers are far apart: with L at -18 and R at -30 dBFS RMS, unlinking
+    stepped R by 61 to 85 times its own largest step and left it 14.7 dB
+    (Tele) and 20.6 dB (Stressed) louder in one sample; linking stepped it by
+    18 to 22 times. */
+void testLinkCrossesOverWithoutAStep()
+{
+    constexpr double quieter = 0.2512;   // R 12 dB under L
+
+    for (const auto mode : { Mode::La2a, Mode::Distressor })
+    {
+        const auto name = std::string (mode == Mode::La2a ? "Tele" : "Stressed");
+
+        const auto unlink = switchStepRatio (params (mode, 100.0f, true), params (mode, 100.0f, false), 1, quieter);
+        const auto link   = switchStepRatio (params (mode, 100.0f, false), params (mode, 100.0f, true), 1, quieter);
+
+        check (unlink < 1.5, name + ": Link off steps the quieter channel by " + std::to_string (unlink)
+                               + " times its own step (under 1.5)");
+        check (link < 1.5,   name + ": Link on steps the quieter channel by " + std::to_string (link)
+                               + " times its own step (under 1.5)");
+
+        // And unlinking does not move the quieter channel's level at once:
+        // its own cell starts from what the shared one was holding.
+        const auto sw = blockAt (3.0);
+        const auto l  = sine (220.0, 5.0, kProgrammeAmp);
+        auto r = l;
+        for (auto& v : r) v = (float) (v * quieter);
+
+        const auto out  = render (l, r, [&] (size_t s) { return params (mode, 100.0f, s < sw); }).second;
+        const auto jump = rmsDb (out, sw, kCycle) - rmsDb (out, sw - (size_t) (0.05 * kSampleRate), kCycle);
+
+        check (std::abs (jump) < 1.0,
+               name + ": the quieter channel's level across Link off moves by " + std::to_string (jump) + " dB in the first cycle (under 1)");
+    }
+}
+
+/** Color is a soft clip, which is nothing at all on a quiet signal and a
+    different waveform on a loud one. Measured where it bends: a tone peaking
+    at -6 dBFS with 6 dB of LEVEL, nothing being reduced. */
+void testColorCrossesOverWithoutAStep()
+{
+    const auto on  = switchStepRatio (params (Mode::Distressor, 0.0f, true, false, 6.0f),
+                                      params (Mode::Distressor, 0.0f, true, true, 6.0f), 0, 1.0, 0.5);
+    const auto off = switchStepRatio (params (Mode::Distressor, 0.0f, true, true, 6.0f),
+                                      params (Mode::Distressor, 0.0f, true, false, 6.0f), 0, 1.0, 0.5);
+
+    check (on < 1.5,  "Color on steps by " + std::to_string (on) + " times the signal's own step (under 1.5)");
+    check (off < 1.5, "Color off steps by " + std::to_string (off) + " times the signal's own step (under 1.5)");
+}
+
 } // namespace
 
 //==============================================================================
 int main()
 {
     testAModeRoundTripComesBackWhereItWouldHaveBeen();
+    testModeCrossesOverWithoutAStep();
+    testLinkCrossesOverWithoutAStep();
+    testColorCrossesOverWithoutAStep();
 
     std::printf ("%d checks, %d failures\n", checks, failures);
     return failures == 0 ? 0 : 1;

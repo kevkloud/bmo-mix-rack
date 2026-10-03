@@ -66,6 +66,7 @@
 #include <iomanip>
 #include <iterator>
 #include <limits>
+#include <sstream>
 #include <thread>
 
 using namespace test;
@@ -80,10 +81,10 @@ constexpr int    kBlocks  = 288;                     // 3.072 s
 constexpr int    kLength  = kBlock * kBlocks;
 
 /** Where the bad sample goes: block 48 (0.512 s, after every module's
-    smoothers have settled from prepare), sample 100 of it, left channel. */
+    smoothers have settled from prepare), sample 100 of it unless a case says
+    otherwise. */
 constexpr int kBadBlock   = 48;
 constexpr int kBadOffset  = 100;
-constexpr int kBadChannel = 0;
 constexpr int kBadAt      = kBadBlock * kBlock + kBadOffset;
 
 /** How close a module has to be to the clean render, and from when.
@@ -167,41 +168,92 @@ const std::vector<float>& sine()
     return s;
 }
 
-/** What one render found. `out` is both channels end to end. */
+/** Which channels a bad sample goes into, and where in `kBadBlock`. */
+constexpr int kLeft  = 1;
+constexpr int kRight = 2;
+constexpr int kBoth  = kLeft | kRight;
+
+constexpr int kFirst = 0;
+constexpr int kLast  = kBlock - 1;
+
+/** One bad sample (or one per channel, for `kBoth`): its value, its
+    channels, and its offset in `kBadBlock`. `channels == 0` is no bad sample
+    at all -- the clean render. */
+struct Hit
+{
+    float value    = 0.0f;
+    int   channels = 0;
+    int   offset   = kBadOffset;
+
+    int at() const noexcept { return kBadBlock * kBlock + offset; }
+};
+
+/** A bus layout, as a host sets it: 2 -> 2, 1 -> 1, or 1 -> 2 for a module
+    that opts in to mono in, stereo out (core/product/BusLayouts.h). */
+struct Layout
+{
+    int in  = 2;
+    int out = 2;
+};
+
+/** What one render found. `out` is every output channel end to end. */
 struct Render
 {
+    bool ran           = false;
+    int  channels      = 0;
+    int  badAt         = kBadAt;
     std::vector<float> out;
     int  nonFinite     = 0;
     bool metersFinite  = true;
 };
 
-/** Runs the sine through `proc` in host-sized blocks, with `bad` written over
-    one sample of the left channel (or nothing, when `bad` is zero). `meters`
-    reads whatever meters the processor publishes after each block. */
-Render render (juce::AudioProcessor& proc, float bad, const std::function<bool()>& meters)
+juce::AudioProcessor::BusesLayout layoutOf (Layout l)
 {
-    proc.setPlayConfigDetails (2, 2, kRate, kBlock);
+    juce::AudioProcessor::BusesLayout b;
+    b.inputBuses.add  (l.in  == 1 ? juce::AudioChannelSet::mono() : juce::AudioChannelSet::stereo());
+    b.outputBuses.add (l.out == 1 ? juce::AudioChannelSet::mono() : juce::AudioChannelSet::stereo());
+    return b;
+}
+
+/** Runs the sine through `proc` in host-sized blocks, in `layout`, with `hit`
+    written over the input. Channels past the input's are handed in silent,
+    as a host hands them. `meters` reads whatever meters the processor
+    publishes after each block. */
+Render render (juce::AudioProcessor& proc, Layout layout, Hit hit, const std::function<bool()>& meters)
+{
+    Render r;
+
+    if (! proc.setBusesLayout (layoutOf (layout)))
+        return r;
+
+    proc.setRateAndBufferSizeDetails (kRate, kBlock);
     proc.prepareToPlay (kRate, kBlock);
 
-    Render r;
-    r.out.resize ((size_t) kLength * 2);
+    r.ran = true;
+    r.channels = layout.out;
+    r.badAt = hit.at();
+    r.out.resize ((size_t) kLength * (size_t) layout.out);
 
-    juce::AudioBuffer<float> buffer (2, kBlock);
+    juce::AudioBuffer<float> buffer (juce::jmax (layout.in, layout.out), kBlock);
     juce::MidiBuffer midi;
 
     for (int b = 0; b < kBlocks; ++b)
     {
         const auto offset = (size_t) b * kBlock;
 
-        for (int ch = 0; ch < 2; ++ch)
+        buffer.clear();
+
+        for (int ch = 0; ch < layout.in; ++ch)
+        {
             buffer.copyFrom (ch, 0, sine().data() + offset, kBlock);
 
-        if (b == kBadBlock && bad != 0.0f)
-            buffer.setSample (kBadChannel, kBadOffset, bad);
+            if (b == kBadBlock && (hit.channels & (1 << ch)) != 0)
+                buffer.setSample (ch, hit.offset, hit.value);
+        }
 
         proc.processBlock (buffer, midi);
 
-        for (int ch = 0; ch < 2; ++ch)
+        for (int ch = 0; ch < layout.out; ++ch)
         {
             const auto* read = buffer.getReadPointer (ch);
 
@@ -219,13 +271,23 @@ Render render (juce::AudioProcessor& proc, float bad, const std::function<bool()
     return r;
 }
 
+/** Stereo, one bad sample at sample 100 of the left channel, or none when
+    `bad` is zero: the case every other case is a variation on. */
+Render render (juce::AudioProcessor& proc, float bad, const std::function<bool()>& meters)
+{
+    return render (proc, Layout {}, Hit { bad, bad != 0.0f ? kLeft : 0, kBadOffset }, meters);
+}
+
 /** The largest difference between two renders from `from` on, in dBFS. A
     non-finite difference is reported as +inf, never as a small number. */
 double maxDiffDb (const Render& a, const Render& b, int from)
 {
+    if (a.channels != b.channels || a.out.size() != b.out.size())
+        return std::numeric_limits<double>::infinity();
+
     double worst = 0.0;
 
-    for (int ch = 0; ch < 2; ++ch)
+    for (int ch = 0; ch < a.channels; ++ch)
         for (int i = from; i < kLength; ++i)
         {
             const auto d = std::abs ((double) a.out[(size_t) (ch * kLength + i)]
@@ -240,49 +302,64 @@ double maxDiffDb (const Render& a, const Render& b, int from)
     return worst > 0.0 ? 20.0 * std::log10 (worst) : -400.0;
 }
 
-/** RMS of the last half second, both channels, in dBFS. */
+/** RMS of the last half second, every channel, in dBFS. */
 double tailRmsDb (const Render& r)
 {
     const auto from = kLength - (int) (kRate * 0.5);
     double sum = 0.0;
 
-    for (int ch = 0; ch < 2; ++ch)
+    for (int ch = 0; ch < r.channels; ++ch)
         for (int i = from; i < kLength; ++i)
         {
             const auto v = (double) r.out[(size_t) (ch * kLength + i)];
             sum += v * v;
         }
 
-    const auto rms = std::sqrt (sum / (2.0 * (kLength - from)));
+    const auto rms = std::sqrt (sum / (juce::jmax (1, r.channels) * (double) (kLength - from)));
     return std::isfinite (rms) && rms > 0.0 ? 20.0 * std::log10 (rms) : (std::isfinite (rms) ? -400.0 : 400.0);
 }
 
-int samplesAfter (double seconds) { return kBadAt + (int) std::lround (seconds * kRate); }
+int samplesAfter (const Render& hit, double seconds) { return hit.badAt + (int) std::lround (seconds * kRate); }
 
 juce::String db (double v)
 {
     return std::isfinite (v) ? juce::String (v, 1) : juce::String ("non-finite");
 }
 
-/** The figures the bound was chosen from, printed for every case. */
-void printFigures (const juce::String& who, const char* what, const Render& clean, const Render& hit)
+juce::String nameOf (float v)
 {
-    std::cout << std::left << std::setw (28) << (who + " " + what).toStdString()
+    if (std::isnan (v))      return "NaN";
+    if (std::isinf (v))      return v > 0.0f ? "+Inf" : "-Inf";
+
+    std::ostringstream s;
+    s << v;
+    return s.str();
+}
+
+/** The figures the bound was chosen from, printed for every case. */
+void printFigures (const juce::String& who, const juce::String& what, const Render& clean, const Render& hit)
+{
+    std::cout << std::left << std::setw (44) << (who + " " + what).toStdString()
               << " non-finite " << std::setw (7) << hit.nonFinite
-              << " diff after 0.05 s " << std::setw (11) << db (maxDiffDb (clean, hit, samplesAfter (0.05))).toStdString()
-              << " 0.25 s " << std::setw (11) << db (maxDiffDb (clean, hit, samplesAfter (0.25))).toStdString()
-              << " 0.5 s "  << std::setw (11) << db (maxDiffDb (clean, hit, samplesAfter (0.5))).toStdString()
-              << " 1 s "    << std::setw (11) << db (maxDiffDb (clean, hit, samplesAfter (1.0))).toStdString()
-              << " 1.5 s "  << std::setw (11) << db (maxDiffDb (clean, hit, samplesAfter (1.5))).toStdString()
-              << " 2 s "    << std::setw (11) << db (maxDiffDb (clean, hit, samplesAfter (2.0))).toStdString()
+              << " diff after 0.05 s " << std::setw (11) << db (maxDiffDb (clean, hit, samplesAfter (hit, 0.05))).toStdString()
+              << " 0.25 s " << std::setw (11) << db (maxDiffDb (clean, hit, samplesAfter (hit, 0.25))).toStdString()
+              << " 0.5 s "  << std::setw (11) << db (maxDiffDb (clean, hit, samplesAfter (hit, 0.5))).toStdString()
+              << " 1 s "    << std::setw (11) << db (maxDiffDb (clean, hit, samplesAfter (hit, 1.0))).toStdString()
+              << " 1.5 s "  << std::setw (11) << db (maxDiffDb (clean, hit, samplesAfter (hit, 1.5))).toStdString()
+              << " 2 s "    << std::setw (11) << db (maxDiffDb (clean, hit, samplesAfter (hit, 2.0))).toStdString()
               << " tail rms " << db (tailRmsDb (hit)).toStdString() << " dBFS\n";
 }
 
-/** The three assertions every injected render is held to. */
-void expectRecovered (const juce::String& who, const char* what, const Render& clean, const Render& hit,
+/** The assertions every injected render is held to. */
+void expectRecovered (const juce::String& who, const juce::String& what, const Render& clean, const Render& hit,
                       double settleSeconds, double toleranceDb)
 {
     const juce::String where { who + ", one " + what };
+
+    expect (clean.ran && hit.ran, where + ": the layout is accepted");
+
+    if (! (clean.ran && hit.ran))
+        return;
 
     printFigures (who, what, clean, hit);
 
@@ -291,7 +368,7 @@ void expectRecovered (const juce::String& who, const char* what, const Render& c
             where + ": no non-finite sample leaves the processor, got " + juce::String (hit.nonFinite));
     expect (hit.metersFinite, where + ": every meter a panel reads stays finite");
 
-    const auto diff = maxDiffDb (clean, hit, samplesAfter (settleSeconds));
+    const auto diff = maxDiffDb (clean, hit, samplesAfter (hit, settleSeconds));
     expect (diff <= toleranceDb,
             where + ": from " + juce::String (settleSeconds) + " s after it the output is within "
                 + juce::String (toleranceDb) + " dBFS of the clean render, got " + db (diff));
@@ -472,6 +549,7 @@ const bmo::ModuleDef& named (const char* id)
 int main()
 {
     juce::ScopedJuceInitialiser_GUI juceInit;
+    std::cout << std::unitbuf;     // a crash mid-walk still shows the case it was on
 
     std::cout << "Bound: within " << kToleranceDb << " dBFS of the clean render from "
               << kSettleSeconds << " s after the bad sample (" << kRackSettleSeconds
@@ -495,27 +573,114 @@ int main()
         modules.push_back (&bmo::tune::module());
        #endif
 
-        int walked = 0;
+        // Where a latch could hide that one mid-block sample on the left would
+        // miss: either sign of infinity, the right channel and both at once
+        // (a stereo link, a mid/side matrix), the first and the last sample of
+        // a block (a block-rate smoother, a lookahead's edge, a filter's
+        // carried state), a mono layout and mono in to stereo out, and every
+        // oversampling factor a module offers -- the oversampler's own filters
+        // are state the default factor never runs.
+        const float values[] { kNaN, kInf, -kInf };
+
+        int walked = 0, oversampledModules = 0, monoToStereoModules = 0;
 
         for (const auto* def : modules)
         {
-            const juce::String who { def->id };
+            const auto settle = settleFor (def->id);
 
-            const auto run = [&] (float bad)
+            /** `oversampling < 0` leaves the module at its default factor. */
+            const auto run = [&] (Layout layout, Hit hit, int oversampling)
             {
                 auto proc = makeProduct (*def);
+
+                if (oversampling >= 0)
+                    proc->getEngine().params().setReal ("oversampling", (float) oversampling);
+
                 auto* engine = &proc->getEngine();
-                return render (*proc, bad, [engine] { return engineMetersFinite (*engine); });
+                return render (*proc, layout, hit, [engine] { return engineMetersFinite (*engine); });
             };
 
-            const auto clean = run (0.0f);
-            expectRecovered (who, "NaN",  clean, run (kNaN), settleFor (def->id), kToleranceDb);
-            expectRecovered (who, "+Inf", clean, run (kInf), settleFor (def->id), kToleranceDb);
+            const auto caseName = [] (float v, int channels, int offset)
+            {
+                return nameOf (v) + (channels == kBoth ? " L+R" : channels == kRight ? " R" : " L")
+                     + (offset == kFirst ? " first" : offset == kLast ? " last" : " mid");
+            };
+
+            // Stereo: every value at every position on the left, and every
+            // value on the right and on both.
+            {
+                const auto clean = run ({}, {}, -1);
+
+                for (const auto v : values)
+                {
+                    for (const auto offset : { kFirst, kBadOffset, kLast })
+                        expectRecovered (def->id, caseName (v, kLeft, offset), clean,
+                                         run ({}, { v, kLeft, offset }, -1), settle, kToleranceDb);
+
+                    for (const auto channels : { kRight, kBoth })
+                        expectRecovered (def->id, caseName (v, channels, kBadOffset), clean,
+                                         run ({}, { v, channels, kBadOffset }, -1), settle, kToleranceDb);
+                }
+            }
+
+            // Mono, and mono in to stereo out where the module opts in.
+            for (const auto layout : { Layout { 1, 1 }, Layout { 1, 2 } })
+            {
+                if (layout.out == 2 && ! def->acceptsMonoInput)
+                    continue;
+
+                const juce::String who { juce::String (def->id) + (layout.out == 1 ? " (mono)" : " (mono->stereo)") };
+                const auto clean = run (layout, {}, -1);
+
+                for (const auto v : values)
+                    expectRecovered (who, caseName (v, kLeft, kBadOffset), clean,
+                                     run (layout, { v, kLeft, kBadOffset }, -1), settle, kToleranceDb);
+
+                if (layout.out == 2)
+                    ++monoToStereoModules;
+            }
+
+            // Every oversampling factor but the default, where there is a
+            // choice of one.
+            const auto asking = makeProduct (*def);
+
+            if (auto* os = asking->getEngine().params().find ("oversampling"))
+            {
+                const auto factors = os->getNumSteps();
+                const auto byDefault = (int) std::lround (os->convertFrom0to1 (os->getDefaultValue()));
+
+                expect (factors >= 2 && factors <= 8, juce::String (def->id) + ": an oversampling choice of "
+                                                          + juce::String (factors));
+
+                for (int f = 0; f < factors; ++f)
+                {
+                    if (f == byDefault)
+                        continue;
+
+                    const juce::String who { juce::String (def->id) + " (oversampling " + os->getText (os->convertTo0to1 ((float) f), 16) + ")" };
+                    const auto clean = run ({}, {}, f);
+
+                    for (const auto v : values)
+                        expectRecovered (who, caseName (v, kLeft, kBadOffset), clean,
+                                         run ({}, { v, kLeft, kBadOffset }, f), settle, kToleranceDb);
+                }
+
+                ++oversampledModules;
+            }
+
             ++walked;
         }
 
         expect (walked == (int) modules.size() && walked >= 11,
                 "every registered module was walked, " + juce::String (walked));
+
+        // The variations reached something: today CEQ, Saturator and FET have
+        // an oversampling choice and Linger takes mono in to stereo out. A
+        // count that drops is a case that stopped running.
+        expect (oversampledModules >= 3, "the oversampling cases ran for "
+                                             + juce::String (oversampledModules) + " modules");
+        expect (monoToStereoModules >= 1, "the mono-to-stereo cases ran for "
+                                              + juce::String (monoToStereoModules) + " modules");
     }
 
     //== A module that blows up by itself: one block of silence ===============
@@ -605,6 +770,7 @@ int main()
             const auto clean = run (0.0f);
             expectRecovered ("rack (input)", "NaN",  clean, run (kNaN), kRackSettleSeconds, kToleranceDb);
             expectRecovered ("rack (input)", "+Inf", clean, run (kInf), kRackSettleSeconds, kToleranceDb);
+            expectRecovered ("rack (input)", "-Inf", clean, run (-kInf), kRackSettleSeconds, kToleranceDb);
         }
 
         // Mid-chain: the probe in slot 4 blows up by itself, on finite input.

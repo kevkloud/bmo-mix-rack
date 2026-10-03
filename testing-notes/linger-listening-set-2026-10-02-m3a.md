@@ -64,5 +64,46 @@ hearing in a host once there is a build.
 
 ## Answers
 
-*(Frosty's, by number, when heard. Say which headphones or monitors, and
-whether the amp was in stereo.)*
+*(Frosty, 2026-10-02, on ICE QUEEN, headphone amp in stereo; the
+headphones were not named.)*
+
+1. **Sounds great.** Hall reads a touch too small, and so does Cavern. Room
+   is too big and "platey". **Ambience is the sound Frosty hears as a room**,
+   and Room sounds like an Ambience that is a little too long and too wide.
+2. Ambience and Room have a touch of flutter, Ambience more so. Chamber has
+   a touch of metallic ring, "but i wouldn't say it's problematic". Plate
+   rings metallic "but it's supposed to, it's based off a metal plate".
+3. **"A pass with flying colors."**
+4. Nothing odd in the middle. Both extremes are "a little bit overdone",
+   but they are controls (LOW x and HIGH x), so "if this is a controllable
+   parameter it's perfect". **Pass.**
+5. Hall: a small gap at SOURCE 100. 0 and 70 both feel real, and so does
+   100, "just like it's a reeeaaalllyyy big hall". Room: no gaps, all three
+   cohesive, **but all very metallic.**
+6. **"Yes."**
+7. **"Plate honestly sounds great."**
+8. On the acoustic it sounds awesome. On the held note it is very metallic,
+   "could be source material though".
+9. A SIZE move under a held note: **"not a concern."**
+
+## What the answers mean (Claude, 2026-10-02)
+
+- **M3a's engine passes.** DECAY, damping, PRE-DELAY, Plate and the
+  acoustic all passed outright. Nothing was heard as broken.
+- **Sizes: M4's job.** These are type constants, all placeholders except
+  Room, and Room is the one that missed. Proposed for M4, for Frosty to
+  decide:
+  - Room is re-voiced toward what Ambience is now: smaller and narrower.
+  - Ambience then becomes smaller still, a tight "space", not a room.
+  - Hall and Cavern each get a little more SIZE.
+  - Room's "platey" quality is worth a listen again after M3b's modulation,
+    because it may be the same thing as point 2.
+- **The flutter and metal are all at the small, short-delay end**: Ambience
+  and Room (τ̄ 20–25 ms), Room on the woodblock, and a held note. That is
+  the unmodulated network, where short lines repeat fastest. **M3b's random
+  delay modulation is the spec's cure**, and these files are its before.
+  Re-render items 2, 5 (Room) and 8 after it. If the small rooms still
+  flutter with modulation, the next lever is their τ̄ or 16 lines.
+- **Hall's gap at SOURCE 100** is expected: at 100 the tail hears only the
+  early cluster, so it starts as the cluster ends. The default is 70, which
+  felt real.

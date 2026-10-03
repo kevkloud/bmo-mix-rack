@@ -105,13 +105,16 @@ rack/     SlotParameter (one generic host parameter, remapped live),
   through if the message thread is mid-rebuild. Never block the audio
   thread on the chain lock.
 - **No processor hands a host a NaN or an infinity, and no module's DSP is
-  ever handed one** (2026-10-03). `ModuleEngine::process`, which every
-  standalone product, every rack slot and BMO Tune RT go through, replaces
-  each non-finite input sample with zero, and resets a module that produces
-  one and silences that block, so it runs again from the next. The
-  processors scrub the paths that skip an engine: the rack at its input,
-  which covers an empty chain and a block the try-lock skips, and both
-  processors' `processBlockBypassed`. On finite audio all of it only reads,
+  ever handed one, nor a sample at or over +192.7 dBFS** (2026-10-03;
+  `finite::kCeiling`, whose comment has the measurements: one finite
+  +200 dBFS sample held BMO Opto 40 dB down for a minute).
+  `ModuleEngine::process`, which every standalone product, every rack slot
+  and BMO Tune RT go through, replaces each such input sample with zero,
+  and resets a module that produces a non-finite one and silences that
+  block, so it runs again from the next. The processors scrub the paths
+  that skip an engine: the rack at its input, which covers an empty chain
+  and a block the try-lock skips, and both processors'
+  `processBlockBypassed`. On audio under the ceiling all of it only reads,
   so the output is bit-identical (about 90 ns a stereo 512 block per
   engine). **So a module needs no guard of its own and must not add one**:
   a second policy inside a module can only disagree with this one. BMO

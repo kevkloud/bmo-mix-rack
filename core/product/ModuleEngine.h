@@ -107,9 +107,11 @@ public:
         // downstream. core/AGENTS.md states what this guarantees; no module
         // adds a guard of its own.
         //
-        // In: a bad sample from the host or from the slot before is written
-        // over with zero before the module sees it (finite::scrub says why
-        // zero). A finite block is only read, never written.
+        // In: a bad sample from the host or from the slot before -- not
+        // finite, or at or over finite::kCeiling (+192.7 dBFS), which can hold
+        // a compressor down for a minute as surely as an infinity can -- is
+        // written over with zero before the module sees it (finite::scrub
+        // says why zero). A clean block is only read.
         finite::scrub (channels, numChannels, numSamples);
 
         inMeter.measure (channels, numChannels, numSamples);

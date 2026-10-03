@@ -508,12 +508,12 @@ void RackProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
     // one channel and silence. BusLayouts.h says why at length.
     buses::spreadInputAcrossOutputs (buffer, numIn, numOut);
 
-    // The host's own NaN and infinity are stopped here, at the rack's edge,
-    // and not only in slot 1's engine: an empty chain and a block the
-    // try-lock skips both hand the host this buffer back without any engine
-    // seeing it. On entry is enough for every path out, because every engine
-    // already guarantees a finite output (ModuleEngine::process). A finite
-    // block is only read.
+    // The host's own bad samples (NaN, infinity, and anything at or over
+    // finite::kCeiling) are stopped here, at the rack's edge, and not only in
+    // slot 1's engine: an empty chain and a block the try-lock skips both hand
+    // the host this buffer back without any engine seeing it. On entry is
+    // enough for every path out, because every engine already guarantees a
+    // finite output (ModuleEngine::process). A clean block is only read.
     finite::scrub (buffer.getArrayOfWritePointers(), numOut, numSamples);
 
     const juce::ScopedTryLock lock (chainLock);

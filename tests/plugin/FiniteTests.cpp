@@ -683,6 +683,95 @@ int main()
                                               + juce::String (monoToStereoModules) + " modules");
     }
 
+    //== A sample that is finite and still not audio ==========================
+    //
+    // A finite sample can do what an infinity does. Measured on ICE QUEEN,
+    // 2026-10-03, before the ceiling, one sample at 1e10 (+200 dBFS) left
+    // BMO Opto and BMO FET 40 dB down (-58 dBFS RMS) for 60 s and 15 s, and
+    // at 1e20 or more for longer than a minute; CEQ, Saturator, FET, Dwell and
+    // Linger put out samples up to +744 dBFS, finite, for the host to sum. So
+    // the guard's idea of a bad sample is "not finite, or at or over
+    // `bmo::finite::kCeiling`" (2^32, +192.7 dBFS; FiniteGuard.h says why
+    // there), and a sample over the ceiling is held to exactly the bounds a
+    // NaN is.
+    {
+        // The ceiling itself, on the guard alone: where it is, both signs,
+        // and that it leaves everything under it bit for bit.
+        {
+            const float under = std::nextafter (bmo::finite::kCeiling, 0.0f);
+            const float denormal = std::numeric_limits<float>::denorm_min();
+
+            std::vector<float> x { 0.25f, under, -under, bmo::finite::kCeiling, -bmo::finite::kCeiling,
+                                   std::numeric_limits<float>::max(), kNaN, -kInf, denormal, -0.0f, 1.0e6f };
+            const std::vector<float> want { 0.25f, under, -under, 0.0f, 0.0f,
+                                            0.0f, 0.0f, 0.0f, denormal, -0.0f, 1.0e6f };
+            float* ch[] { x.data() };
+
+            expect (bmo::finite::kCeiling == 4294967296.0f, "the ceiling is 2^32, +192.7 dBFS");
+            expect (bmo::finite::scrub (ch, 1, (int) x.size()), "the scrub reports what it found");
+            expect (std::memcmp (x.data(), want.data(), sizeof (float) * x.size()) == 0,
+                    "the scrub zeroes the ceiling and above, both signs, and nothing under it");
+
+            std::vector<float> fine { 0.25f, under, -under, denormal, -0.0f, 1.0e6f };
+            const auto before = fine;
+            float* fch[] { fine.data() };
+
+            expect (! bmo::finite::scrub (fch, 1, (int) fine.size())
+                        && std::memcmp (fine.data(), before.data(), sizeof (float) * fine.size()) == 0,
+                    "a block entirely under the ceiling is left bit for bit and reported clean");
+        }
+
+        std::vector<const bmo::ModuleDef*> modules (bmo::products::registry().begin(),
+                                                    bmo::products::registry().end());
+       #if BMO_FINITE_TESTS_TUNE
+        modules.push_back (&bmo::tune::module());
+       #endif
+
+        for (const auto* def : modules)
+        {
+            const auto run = [&] (float bad)
+            {
+                auto proc = makeProduct (*def);
+                auto* engine = &proc->getEngine();
+                return render (*proc, bad, [engine] { return engineMetersFinite (*engine); });
+            };
+
+            const auto clean = run (0.0f);
+
+            for (const auto huge : { bmo::finite::kCeiling, 1.0e10f, 1.0e20f, 1.0e30f, 3.0e38f, -3.0e38f })
+                expectRecovered (def->id, nameOf (huge) + " L mid", clean, run (huge), settleFor (def->id), kToleranceDb);
+
+            // Just under the ceiling the sample is the module's to answer, as
+            // a signal legal settings can make; BMO Opto may hold for most of
+            // a minute over it. What the guard owes there is a finite output,
+            // and that is what is asserted. The figures are printed.
+            const auto loud = run (4.0e9f);
+            printFigures (def->id, "4e+09 L mid (under the ceiling)", clean, loud);
+            expect (loud.nonFinite == 0 && loud.metersFinite,
+                    juce::String (def->id) + ", one sample just under the ceiling: everything out stays finite");
+        }
+
+        // And at the rack's input.
+        {
+            const char* chain[] { "util", "eq", "opto", "sat", "fetcomp", "reverb" };
+
+            const auto run = [&] (float bad)
+            {
+                auto rack = bmo::products::createRack();
+
+                for (const auto* id : chain)
+                    rack->addModule (named (id));
+
+                return render (*rack, bad, {});
+            };
+
+            const auto clean = run (0.0f);
+
+            for (const auto huge : { 1.0e10f, 3.0e38f })
+                expectRecovered ("rack (input)", nameOf (huge), clean, run (huge), kRackSettleSeconds, kToleranceDb);
+        }
+    }
+
     //== A module that blows up by itself: one block of silence ===============
     for (const auto bad : { kNaN, kInf })
     {

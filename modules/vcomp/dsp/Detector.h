@@ -95,8 +95,9 @@ inline Curve curveFor (float amountPercent) noexcept
 // suite's own test source (voice(), tests/plugin/TestUtil.h) is normalised to
 // -18 dBFS RMS and peaks at -3.6, a 14.4 dB crest, so a -10 reference was
 // compensating for a signal 6 dB quieter than the one the detector was
-// hearing. At -7 the six factory presets land inside 1.8 dB, and
-// VcompTests' level-matching check is the thing that holds it there.
+// hearing. At -7 the six factory presets of the time landed inside 1.8 dB
+// (with the limiter shaving their peaks; the presets have set MAKEUP to stay
+// off it since 2026-10-03), and VcompTests' preset-level check holds it.
 //
 // A quieter source still gets less than full compensation and a hotter one
 // more, which is correct -- it is what the curve is genuinely doing to them --

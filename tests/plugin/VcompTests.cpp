@@ -7,6 +7,8 @@
 #include "modules/vcomp/presets/FactoryPresets.h"
 #include "products/vcomp/Product.h"
 
+#include <map>
+
 using namespace test;
 namespace P = bmo::vcomp;
 
@@ -214,12 +216,16 @@ int main()
         bmo::PresetManager::setDirectoryForTesting ({});
     }
 
-    //== Every preset comes out near the level it went in ======================
-    // Unlike every other module's, this is not a check on hand-picked makeup
-    // figures -- no preset here sets OUTPUT at all. It is a check on the
-    // automatic makeup itself (autoMakeupDb, Detector.h), which is what makes
-    // AMOUNT buy density rather than level. If this drifts, the auto makeup
-    // has drifted, not a preset.
+    //== Every preset comes out at the level it was solved to ===================
+    // Until 2026-10-03 this asked every preset to come out near the level it
+    // went in, and every one did -- because the limiter was taking 1 to 10 dB
+    // off the voice's peaks. The owner's decision that day was to re-solve the
+    // presets off the limiter by MAKEUP alone (modules/vcomp/presets/
+    // FactoryPresets.h), which makes them quieter, so what is pinned now is the
+    // level each one comes out at, as measured here on ICE QUEEN when they were
+    // re-solved, at the same 3 dB tolerance. It still trips if the automatic
+    // makeup (autoMakeupDb, Detector.h) drifts, and now also if a preset's
+    // MAKEUP does. Print the figures with BMO_PRINT_PRESET_LEVELS=1.
     {
         auto proc = createVcomp();
         proc->setPlayConfigDetails (2, 2, 48000.0, 512);
@@ -229,6 +235,13 @@ int main()
         const auto sourceDb = rmsDb (source);
         const auto& factory = proc->getPresets().getFactory();
         const bool print = std::getenv ("BMO_PRINT_PRESET_LEVELS") != nullptr;
+
+        // Output RMS against the source's, dB, per preset, Init excepted.
+        const std::map<juce::String, double> expected {
+            { "Lift",           -3.40 }, { "Forward",     -8.09 }, { "In Front", -9.48 },
+            { "Fast Vocal",    -11.21 }, { "Smooth Lead", -6.55 },
+            { "Keep The Chest", -4.67 }, { "Keep The Air", -5.69 }, { "Manual",   -7.46 },
+        };
 
         for (int index = 1; index < (int) factory.size(); ++index)
         {
@@ -240,8 +253,14 @@ int main()
             if (print)
                 std::cout << factory[(size_t) index].name << ": " << (outDb - sourceDb) << " dB\n";
 
-            checkClose (outDb - sourceDb, 0.0, 3.0,
-                        juce::String ("preset '") + factory[(size_t) index].name + "' comes out near the level it went in");
+            const auto name = juce::String (factory[(size_t) index].name);
+            const auto pinned = expected.find (name);
+
+            check (pinned != expected.end(), "preset '" + name + "' has a pinned level");
+
+            if (pinned != expected.end())
+                checkClose (outDb - sourceDb, pinned->second, 3.0,
+                            "preset '" + name + "' comes out at the level it was solved to");
         }
     }
 

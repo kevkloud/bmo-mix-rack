@@ -52,10 +52,14 @@ worst at the *bottom* of the knob where the makeup is smallest but the peaks are
 reduced just as hard. The suite's `voice()` source is normalised to -18 dBFS RMS
 and peaks at -3.6 (a 14.4 dB crest), so the makeup was compensating for a signal
 6 dB quieter than the detector was hearing. At -7 dBFS every factory preset
-lands inside 2.5 dB.
+landed inside 2.5 dB -- with the limiter taking 1 to 10 dB off the peaks to get
+them there, which nothing showed until 2026-10-03. The presets now set MAKEUP
+to stay off the limiter and come out 0.6 to 6.4 dB under the voice's level, by
+the owner's decision (presets/FactoryPresets.h has the figures).
 
 This is the failure mode to watch for in any revoicing: it does not announce
-itself, and only `VcompTests`' level-matching check holds it.
+itself, and only `VcompTests`' preset-level check holds it, now against each
+preset's pinned level rather than against the input's.
 
 ### ARC's slow branch is programme-dependent because of its *attack*
 
@@ -342,7 +346,8 @@ comparison.
 Still open, having been heard once:
 
 - **The curve's three sweeps** are round numbers at a shape, not tuned figures.
-- **The eight factory presets** are AMOUNT positions with names on them.
+- **The eight factory presets** are AMOUNT positions with names on them, and
+  since 2026-10-03 a MAKEUP each, solved to keep the voice off the limiter.
 - **`kArcFastScale` / `kArcChargeScale` / `kArcSlowScale`** (0.35 / 1.2 / 10 x
   RELEASE since the ear pass; they were 0.35 / 2 / 5 and could not be heard).
   The charge scale decides how much material counts as "sustained" and is the

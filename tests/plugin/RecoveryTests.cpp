@@ -93,7 +93,7 @@ struct Recorded
 // Seconds from the bad sample to the last sample outside -60 dBFS of the
 // clean render. Opto and FET are the compressors whose own recovery this is.
 //
-// Opto's row was re-measured on 2026-10-04 on the merge with main through #40,
+// Opto's row was re-measured on 2026-10-03 on the merge with main through #40,
 // where a spike no longer charges the cell: 2.35, 7.67, 18.22 and 61.64 s
 // became the figures below, and the bound was tightened with them, as this
 // test's header asks when a module's recovery improves.

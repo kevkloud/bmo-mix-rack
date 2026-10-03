@@ -263,6 +263,7 @@ private:
     struct WetPath
     {
         std::array<EqNetwork, 2>        networks;
+        std::array<EqNetwork, 2>        previous;   // the network as it was, while the mid's frequency crosses over
         std::array<TransformerStage, 2> inputTransformer, outputTransformer;
         std::array<ClassAStage, 2>      preamp, outputAmp;
         std::array<Oversampler, 2>      oversamplers;
@@ -281,9 +282,18 @@ private:
     WetPath& livePath() noexcept     { return paths[(size_t) live]; }
     WetPath& standbyPath() noexcept  { return paths[(size_t) (1 - live)]; }
 
+    /** The per-frame positions of the fades that act inside the chain. */
+    struct Fades
+    {
+        bool  eqFading = false;
+        float eqAmount = 1.0f;
+        bool  midFading = false;
+        float midAmount = 1.0f;
+    };
+
     /** One host-rate sample through a path's oversampled chain, before the
         output gain. */
-    float runWet (WetPath&, size_t ch, float x, bool eqFading, float eqAmount) noexcept;
+    float runWet (WetPath&, size_t ch, float x, const Fades&) noexcept;
 
     double sampleRate = 44100.0;
     double effectiveRate = 44100.0;
@@ -323,8 +333,11 @@ private:
 
     // The switches' fades, at the host's rate. eqInMix is 0 out and 1 in;
     // polarity is the sign itself, ramped through zero; hiQAmount is 0 for
-    // the normal width and 1 for Hi-Q, advanced a sub-block at a time.
-    bmo::dsp::Ramp eqInMix, polarity, hiQAmount;
+    // the normal width and 1 for Hi-Q, advanced a sub-block at a time;
+    // midFreqMix is 0 on the copy of the network as it was and 1 on the
+    // network at the mid frequency midIndexApplied.
+    bmo::dsp::Ramp eqInMix, polarity, hiQAmount, midFreqMix;
+    int midIndexApplied = -1;
 
     Params   params;
     EqSettings currentSettings;

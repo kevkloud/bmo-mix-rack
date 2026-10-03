@@ -309,6 +309,72 @@ int main()
                                              + ", past its documented " + ratioText (kLowToneBound));
     }
 
+    //== 2d. A band's frequency selector crosses over rather than gliding ==
+    // The frequency selectors glided the band's centre in log2 Hz over 25 ms,
+    // so a move swept the band across every frequency in between: with the
+    // mid at +18, 360 Hz -> 7.2 kHz carried the +18 dB peak through a 1.6 kHz
+    // tone and stepped the output 4.63x its own largest step. Every pair of
+    // choices of every band, both ways, with the band at its full boost and
+    // full cut (and Hi-Q on and off for the mid), at 44.1, 48 and 96 kHz,
+    // driven at the geometric mean of the two frequencies -- the tone the
+    // move would sweep across: bound 1.5x.
+    {
+        struct Band
+        {
+            const char* name;
+            int choices;
+            float (*hz) (int) noexcept;
+            int DspCore::Params::* index;
+            float DspCore::Params::* gain;
+            float maxGain;
+        };
+
+        const Band bands[] {
+            { "HF",  3, [] (int i) noexcept { return highShelfFreqHz (i); }, &DspCore::Params::hfFreqIndex,  &DspCore::Params::hfGainDb,  16.0f },
+            { "Mid", 6, [] (int i) noexcept { return midFreqHz (i); },       &DspCore::Params::midFreqIndex, &DspCore::Params::midGainDb, 18.0f },
+            { "LF",  4, [] (int i) noexcept { return lowShelfFreqHz (i); },  &DspCore::Params::lfFreqIndex,  &DspCore::Params::lfGainDb,  16.0f },
+        };
+
+        for (double fs : { 44100.0, 48000.0, 96000.0 })
+            for (const auto& band : bands)
+            {
+                double worst = 0.0;
+                std::string worstWhere;
+
+                for (int from = 0; from < band.choices; ++from)
+                    for (int to = from + 1; to < band.choices; ++to)
+                        for (float sign : { 1.0f, -1.0f })
+                            for (int hiQ = 0; hiQ < (band.index == &DspCore::Params::midFreqIndex ? 2 : 1); ++hiQ)
+                            {
+                                DspCore::Params a;
+                                a.*(band.gain) = sign * band.maxGain;
+                                a.midHiQ = hiQ == 1;
+                                a.*(band.index) = from;
+                                auto b = a;
+                                b.*(band.index) = to;
+
+                                const auto hz = std::sqrt ((double) band.hz (from) * (double) band.hz (to));
+
+                                for (int way = 0; way < 2; ++way)
+                                {
+                                    const auto r = way == 0 ? switchStepRatio (fs, a, b, hz) : switchStepRatio (fs, b, a, hz);
+
+                                    if (r > worst)
+                                    {
+                                        worst = r;
+                                        worstWhere = std::to_string ((int) band.hz (way == 0 ? from : to)) + " -> "
+                                                   + std::to_string ((int) band.hz (way == 0 ? to : from)) + " Hz at "
+                                                   + (sign > 0 ? "+" : "-") + std::to_string ((int) band.maxGain) + " dB"
+                                                   + (hiQ ? ", Hi-Q" : "");
+                                    }
+                                }
+                            }
+
+                check (worst < 1.5, std::string (band.name) + " frequency at " + rateName (fs) + ": worst "
+                                        + ratioText (worst) + ", " + worstWhere);
+            }
+    }
+
     //== 2b. EQ In brought back in silence does not replay either ===========
     // EQ In out of circuit stops the network, and a stopped network holds its
     // state exactly as a stopped cut does: the same fault as section 1, one

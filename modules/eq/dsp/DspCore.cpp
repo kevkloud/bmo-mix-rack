@@ -88,13 +88,14 @@ void DspCore::prepare (double newSampleRate, int maxBlockSize, int numChannels,
     inputTrim .prepare (sampleRate, 20.0);
     outputTrim.prepare (sampleRate, 20.0);
 
-    for (auto* r : { &eqInMix, &polarity, &hiQAmount })
+    for (auto* r : { &eqInMix, &polarity, &hiQAmount, &midFreqMix })
         r->prepare (sampleRate, EqNetwork::kSwitchFadeMs);
 
     // Taken as found, never faded in from whatever they held before.
-    eqInMix  .snap (params.eqIn ? 1.0f : 0.0f);
-    polarity .snap (params.phaseInvert ? -1.0f : 1.0f);
-    hiQAmount.snap (params.midHiQ ? 1.0f : 0.0f);
+    eqInMix   .snap (params.eqIn ? 1.0f : 0.0f);
+    polarity  .snap (params.phaseInvert ? -1.0f : 1.0f);
+    hiQAmount .snap (params.midHiQ ? 1.0f : 0.0f);
+    midFreqMix.snap (1.0f);
 
     oversamplingDip.prepare (sampleRate, EqNetwork::kSwitchFadeMs);
 
@@ -180,6 +181,11 @@ void DspCore::beginWarming (int factor) noexcept
         for (auto& n : standby.networks)
             n.setSettings (currentSettings);
 
+    // A mid crossover in progress belongs to the live path. The standby path
+    // starts at the new frequency with a copy that is the same, so whatever
+    // the shared ramp says, its blend is the new network.
+    standby.previous = standby.networks;
+
     warming       = true;
     warmedSamples = 0;
 }
@@ -225,6 +231,10 @@ void DspCore::reset() noexcept
     // Auto Gain starts at its figure for the settings on the next block.
     autoGainPrimed = false;
 
+    // A mid crossover in progress is history; the network is at its new
+    // frequency already.
+    midFreqMix.snap (1.0f);
+
     // The next sample starts a control period, as the first after prepare()
     // does.
     periodPos = 0;
@@ -239,8 +249,9 @@ void DspCore::setParams (const Params& p) noexcept
     const auto midHz = midFreqHz (p.midFreqIndex);
     const auto lfHz  = lowShelfFreqHz (p.lfFreqIndex);
 
+    // The mid's frequency does not glide; it crosses over, and the change is
+    // made in updateCoefficients(). See there.
     hfFreqSm .setTarget (toLog2Hz (hfHz));
-    midFreqSm.setTarget (toLog2Hz (midHz));
     lfFreqSm .setTarget (toLog2Hz (lfHz));
 
     hfGainSm .setTarget (p.hfGainDb);
@@ -257,8 +268,10 @@ void DspCore::setParams (const Params& p) noexcept
     // still live and it keeps it.
     if (settingsValid && p.eqIn && ! eqInMix.isMoving() && eqInMix.value() == 0.0f)
         for (auto& path : paths)
-            for (auto& n : path.networks)
-                n.reset();
+        {
+            for (auto& n : path.networks)  n.reset();
+            for (auto& n : path.previous)  n.reset();
+        }
 
     eqInMix  .setTarget (p.eqIn ? 1.0f : 0.0f);
     polarity .setTarget (p.phaseInvert ? -1.0f : 1.0f);
@@ -269,6 +282,8 @@ void DspCore::setParams (const Params& p) noexcept
         hfFreqSm .snap (toLog2Hz (hfHz));
         midFreqSm.snap (toLog2Hz (midHz));
         lfFreqSm .snap (toLog2Hz (lfHz));
+        midIndexApplied = p.midFreqIndex;
+        midFreqMix   .snap (1.0f);
         hfGainSm .snap (p.hfGainDb);
         midGainSm.snap (p.midGainDb);
         lfGainSm .snap (p.lfGainDb);
@@ -285,6 +300,29 @@ void DspCore::setParams (const Params& p) noexcept
 //==============================================================================
 void DspCore::updateCoefficients (int activeChannels, int numSamples) noexcept
 {
+    // The mid's frequency selector crosses over between the network as it was
+    // and the network at the new frequency, in EqNetwork::kSwitchFadeMs. It
+    // used to glide the centre in log2 Hz, which swept the band across every
+    // frequency in between: at +18 dB, 360 Hz -> 7.2 kHz carried the peak
+    // through a 1.6 kHz tone and stepped the output 4.63x its own largest step
+    // (6.6x with Hi-Q). A crossover never passes through a response that is
+    // neither end. The network as it was is a copy, frozen at the settings it
+    // had; the live one jumps to the new frequency and carries on following
+    // the knobs. A further change while one crosses waits for it to finish,
+    // at most 10 ms, since a copy of a half-crossed pair is not either end.
+    // HF and LF still glide: at full boost or cut, every pair of their
+    // choices, both ways, measured at most 1.5x without a crossover.
+    if (params.midFreqIndex != midIndexApplied && ! midFreqMix.isMoving())
+    {
+        for (auto& path : paths)
+            path.previous = path.networks;
+
+        midIndexApplied = params.midFreqIndex;
+        midFreqSm.snap (toLog2Hz (midFreqHz (midIndexApplied)));
+        midFreqMix.snap (0.0f);
+        midFreqMix.setTarget (1.0f);
+    }
+
     EqSettings s;
     s.hfFreqHz  = fromLog2Hz (hfFreqSm.tick());
     s.midFreqHz = fromLog2Hz (midFreqSm.tick());
@@ -357,8 +395,11 @@ void DspCore::updateCoefficients (int activeChannels, int numSamples) noexcept
 }
 
 //==============================================================================
-float DspCore::runWet (WetPath& path, size_t ch, float x, bool eqFading, float eqAmount) noexcept
+float DspCore::runWet (WetPath& path, size_t ch, float x, const Fades& fades) noexcept
 {
+    const auto eqFading = fades.eqFading;
+    const auto eqAmount = fades.eqAmount;
+
     const auto factor = path.factor;
     wetSamplesProcessed += (unsigned long long) factor;
 
@@ -383,10 +424,21 @@ float DspCore::runWet (WetPath& path, size_t ch, float x, bool eqFading, float e
         // their iron stay in, as on the hardware. It crosses over rather than
         // stepping: with the mid at +18 the two sides differ by most of full
         // scale.
+        // The network, crossed over from its copy while the mid's frequency
+        // changes; idle, exactly the network.
+        const auto network = [&] (float in) noexcept
+        {
+            const auto out = networks[ch].processSample (in);
+
+            return fades.midFading
+                     ? bmo::dsp::crossfade (path.previous[ch].processSample (in), out, fades.midAmount)
+                     : out;
+        };
+
         if (eqFading)
-            v = bmo::dsp::crossfade (v, networks[ch].processSample (v), eqAmount);
+            v = bmo::dsp::crossfade (v, network (v), eqAmount);
         else if (params.eqIn)
-            v = networks[ch].processSample (v);
+            v = network (v);
 
         v = outputAmp[ch].process (v);
         v = outputTransformer[ch].process (v);
@@ -494,9 +546,12 @@ void DspCore::process (float* const* channels, int numChannels, int numSamples) 
             // the switches' positions and the paths below are the ones the
             // module always had; the dip at rest is exactly 1, so it leaves
             // the sign unchanged.
-            const auto eqFading = eqInMix.isMoving();
-            const auto eqAmount = eqInMix.next();
-            const auto sign     = polarity.next() * oversamplingDip.next();
+            Fades fades;
+            fades.eqFading  = eqInMix.isMoving();
+            fades.eqAmount  = eqInMix.next();
+            fades.midFading = midFreqMix.isMoving();
+            fades.midAmount = midFreqMix.next();
+            const auto sign = polarity.next() * oversamplingDip.next();
 
             for (int ch = 0; ch < activeChannels; ++ch)
             {
@@ -508,12 +563,12 @@ void DspCore::process (float* const* channels, int numChannels, int numSamples) 
                 dry[(size_t) dryWrite] = input;
                 const auto delayed = dry[(size_t) readIndex];
 
-                const auto processed = runWet (livePath(), (size_t) ch, input * inGain, eqFading, eqAmount)
+                const auto processed = runWet (livePath(), (size_t) ch, input * inGain, fades)
                                      * outGain;
 
                 // Heard and discarded: the new path keeping up with the input.
                 if (warming)
-                    runWet (standbyPath(), (size_t) ch, input * inGain, eqFading, eqAmount);
+                    runWet (standbyPath(), (size_t) ch, input * inGain, fades);
 
                 // Polarity flips the blend, not the wet path alone. Until 0.2.4
                 // it was applied before the iron while the dry ring held the

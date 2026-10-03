@@ -119,7 +119,12 @@ and nothing else:
   (`testing-notes/linger-cleanup-2026-10-02.md`).
 - `11` §7's "owner confirm" paragraph is closed out, and this file revised.
 
-**1. M3a — a tail you can hear.** In this order:
+**1. M3a — a tail you can hear.** *Built on ICE QUEEN, 2026-10-02, on
+`frosty-linger-m3a`: `testing-notes/linger-m3a-late-network-2026-10-02.md`
+is the record and `10` §4's "As built in M3a" lists the six departures
+(Hadamard mixing among them, so the line count is now a power of two).
+It stops at the listening checkpoint below; M3b waits for Frosty's ears.*
+The plan it followed, in this order:
 
 1. Your own baseline (build exit code, counts, machine).
 2. **The CPU worst case first**, as M2 did: M2's worst-case ER plus the full

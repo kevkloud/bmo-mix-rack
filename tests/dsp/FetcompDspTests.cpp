@@ -1018,6 +1018,71 @@ void testAllButtonsTimingIsRateFree()
     }
 }
 
+/** **Why the panel dims ATTACK under all-buttons**, measured rather than
+    asserted. The 2.5 ms lag follows the attack one-pole in series and owns
+    the whole rise, so every attack position gives the same reduction after a
+    step (the owner accepted that for 0.2.6; modules/AGENTS.md dims a control
+    a mode makes inert). `attackIsLive` is what the panel reads.
+
+    Both halves, so the test cannot pass by measuring nothing: under 20:1 the
+    same comparison has to show the knob working. If ATTACK is ever made live
+    under all-buttons, the first half fails, and `attackIsLive` and the panel's
+    dim have to change with it. */
+void testAttackIsInertUnderAllButtons()
+{
+    const auto trace = [] (int ratioChoice, float position, size_t& before)
+    {
+        DspCore::Params p;
+        p.ratio = ratioChoice == ratioAll ? Ratio::allButtons : Ratio::twenty;
+        p.attackPosition = position;
+        p.releasePosition = 4.0f;
+
+        before = (size_t) (0.3 * kSampleRate);
+        std::vector<float> source (before + (size_t) (0.01 * kSampleRate));
+
+        for (size_t n = 0; n < source.size(); ++n)
+            source[n] = (float) std::pow (10.0, (n < before ? -30.0 : -10.0) / 20.0);
+
+        auto core = prepared (p);
+        std::vector<double> gr;
+        runTracing (core, source, gr);
+        return gr;
+    };
+
+    size_t before = 0;
+
+    check (! attackIsLive (ratioAll), "attackIsLive says ATTACK is inert under all-buttons");
+
+    {
+        const auto slow = trace (ratioAll, 1.0f, before);
+        const auto fast = trace (ratioAll, 7.0f, before);
+
+        for (const auto ms : { 1.0, 5.0 })
+        {
+            const auto at = before + (size_t) (ms * 1.0e-3 * kSampleRate);
+
+            check (std::abs (slow[at] - fast[at]) < 0.1,
+                   "all-buttons: ATTACK 1 and 7 give the same reduction "
+                       + std::to_string ((int) ms) + " ms after a step, got "
+                       + std::to_string (slow[at]) + " and " + std::to_string (fast[at])
+                       + " -- if ATTACK is live here now, undim it (attackIsLive)");
+        }
+    }
+
+    check (attackIsLive (ratio20), "attackIsLive says ATTACK is live under 20:1");
+
+    {
+        const auto slow = trace (ratio20, 1.0f, before);
+        const auto fast = trace (ratio20, 7.0f, before);
+
+        // The first sample of the step, where 10 section 12's overshoot table
+        // lives: the slowest detent lets several dB more through.
+        check (fast[before] - slow[before] > 1.0,
+               "20:1: ATTACK 1 and 7 differ on the first sample of a step, got "
+                   + std::to_string (slow[before]) + " and " + std::to_string (fast[before]));
+    }
+}
+
 //==============================================================================
 /** One step into a settled level, sample by sample, with the reduction the
     core reports after each. Block size 1, so the reported figure is that
@@ -2451,6 +2516,7 @@ int main()
     testCurveAboveTwentyDb();
     testAllButtonsShape();
     testAllButtonsTimingIsRateFree();
+    testAttackIsInertUnderAllButtons();
     testFirstSampleOvershoot();
     testReleaseDetents();
     testProgrammeDependentRelease();

@@ -323,4 +323,20 @@ private:
     double pole = 0.0;
 };
 
+/** Whether ATTACK does anything audible in this ratio state -- the one
+    function the panel's dim and the DSP test both read, so they cannot
+    disagree (modules/AGENTS.md, "A control a mode makes inert is dimmed").
+
+    Under all-buttons it does not. The 2.5 ms lag follows the attack one-pole
+    in series, and the slowest attack is a 160 us time constant, so the lag
+    owns the whole rise: a DC step reads 6.79 / 6.81 / 6.80 dB at 1 ms at
+    attack 1 / 4 / 7 (48 kHz, Off). The owner accepted that for 0.2.6 and the
+    knob is dimmed rather than given a new meaning.
+    `testAttackIsInertUnderAllButtons` measures it; if ATTACK is ever made
+    live here, that test fails and this has to say true. */
+inline constexpr bool attackIsLive (int ratioChoice) noexcept
+{
+    return ratioChoice != ratioAll;
+}
+
 } // namespace bmo::fetcomp

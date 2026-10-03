@@ -57,6 +57,18 @@ sets the reduction for a release time. The collapse it works with is keyed on
 this sample's level, not the previous sample's, for the same reason.
 `testAllButtonsTimingIsRateFree` fails if any of this comes back.
 
+**One consequence: ATTACK is inert under all-buttons, and the panel dims it.**
+The slowest attack is a 160 us time constant and the lag is 2.5 ms, so the lag
+owns the whole rise and every position gives the same reduction after a step
+(6.79 / 6.81 / 6.80 dB at 1 ms, attack 1 / 4 / 7, 48 kHz, Off). The owner
+accepted that for 0.2.6 and applied the house rule rather than give the knob
+a new meaning there. `attackIsLive` in `Detector.h` is the one answer the
+panel's dim (`FetcompPanel::refreshAttack`, on the ratio parameter's
+attachment, so automation moves it) and the DSP test read.
+`testAttackIsInertUnderAllButtons` measures it: **if ATTACK is ever made live
+under all-buttons, that test fails, and `attackIsLive` and the dim change with
+it.** The parameter is untouched -- dimmed, not locked, still automating.
+
 Everything around the DSP was already real and shipped-shaped: the parameter
 schema is permanent, the panel is the panel, the registration is complete, and
 the factory presets set everything but makeup.

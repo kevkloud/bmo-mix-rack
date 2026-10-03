@@ -78,6 +78,11 @@ private:
         made by a click land in the same state. */
     void showRatio (int choice);
 
+    /** Dims ATTACK, caption and all, in the ratio state that leaves it inert
+        (all-buttons), and gives it back everywhere else. Called from the
+        ratio parameter's attachment, so automation moves it too. */
+    void refreshAttack (int ratioChoice);
+
     /** Lights BLUE or BLACK, and repaints the meter's bezel in the colour that
         voicing means. The bezel is the only thing on the panel that moves. */
     void showVoicing (int choice);

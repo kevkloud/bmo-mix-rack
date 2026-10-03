@@ -30,7 +30,7 @@ namespace
         { P::kDepth,       "Drift Depth",    0.0f,  100.0f,  50.0f, 0 },
         { P::kRotation,    "Turn",         -45.0f,   45.0f,   0.0f, 0 },
         { P::kAsymmetry,   "Tilt",        -100.0f,  100.0f,   0.0f, 0 },
-        // Appended 2026-10-04, the owner's call: a trim on the output. Last,
+        // Appended 2026-10-03, the owner's call: a trim on the output. Last,
         // so nothing above moved; 0 dB, so nothing saved before it changes.
         { P::kOutput,      "Output",       -24.0f,   24.0f,   0.0f, 0 },
     };

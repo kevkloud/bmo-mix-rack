@@ -73,7 +73,7 @@ TURN turns: material on the right comes up and material on the left goes down.
 are marked L and R.
 
 **OUTPUT** — a trim on both channels after everything else, ±24 dB, 0 by
-default. Added 2026-10-04; a session or preset saved before it plays exactly
+default. Added 2026-10-03; a session or preset saved before it plays exactly
 as it did, and no factory preset sets it.
 
 ## Presets

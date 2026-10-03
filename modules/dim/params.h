@@ -41,7 +41,7 @@ inline constexpr auto kDepth   = "depth";
 inline constexpr auto kRotation  = "rotation";
 inline constexpr auto kAsymmetry = "asymmetry";
 
-// A trim on what leaves the module, added 2026-10-04 at the end of the list,
+// A trim on what leaves the module, added 2026-10-03 at the end of the list,
 // where a new parameter has to go.
 inline constexpr auto kOutput = "output";
 
@@ -114,14 +114,14 @@ inline const ParamSpecs& specs()
         // relative levels of anything standing on it. Degrees, and the S1's
         // own control is unbounded in principle -- this stops at 45 either
         // way. That is not a quarter turn, which is what this comment said
-        // until 2026-10-04: it is a 45-degree rotation of the mid/side pair,
+        // until 2026-10-03: it is a 45-degree rotation of the mid/side pair,
         // and at the end of it the image is already inverted on one side.
         // At -45 (the L end) the output is L = (L + R) / sqrt 2 and
         // R = (R - L) / sqrt 2: a centre source lands hard left, 3.01 dB down
         // in the mono sum, and a source hard-panned LEFT comes out in
         // anti-phase and cancels in the mono sum completely (measured
         // -180.4 dB). +45 is the mirror image: hard-RIGHT material cancels.
-        // The range stays -- the owner's call, 2026-10-04 -- and this is the
+        // The range stays -- the owner's call, 2026-10-03 -- and this is the
         // one place the module's mono promise does not hold even for
         // material that was in the sum to begin with; see
         // modules/dim/AGENTS.md.
@@ -137,7 +137,7 @@ inline const ParamSpecs& specs()
         S::floatParam (kAsymmetry, "Tilt", -100.0f, 100.0f, 1.0f, 0.0f, F::Percent),
 
         // OUTPUT: a trim on both channels after everything else, the owner's
-        // call of 2026-10-04. At the extremes this module reaches +7.2 dBFS
+        // call of 2026-10-03. At the extremes this module reaches +7.2 dBFS
         // peak and +15.3 dB of side gain with nothing to pull it back. An
         // automatic level match was considered and not chosen: it needs a
         // detector, and "matched" is ambiguous for a widener -- matched in

@@ -52,7 +52,7 @@ writing into `mid`, stop: you are about to spend the reason this module exists.
   hard-right one comes up 3.01 dB. +45 is the mirror image. Everywhere else
   in the module the mid is preserved to −143.5 dBFS at worst (every other
   control at its maximum, on a chorused source). The range stays, by the
-  owner's call on 2026-10-04; the docs say what it does instead.
+  owner's call on 2026-10-03; the docs say what it does instead.
 - **Asymmetry** does not move the centre. A source with no side content passes
   it untouched; only material already off centre changes level. The mono sum
   moves for *that* reason, not because the centre moved.
@@ -212,7 +212,7 @@ claim on the colour** — accents are allocated in `products/AGENTS.md` now.
   Saturator's (`testing-notes/opto-0.2.1-handoff.md` §4) — and the check
   that was skipped is whether any preset jumps in level against Init at the
   same settings, or puts True Peak over the ceiling. Up to +15.5 dB is
-  reachable, and OUTPUT (2026-10-04) is a hand-set trim, not a catch: no
+  reachable, and OUTPUT (2026-10-03) is a hand-set trim, not a catch: no
   preset sets it, so nothing pulls a loud preset back on its own.
   **Audition all seven before this is called finished**, and treat a level
   jump as a preset bug rather than a voicing choice.
@@ -230,7 +230,7 @@ claim on the colour** — accents are allocated in `products/AGENTS.md` now.
   correctly and predicted the wrong cost.
 - **WIDTH at 0 silently disables everything above it**, DETUNE included, since
   WIDTH is downstream of generate. Measured: peak side 0.00000.
-- ~~No output trim, and up to +15.5 dB available~~ **Settled 2026-10-04 (the
+- ~~No output trim, and up to +15.5 dB available~~ **Settled 2026-10-03 (the
   owner): OUTPUT, ±24 dB in 0.1 dB steps, default 0, appended as the
   eleventh parameter and rack lane 11.** At the extremes the module reaches
   +7.2 dBFS peak and +15.3 dB of side gain. It is the equaliser's trim --

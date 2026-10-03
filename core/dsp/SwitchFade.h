@@ -34,10 +34,14 @@ namespace bmo::dsp
         flicked back before its fade completes turns round without a step,
         and takes the full length again to arrive.
       - Idle is bit-exact. A Ramp that is not moving returns its value
-        unchanged, crossfade() at 0 or 1 returns one input exactly, and a
-        Dip at rest returns 1.0f, so code that uses these while nothing is
-        switching renders bit-identical to code that never had them. Callers
-        that want to skip the work of the path not in use test isMoving().
+        unchanged; crossfade() at 0 or 1 returns the selected input bit for
+        bit, a -0.0 included, whatever the other input holds -- a NaN or an
+        infinity on the path not in use does not reach the output; and a
+        Dip at rest -- default-constructed, prepared or reset -- returns
+        exactly 1.0f. So code that uses these while nothing is switching
+        renders bit-identical to code that never had them. Callers that want
+        to skip the work of the path not in use test isMoving().
+      - A Ramp before prepare() rests at 0 with a length of one sample.
 
     Why straight lines rather than a curve: what the bound measures is the
     largest step, and for a given time a straight line has the smallest
@@ -137,10 +141,18 @@ private:
 };
 
 //==============================================================================
-/** Equal-gain blend: `oldPath` at position 0, `newPath` at 1, and exactly
-    each of them there (for finite inputs). */
+/** Equal-gain blend: `oldPath` at position 0, `newPath` at 1. At either end
+    it returns that input itself, bit for bit, and never reads the other:
+    a sum of products would turn a -0.0 into +0.0, and a NaN or an infinity
+    on the path not in use into a NaN on the one that is. */
 inline float crossfade (float oldPath, float newPath, float position) noexcept
 {
+    if (! (position > 0.0f))
+        return oldPath;
+
+    if (! (position < 1.0f))
+        return newPath;
+
     return oldPath * (1.0f - position) + newPath * position;
 }
 
@@ -160,6 +172,10 @@ inline float crossfade (float oldPath, float newPath, float position) noexcept
 class Dip
 {
 public:
+    /** At rest at exactly 1 from construction, as after reset(): a Dip used
+        before prepare() passes the signal rather than silencing it. */
+    Dip() noexcept { reset(); }
+
     void prepare (double sampleRate, double milliseconds) noexcept
     {
         ramp.prepare (sampleRate, milliseconds);

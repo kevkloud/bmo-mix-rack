@@ -159,16 +159,22 @@ int main()
         std::vector<float> values { 0.0f, -0.0f, 1.0f, -1.0f, 0.1234567f, -3.0e-39f, 1.0e-30f,
                                     std::numeric_limits<float>::denorm_min(), 123456.7f, -0.999999f };
 
+        // At 0 and 1 the selected path comes back bit for bit -- a -0.0
+        // included -- and whatever the other path holds, a NaN or an
+        // infinity included: a fault on the path not in use must not reach
+        // the one that is.
+        values.push_back (std::numeric_limits<float>::quiet_NaN());
+        values.push_back (std::numeric_limits<float>::infinity());
+        values.push_back (-std::numeric_limits<float>::infinity());
+
         bool exact = true;
         for (float a : values)
             for (float b : values)
             {
-                // Equal value is equal bits for everything but the sign of a
-                // zero, which a sum of two products cannot promise.
-                exact = exact && crossfade (a, b, 1.0f) == b;
-                exact = exact && crossfade (a, b, 0.0f) == a;
+                exact = exact && sameBits (crossfade (a, b, 1.0f), b);
+                exact = exact && sameBits (crossfade (a, b, 0.0f), a);
             }
-        check (exact, "crossfade at 0 and 1 returns one input exactly");
+        check (exact, "crossfade at 0 and 1 returns the selected input bit for bit, whatever the other holds");
 
         Ramp r;
         r.prepare (96000.0, 10.0);
@@ -186,8 +192,29 @@ int main()
         check (unity, "a Dip at rest is exactly 1, so multiplying by it changes nothing");
 
         for (float x : values)
-            unity = unity && sameBits (x * d.value(), x);
+            unity = unity && (std::isnan (x) || sameBits (x * d.value(), x));
         check (unity, "x times a resting Dip is x, bit for bit");
+
+        // Before prepare(), and after reset(), a Dip is at rest at exactly
+        // 1 too: the header promises the resting gain is 1, and a Dip that
+        // rested at 0 would silence a module that used it before preparing.
+        Dip fresh;
+        check (fresh.isIdle() && sameBits (fresh.value(), 1.0f) && sameBits (fresh.next(), 1.0f),
+               "a default-constructed Dip is idle at exactly 1");
+
+        Dip used;
+        used.prepare (48000.0, 10.0);
+        used.request();
+        for (int i = 0; i < 100; ++i) used.next();
+        used.reset();
+        check (used.isIdle() && sameBits (used.value(), 1.0f) && sameBits (used.next(), 1.0f),
+               "a Dip reset mid-fade is idle at exactly 1");
+
+        // A Ramp before prepare() rests at 0, idle, with a one-sample length.
+        Ramp unprepared;
+        check (! unprepared.isMoving() && sameBits (unprepared.value(), 0.0f)
+                   && unprepared.lengthInSamples() == 1,
+               "a default-constructed Ramp is idle at 0 with a length of one sample");
     }
 
     //== 5. Dip: down, one sample at zero, the change, and back up ==========

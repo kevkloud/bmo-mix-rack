@@ -30,8 +30,11 @@ rack/     SlotParameter (one generic host parameter, remapped live),
   largest sample-to-sample step after a switch stays under 1.5x the steady
   signal's own. `Ramp` + `crossfade` blend an old path into a new one;
   `Dip` fades to zero around a change no blend can cross, such as a latency
-  change. All three are bit-exact while idle, so adopting them leaves a
-  module's steady output untouched; `switch_fade_tests` holds the contract.
+  change. All three are bit-exact while idle -- `crossfade` at 0 or 1
+  returns the selected path's sample itself, -0.0 and a NaN on the other
+  path included, and a `Dip` rests at exactly 1 from construction -- so
+  adopting them leaves a module's steady output untouched;
+  `switch_fade_tests` holds the contract.
 - `ParamSpec::toNormalised/fromNormalised` must agree with
   `juce::NormalisableRange` for the same range: standalone products use
   JUCE's, the rack uses ours, and `RackTests` checks they match. Do not add

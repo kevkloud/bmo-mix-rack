@@ -43,6 +43,11 @@ add_test(NAME dwell_dsp COMMAND dwell_dsp_tests)
 bmo_add_dsp_tool(reverb_dsp_tests dsp/ReverbDspTests.cpp)
 target_link_libraries(reverb_dsp_tests PRIVATE bmo_reverb_dsp)
 add_test(NAME reverb_dsp COMMAND reverb_dsp_tests)
+# A regression that hangs has to fail here, not stall the job until the
+# runner gives up: reset() before prepare() spun forever on 6067809 and only
+# a probe run by hand found it. The suite takes about a minute and a half;
+# five is the fence. (ctest's own default is 1500 s.)
+set_tests_properties(reverb_dsp PROPERTIES TIMEOUT 300)
 
 endif()
 
@@ -133,6 +138,8 @@ target_link_libraries(reverb_tests PRIVATE bmo_reverb)
 # into the executable itself, so the define is consistent across it.
 target_compile_definitions(reverb_tests PRIVATE JUCE_MODAL_LOOPS_PERMITTED=1)
 add_test(NAME reverb COMMAND reverb_tests)
+# The same fence as reverb_dsp, for the same reason; this one takes seconds.
+set_tests_properties(reverb PROPERTIES TIMEOUT 300)
 
 bmo_add_tool(rack_tests plugin/RackTests.cpp ${BMO_ROOT}/products/rack/Registry.cpp)
 target_link_libraries(rack_tests PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp bmo_deesser bmo_fetcomp bmo_dwell bmo_reverb)

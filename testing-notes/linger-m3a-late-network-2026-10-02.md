@@ -184,3 +184,72 @@ review found gaps in the tests. All on ICE QUEEN.
 
 `build-dsp` and `build-full` figures are in the commit that carries this
 note.
+
+## QA's third pass, on `6a37ffe`, 2026-10-04
+
+The last round held. QA found a blocker that had been in the late network
+since the first head they saw: **SIZE kept moving makes the tail grow without
+limit.** Every earlier test, QA's and mine, moved SIZE once. All on ICE
+QUEEN.
+
+**Reproduced.** Probe `sizegrow`: 9 of 24 rows grow, by QA's figures to the
+decimal. The worst is +573 dBFS at 60 s: 48 kHz Room, SIZE 12 ↔ 30 m every 64
+blocks, DECAY 20 s, both multipliers 2.0.
+
+**Cause.** A length move crossfaded the old and new reads in *read* time.
+Reading at a longer delay replays samples that have already been round the
+loop, so every move put energy back. Toggle faster than the loop loses it,
+and the tail grows.
+
+**Fix.** The two paths are weighted by when a sample was *written*:
+- a sample written before the move is read at the old delay, in full, and
+  never again
+- a sample written after it is read at the new delay
+- the weights cross over across the 30 ms after the move starts
+- at no instant do the two paths together weigh more than one
+
+That makes the reads of a line carry no more energy than was written to it.
+The proof is exact for the reads. The step after them, two different
+filters each under one, is held by measurement, and the code says so.
+
+**Tests, written first:**
+- SIZE, TYPE, and both together, alternating every 1, 64 and 2048 blocks of
+  32 samples over a 40 s tail at 48 and 192 kHz, 43 rows: the 10 s window
+  peaks may never rise. On `6a37ffe` 8 rows grew; now none.
+- Both filter banks, live and incoming, realise under 1 while a move is in
+  flight: 144 moves, worst 0.99935. Shown failing with a 1 % error in the
+  incoming bank.
+- `reset()` *after* the bottom of a TYPE dip, with the incoming bank
+  running, lands on a fresh instance sample for sample.
+- `reverb_dsp` and `reverb` have a 300 s timeout in ctest, so a hang fails
+  CI instead of stalling it.
+
+**Probe:** `sizegrow`, `sizegrow 5 1.0` and `sizegrow 10 1.0` all report 0 of
+24 rows growing. `gain` 0.9993490, `resetfirst` returns, `sizefade` −22.3 /
+−24.9 dBFS, and the 192 kHz `grow` case reaches −600 dBFS, as before.
+
+**What one SIZE move now does**, on noise held through it (Room, DECAY
+1.8 s, 48 kHz, 10 ms windows):
+
+| move | deepest window | within 1 dB of settled | the move lasts |
+|---|---|---|---|
+| 12 → 30 m | 18 dB down | 70 ms | 111 ms |
+| 30 → 12 m | 1.8 dB down | 160 ms | 111 ms |
+| 12 → 80 m | silent | 340 ms | 246 ms |
+| 80 → 12 m | 0.9 dB down | 300 ms | 246 ms |
+
+Growing a room opens a gap in the tail, because nothing is replayed to fill
+it. Shrinking one is nearly seamless. A move lasts the longest line plus
+30 ms, and the next move waits for it. **This is a trade-off for Frosty to
+confirm**; the alternatives are in the PR comment.
+
+**One test criterion changed with it.** The single SIZE 12 → 30 m move is
+held to the step ratio again (1.00), not the 1 ms energy jump (3.8 dB). The
+gap passes through near-cancellation on a steady sine, where a smooth change
+is a large one in dB. 11 §6 asks "no click" of SIZE and keeps the 3 dB rule
+for coefficient changes; both figures are printed.
+
+**CPU with a move in flight** (probe `sizecpu`, 192 kHz / 32, Room, on a
+quiet machine): mean 10.4 % of the block, 99th percentile 39.9 %, against
+10.5 % and 40.0 % on `6a37ffe`. Held: 4.99 % against 4.95 %. The spec now
+says its figures are for held settings.

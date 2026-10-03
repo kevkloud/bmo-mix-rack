@@ -443,13 +443,41 @@ where it is coded. Everything else above stands.
   The second exists because a network's energy at a given T60 grows as
   T60/τ̄: Hall at 1 m peaked +0.8 dBFS on pink noise at −18 dBFS RMS. Both
   are CALIBRATE.
-- **A length change crossfades two whole paths**: the old read through the
-  old filters at the old level, the new read through the new filters at the
-  new level, and only the results are mixed across the 30 ms. A redesign
-  landing in one step at the end of the fade measured as the largest step in
-  the move; blending the *coefficients* instead (tried first) does not keep a
-  filter's gain-times-shelf product, and burst 27 dB over either end on a
-  full-range SIZE move at DECAY 0.1, LOW × 2.0.
+- **A length change runs two whole paths, weighted by when a sample was
+  written** (third form, 2026-10-04). The old read goes through the old
+  filters at the old level and the new read through the new filters at the
+  new level. A sample written before the move is read at the old delay, in
+  full, and never again; a sample written after it is read at the new delay;
+  the two weights cross over across the 30 ms after the move starts; and at
+  no instant do the two paths together weigh more than one. So the reads of
+  a line carry no more energy than was written to it, moving or not.
+
+  *Why it is this and not §5's plain 30 ms crossfade:* a crossfade in read
+  time re-reads the line at its new delay, and reading at a longer delay
+  replays samples that have already been round the loop. Every move put
+  energy back, and SIZE toggling 12 ↔ 30 m every 64 blocks at DECAY 20 s
+  reached +573 dBFS in a minute. The two earlier forms had their own
+  failures: a redesign landing in one step at the end of the fade was the
+  largest step in the move, and blending the *coefficients* does not keep a
+  filter's gain-times-shelf product (a 27 dB burst on a full-range move).
+
+  *What it costs, measured on noise held through one move, Room, DECAY
+  1.8 s, 48 kHz, in 10 ms windows:*
+
+  | move | deepest window | within 1 dB of settled | the move lasts |
+  |---|---|---|---|
+  | 12 → 30 m | 18 dB down | 70 ms | 111 ms |
+  | 30 → 12 m | 1.8 dB down | 160 ms | 111 ms |
+  | 12 → 80 m | silent | 340 ms | 246 ms |
+  | 80 → 12 m | 0.9 dB down | 300 ms | 246 ms |
+
+  A line that grows is quiet between its old delay and its new one, because
+  nothing written since the move has reached the new delay yet. A move lasts
+  the longest line, old or new, plus 30 ms, and the next move waits for it,
+  so SIZE under automation steps at that pace. Shrinking is nearly
+  seamless. **The ER generator keeps §3's 30 ms crossfade**: it is
+  feed-forward, has no loop to feed, and so cannot grow. "ER and late
+  sharing the scheme" (§5) no longer holds, on purpose.
 
 Four more, from QA's two passes on PR #38 (2026-10-03):
 
@@ -524,6 +552,14 @@ so the measured **5.18 %** stands as accepted. It is not a new budget:
 whatever M3b's EQ and modulation add on top is measured and brought to
 Frosty, not assumed to fit. 48 kHz / 128 stays at ≤1.5 % (measured
 1.10–1.22 %).
+
+**These are figures for held settings.** While a length move is in flight
+the tail runs two paths and the early reflections rebuild their table, and
+at 192 kHz / 32 QA measured a mean of about 10.5 % of the block with a 99th
+percentile near 40 % (Room, SIZE 30 ↔ 12 m toggled every block and every 64
+blocks; 2026-10-04, ICE QUEEN, and the same before and after the move was
+reworked that day: 10.4 % and 39.9 % on a quiet machine). No dropout at
+that; it is a cost of moving SIZE or TYPE, not of holding them.
 
 **Memory** (float32): ER 0.25 s × 2 ch, pre-delay 0.25 s × 2 ch, FDN Σ ≈ 0.7 s
 with modulation headroom, diffuser and allpasses ≈ 0.1 s — ≈1.55 s

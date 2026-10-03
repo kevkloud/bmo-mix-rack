@@ -171,6 +171,18 @@ if(BMO_BUILD_TUNE)
 endif()
 add_test(NAME tempo COMMAND tempo_tests)
 
+# One NaN or infinity into every registered module, through the processor a
+# host drives, and into a rack at its input and mid-chain: nothing non-finite
+# leaves, and the module recovers by itself. Linked like tempo_tests, Tune
+# included, because it walks the registry and the guard is ModuleEngine's.
+bmo_add_tool(finite_tests plugin/FiniteTests.cpp ${BMO_ROOT}/products/rack/Registry.cpp)
+target_link_libraries(finite_tests PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp bmo_deesser bmo_fetcomp bmo_dwell bmo_reverb)
+if(BMO_BUILD_TUNE)
+    target_link_libraries(finite_tests PRIVATE bmo_tune)
+    target_compile_definitions(finite_tests PRIVATE BMO_FINITE_TESTS_TUNE=1)
+endif()
+add_test(NAME finite COMMAND finite_tests)
+
 # Layout assertions on the real panels. JUCE, not bmo_add_dsp_tool: no
 # rendering happens, but Tokens.h includes juce_gui_basics, so a UI assertion
 # cannot run in the DSP-only job whatever docs/ui-workflow-brief.md §4 says.

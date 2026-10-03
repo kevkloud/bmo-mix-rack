@@ -508,6 +508,14 @@ void RackProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
     // one channel and silence. BusLayouts.h says why at length.
     buses::spreadInputAcrossOutputs (buffer, numIn, numOut);
 
+    // The host's own NaN and infinity are stopped here, at the rack's edge,
+    // and not only in slot 1's engine: an empty chain and a block the
+    // try-lock skips both hand the host this buffer back without any engine
+    // seeing it. On entry is enough for every path out, because every engine
+    // already guarantees a finite output (ModuleEngine::process). A finite
+    // block is only read.
+    finite::scrub (buffer.getArrayOfWritePointers(), numOut, numSamples);
+
     const juce::ScopedTryLock lock (chainLock);
 
     if (! lock.isLocked())
@@ -516,6 +524,17 @@ void RackProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
     for (auto& s : slots)
         if (s.engine != nullptr)
             s.engine->process (buffer.getArrayOfWritePointers(), numOut, numSamples, tempo);
+}
+
+void RackProcessor::processBlockBypassed (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
+{
+    // A host's bypass is JUCE's pass-through, which hands the host its own
+    // buffer back and so its own bad samples with it. Scrubbed after, so the
+    // pass-through itself is JUCE's, unchanged.
+    AudioProcessor::processBlockBypassed (buffer, midi);
+    finite::scrub (buffer.getArrayOfWritePointers(),
+                   juce::jmin (buffer.getNumChannels(), getTotalNumOutputChannels()),
+                   buffer.getNumSamples());
 }
 
 juce::AudioProcessorEditor* RackProcessor::createEditor()

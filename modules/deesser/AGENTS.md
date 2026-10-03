@@ -112,7 +112,7 @@ past RANGE; **since 2026-10-04, by the owner's decision, a shelf runs at 0.707
 whatever the knob says**, which rises nowhere and never cuts past RANGE.
 **Q stays one parameter whatever the shape** — 0.7 to 6 on the knob in both —
 and the shelf's value is applied behind it, so in shelf shape Q is a control
-the mode makes inert. Nothing but a render would have shown this: the schema test
+the mode makes inert, and the panel dims it there on `qIsLive`. Nothing but a render would have shown this: the schema test
 passed, the layout test passed, and the arithmetic was correct.
 
 ## The meter reports band reduction, not a wideband figure

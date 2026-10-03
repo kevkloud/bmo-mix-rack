@@ -1617,6 +1617,54 @@ void checkDeesserPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
         check (bell->getToggleState(), who + " the parameter lights the shape pair, not the click");
     }
 
+    //== Q dims in SHELF, where it reaches nothing ============================
+    //
+    // A control a mode makes inert is dimmed (modules/AGENTS.md). A shelf runs
+    // at kShelfQ whatever the knob says (the owner's decision, 2026-10-04), so
+    // Q does nothing there, and the panel must say so on the same function the
+    // engine designs through. Driven through the parameter rather than a click,
+    // because automation and a preset recall reach the panel that way; and the
+    // value must survive the round trip, because a mode that reset the knob to
+    // make the dim "true" would pass a check on the dim alone.
+    {
+        namespace D = bmo::deesser;
+
+        const auto qLive = [&]() -> int
+        {
+            auto* found = dynamic_cast<bmo::ui::PlainKnob*> (findNamed (panel, "Q"));
+            const auto* face = found != nullptr ? knobFace (*found) : nullptr;
+
+            if (face == nullptr)
+            {
+                check (false, who + " has no Q knob with a rotary under it");
+                return -1;
+            }
+
+            return face->isEnabled() ? 1 : 0;
+        };
+
+        params.setReal (D::Index::q, 4.0f);
+
+        params.setReal (D::Index::shape, (float) D::highShelf);
+        check (qLive() == 0, who + " Q should dim in SHELF, which runs at one Q whatever it says");
+        check (D::effectiveQ (D::highShelf, 0.7f) == D::effectiveQ (D::highShelf, 6.0f),
+               who + " the engine should agree a shelf ignores Q");
+
+        params.setReal (D::Index::shape, (float) D::bell);
+        check (qLive() == 1, who + " Q should be live in BELL");
+        check (D::effectiveQ (D::bell, 0.7f) != D::effectiveQ (D::bell, 6.0f),
+               who + " the engine should agree a bell reads Q");
+
+        params.setReal (D::Index::shape, (float) D::highShelf);
+        check (qLive() == 0, who + " Q should dim again on the way back to SHELF");
+
+        checkNear (params.getReal (D::Index::q), 4.0, 1.0e-3,
+                   who + " SHAPE must not write the Q it is ignoring");
+
+        params.setReal (D::Index::shape, (float) D::bell);
+        params.setReal (D::Index::q, D::specs()[D::Index::q].def);
+    }
+
     //== One GR bar, scaled to what the module can actually do ================
     //
     // The needle and its IN/GR/OUT row went on 2026-09-20 (Frosty). Two of

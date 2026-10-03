@@ -1165,6 +1165,43 @@ void testTheShelfDetectorDoesNotResonate()
     }
 }
 
+/** **Why Q dims in SHELF: there it does nothing at all.** The same sibilant
+    material, the knob at both ends of its travel, renders bit-identically in
+    shelf shape at three rates -- and differently in bell shape, so the
+    comparison is one that could have failed. The panel dims Q on `qIsLive`,
+    the function `effectiveQ` itself asks, so the two cannot disagree. */
+void testQIsInertInShelfShape()
+{
+    for (const auto rate : { 44100.0, 48000.0, 96000.0 })
+        for (const auto shapeChoice : { (int) highShelf, (int) bell })
+        {
+            const auto renderAt = [&] (float qValue)
+            {
+                DeesserDsp dsp;
+                dsp.prepare (rate, 512, 2);
+
+                auto v = defaults();
+                v[thresh] = -6.0f;
+                v[range]  = 12.0f;
+                v[shape]  = (float) shapeChoice;
+                v[q]      = qValue;
+                dsp.setParams (v.data(), (int) v.size());
+
+                return run (dsp, essAt (rate, 0.5));
+            };
+
+            const auto differ = differingSamples (renderAt (0.7f), renderAt (6.0f));
+            const auto tag = std::to_string ((int) rate) + " Hz, " + std::to_string (differ) + " samples differ";
+
+            if (shapeChoice == highShelf)
+                check (differ == 0, "in shelf shape Q 0.7 and Q 6 render identically, " + tag);
+            else
+                check (differ > 0, "in bell shape Q 0.7 and Q 6 do not, " + tag);
+        }
+
+    check (! qIsLive (highShelf) && qIsLive (bell), "qIsLive says the same as the renders");
+}
+
 int main()
 {
     testRePrepareMatchesAFreshInstance();
@@ -1172,6 +1209,7 @@ int main()
     testTheShelfNeverBoosts();
     testTheShelfMeterReadsTheCut();
     testTheShelfDetectorDoesNotResonate();
+    testQIsInertInShelfShape();
 
     testLatencyIsZeroEverywhere();
     testQuietMaterialIsUntouched();

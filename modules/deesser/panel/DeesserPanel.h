@@ -202,9 +202,10 @@ private:
         outside (`core/ui/LevelBars.h`). */
     void timerCallback() override;
 
-    /** Lights the one shape switch that `choice` names. Called from the click
-        handlers and from the parameter, so a setting made by the host and one
-        made by a click land in the same state. */
+    /** Lights the one shape switch that `choice` names, and dims Q in SHELF,
+        where it reaches nothing. Called from the click handlers and from the
+        parameter, so a setting made by the host and one made by a click land
+        in the same state. */
     void showShape (int choice);
 
     /** The one place LISTEN becomes a call to the engine. -1 clears it; this

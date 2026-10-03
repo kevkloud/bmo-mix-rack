@@ -389,6 +389,15 @@ void DeesserPanel::showShape (int choice)
 {
     bellButton .setToggleState (choice == bell,      juce::dontSendNotification);
     shelfButton.setToggleState (choice == highShelf, juce::dontSendNotification);
+
+    // **A control a mode makes inert is dimmed** (Frosty, 2026-10-02, for every
+    // module). A shelf runs at kShelfQ whatever Q says, so Q dims in SHELF --
+    // caption and all, never locked and never written: the value is kept, it
+    // still automates, and BELL gives it back. `qIsLive` is the function the
+    // engine's `effectiveQ` asks, so the panel and the audio cannot disagree.
+    // This runs from the shape's attachment, so automation and a preset recall
+    // dim it exactly as a click does.
+    qKnob.setKnobEnabled (qIsLive (choice));
 }
 
 void DeesserPanel::setListening (bool shouldListen)

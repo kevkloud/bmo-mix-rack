@@ -102,11 +102,20 @@ enum ShapeChoice { bell = 0, highShelf, numShapes };
     that one is not changed by this decision. */
 inline constexpr float kShelfQ = 0.707f;
 
+/** Whether the Q knob reaches the audio in this shape. The panel dims Q on
+    this and the engine designs through it (via `effectiveQ` below), so the
+    two ask one function and cannot disagree -- the house rule for a control a
+    mode makes inert (modules/AGENTS.md). */
+inline constexpr bool qIsLive (int shapeChoice) noexcept
+{
+    return shapeChoice != highShelf;
+}
+
 /** The Q this band actually runs at: its knob for a bell, `kShelfQ` for a
     shelf. `shapeChoice` is the stored choice index (`ShapeChoice`). */
 inline constexpr float effectiveQ (int shapeChoice, float q) noexcept
 {
-    return shapeChoice == highShelf ? kShelfQ : q;
+    return qIsLive (shapeChoice) ? q : kShelfQ;
 }
 
 namespace detail

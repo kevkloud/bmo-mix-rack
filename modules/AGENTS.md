@@ -368,4 +368,4 @@ one thing a panel must not do. The rule is about display only:
   is written down where the control is wired.
 
 Precedents: BMO Util's WIDTH under MONO, BMO DEQ's gain on a cut, BMO Linger's
-GAIN on a cut and ER SPREAD in Taps.
+GAIN on a cut and ER SPREAD in Taps, BMO Defang's Q in SHELF.

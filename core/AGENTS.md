@@ -4,7 +4,8 @@ Shared code. Four layers, each depending only on the ones above it:
 
 ```
 dsp/      JUCE-free. ModuleDsp (the interface every module's DSP implements),
-          Oversampler, Meter. Nothing here includes <juce_*>.
+          Oversampler, Meter, SwitchFade (a hard switch made a short fade).
+          Nothing here includes <juce_*>.
 state/    ParamSpec (a parameter described without JUCE), ParamSet (a spec
           list bound to live juce parameters), Parameters.h (APVTS layout
           from specs), PresetManager (files, factory lists, migration).
@@ -24,6 +25,13 @@ rack/     SlotParameter (one generic host parameter, remapped live),
 
 - `dsp/` must build with `BMO_DSP_ONLY=ON`. If you need JUCE, it does not
   belong here.
+- **A switch that changes the signal path fades** (`dsp/SwitchFade.h`): a
+  step that measures gets a fade, heard or not, and the bound is that the
+  largest sample-to-sample step after a switch stays under 1.5x the steady
+  signal's own. `Ramp` + `crossfade` blend an old path into a new one;
+  `Dip` fades to zero around a change no blend can cross, such as a latency
+  change. All three are bit-exact while idle, so adopting them leaves a
+  module's steady output untouched; `switch_fade_tests` holds the contract.
 - `ParamSpec::toNormalised/fromNormalised` must agree with
   `juce::NormalisableRange` for the same range: standalone products use
   JUCE's, the rack uses ours, and `RackTests` checks they match. Do not add

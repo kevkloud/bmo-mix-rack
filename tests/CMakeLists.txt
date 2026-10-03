@@ -1,5 +1,9 @@
 # DSP tests build everywhere, JUCE or not. Plugin tests need JUCE.
 
+# Shared DSP in core/dsp, header-only, so it links nothing.
+bmo_add_dsp_tool(switch_fade_tests dsp/SwitchFadeTests.cpp)
+add_test(NAME switch_fade COMMAND switch_fade_tests)
+
 if(BMO_BUILD_RACK)
 
 bmo_add_dsp_tool(eq_dsp_tests dsp/EqDspTests.cpp)

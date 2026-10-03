@@ -46,6 +46,33 @@ were fitted against renders, not chosen; the 0.2.1 handoff has the fit.
 a hand-set makeup and there is no automatic one: one was proposed in 0.2.0 and
 refused, and `params.h` says why.
 
+**A spike is not programme, and the cells know the difference.** With 15 to
+20 dB already standing, the charge sits at its ceiling, and a release read
+off the charge alone gave everything a spike added the slowest release the
+cell has: the programme stayed turned down for 3.5 s (Tele) and 7.2 s
+(Stressed) behind an 18 dB spike of 20 ms. Three rules in `Detector.h` fix
+that, and each has a reason a later change could undo by accident:
+
+- Reduction standing above the charge releases at the fast 60 ms rate, but
+  only once the envelope stands clear of what the signal has reached in the
+  last 30 ms. Without that condition the envelope sags between the crests of
+  a held note, and Stressed took 520 ms to settle on a step instead of 56.
+- The charge counts reduction only up to what the level the signal has *kept
+  up for 60 ms* would earn. Counting the reduction itself let ten spikes a
+  second apart walk the level down 8 to 12 dB.
+- A rule that switched the charge off whenever nothing was pushing the
+  envelope was tried first and dropped before it was committed: on notes
+  that decay nothing pushes the envelope, so the charge never built, and the
+  cell turned into a fast compressor on anything percussive.
+
+What this costs is on the record in `testing-notes/opto-spike-and-dip-2026-10-04.md`:
+programme made of short decaying notes holds less reduction than it did.
+
+**Stressed has a two-stage attack and Tele does not.** Within 6 dB of what is
+asked the attack is 10 ms in both. Stressed quickens to 0.5 ms by the time it
+is 12 dB short. That stage was built for both cells and heard blind in both;
+see below for why Tele does not have it.
+
 **Latency is zero and stays zero.** No lookahead, no oversampling. That is why
 the first crest of any onset always gets some of the way out.
 
@@ -86,6 +113,11 @@ touching `DspCore`:
   could be told from the shipped build. The 10 ms attack stayed. The lesson
   that note records is the method: enter one variant twice, or a small
   imagined difference looks like a small real one.
+- **The quick attack in Tele** (October 2026). Heard blind with each build
+  entered twice: in Stressed both copies with it were ranked above both
+  without, in Tele both copies with it were ranked below both without. Tele
+  lets an 18 dB spike through by 7.8 dB and that is the accepted figure;
+  `testASpikeIsCaught` holds it so that it is a choice if it ever moves.
 - **An automatic makeup.** Refused in 0.2.0; `params.h`.
 - **A lift around 2 to 2.4 kHz.** Asked for, measured, found not to be
   missing. The release bug was leaving reduction standing at phrase onsets,
@@ -121,17 +153,15 @@ absolute rather than relative, and at the level a track arrives at.
 
 ## Open
 
-- **A spike on top of heavy reduction, and the dip after it.** Measured on
-  2026-10-03: with 15 to 20 dB already standing, an 18 dB spike of 20 ms comes
-  out 7.8 dB (Tele) and 13.6 dB (Stressed) above where a held level settles,
-  and the programme then sits turned down for 3.5 and 7.2 s. The release test
-  did not see it because it reads the release into silence, where the charge
-  is free to fall; under continuing programme the charge sits at its ceiling
-  and the spike inherits the slowest release. Candidates exist on a local
-  branch and are waiting on an ear; nothing in this tree changes it yet.
+- **A longer loud hit still leaves the level down, by design.** A 100 ms
+  passage 18 dB hotter is long enough to count toward the charge, and ten of
+  them a second apart still sink the level 5 dB (Tele) and 10 dB (Stressed).
+  That is the charge's own 0.3 s and the slow release at work. It was
+  measured, reported and left alone in October 2026.
 - **Preset levels are back-solved, not ear-tuned**, and move with any change
-  to how much reduction a preset holds. `BMO_PRINT_PRESET_LEVELS` on
-  `opto_tests` prints every delta, pass or fail. Ask before re-solving them.
+  to how much reduction a preset holds. They were re-solved on 2026-10-04
+  for the new release. `BMO_PRINT_PRESET_LEVELS` on `opto_tests` prints every
+  delta, pass or fail. Ask before re-solving them.
 - **The Mode labels and the two mode buttons** stay as they are for 0.2.6 and
   are due a change after it. It is display only: the parameter is a choice
   saved by index under `mode`, so new labels do not break a session as long as

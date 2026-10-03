@@ -21,7 +21,7 @@ looks after itself.
 | ratio | about 3:1 | 10:1 |
 | knee | soft, 16 dB | harder, 6 dB |
 | topology | feedback: it listens to its own output | feedforward: it listens to the input |
-| attack | about 10 ms, shortened by the loop | about 10 ms |
+| attack | about 10 ms, shortened by the loop | about 10 ms, quickening to 0.5 ms when it is far short of what a loud onset asks |
 | release | 60 ms for a short hit, sliding towards 4 s the longer and harder it has been driven | 60 ms sliding towards 3 s |
 | color | low-order, even-harmonic warmth, always on | a grittier odd-harmonic clip, switchable |
 
@@ -35,6 +35,9 @@ the release doing what the mode is for, and it is why there is no release knob.
   switching back finds it where it would have been.
 - **The meter's reduction scale stops at 24 dB.** At the deepest settings the
   module can apply more than that; the needle pins and the module carries on.
+- **A loud spike does not leave the level turned down behind it.** What a
+  short spike adds comes back in about a tenth of a second; what a held
+  passage adds comes back slowly, as it should.
 - **No latency.** Nothing is delayed, so the very front of a hard onset always
   gets part of the way through before the cell catches it.
 - **A track should arrive at about -18 dBFS RMS**, peaks around -12. COMP at 0

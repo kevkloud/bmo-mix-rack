@@ -203,6 +203,7 @@ public:
         gate.prepare (rate);
         limiter.prepare (rate);
         release.prepare (rate);
+        complexDip.prepare (rate, kComplexDipMs);
 
         amountSmoother.prepare (rate, 15.0);
         outputSmoother.prepare (rate, 15.0);
@@ -210,12 +211,21 @@ public:
         cachedAmount = cachedOutputDb = kNotYet;
         outputSmoother.snap (params.outputDb);
 
+        activeComplex = params.complex;
         applyTimings();
         reset();
     }
 
     void reset() noexcept
     {
+        // A switch of COMPLEX in flight is abandoned for where the controls
+        // are: reset() is where the state starts over, so the module comes
+        // back already in the mode it was asked for, as a fresh instance does.
+        complexDip.reset();
+        activeComplex = params.complex;
+        heard = false;
+        applyTimings();
+
         for (auto& ch : channels)
         {
             ch.sidechain.reset();
@@ -235,6 +245,68 @@ public:
         params = p;
         amountSmoother.setTarget (p.amountPercent);
         outputSmoother.setTarget (p.outputDb);
+
+        auto switchNow = false;
+
+        // **COMPLEX is a switch, and it switches through a dip** (Frosty,
+        // 2026-10-03). It changes the detector's six settings and brings both
+        // sides of the split in or out at once, and taken the way a LOW THRU
+        // knob is -- each side in by the edge of its range and a glide -- the
+        // band in transit spent up to a second at the wrong gain: the suite's
+        // voice more than 1 dB off where it settles for 0.61 s, +8.4 dB at
+        // worst, and a 60 Hz tone +7.2 dB for 0.95 s with the limiter taking
+        // 2.2 dB more than it settles to. So the output fades to nothing over
+        // kComplexDipMs while the sides the switch brings in run unheard on
+        // the input at their settings (BandSplit::prime), the switch is made
+        // at the bottom, and the output fades back up over kComplexDipMs with
+        // the split already settled -- the pattern BMO EQ's oversampling
+        // change uses. Nothing heard since prepare() or reset() means nothing
+        // to fade, and the change is made at once.
+        //
+        // Only when the switch moves the split, though. With LOW THRU and
+        // HIGH THRU at their rails COMPLEX changes nothing but the detector's
+        // settings, which are continuous and change as a knob does, so the
+        // switch is made at once, as it always was.
+        if (p.complex != activeComplex && ! movesSplit (p.complex))
+        {
+            if (complexDip.isPending())
+                complexDip.cancel();
+
+            switchNow = ! heard;
+
+            if (heard)
+            {
+                activeComplex = p.complex;
+                applyTimings();
+                return;
+            }
+        }
+        else if (p.complex != activeComplex)
+        {
+            if (! heard)
+                switchNow = true;
+            else if (! complexDip.isPending())
+                complexDip.request();
+        }
+        else if (complexDip.isPending())
+        {
+            // Changed back before the dip reached the bottom: nothing to
+            // change, and the output comes back up from where it got to.
+            complexDip.cancel();
+        }
+
+        if (switchNow)
+        {
+            switchNow = false;
+            activeComplex = p.complex;
+            applyTimings();
+
+            for (auto& ch : channels)
+                ch.bands.reset();
+
+            return;
+        }
+
         applyTimings();
     }
 
@@ -244,8 +316,29 @@ public:
 
         auto blockMaxReduction = 0.0f;
 
+        heard = true;
+
         for (int i = 0; i < numSamples; ++i)
         {
+            // The bottom of a COMPLEX switch: the split goes where the
+            // controls say, keeping what it primed, and then the detector's
+            // settings follow -- in that order, so the split is already in
+            // when it is told where its sides are and has nothing to glide.
+            if (complexDip.ready())
+            {
+                activeComplex = params.complex;
+
+                for (auto& ch : channels)
+                    ch.bands.switchTo (lowThruFor (activeComplex), highThruFor (activeComplex));
+
+                applyTimings();
+                complexDip.changed();
+            }
+
+            const auto dipping = ! complexDip.isIdle();
+            const auto dipGain = dipping ? complexDip.next() : 1.0f;
+            const auto priming = dipping && channels[0].bands.isPriming();
+
             // Asked per sample rather than read off the parameters once a
             // block: a side of the split fading out is still in circuit, and
             // the fade ends wherever in a block it ends. Every channel's split
@@ -369,6 +462,9 @@ public:
                 auto& c = channels[(size_t) ch];
                 const auto gated = channelData[ch][i] * gateGain;
 
+                if (priming)
+                    c.bands.prime (gated);
+
                 float out;
 
                 if (split)
@@ -382,7 +478,12 @@ public:
                     out = gated * compressorGain * autoMakeupLin * outputLin;
                 }
 
-                pending[(size_t) ch] = out;
+                // The dip is taken off what is written, and the limiter still
+                // judges the peak without it, so the limiter carries on as if
+                // there were no dip and the dip only ever makes the output
+                // quieter. Ahead of the limiter it let a ceiling that was
+                // clamping relax, and a dip came out louder than either mode.
+                pending[(size_t) ch] = dipping ? out * dipGain : out;
                 pendingPeak = std::max (pendingPeak, std::abs (out));
             }
 
@@ -420,14 +521,27 @@ private:
     /** The one place standard mode's figures are substituted for the
         parameters. Everything downstream reads the result and cannot tell
         which it got, which is the point. */
+    float lowThruFor (bool complex) const noexcept  { return complex ? params.lowThruHz  : kStandardLowThruHz; }
+    /** True when running COMPLEX as `complex` would put a side of the split
+        in or out, or move one, against the COMPLEX being run. */
+    bool movesSplit (bool complex) const noexcept
+    {
+        return lowThruFor (complex) != lowThruFor (activeComplex) || highThruFor (complex) != highThruFor (activeComplex);
+    }
+
+    float highThruFor (bool complex) const noexcept { return complex ? params.highThruHz : kStandardHighThruHz; }
+
     void applyTimings() noexcept
     {
-        const auto attackMs    = params.complex ? params.attackMs    : kStandardAttackMs;
-        const auto releaseMs   = params.complex ? params.releaseMs   : kStandardReleaseMs;
-        const auto arcOn       = params.complex ? params.arc         : kStandardArc;
-        const auto sidechainHz = params.complex ? params.sidechainHz : kStandardSidechainHz;
-        const auto lowHz       = params.complex ? params.lowThruHz   : kStandardLowThruHz;
-        const auto highHz      = params.complex ? params.highThruHz  : kStandardHighThruHz;
+        // The COMPLEX the module is running, which during a switch's fade
+        // down is still the one being left.
+        const auto complex     = activeComplex;
+        const auto attackMs    = complex ? params.attackMs    : kStandardAttackMs;
+        const auto releaseMs   = complex ? params.releaseMs   : kStandardReleaseMs;
+        const auto arcOn       = complex ? params.arc         : kStandardArc;
+        const auto sidechainHz = complex ? params.sidechainHz : kStandardSidechainHz;
+        const auto lowHz       = lowThruFor (complex);
+        const auto highHz      = highThruFor (complex);
 
         attackPole = poleFor (attackMs, rate);
         release.setTimes (releaseMs, arcOn, rate);
@@ -439,6 +553,12 @@ private:
         for (auto& ch : channels)
         {
             ch.sidechain.setCutoff (sidechainHz);
+
+            if (complexDip.isPending())
+                ch.bands.primeFor (lowThruFor (params.complex), highThruFor (params.complex));
+            else
+                ch.bands.cancelPrime();
+
             ch.bands.setCutoffs (lowHz, highHz);
         }
     }
@@ -462,6 +582,16 @@ private:
 
     float attackPole = 0.0f;
     float envelopeDb = 0.0f;
+
+    /** Each half of a COMPLEX switch's dip, in ms: down, then up -- 28 ms and
+        a sample in all. A straight line in gain, so on a 20 Hz tone the fade
+        moves the largest sample step to 1.23x the signal's own at worst; at
+        12 ms each way it was 1.48x. */
+    static constexpr double kComplexDipMs = 14.0;
+
+    bmo::dsp::Dip complexDip;
+    bool activeComplex = false;   ///< the COMPLEX being run; params.complex is the one asked for
+    bool heard = false;           ///< anything processed since prepare() or reset()
 
     Params params;
     float reportedReductionDb = 0.0f;

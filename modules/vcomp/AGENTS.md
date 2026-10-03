@@ -327,6 +327,15 @@ Two things this changed that are worth knowing:
   (half a cycle: -3.1 / +5.1 dB; 2.5: under 1 dB). So the low side takes up
   to about 1 s to come all the way in at LOW THRU 500 and the high side
   30 ms. `vcomp_switch_tests` sections 3 and 5 hold steps and level.
+- **COMPLEX is a switch, and switches through a dip** (Frosty, 2026-10-03).
+  Taken the knobs' way, both sides in by their edges and a glide, the band in
+  transit sat at the wrong gain for up to a second (+8.4 dB on the voice).
+  Now the output fades to nothing over 14 ms while the sides the switch
+  brings in run unheard on the input at their settings, the split and the
+  detector change at the bottom, and the output fades back over 14 ms. The
+  glide is for knobs only, including a knob leaving or reaching its rail.
+  With LOW and HIGH THRU at their rails COMPLEX moves only the detector and
+  switches at once. `vcomp_switch_tests` section 10 holds it.
 - **A separate limiter on the thru path** was the third candidate and is not
   needed now. It only bit near full scale, and the thru band no longer gets
   anywhere near it.

@@ -308,6 +308,7 @@ public:
     void reset() noexcept
     {
         lowWarm = highWarm = 0;
+        primeLow = primeHigh = false;
         lowMix.snap (wantLow ? 1.0f : 0.0f);
         highMix.snap (wantHigh ? 1.0f : 0.0f);
 
@@ -351,13 +352,15 @@ public:
         // sides in, HIGH THRU to its rail and back 0.8 s into digital silence
         // put out a 0.13 peak, LOW THRU 0.05. Out means faded all the way out,
         // not merely asked to go: a side that is fading is still running.
-        if (! lowRunning())
+        // A side being primed for a switch is out but is not idle: it is
+        // running on the input, unheard, so the switch finds it warm.
+        if (! lowRunning() && ! primeLow)
             lower.reset();
 
-        if (! highRunning())
+        if (! highRunning() && ! primeHigh)
             upper.reset();
 
-        if (! (lowRunning() && highRunning()))
+        if (! (lowRunning() && highRunning()) && ! (primeLow && primeHigh))
             lowAlign.reset();
 
         if (wantLow)
@@ -381,6 +384,104 @@ public:
         out the whole split is skipped: a crossover left in circuit costs its
         allpass phase shift whether or not anything is in its outer bands. */
     bool inCircuit() const noexcept { return lowRunning() || highRunning(); }
+
+    //== Switching, as against moving a knob ===================================
+    //
+    // A side brought in or taken out by a *switch* -- COMPLEX, which puts both
+    // sides at their rails when it goes off -- does not take the knob's way in
+    // by its edge, which takes up to a second to arrive and carries whatever
+    // the compressor makes of the band in transit for all of it. The module
+    // dips its output to nothing instead (DspCore), and these three are the
+    // split's half of that: while the output fades down, prime() runs the
+    // sides the switch will bring in, already at their settings, on the live
+    // input, unheard; at the bottom, switchTo() puts the split where the
+    // controls say at once, keeping what was primed; and the output fades
+    // back up with the split already settled.
+
+    /** The sides that `lowHz` / `highHz` will bring in at a switch, and that
+        are not in circuit now, run from here on in prime() at those
+        settings. Safe to call every block; a setting that changes moves the
+        primed crossover at once -- nothing is listening to it. */
+    void primeFor (float lowHz, float highHz) noexcept
+    {
+        primeLow  = lowHz  > kLowThruOffHz  && ! lowRunning();
+        primeHigh = highHz < kHighThruOffHz && ! highRunning();
+
+        if (primeLow && lower.warpedTarget() != lower.warpedFor (lowHz))
+            lower.setCutoff (lowHz);
+
+        if (primeHigh && upper.warpedTarget() != upper.warpedFor (highHz))
+        {
+            upper.setCutoff (highHz);
+            lowAlign.setCutoff (highHz);
+        }
+    }
+
+    /** Stops priming; what was primed is cleared at the next setCutoffs(). */
+    void cancelPrime() noexcept { primeLow = primeHigh = false; }
+
+    bool isPriming() const noexcept { return primeLow || primeHigh; }
+
+    /** One sample of the input through the sides being primed, exactly as
+        the split would run them, with nothing heard. */
+    void prime (float x) noexcept
+    {
+        float below = 0.0f, rest = x, inner = 0.0f, above = 0.0f;
+
+        if (primeLow)
+            lower.process (x, below, rest);
+
+        if (primeHigh)
+            upper.process (rest, inner, above);
+
+        if (primeLow && primeHigh)
+            lowAlign.allpass (below);
+    }
+
+    /** At the bottom of a switch: each side in or out as `lowHz` / `highHz`
+        say, at once, at its setting, nothing fading or gliding. A side that
+        was primed keeps its state; one that goes out is cleared and parked. */
+    void switchTo (float lowHz, float highHz) noexcept
+    {
+        wantLow  = lowHz  > kLowThruOffHz;
+        wantHigh = highHz < kHighThruOffHz;
+        lowWarm = highWarm = 0;
+
+        lowMix.snap (wantLow ? 1.0f : 0.0f);
+        highMix.snap (wantHigh ? 1.0f : 0.0f);
+
+        if (wantLow)
+        {
+            lower.setCutoff (lowHz);
+            lowTarget   = lower.warpedFor (lowHz);
+            lowCutoffHz = lowHz;
+        }
+        else
+        {
+            lower.reset();
+            lower.setWarped (lowEdge);
+        }
+
+        if (wantHigh)
+        {
+            upper.setCutoff (highHz);
+            lowAlign.setCutoff (highHz);
+            highTarget   = upper.warpedFor (highHz);
+            highCutoffHz = highHz;
+        }
+        else
+        {
+            upper.reset();
+            lowAlign.reset();
+            upper.setWarped (highEdge);
+            lowAlign.setWarped (highEdge);
+        }
+
+        if (! (wantLow && wantHigh))
+            lowAlign.reset();
+
+        primeLow = primeHigh = false;
+    }
 
     /** Splits `x` into the band to compress and the band that passes through.
 
@@ -620,6 +721,7 @@ private:
     dsp::Ramp lowMix, highMix;
     bool  wantLow = false, wantHigh = false;
     int   lowWarm = 0, highWarm = 0, lowWarmLength = 0;
+    bool  primeLow = false, primeHigh = false;
     float lowTarget = 0.0f, highTarget = 0.0f, lowEdge = 0.0f, highEdge = 0.0f;
     float lowCutoffHz = kLowThruOffHz, highCutoffHz = kHighThruOffHz;
 };

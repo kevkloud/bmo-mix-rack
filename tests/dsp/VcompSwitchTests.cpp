@@ -832,8 +832,8 @@ void sections()
 
         moves.push_back ({ "HIGH THRU 20k -> 6000, LOW THRU 200", at (200, hi), at (200, 6000), { 200.0, 6000.0 } });
         moves.push_back ({ "LOW THRU 200 -> 20, HIGH THRU 6000",  at (200, 6000), at (lo, 6000), { 200.0, 6000.0 } });
-        moves.push_back ({ "COMPLEX off -> on, 200 / 6000",       at (200, 6000, false), at (200, 6000), { 200.0, 6000.0 } });
-        moves.push_back ({ "COMPLEX on -> off, 200 / 6000",       at (200, 6000), at (200, 6000, false), { 200.0, 6000.0 } });
+        // COMPLEX is not here: it is a switch, and a switch goes through a
+        // dip by decision (section 10), which this section would read as one.
 
         for (const auto fs : kRates)
             for (const auto& m : moves)
@@ -1128,6 +1128,446 @@ void heldIsUnchanged (bool print)
     }
 }
 
+//== 10. COMPLEX switches through a dip ========================================
+//
+// The owner's decision, 2026-10-03: a *switch* that brings sides of the split
+// in or out goes through a short dip, and the glide is for knobs. COMPLEX is
+// that switch: the output fades to nothing, the split changes at the bottom
+// with its crossovers already at their settings and warmed on the input, and
+// the output comes back. Before this, a COMPLEX switch took the knob's way in
+// -- each side by its edge and a glide -- and the band in transit spent up to
+// a second at the wrong gain: the suite's voice +8.4 dB off where it settles
+// for 0.61 s, a 60 Hz tone +7.2 dB for 0.95 s with the limiter taking 2.2 dB
+// more than it settles to.
+//
+// Judged at AMOUNT 55 with the reviewer's knobs -- ATTACK 0.1, RELEASE 20,
+// ARC off, HIGH THRU 6000, LOW THRU 200 and 500, SIDECHAIN 20 and 500 -- so
+// the compressor is working and the two modes disagree about everything.
+
+/** The suite's voice (tests/plugin/TestUtil.h voice()) at any rate. */
+std::vector<float> suiteVoice (double fs, size_t n)
+{
+    std::vector<float> out (n);
+    double sumSquares = 0.0;
+
+    for (size_t i = 0; i < n; ++i)
+    {
+        const auto t = (double) i / fs;
+        const auto beat = std::fmod (t, 0.55);
+        const auto env = (std::fmod (t, 3.0) < 1.6 ? 1.0 : 0.0)
+                       * (beat < 0.01 ? beat / 0.01 : std::exp (-(beat - 0.01) * 7.0));
+        double sum = 0.0;
+
+        for (int h = 1; h <= 120 && 75.0 * h <= fs * 0.49; ++h)
+            sum += std::pow ((double) h, -1.4) * std::sin (2.0 * kPi * 75.0 * h * t);
+
+        out[i] = (float) (env * sum);
+        sumSquares += (double) out[i] * out[i];
+    }
+
+    const auto gain = dbToLin (-18.0) / std::sqrt (sumSquares / (double) n);
+
+    for (auto& v : out)
+        v = (float) (v * gain);
+
+    return out;
+}
+
+/** Mono, any block size, with a hook called before each block. */
+std::vector<float> renderBlocks (double fs, std::vector<float> x, int block, const std::function<Params (size_t)>& paramsAt,
+                                 const std::function<void (DspCore&, size_t)>& hook = {})
+{
+    DspCore core;
+    core.setParams (paramsAt (0));
+    core.prepare (fs, block, 1);
+
+    for (size_t start = 0; start < x.size(); start += (size_t) block)
+    {
+        const auto n = (int) std::min ((size_t) block, x.size() - start);
+        if (hook) hook (core, start);
+        core.setParams (paramsAt (start));
+        auto* p = x.data() + start;
+        core.process (&p, 1, n);
+    }
+
+    return x;
+}
+
+/** The limiter's reduction at each sample, read without the meter: the same
+    render 24 dB lower (OUTPUT is a pure gain ahead of the limiter, and the
+    detector never sees it, so that render is the pre-limiter signal less 24
+    dB, with the limiter idle) against the real one. */
+std::vector<float> limiterReduction (const std::vector<float>& y, const std::vector<float>& quiet)
+{
+    std::vector<float> r (y.size(), 0.0f);
+
+    for (size_t i = 0; i < y.size(); ++i)
+    {
+        const auto pre = std::abs ((double) quiet[i]) * dbToLin (24.0);
+        if (pre > 1.0e-3 && y[i] != 0.0f)
+            r[i] = (float) std::max (0.0, 20.0 * std::log10 (pre / std::abs ((double) y[i])));
+    }
+
+    return r;
+}
+
+Params reviewerKnobs (float lowHz, float sidechainHz, bool complex)
+{
+    auto p = complexMode (55.0f, 0.1f, 20.0f, false, sidechainHz, lowHz, 6000.0f);
+    p.complex = complex;
+    return p;
+}
+
+/** What a COMPLEX switch does to the level, against what the compressor's own
+    memory does to it.
+
+    A switch changes the detector as well as the split, and a detector that
+    has been running one RELEASE, ARC and SIDECHAIN takes its own time to
+    become one that has always run the others -- with ARC on, seconds. That is
+    the compressor, and no way of switching the split can hurry it. So the
+    switch is judged against the same switch made with LOW THRU and HIGH THRU
+    at their rails, where it moves the detector and nothing else, at the same
+    sample: each is compared with an instance that was always in its new
+    mode, and the difference between the two comparisons is what the split
+    and the dip add. That is held to 1 dB in every 10 ms window from the end
+    of the dip, and the limiter to no more than 0.5 dB over what the
+    detector-only switch makes it take. The time the switch itself is more
+    than 1 dB off the always-new instance is printed, beside the
+    detector-only switch's, which is what explains it. */
+void complexSwitchLevels()
+{
+    double worstExtra = 0.0, worstLimit = -1.0e9, latest = 0.0, latestDetector = 0.0;
+    std::string extraWhere, limitWhere;
+
+    for (const auto fs : { 48000.0, 96000.0 })
+        for (const auto lowHz : { 200.0f, 500.0f })
+            for (const auto sc : { 20.0f, 500.0f })
+                for (const auto toOn : { true, false })
+                {
+                    const auto from = reviewerKnobs (lowHz, sc, ! toOn), to = reviewerKnobs (lowHz, sc, toOn);
+                    auto railFrom = from, railTo = to;
+                    railFrom.lowThruHz = railTo.lowThruHz = kLowThruOffHz;
+                    railFrom.highThruHz = railTo.highThruHz = kHighThruOffHz;
+
+                    const auto quieter = [] (Params p) { p.outputDb -= 24.0f; return p; };
+
+                    const auto n    = (size_t) (2.5 * fs);
+                    const auto sw   = (size_t) (1.0 * fs) / 64 * 64;
+                    const auto half = (size_t) std::lround (0.014 * fs);    // DspCore::kComplexDipMs
+                    const auto back = sw + 2 * half + 1;
+
+                    for (const auto hz : { 60.0, 150.0, 300.0, 0.0 })
+                    {
+                        const auto members = hz > 0.0 ? 4 : 1;
+                        std::vector<double> ey (n, 0.0), er (n, 0.0), e2 (n, 0.0), e2r (n, 0.0);
+                        double limY = 0.0, limR = 0.0, lim2 = 0.0, lim2r = 0.0;
+
+                        for (int k = 0; k < members; ++k)
+                        {
+                            std::vector<float> x;
+
+                            if (hz > 0.0)
+                            {
+                                x.resize (n);
+                                for (size_t i = 0; i < n; ++i)
+                                    x[i] = (float) (0.17782794 * 1.41421356 * std::sin (2.0 * kPi * hz * (double) i / fs + k * kPi / 4.0));
+                            }
+                            else
+                            {
+                                x = suiteVoice (fs, n);
+                            }
+
+                            auto run = [&] (const Params& a, const Params& b, size_t at, std::vector<double>& energy, double& limit)
+                            {
+                                const auto y = renderBlocks (fs, x, 64, [&] (size_t s) { return s < at ? a : b; });
+                                const auto q = renderBlocks (fs, x, 64, [&] (size_t s) { return s < at ? quieter (a) : quieter (b); });
+                                const auto l = limiterReduction (y, q);
+
+                                for (size_t i = 0; i < n; ++i)
+                                    energy[i] += (double) y[i] * y[i];
+
+                                for (auto i = sw; i < n; ++i)
+                                    limit = std::max (limit, (double) l[i]);
+                            };
+
+                            run (from, to, sw, ey, limY);
+                            run (to, to, 0, er, limR);
+                            run (railFrom, railTo, sw + half, e2, lim2);
+                            run (railTo, railTo, 0, e2r, lim2r);
+                        }
+
+                        const auto name = std::string (toOn ? "COMPLEX off -> on" : "COMPLEX on -> off") + ", LOW " + fixed (lowHz, 0)
+                                        + ", SIDECHAIN " + fixed (sc, 0) + ", " + (hz > 0.0 ? fixed (hz, 0) + " Hz" : std::string ("voice"))
+                                        + ", at " + rateName (fs);
+
+                        const auto w = (size_t) (0.01 * fs);
+                        double extra = 0.0, lastOff = 0.0, lastOffDetector = 0.0;
+
+                        auto windowDb = [&] (const std::vector<double>& e, size_t a)
+                        {
+                            double s = 0.0;
+                            for (size_t i = a; i < a + w; ++i) s += e[i];
+                            return 10.0 * std::log10 (std::max (s, 1.0e-300));
+                        };
+
+                        for (auto a = sw; a + w <= n; a += w)
+                        {
+                            if (windowDb (er, a) - 10.0 * std::log10 ((double) (w * (size_t) members)) < -60.0)
+                                continue;
+
+                            const auto dy = windowDb (ey, a) - windowDb (er, a);
+                            const auto d2 = windowDb (e2, a) - windowDb (e2r, a);
+
+                            // Worse than the detector-only switch, not merely different:
+                            // the split coming in settled can be nearer the always-new
+                            // instance than a detector that is still catching up.
+                            if (a >= back && std::abs (dy) - std::abs (d2) > extra)
+                                extra = std::abs (dy) - std::abs (d2);
+
+                            if (std::abs (dy) > 1.0) lastOff = (double) (a + w - sw) / fs;
+                            if (std::abs (d2) > 1.0) lastOffDetector = (double) (a + w - sw) / fs;
+                        }
+
+                        check (extra <= 1.0,
+                               name + ": from the end of the dip, " + fixed (extra) + " dB off the always-new instance"
+                                   + " beyond what the same switch with the split at its rails is");
+
+                        const auto excessY = limY - limR, excess2 = std::max (0.0, lim2 - lim2r);
+                        check (excessY <= excess2 + 0.5,
+                               name + ": the limiter takes " + fixed (excessY) + " dB over its settled figure, against "
+                                   + fixed (excess2) + " for the switch with the split at its rails");
+
+                        latest = std::max (latest, lastOff);
+                        latestDetector = std::max (latestDetector, lastOffDetector);
+
+                        if (extra > worstExtra) { worstExtra = extra; extraWhere = name; }
+                        if (excessY - excess2 > worstLimit) { worstLimit = excessY - excess2; limitWhere = name; }
+                    }
+                }
+
+    std::cout << "COMPLEX switch: worst 10 ms window from the end of the dip " << fixed (worstExtra) << " dB beyond the detector-only switch ("
+              << extraWhere << "); more than 1 dB off the always-new instance until " << fixed (latest, 3) << " s, the detector-only switch until "
+              << fixed (latestDetector, 3) << " s; limiter at most " << fixed (worstLimit) << " dB over the detector-only switch's excess ("
+              << limitWhere << ")\n";
+}
+
+void complexSwitchSteps()
+{
+    double worst = 0.0;
+    std::string where;
+
+    const auto from = reviewerKnobs (200.0f, 500.0f, false), to = reviewerKnobs (200.0f, 500.0f, true);
+
+    for (const auto fs : { 44100.0, 48000.0, 96000.0, 192000.0 })
+        for (const auto block : { 1, 32, 441, 512 })
+            for (const auto hz : { 20.0, 30.0, 60.0, 150.0, 300.0, 1000.0, 0.0 })
+            {
+                // Block 1 is a sample-by-sample host and costs the most to run;
+                // it is judged at the rates at either end.
+                if (block == 1 && fs != 48000.0 && fs != 192000.0)
+                    continue;
+
+                const auto n  = (size_t) (0.7 * fs);
+                const auto sw = (size_t) (0.4 * fs) / (size_t) block * (size_t) block;
+
+                for (int k = 0; k < (hz > 0.0 ? 2 : 1); ++k)
+                {
+                    std::vector<float> x;
+
+                    if (hz > 0.0)
+                    {
+                        x.resize (n);
+                        for (size_t i = 0; i < n; ++i)
+                            x[i] = (float) (0.17782794 * 1.41421356 * std::sin (2.0 * kPi * hz * (double) i / fs + k * kPi / 4.0));
+                    }
+                    else
+                    {
+                        x = suiteVoice (fs, n);
+                    }
+
+                    const auto heldFrom = renderBlocks (fs, x, block, [&] (size_t) { return from; });
+                    const auto heldTo   = renderBlocks (fs, x, block, [&] (size_t) { return to; });
+                    const auto own = std::max (largestStep (heldFrom, sw / 2, n), largestStep (heldTo, sw / 2, n));
+
+                    for (const auto toOn : { true, false })
+                    {
+                        const auto& a = toOn ? from : to;
+                        const auto& b = toOn ? to : from;
+                        const auto y = renderBlocks (fs, x, block, [&] (size_t s) { return s < sw ? a : b; });
+                        const auto ratio = largestStep (y, sw, n) / own;
+
+                        const auto name = std::string (toOn ? "COMPLEX off -> on" : "COMPLEX on -> off") + ", "
+                                        + (hz > 0.0 ? fixed (hz, 0) + " Hz" : std::string ("voice")) + ", block "
+                                        + std::to_string (block) + ", at " + rateName (fs);
+
+                        check (ratio < 1.5, name + " steps " + fixed (ratio) + "x the signal's own");
+
+                        if (ratio > worst) { worst = ratio; where = name; }
+                    }
+                }
+            }
+
+    std::cout << "COMPLEX switch: largest step " << fixed (worst) << "x the signal's own (" << where << ")\n";
+}
+
+/** COMPLEX flicked on and off for 30 s at every rate a user or automation
+    might manage, on the voice, then left: nothing blows up or passes the
+    ceiling, nothing reaches the limiter louder than the louder of the two
+    modes held does, and the module ends up sample for sample where an
+    instance that was always in the final mode is.
+
+    "Louder" is judged ahead of the limiter -- the same renders 24 dB down,
+    where it is idle -- because after it a ceiling that was clamping in one
+    render and not the other moves a 10 ms window by about a dB on its own:
+    the limiter remembering a peak for its 60 ms release, not the switch. */
+constexpr double kTogglesForgottenWithin = 3.0;
+
+void complexToggled()
+{
+    const double fs = 48000.0;
+    const int block = 512;
+    const auto n = (size_t) (35.0 * fs), stop = (size_t) (30.0 * fs) / (size_t) block * (size_t) block;
+    const auto x = suiteVoice (fs, n);
+    const auto on = complexMode (55.0f, 5.0f, 200.0f, true, kStandardSidechainHz, 200.0f, 6000.0f);
+    auto off = on;
+    off.complex = false;
+
+    auto onQuiet = on, offQuiet = off;
+    onQuiet.outputDb = offQuiet.outputDb = -24.0f;
+
+    const auto heldOn  = renderBlocks (fs, x, block, [&] (size_t) { return on; });
+    const auto heldOff = renderBlocks (fs, x, block, [&] (size_t) { return off; });
+    const auto heldOnQ  = renderBlocks (fs, x, block, [&] (size_t) { return onQuiet; });
+    const auto heldOffQ = renderBlocks (fs, x, block, [&] (size_t) { return offQuiet; });
+
+    struct Pattern { const char* name; std::function<bool (long)> isOn; };
+    std::vector<bool> random (n / (size_t) block + 1);
+    unsigned state = 2463534242u;
+    auto current = false;
+    long nextFlip = 0;
+
+    for (long b = 0; b < (long) random.size(); ++b)
+    {
+        if (b >= nextFlip)
+        {
+            current = ! current;
+            state ^= state << 13; state ^= state >> 17; state ^= state << 5;
+            nextFlip = b + 1 + (long) (state % 200u);
+        }
+
+        random[(size_t) b] = current;
+    }
+
+    const Pattern patterns[] {
+        { "every block",       [] (long b) { return (b & 1) == 0; } },
+        { "every 3 blocks",    [] (long b) { return ((b / 3) & 1) == 0; } },
+        { "every 64 blocks",   [] (long b) { return ((b / 64) & 1) == 0; } },
+        { "every 2048 blocks", [] (long b) { return ((b / 2048) & 1) == 0; } },
+        { "at random",         [&] (long b) { return (bool) random[(size_t) b]; } },
+    };
+
+    for (const auto& pattern : patterns)
+    {
+        const auto finalOn = pattern.isOn ((long) (stop / (size_t) block) - 1);
+        const auto y = renderBlocks (fs, x, block, [&] (size_t s)
+        {
+            const auto b = (long) (std::min (s, stop - 1) / (size_t) block);
+            return pattern.isOn (b) ? on : off;
+        });
+        const auto yq = renderBlocks (fs, x, block, [&] (size_t s)
+        {
+            const auto b = (long) (std::min (s, stop - 1) / (size_t) block);
+            return pattern.isOn (b) ? onQuiet : offQuiet;
+        });
+
+        auto finite = true;
+        auto peak = 0.0;
+        for (const auto v : y)
+        {
+            finite = finite && std::isfinite (v);
+            peak = std::max (peak, (double) std::abs (v));
+        }
+
+        check (finite, std::string ("COMPLEX toggled ") + pattern.name + " stays finite");
+        check (peak <= dbToLin ((double) kLimiterCeilingDb) * 1.0001,
+               std::string ("COMPLEX toggled ") + pattern.name + " stays under the ceiling");
+
+        const auto w = (size_t) (0.01 * fs);
+        double over = -1.0e9;
+
+        for (size_t a = 0; a + w <= stop; a += w)
+        {
+            double sy = 0.0, s1 = 0.0, s0 = 0.0;
+            for (size_t i = a; i < a + w; ++i) { sy += (double) yq[i] * yq[i]; s1 += (double) heldOnQ[i] * heldOnQ[i]; s0 += (double) heldOffQ[i] * heldOffQ[i]; }
+
+            const auto louder = std::max (s1, s0);
+            if (10.0 * std::log10 (std::max (louder, 1.0e-300) / (double) w) < -84.0)
+                continue;
+
+            over = std::max (over, 10.0 * std::log10 (std::max (sy, 1.0e-300) / louder));
+        }
+
+        check (over <= 1.0, std::string ("COMPLEX toggled ") + pattern.name + " comes out " + fixed (over)
+                                + " dB over the louder of the two modes held, ahead of the limiter");
+
+        const auto& held = finalOn ? heldOn : heldOff;
+        size_t lastDifferent = stop;
+        for (auto i = stop; i < n; ++i)
+            if (y[i] != held[i])
+                lastDifferent = i + 1;
+
+        const auto after = (double) (lastDifferent - stop) / fs;
+        check (after <= kTogglesForgottenWithin,
+               std::string ("COMPLEX toggled ") + pattern.name + " is sample for sample an instance always in the final mode only "
+                   + fixed (after, 3) + " s after the toggling stops");
+
+        std::cout << "COMPLEX toggled " << pattern.name << ": at most " << fixed (over) << " dB over the louder mode held; "
+                  << "sample-exact with the final mode held " << fixed (after, 3) << " s after the last toggle\n";
+    }
+}
+
+/** reset() or prepare() in the middle of a switch's dip, on the way down or
+    on the way up, lands exactly where a fresh instance at the new setting
+    is, from that sample on. */
+void complexSwitchLifecycle()
+{
+    const auto from = reviewerKnobs (200.0f, 500.0f, false), to = reviewerKnobs (200.0f, 500.0f, true);
+
+    for (const auto toOn : { true, false })
+        for (const auto into : { 0.005, 0.020 })
+            for (const auto action : { 0, 1, 2 })
+            {
+                const double fs = 48000.0, after = action == 2 ? 96000.0 : 48000.0;
+                const int block = 64;
+                const auto n = (size_t) (2.0 * fs);
+                const auto x = suiteVoice (fs, n);
+                const auto sw = (size_t) (1.0 * fs) / (size_t) block * (size_t) block;
+                const auto at = (sw + (size_t) (into * fs)) / (size_t) block * (size_t) block;
+                const auto& a = toOn ? from : to;
+                const auto& b = toOn ? to : from;
+
+                const auto y = renderBlocks (fs, x, block, [&] (size_t s) { return s < sw ? a : b; },
+                                             [&] (DspCore& core, size_t s)
+                                             {
+                                                 if (s != at) return;
+                                                 if (action == 0) core.reset();
+                                                 else             core.prepare (after, block, 1);
+                                             });
+
+                const std::vector<float> rest (x.begin() + (long) at, x.end());
+                const auto fresh = renderBlocks (after, rest, block, [&] (size_t) { return b; });
+
+                size_t differ = 0;
+                for (size_t i = 0; i < rest.size(); ++i)
+                    differ += y[at + i] != fresh[i] ? 1 : 0;
+
+                check (differ == 0, std::string (action == 0 ? "reset()" : action == 1 ? "prepare (48 kHz)" : "prepare (96 kHz)")
+                                        + (into < 0.014 ? " on the way down" : " on the way up") + " of COMPLEX "
+                                        + (toOn ? "off -> on" : "on -> off") + ": " + std::to_string (differ)
+                                        + " samples differ from a fresh instance at the new setting");
+            }
+}
+
 int main (int argc, char** argv)
 {
     if (argc > 1 && std::string (argv[1]) == "--print-hashes")
@@ -1160,6 +1600,10 @@ int main (int argc, char** argv)
     glideFlatness();
     complexReturn();
     gateReturn();
+    complexSwitchLevels();
+    complexSwitchSteps();
+    complexToggled();
+    complexSwitchLifecycle();
     heldIsUnchanged (false);
 
     if (failures == 0)

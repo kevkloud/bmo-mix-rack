@@ -175,7 +175,13 @@ void DspCore::prepare (double newSampleRate, int maxBlockSize, int numChannels,
     // Auto Gain's detector. 1.5 seconds: slower than any phrase, so it cannot
     // act on the programme's dynamics.
     autoGainCoeff = (float) (1.0 - std::exp (-1.0 / (controlRate * 1.5)));
-    inputEnergy = processedEnergy = 0.0;
+
+    // Its reading is kept. It is a ratio of what the stage puts out to what
+    // it is fed, a property of the settings and the material rather than of
+    // the stream, so it is as good after prepare() as before; throwing it
+    // away restarted the makeup at unity, +6.8 dB high for 10 ms with Tone at
+    // 100. An instance that has heard nothing has no reading, and starts at
+    // unity as it always has.
 
     oversamplingDip.prepare (sampleRate, kSwitchFadeMs);
 
@@ -305,7 +311,10 @@ void DspCore::setParams (const Params& p) noexcept
     polaritySwitch.snap (p.phaseInvert ? -1.0f : 1.0f);
 
     toneSm.snap (std::clamp (p.toneAmount, 0.0f, 100.0f));
-    makeupSm.snap (1.0f);
+
+    // Auto Gain starts where its detector last read, which survives prepare()
+    // and reset(); unity only if it has never heard anything.
+    makeupSm.snap (p.autoGain ? currentAutoGain() : 1.0f);
 
     inputGainSm  .snap (dbToGain (p.inputGainDb));
     outputLevelSm.snap (dbToGain (p.outputLevelDb));
@@ -505,6 +514,18 @@ void DspCore::updateAutoGain (double blockInput, double blockProcessed, int samp
     // capable of a surprise: at most 12 dB either way.
     const auto wanted = std::sqrt (inputEnergy / processedEnergy);
     makeupSm.setTarget ((float) std::clamp (wanted, 0.25, 4.0));
+}
+
+float DspCore::currentAutoGain() const noexcept
+{
+    // The same figure updateAutoGain() aims the makeup at, or unity when the
+    // detector has nothing to say.
+    constexpr double kFloor = 1.0e-9;
+
+    if (inputEnergy <= kFloor || processedEnergy <= kFloor)
+        return 1.0f;
+
+    return (float) std::clamp (std::sqrt (inputEnergy / processedEnergy), 0.25, 4.0);
 }
 
 } // namespace bmo::sat

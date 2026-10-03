@@ -274,6 +274,10 @@ private:
     void switchOversampling (int activeChannels, float inGain, float drive, float tone) noexcept;
     void updateAutoGain (double blockInput, double blockProcessed, int samples) noexcept;
 
+    /** Auto Gain's figure from the detector's reading, or unity if it has
+        never had one. */
+    float currentAutoGain() const noexcept;
+
     struct Channel
     {
         AsymmetricShaper shaper, bodyShaper, sheenShaper;

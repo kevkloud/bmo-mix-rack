@@ -408,6 +408,106 @@ int main()
             }
     }
 
+    //== 4. Auto Gain is at its level from the first block ===================
+    // prepare() threw Auto Gain's reading away and restarted the makeup at
+    // unity, so with Tone at 100 (which the makeup pulls down by about 7 dB
+    // on noise) every prepare() mid-stream put the output +6.8 dB high for
+    // 10 ms and settled over about 70 ms. Measured as the level with Auto
+    // Gain on against the same core with it off, so the chain's own start-up
+    // is the same on both sides and only Auto Gain is compared: the first
+    // 512-sample block after the latency, against the 50 ms before the
+    // prepare() or reset(). Bound 0.5 dB.
+    //
+    // A fresh instance is deliberately not here. It has heard nothing, so it
+    // starts at unity and glides to its first reading, as it always has; a
+    // reading taken from the first few milliseconds overshoots on a
+    // programme's onset and breaks sat_dsp's crest-factor test, which is the
+    // owner's call and not this test's.
+    {
+        struct Setting { const char* name; float drive, tone; bool noise; };
+        const Setting settings[] { { "Drive 40, Tone 100, noise", 40.0f, 100.0f, true },
+                                   { "Drive 100, Tone 0, 1 kHz", 100.0f, 0.0f, false } };
+
+        const auto rmsOf = [] (const std::vector<float>& y, size_t from, size_t length)
+        {
+            double acc = 0.0;
+            for (size_t i = from; i < from + length; ++i) acc += (double) y[i] * y[i];
+            return std::sqrt (acc / (double) length);
+        };
+
+        for (double fs : { 44100.0, 48000.0, 96000.0 })
+            for (int os : { 1, 2 })
+                for (const auto& setting : settings)
+                    for (int start = 3; start < 6; ++start)
+                    {
+                        // 2 s in, after setParams() and prepare() the way a
+                        // module is driven: 3, prepare() again, as a host does
+                        // on a transport or buffer change; 4, reset(); 5,
+                        // prepare() and then reset(), as a host does on play.
+                        const auto again = (size_t) (2.0 * fs) / 512 * 512;
+
+                        std::vector<float> x;
+                        if (setting.noise)
+                        {
+                            x.resize ((size_t) (3.0 * fs));
+                            unsigned seed = 777u;
+                            for (auto& v : x)
+                            {
+                                seed = seed * 1664525u + 1013904223u;
+                                v = 0.3f * ((float) (seed >> 8) / 8388608.0f - 1.0f);
+                            }
+                        }
+                        else
+                        {
+                            x = tone (fs, 1000.0, kAmplitude, 3.0);
+                        }
+
+                        const auto renderWith = [&] (bool autoGain)
+                        {
+                            DspCore::Params p;
+                            p.driveAmount = setting.drive;
+                            p.toneAmount = setting.tone;
+                            p.oversampling = os;
+                            p.autoGain = autoGain;
+
+                            DspCore core;
+                            core.setParams (p);
+                            core.prepare (fs, 512, 1, os);
+                            core.setParams (p);
+
+                            auto y = x;
+                            for (size_t at = 0; at < y.size(); at += 512)
+                            {
+                                if (at == again && (start == 3 || start == 5)) core.prepare (fs, 512, 1, os);
+                                if (at == again && (start == 4 || start == 5)) core.reset();
+                                core.setParams (p);
+                                float* channels[1] { y.data() + at };
+                                core.process (channels, 1, (int) std::min<size_t> (512, y.size() - at));
+                            }
+
+                            return y;
+                        };
+
+                        const auto on  = renderWith (true);
+                        const auto off = renderWith (false);
+
+                        const auto lat     = (size_t) bmo::Oversampler::latencyForFactor (os);
+                        const auto window  = (size_t) (0.05 * fs);
+                        const auto from     = again + lat;
+                        const auto settleAt = again - window;
+
+                        const auto first   = 20.0 * std::log10 (rmsOf (on, from, 512) / rmsOf (off, from, 512));
+                        const auto settled = 20.0 * std::log10 (rmsOf (on, settleAt, window) / rmsOf (off, settleAt, window));
+
+                        const char* how[] { "", "", "", "prepare() mid-stream", "reset() mid-stream",
+                                            "prepare() and reset() mid-stream" };
+                        check (std::abs (first - settled) < 0.5,
+                               std::string ("Auto Gain (") + setting.name + ") in the first block after "
+                                   + how[start] + " at " + rateName (fs) + ", " + std::to_string (os)
+                                   + "x is " + std::to_string (first - settled) + " dB from where it settles");
+                    }
+    }
+
     if (failures == 0)
         std::cout << "All Saturator switch tests passed.\n";
 

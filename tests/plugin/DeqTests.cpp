@@ -358,9 +358,21 @@ int main()
         const auto bell8 = shelfAt (8.0f, 0), bell2 = shelfAt (2.0f, 0);
         check (std::abs (bell8.first - bell2.first) > 1.0, "a bell's Q is not capped");
 
+        // The cuts stop at kCutMaxQ (Frosty, 2026-10-03): at the knob's top a
+        // Low Cut or High Cut is the 0.71 one, and 0.71 does not resonate.
+        check (P::kCutMaxQ == 0.71f, "a cut's Q stops at 0.71");
+
+        for (const auto shape : { 3, 4 })
+        {
+            const auto asked = shelfAt (40.0f, shape), capped = shelfAt (0.71f, shape);
+            const auto name = juce::String (shape == 3 ? "low" : "high");
+            checkClose (asked.first,  capped.first,  1.0e-3, name + " cut at Q 40 is the Q 0.71 cut, below f0");
+            checkClose (asked.second, capped.second, 1.0e-3, name + " cut at Q 40 is the Q 0.71 cut, above f0");
+        }
+
         check (P::effectiveQ (1, 30.0f) == 2.0f && P::effectiveQ (2, 1.5f) == 1.5f && P::effectiveQ (0, 30.0f) == 30.0f
-                   && P::effectiveQ (3, 30.0f) == 30.0f,
-               "effectiveQ caps shelves only, and only above the cap");
+                   && P::effectiveQ (3, 30.0f) == P::kCutMaxQ && P::effectiveQ (4, 0.5f) == 0.5f,
+               "effectiveQ caps shelves and cuts, and only above their caps");
     }
 
     //== AUTO ===================================================================

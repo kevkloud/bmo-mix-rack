@@ -1702,6 +1702,85 @@ namespace
             }
         }
     }
+
+    /** The cut shapes' Q stops at kCutMaxQ, the way a shelf's stops at
+        kShelfMaxQ: the knob keeps its whole range and its value, and the
+        engine runs a cut no more resonant than Butterworth. Frosty's
+        decision, 2026-10-03.
+
+        Before it, a cut at the knob's top (Q 40) peaked +32 dB at its corner,
+        and the bus test's swept setting -- twelve Low Cuts at 1552.5 Hz, Q
+        4.36, +12.85 dB of resonance each -- stacked to +154 dB and put the
+        module out at +96.6 dBFS on a -3 dBFS signal. */
+    void testCutQIsCapped()
+    {
+        const double rate = 48000.0;
+
+        auto engineFor = [rate] (int shape, float hz, float q, int bands)
+        {
+            Values p;
+            for (int b = 0; b < bands; ++b)
+            {
+                p.at (b, Control::on) = 1.0f;  p.at (b, Control::shape) = (float) shape;
+                p.at (b, Control::freq) = hz;  p.at (b, Control::q) = q;
+            }
+
+            auto d = std::make_unique<DeqDsp>();
+            d->setParams (p.v.data(), (int) p.v.size());
+            d->prepare (rate, 512, 2);
+            d->setParams (p.v.data(), (int) p.v.size());
+            return d;
+        };
+
+        auto peakDb = [rate] (const DspCore& e)
+        {
+            double peak = 0.0;
+            for (double hz = 10.0; hz < 0.499 * rate; hz *= 1.0005)
+                peak = std::max (peak, std::abs (e.staticResponseAt (hz)));
+            return toDb (peak);
+        };
+
+        // The knob's own 0.71, as a host hands it over after snapping to the
+        // 0.01 step: not capped, so a default cut band is the cut it was.
+        const auto& qSpec = specs()[(size_t) indexOf (0, Control::q)];
+        const auto knob071 = qSpec.fromNormalised (qSpec.toNormalised (0.71f));
+
+        check (std::abs (effectiveQ (3, 40.0f) - 0.71f) < 1.0e-6f, "Cut Q: the cap is 0.71, the knob's default and its closest position to Butterworth");
+        check (effectiveQ (3, knob071) == knob071 && effectiveQ (4, knob071) == knob071 && effectiveQ (3, 0.71f) == 0.71f,
+               "Cut Q: the knob's 0.71 runs as itself");
+        check (effectiveQ (4, 40.0f) < 0.711f && effectiveQ (4, 0.72f) < 0.711f && effectiveQ (3, 0.3f) == 0.3f,
+               "Cut Q: above the cap a cut runs at it, below it at its knob");
+        check (effectiveQ (1, 30.0f) == kShelfMaxQ && effectiveQ (2, 1.5f) == 1.5f && effectiveQ (0, 30.0f) == 30.0f,
+               "Cut Q: the shelves keep their cap and a bell keeps all of its Q");
+
+        for (int shape : { 3, 4 })
+            for (float hz : { 30.0f, 1000.0f, 10000.0f })
+            {
+                const auto name = std::string (kShapeNames[shape]) + " at " + std::to_string ((int) hz) + " Hz";
+                const auto atCap = engineFor (shape, hz, 0.71f, 1);
+                const auto capPeak = peakDb (atCap->engine());
+
+                checkAtMost (capPeak, 0.05, "Cut Q: no resonance at the cap, " + name);
+
+                for (float q : { 0.72f, 2.0f, 4.36f, 40.0f })
+                {
+                    const auto asked = engineFor (shape, hz, q, 1);
+                    checkAtMost (peakDb (asked->engine()), capPeak + 1.0e-6,
+                                 "Cut Q: Q " + std::to_string (q) + " peaks no higher than the cap, " + name);
+                }
+
+                // Below the cap the knob is live: Q 0.3 is a softer corner.
+                const auto soft = engineFor (shape, hz, 0.3f, 1);
+                const auto atF0 = [hz] (const DeqDsp& d) { return toDb (std::abs (d.engine().staticResponseAt (hz))); };
+                check (atF0 (*soft) < atF0 (*atCap) - 1.0, "Cut Q: below the cap the knob still moves the corner, " + name);
+            }
+
+        // The bus test's swept setting: twelve stacked Low Cuts, Q 4.36.
+        {
+            const auto swept = engineFor (3, 1552.5f, 4.36f, kBands);
+            checkAtMost (peakDb (swept->engine()), 0.1, "Cut Q: twelve stacked cuts at Q 4.36 do not resonate");
+        }
+    }
 }
 
 int main()
@@ -1721,6 +1800,7 @@ int main()
     testDynamicsComeBackCurrent();
     testAutoFromTheFirstBlock();
     testSwitchesFade();
+    testCutQIsCapped();
 
     if (failures == 0)
         std::cout << "deq_dsp: all passed\n";

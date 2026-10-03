@@ -461,10 +461,23 @@ const Golden kDefaults[]
       -18.752053514, 0.263523042202, -18.752053514, 0.263523042202 },
 };
 
-// BMO DEQ's swept row is loud on purpose and is not a fault: 0.63 turns all 24
-// bands on and boosts each of them, and 24 stacked boosts is +90 dB. The
-// filters are stable -- it is plain gain, not a runaway -- and the number is
-// deterministic, which is all a fingerprint has to be.
+// BMO DEQ at 0.63 turns all 12 bands on as Low Cuts at 1552.5 Hz, Q 4.36,
+// with AUTO on and the output at +6.2 dB. Until 2026-10-03 each of those cuts
+// resonated +12.85 dB at its corner, twelve stacked made +154 dB, and this row
+// read +89.70 dBFS RMS with a peak of 67366 (+96.6 dBFS) -- not a runaway,
+// but a cut that could boost without limit. Frosty capped the cuts' Q at
+// kCutMaxQ (0.71) that day, as the shelves' already was, and the row was
+// regenerated on ICE QUEEN as the record of that decision:
+//
+//   mono            +89.700048 dBFS RMS, peak 67366   -> -11.470041, 0.886605
+//   stereo L / R    +84.742162 / +84.742162, 53060.81 / 53060.84
+//                                                     -> -3.771258 / -3.769610, 1.880584 / 1.907981
+//
+// The stereo rows sit higher than mono because the swept placement is Mid:
+// the side of a decorrelated pair passes the twelve cuts untouched and still
+// takes AUTO's +10.6 dB and the output's +6.2 dB. The "rack" swept row
+// below moved with it, because BMO DEQ is the sixth of its eight slots; no
+// tolerance was touched.
 const Golden kSwept[]
 {
     { "util",
@@ -520,9 +533,9 @@ const Golden kSwept[]
       -5.87867470619, 1.25943660736, -9.278296506, 0.950595080853,
       -16.9095587195, 0.408530026674, -6.65830929824, 1.07017970085 },
     { "deq",
-      89.7000479803, 67366,
-      84.7421622782, 53060.8125, 84.7421621754, 53060.8398438,
-      89.7000479803, 67366, 89.7000479803, 67366 },
+      -11.470041361, 0.886605024338,
+      -3.77125845442, 1.88058388233, -3.76960981771, 1.90798139572,
+      -11.470041361, 0.886605024338, -11.470041361, 0.886605024338 },
     { "ltvcomp",
       -7.16919915094, 0.988553106785,
       -10.8123103775, 0.853308975697, -9.8115626611, 0.988553166389,
@@ -575,6 +588,11 @@ const Golden kSwept[]
     // answers the louder start more strongly: against main's row, RMS -0.040
     // (mono), -0.077 / -0.074 (stereo L / R), -0.044 / -0.041 (duplicate and
     // mono -> stereo L / R) dB, and every peak up by 0.0028 to 0.0075.
+    // Regenerated on ICE QUEEN, 2026-10-03, for BMO DEQ's cut Q cap (see the
+    // note above this table). Mono RMS -12.3128 dBFS (6f6b8c3) -> -17.8614,
+    // peak 1.16623 -> 0.98509. The branch this was made on also carried BMO
+    // EQ's switch fixes, which had moved this row to -12.3533 / 1.16854 on
+    // their own; the figures here are both together.
     { "rack",
       -11.7195631752, 1.16198933125,
       -11.317069677, 1.15757536888, -11.2731589041, 1.15886342525,

@@ -26,7 +26,9 @@ one before it. Every decision so far is in `spec/decisions.md`; in short:
   is in core (`ModuleDef::expandedWidth`; `core/AGENTS.md` has the rules) and
   only DEQ uses it.
 - **Knobs show values**, **AUTO** is BMO EQ's static compensation
-  (`dsp/AutoGain.h`), and **a shelf's Q stops at 2** (`kShelfMaxQ`).
+  (`dsp/AutoGain.h`), **a shelf's Q stops at 2** (`kShelfMaxQ`), and **a
+  cut's at 0.71** (`kCutMaxQ`, 2026-10-03: no cut boosts, so twelve stacked
+  cannot resonate).
 - **Serial**, pending the listening test.
 
 ## The panel

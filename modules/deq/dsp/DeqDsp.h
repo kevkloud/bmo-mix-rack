@@ -28,9 +28,10 @@ namespace bmo::deq
       own smoothing, so switching it or dragging a band glides.
     - **Output** is a trim after the bands, smoothed like BMO Util's gain.
 
-    A shelf's Q is capped at kShelfMaxQ here (params.h, effectiveQ), so
-    automation or an old session asking for a resonant shelf gets the widest
-    one the design is good for.
+    A shelf's Q is capped at kShelfMaxQ here and a cut's at kCutMaxQ
+    (params.h, effectiveQ), so automation or an old session asking for a
+    resonant shelf gets the widest one the design is good for, and one asking
+    for a resonant cut gets one that does not boost.
 */
 class DeqDsp final : public ModuleDsp
 {

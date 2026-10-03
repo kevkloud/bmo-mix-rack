@@ -119,3 +119,28 @@ set and the answers. It covered decay and damping across the six types, the
 ER-to-tail handover, PRE-DELAY and Plate on a vocal. A SIZE move under a
 sustained source was **not** in it, because the render tool has no
 automation, and Frosty judged it not a concern. M3b is next.
+
+## After QA's review of `de00c43`, 2026-10-03
+
+QA blocked PR #38 on two findings, both reproduced on ICE QUEEN and fixed
+with a test written first and shown failing:
+
+- **`6b31ad0`: the loop grew at 96 and 192 kHz.** The absorbent filters'
+  float coefficients realised a DC loop gain of up to 1.0071. They now run
+  in double; the worst of 1,080 settings is 0.99935.
+- **`0911af7`: `prepare()` or `reset()` mid-move.** Stale crossfade lengths
+  were read outside the buffer. Both now rebuild from the current settings,
+  exactly as a fresh instance does.
+- **`e25b9a5`: exact silence.** The ER generator's one-pole filters stuck at
+  denormals; they now flush below 1e-15. `reverb_dsp_tests --long` reaches
+  exact zero in all 48 cases.
+
+**Two decisions, Frosty's, 2026-10-03:**
+
+- **Level at the extreme is intended.** Plate, DECAY 20 s, both multipliers
+  at 2.0, REVERB 0 dB, noise at −18 dBFS RMS peaks at +3.4 to +4.0 dBFS. A
+  40 s tail holds that energy, and REVERB is the control for it. No change.
+- **CPU at 192 kHz is accepted.** On an idle machine the worst case is
+  4.77–5.18 % of a core at 192 kHz / 32, SIZE 80, DENSITY 100, against a
+  5 % budget. Frosty: 5.18 % is fine at 192 kHz, a high-fidelity rate where
+  added cost should be expected. The budget at 48 kHz is unchanged.

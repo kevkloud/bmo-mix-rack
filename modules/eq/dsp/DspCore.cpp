@@ -196,6 +196,9 @@ void DspCore::reset() noexcept
     // hide; a change still wanted is made at once by the next process().
     oversamplingDip.reset();
     running = false;
+
+    // Auto Gain starts at its figure for the settings on the next block.
+    autoGainPrimed = false;
 }
 
 //==============================================================================
@@ -283,7 +286,7 @@ void DspCore::updateCoefficients (int activeChannels, int numSamples) noexcept
 
     const auto settingsChanged = ! (settingsValid && sameSettings (s, currentSettings));
 
-    if (! settingsChanged && params.autoGain == autoGainApplied)
+    if (! settingsChanged && params.autoGain == autoGainApplied && autoGainPrimed)
         return;
 
     if (settingsChanged)
@@ -300,7 +303,20 @@ void DspCore::updateCoefficients (int activeChannels, int numSamples) noexcept
     // the switch with nothing else moving did nothing at all, and the next
     // knob move then jumped the level by the whole compensation at once.
     autoGainApplied = params.autoGain;
-    autoGainSm.setTarget (params.autoGain ? (float) (1.0 / networks[0].broadbandGain()) : 1.0f);
+
+    const auto compensation = params.autoGain ? (float) (1.0 / networks[0].broadbandGain()) : 1.0f;
+    autoGainSm.setTarget (compensation);
+
+    // The figure comes from the settings, not from the signal, so it is known
+    // before the first sample is heard: after prepare() or reset() Auto Gain
+    // starts where it belongs. It used to start from unity and glide, +6.6 dB
+    // high at 2 ms with the low shelf at +16 and the mid at +12. Only a
+    // change heard while running glides.
+    if (! autoGainPrimed)
+    {
+        autoGainSm.snap (compensation);
+        autoGainPrimed = true;
+    }
 }
 
 //==============================================================================

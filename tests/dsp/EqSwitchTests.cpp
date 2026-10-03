@@ -336,6 +336,74 @@ int main()
                 }
     }
 
+    //== 4. Auto Gain is at its level from the first block ===================
+    // Auto Gain's figure comes from the EQ's settings, not from the signal,
+    // so it is known before the first sample. It used to start from unity
+    // after prepare() and glide: +6.60 dB at 2 ms, +3.42 at 20 ms, +0.79 at
+    // 60 ms above where it settled, with the low shelf at +16 and the mid at
+    // +12. Measured as the level with Auto Gain on against the same core with
+    // it off, so the chain's own start-up is the same on both sides and only
+    // Auto Gain is compared.
+    {
+        struct Setting { const char* name; float lf, mid, hf; };
+        const Setting settings[] { { "low +16, mid +12", 16.0f, 12.0f, 0.0f },
+                                   { "high -16, mid -18", 0.0f, -18.0f, -16.0f } };
+
+        const auto rmsOf = [] (const std::vector<float>& y, size_t from, size_t length)
+        {
+            double acc = 0.0;
+            for (size_t i = from; i < from + length; ++i) acc += (double) y[i] * y[i];
+            return std::sqrt (acc / (double) length);
+        };
+
+        for (double fs : { 44100.0, 48000.0, 96000.0 })
+            for (int os : { 1, 2 })
+                for (const auto& setting : settings)
+                    for (int start = 0; start < 3; ++start)
+                    {
+                        // 0: prepare, then setParams. 1: setParams, prepare,
+                        // setParams, which is how a module is driven. 2: the
+                        // same followed by reset(), as a host does on play.
+                        const auto renderWith = [&] (bool autoGain)
+                        {
+                            DspCore::Params p;
+                            p.lfGainDb = setting.lf; p.midGainDb = setting.mid; p.hfGainDb = setting.hf;
+                            p.oversampling = os;
+                            p.autoGain = autoGain;
+
+                            DspCore core;
+                            if (start > 0) core.setParams (p);
+                            core.prepare (fs, 512, 1, os);
+                            core.setParams (p);
+                            if (start == 2) core.reset();
+
+                            std::vector<float> x ((size_t) (0.5 * fs));
+                            for (size_t i = 0; i < x.size(); ++i)
+                                x[i] = (float) (0.17782794 * std::sin (2.0 * kPi * 1000.0 * (double) i / fs));
+
+                            return render (core, x, 512, [&] (size_t) { return p; }, 1);
+                        };
+
+                        const auto on  = renderWith (true);
+                        const auto off = renderWith (false);
+
+                        // The first 512-sample block after the latency, and the
+                        // last 50 ms, where everything has settled.
+                        const auto lat  = (size_t) bmo::Oversampler::latencyForFactor (os);
+                        const auto tail = (size_t) (0.05 * fs);
+
+                        const auto first   = 20.0 * std::log10 (rmsOf (on, lat, 512) / rmsOf (off, lat, 512));
+                        const auto settled = 20.0 * std::log10 (rmsOf (on, on.size() - tail, tail)
+                                                                / rmsOf (off, off.size() - tail, tail));
+
+                        const char* how[] { "prepare()", "setParams(), prepare()", "prepare() and reset()" };
+                        check (std::abs (first - settled) < 0.5,
+                               std::string ("Auto Gain (") + setting.name + ") in the first block after "
+                                   + how[start] + " at " + rateName (fs) + (os == 1 ? ", 1x" : ", 2x")
+                                   + " is " + std::to_string (first - settled) + " dB from where it settles");
+                    }
+    }
+
     if (failures == 0)
         std::cout << "All EQ switch tests passed.\n";
 

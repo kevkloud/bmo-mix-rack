@@ -161,6 +161,7 @@ private:
     EqSettings currentSettings;
     bool     settingsValid = false;
     bool     autoGainApplied = false;   // the Auto Gain state the smoother's target was last set from
+    bool     autoGainPrimed  = false;   // false until the first coefficient update after prepare() or reset()
 
     int maxBlock = 0, maxChannels = 0;
     int currentFactor = 0;

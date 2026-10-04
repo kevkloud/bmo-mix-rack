@@ -50,6 +50,12 @@ namespace
 
 int failures = 0, checks = 0;
 
+/** `--long` on the command line: the exhaustive rows of the tests that carry a
+    matrix (every character, mover, schedule, FEEDBACK and rate). The default
+    run keeps a subset of each that fails on the defect it was written for, so
+    CI stays short and still catches a regression. */
+bool longRun = false;
+
 /** Armed only around a `setParams` + `process` pair. `11` §4k: both rings come
     from `prepare()` and **nothing** is allocated on the audio thread. */
 bool allocationGuardArmed = false;
@@ -6006,11 +6012,505 @@ void testNoEventSpikesTheOutputOnAnyCharacter()
                  std::chrono::duration<double> (std::chrono::steady_clock::now() - started).count());
 }
 
+//==============================================================================
+// The 2026-10-03 review. **A time kept moving pumped the clean loop past
+// unity**: §2's crossfade was equal power, and it sits inside the loop.
+//==============================================================================
+
+/** What moves, and how. The four movers are every way the clean crossfade is
+    started: the TIME knob, NOTE and the host tempo under SYNC, and the lane's
+    own time. */
+enum class Mover { time, note, laneTime, tempo };
+enum class Schedule { everyBlock, every64, every2048, ramp, random };
+
+const char* moverName (Mover m)
+{
+    switch (m)
+    {
+        case Mover::time:     return "TIME";
+        case Mover::note:     return "NOTE";
+        case Mover::laneTime: return "LANE TIME";
+        case Mover::tempo:    break;
+    }
+
+    return "the host tempo";
+}
+
+const char* scheduleName (Schedule s)
+{
+    switch (s)
+    {
+        case Schedule::everyBlock: return "every block";
+        case Schedule::every64:    return "every 64 blocks";
+        case Schedule::every2048:  return "every 2048 blocks";
+        case Schedule::ramp:       return "on a slow ramp";
+        case Schedule::random:     break;
+    }
+
+    return "at random";
+}
+
+/** FEEDBACK's loop gain written as LANE GAIN, so a lane row runs its loop at
+    the gain the main rows run at: `(1 + L)^1.6 = 1.05 fb^1.6`. FEEDBACK's
+    maximum, 1.05 over `P_c`, is past FREEZE, so the lane's own top -- BUILD at
+    +100, 1.10 -- stands in for it. */
+float laneGainMatching (float feedbackPct)
+{
+    if (feedbackPct >= 100.0f)
+        return 100.0f;
+
+    const auto onePlus = std::pow (1.05, 1.0 / 1.6) * (double) feedbackPct * 0.01;
+    return (float) std::clamp (100.0 * (onePlus - 1.0), -100.0, 0.0);
+}
+
+struct MoveRow { int character; Mover mover; Schedule schedule; float feedback; double rate; };
+
+/** What a 32 s render leaves: the peaks of the three 10 s windows after a 2 s
+    burst, or the RMS of the last 10 s under a steady input. */
+struct MoveMeasure { double windowDb[3] {}; double steadyDb = 0.0; };
+
+double dbOf (double x) { return 20.0 * std::log10 (std::max (x, 1.0e-30)); }
+
+/** One row of the movement matrix, rendered as a host does, block by block
+    at 512 samples, MIX 100 so the loop is all that is measured.
+
+    `at` places a held render: -1 moves the value by the row's schedule,
+    0 or 1 holds it at one end of the schedule's travel. The input is white
+    noise at -18 dBFS RMS -- for 2 s then silence, or throughout when `steady`
+    -- because noise has the same level at every TIME: a tone's steady level
+    depends on where the loop's comb teeth land against its harmonics, and
+    would measure the TIME rather than the movement. */
+MoveMeasure renderMoving (const MoveRow& row, int at, bool steady)
+{
+    constexpr int chunk = 512;
+    const auto rate = row.rate;
+    const auto total = (int) (32.0 * rate);
+    const auto burstEnd = (int) (2.0 * rate);
+    const auto window = (int) (10.0 * rate);
+    const auto blocks = (total + chunk - 1) / chunk;
+    const auto lane = row.mover == Mover::laneTime;
+    const auto sync = row.mover == Mover::note || row.mover == Mover::tempo;
+
+    auto v = defaults();
+    v[P::Index::character] = (float) row.character;
+    v[P::Index::mix]       = 100.0f;
+    v[P::Index::sync]      = sync ? 1.0f : 0.0f;
+
+    if (lane)
+    {
+        // The lane alone: HOLD on, SEND open while the input plays, and the
+        // main loop at FEEDBACK 0 so it adds one repeat and nothing more.
+        v[P::Index::feedback] = 0.0f;
+        v[P::Index::hold]     = 1.0f;
+        v[P::Index::laneGain] = laneGainMatching (row.feedback);
+    }
+    else
+        v[P::Index::feedback] = row.feedback;
+
+    P::DwellDsp dsp;
+    dsp.setParams (v.data(), (int) v.size());
+    dsp.prepare (rate, chunk, 2);
+
+    Noise noise, coin;
+    coin.state = 1234567u;
+    auto flipped = false;
+    const auto scale = (float) (std::pow (10.0, -18.0 / 20.0) * std::sqrt (3.0));
+
+    std::vector<float> left ((size_t) chunk), right ((size_t) chunk);
+    double peaks[3] { 0.0, 0.0, 0.0 };
+    auto sumSq = 0.0;
+    long long counted = 0;
+
+    for (int b = 0; b < blocks; ++b)
+    {
+        const auto offset = b * chunk;
+        const auto count = std::min (chunk, total - offset);
+
+        // Where the value sits, from 0 (one end) to 1 (the other).
+        auto x = (double) std::max (at, 0);
+
+        if (at < 0)
+        {
+            switch (row.schedule)
+            {
+                case Schedule::everyBlock: x = (double) (b & 1); break;
+                case Schedule::every64:    x = (double) ((b / 64) & 1); break;
+                case Schedule::every2048:  x = (double) ((b / 2048) & 1); break;
+                case Schedule::ramp:       x = (double) b / (double) (blocks - 1); break;
+                case Schedule::random:
+                    // One chance in sixteen a block, from a seeded source.
+                    if ((coin.next() + 1.0f) * 8.0f < 1.0f)
+                        flipped = ! flipped;
+                    x = flipped ? 1.0 : 0.0;
+                    break;
+            }
+        }
+
+        // TIME 375 <-> 400 ms, the review's triangle; NOTE 1/8D <-> 1/4 (375
+        // and 500 ms at 120 bpm); LANE TIME 250 <-> 275 ms; tempo 120 <-> 121.
+        // The ramps are the review's slow one, 5 ms over the render (TIME
+        // 375 -> 380, LANE TIME 250 -> 255; tempo 120 -> 121 is 3.1 ms),
+        // and NOTE, which has no values between, walks 1/8 -> 1/4 a step a
+        // quarter of the way.
+        auto bpm = 120.0;
+        const auto ramp = row.schedule == Schedule::ramp;
+        const auto travel = ramp ? 5.0 : 25.0;
+
+        switch (row.mover)
+        {
+            case Mover::time:     v[P::Index::time] = (float) (375.0 + travel * x); break;
+            case Mover::laneTime: v[P::Index::laneTime] = (float) (250.0 + travel * x); break;
+            case Mover::tempo:    bpm = 120.0 + x; break;
+            case Mover::note:
+                v[P::Index::note] = (float) (ramp ? 6.0 + std::min (3.0, std::floor (4.0 * x)) : 8.0 + x);
+                break;
+        }
+
+        const auto feeding = steady || offset < burstEnd;
+
+        if (lane)
+            v[P::Index::send] = feeding ? 1.0f : 0.0f;
+
+        for (int i = 0; i < count; ++i)
+        {
+            const auto s = scale * noise.next();
+            left[(size_t) i] = right[(size_t) i] = (steady || offset + i < burstEnd) ? s : 0.0f;
+        }
+
+        dsp.setParams (v.data(), (int) v.size());
+        dsp.setTempo (bpm, sync, sync);
+
+        float* channels[] { left.data(), right.data() };
+        dsp.process (channels, 2, count);
+
+        for (int i = 0; i < count; ++i)
+        {
+            const auto n = offset + i;
+            const auto l = (double) left[(size_t) i], r = (double) right[(size_t) i];
+
+            if (n >= burstEnd)
+            {
+                const auto w = std::min (2, (n - burstEnd) / window);
+                peaks[w] = std::max (peaks[w], std::max (std::abs (l), std::abs (r)));
+            }
+
+            if (n >= total - window)
+            {
+                sumSq += 0.5 * (l * l + r * r);
+                ++counted;
+            }
+        }
+    }
+
+    MoveMeasure m;
+
+    for (int w = 0; w < 3; ++w)
+        m.windowDb[w] = dbOf (peaks[w]);
+
+    m.steadyDb = dbOf (std::sqrt (sumSq / (double) std::max (counted, 1LL)));
+    return m;
+}
+
+/** **No TIME, NOTE, LANE TIME or tempo movement, on any schedule, lifts the
+    loop** (the house rule: a loop under 100 % never rings indefinitely and
+    never gains from a parameter being moved).
+
+    The clean crossfade blended its two reads with `(cos, sin)`, which sum to
+    sqrt(2) at the midpoint, and it is inside the loop. Measured on ICE QUEEN
+    at 48 kHz on the starting code, TIME drawn as a ramp 375 -> 380 ms over
+    60 s after a 2 s noise burst: the 52-62 s window peaked at -4.0 dBFS at
+    FEEDBACK 85, where the held render was at -257.0; TIME every 64 blocks in
+    this test's own render held -15.7 dBFS in its last window at FEEDBACK 85
+    against -107.1 held; and a steady input stood up to +8 dB over its held
+    level.
+
+    Each row is a 2 s burst then silence, read as three 10 s windows, beside
+    the same render held at each end of the row's travel. **The reference is
+    the louder of the two held renders**: a longer time decays more slowly per
+    second, and a loop moved between two times may ring as long as the slower
+    one does, never longer. So:
+
+    - **no window may be louder than the one before**, by 0.1 dB, where the
+      held reference is decaying -- at the maximum, where the held loop
+      self-oscillates at its clip, the windows are bounded by the next rule
+      instead;
+    - **the last window is no more than 6 dB over the reference's**, or under
+      -120 dBFS. Quieter is allowed: a crossfade between reads that do not
+      correlate loses level, which is the direction the rule permits.
+
+    And under steady noise, at FEEDBACK under 100 %, **the level never stands
+    more than 0.5 dB over the louder held level** -- the rule is that a move
+    never gains. Below is allowed, and it is where the fades go: on ICE QUEEN,
+    clean loses up to 2.75 dB with a fade started every block (20 ms fades
+    back to back between reads that do not correlate), 1.7 dB at random and
+    0.6 dB every 64 blocks at 192 kHz, and bucket-brigade's glide 0.9 dB.
+
+    **One class of rows is not held to the steady bound**, because it is not
+    the crossfade: a gliding character moved every block is a read
+    rate swung 0.75 <-> 1.25 at the block rate -- a 47 Hz frequency
+    modulation, the glide's rate limit by design -- and tape there stood
+    +0.65 dB at FEEDBACK 95 (NOTE 1/8D <-> 1/4, 48 kHz) on the starting code
+    and this one alike. Its decay is still held to the rules above. */
+void testMovingATimeNeverFeedsTheLoop()
+{
+    const auto started = std::chrono::steady_clock::now();
+
+    std::vector<MoveRow> rows;
+
+    if (longRun)
+    {
+        for (const auto rate : { 48000.0, 192000.0 })
+            for (int c = 0; c < 3; ++c)
+                for (const auto mover : { Mover::time, Mover::note, Mover::laneTime, Mover::tempo })
+                    for (const auto schedule : { Schedule::everyBlock, Schedule::every64, Schedule::every2048,
+                                                 Schedule::ramp, Schedule::random })
+                        for (const auto feedback : { 85.0f, 95.0f, 100.0f })
+                            rows.push_back ({ c, mover, schedule, feedback, rate });
+    }
+    else
+    {
+        // A subset that fails on the equal-power fade: each mover on clean,
+        // two schedules each, at both high FEEDBACKs; the gliding characters
+        // and the maximum as controls.
+        rows = {
+            { 0, Mover::time,     Schedule::every64,    85.0f, 48000.0 },
+            { 0, Mover::time,     Schedule::ramp,       95.0f, 48000.0 },
+            { 0, Mover::note,     Schedule::everyBlock, 85.0f, 48000.0 },
+            { 0, Mover::laneTime, Schedule::ramp,       85.0f, 48000.0 },
+            { 0, Mover::tempo,    Schedule::random,     95.0f, 48000.0 },
+            { 0, Mover::time,     Schedule::every64,   100.0f, 48000.0 },
+            { 1, Mover::time,     Schedule::everyBlock, 95.0f, 48000.0 },
+            { 2, Mover::note,     Schedule::ramp,       95.0f, 48000.0 },
+        };
+    }
+
+    for (const auto& row : rows)
+    {
+        char name[160];
+        std::snprintf (name, sizeof (name), "%s moved %s on %s at FEEDBACK %.0f, %.0f kHz",
+                       moverName (row.mover), scheduleName (row.schedule), characterName (row.character),
+                       (double) row.feedback, row.rate * 0.001);
+
+        // Decay: the burst, then silence.
+        {
+            const auto moved = renderMoving (row, -1, false);
+            const auto heldA = renderMoving (row, 0, false);
+            const auto heldB = renderMoving (row, 1, false);
+
+            double reference[3];
+            for (int w = 0; w < 3; ++w)
+                reference[w] = std::max (heldA.windowDb[w], heldB.windowDb[w]);
+
+            auto rose = false;
+
+            for (int w = 1; w < 3; ++w)
+            {
+                const auto referenceDecays = reference[w] < reference[w - 1] - 1.0;
+                rose = rose || (referenceDecays && moved.windowDb[w] > moved.windowDb[w - 1] + 0.1
+                                    && moved.windowDb[w] > -150.0);
+            }
+
+            const auto last = moved.windowDb[2];
+            const auto lastOk = last <= reference[2] + 6.0 || last < -120.0;
+
+            char buf[400];
+            std::snprintf (buf, sizeof (buf),
+                           "%s: after a 2 s burst the 10 s windows peak at %.1f, %.1f, %.1f dBFS against "
+                           "%.1f, %.1f, %.1f held -- none louder than the one before, the last no more "
+                           "than 6 dB over held",
+                           name, moved.windowDb[0], moved.windowDb[1], moved.windowDb[2],
+                           reference[0], reference[1], reference[2]);
+
+            check (! rose && lastOk, buf);
+        }
+
+        // Steady: the same row under continuous noise, under 100 % only --
+        // the rule is about a loop under unity, and at the top of FEEDBACK
+        // the level is wherever the clip holds the self-oscillation.
+        const auto glideFm = row.character != P::kClean && row.schedule == Schedule::everyBlock;
+
+        if (row.feedback < 100.0f && ! glideFm)
+        {
+            const auto moved = renderMoving (row, -1, true).steadyDb;
+            const auto heldA = renderMoving (row, 0, true).steadyDb;
+            const auto heldB = renderMoving (row, 1, true).steadyDb;
+
+            const auto over  = moved - std::max (heldA, heldB);
+            const auto under = moved - std::min (heldA, heldB);
+
+            char buf[300];
+            std::snprintf (buf, sizeof (buf),
+                           "%s: under steady noise the last 10 s stand %+.2f dB against the louder held "
+                           "level (%+.2f against the quieter; held %.2f / %.2f dBFS RMS)",
+                           name, over, under, heldA, heldB);
+
+            check (over <= 0.5, buf);
+        }
+    }
+
+    std::printf ("      the movement matrix ran %d rows in %.1f s\n", (int) rows.size(),
+                 std::chrono::duration<double> (std::chrono::steady_clock::now() - started).count());
+}
+
+/** The largest 5 ms RMS of `x` over [from, to), stepped a quarter window. */
+double loudest5ms (const std::vector<float>& x, int from, int to, double rate)
+{
+    const auto w = (int) (0.005 * rate);
+    auto hi = 0.0;
+
+    for (int s = from; s + w <= to; s += w / 4)
+        hi = std::max (hi, rms (x, s, w));
+
+    return hi;
+}
+
+/** **One SYNC, NOTE, tempo or TIME switch does not burst** -- under 0.5 dB
+    over the loudest steady level the delay passes through.
+
+    The review's probe: a 440 Hz sine at -18 dBFS RMS throughout, FEEDBACK 60,
+    MIX 50, the switch at 4.000 s on a block edge. With the equal-power fade a
+    single SYNC on, NOTE 1/8D -> 1/4 or tempo change on clean burst +1.83 dB --
+    two reads of one tone summed at sqrt(2). Measured as the largest 5 ms RMS in
+    the 1.2 s after the switch, which takes in the repeat one TIME later.
+
+    **What it is measured against depends on the law.** Clean's crossfade goes
+    from one time to the other and through none between, so the reference is
+    the larger of the steady levels in the half second before and 2.5-3.0 s
+    after. Tape and bucket-brigade glide through every time between, and a
+    tone's steady level moves with the time, by where the loop's comb teeth
+    fall against it: on bucket-brigade, whose clock filters turn the loop's
+    phase at 440 Hz, a TIME held at 393 ms stands at -9.06 dB where 375 ms
+    stands at -10.36 (measured on ICE QUEEN). A glide crossing that tooth is
+    the delay passing a louder time, not the loop gaining, so a gliding
+    character is held to the loudest held time on its path, on a 0.25 ms grid
+    -- which can read that tooth up to 0.15 dB low. Those rows cost a few
+    hundred renders each and run under `--long`; the default run takes clean,
+    the law the defect was in. */
+void testOneTimeSwitchDoesNotBurst()
+{
+    constexpr auto rate = 48000.0;
+    constexpr int chunk = 512;
+    const auto at = (int) std::lround (4.0 * rate / chunk) * chunk;
+
+    struct Switch
+    {
+        const char* name;
+        int index;
+        float from, to;
+        double bpmFrom, bpmTo;
+        bool sync, lane;
+        double msFrom, msTo;   ///< the engine's time either side, for the path
+    };
+
+    const Switch switches[]
+    {
+        { "SYNC on at 100 bpm (375 -> 450 ms)", P::Index::sync, 0.0f, 1.0f, 100.0, 100.0, false, false, 375.0, 450.0 },
+        { "SYNC off at 100 bpm",                P::Index::sync, 1.0f, 0.0f, 100.0, 100.0, true,  false, 450.0, 375.0 },
+        { "NOTE 1/8D -> 1/4 under SYNC",        P::Index::note, 8.0f, 9.0f, 100.0, 100.0, true,  false, 450.0, 600.0 },
+        { "the tempo 120 -> 90 under SYNC",     -1,             0.0f, 0.0f, 120.0,  90.0, true,  false, 375.0, 500.0 },
+        { "TIME 375 -> 376 ms",                 P::Index::time, 375.0f, 376.0f, 100.0, 100.0, false, false, 375.0, 376.0 },
+        { "LANE TIME 250 -> 300 ms",            P::Index::laneTime, 250.0f, 300.0f, 100.0, 100.0, false, true, 250.0, 300.0 },
+    };
+
+    // One render: the switch at `at`, or (heldMs > 0) the engine held at
+    // that time with SYNC off, for the path's reference.
+    const auto render = [&] (int c, const Switch& sw, double heldMs, int n)
+    {
+        P::DwellDsp dsp;
+        dsp.prepare (rate, chunk, 2);
+
+        auto v = defaults();
+        v[P::Index::character] = (float) c;
+        v[P::Index::feedback]  = 60.0f;
+        v[P::Index::mix]       = 50.0f;
+        v[P::Index::sync]      = sw.sync && heldMs <= 0.0 ? 1.0f : 0.0f;
+
+        if (sw.lane)
+        {
+            v[P::Index::hold]     = 1.0f;
+            v[P::Index::send]     = 1.0f;
+            v[P::Index::laneGain] = laneGainMatching (60.0f);
+        }
+
+        if (heldMs > 0.0)
+            v[(size_t) (sw.lane ? P::Index::laneTime : P::Index::time)] = (float) heldMs;
+
+        Block block { n };
+
+        for (int i = 0; i < n; ++i)
+            block.left[(size_t) i] = block.right[(size_t) i]
+                = (float) (std::pow (10.0, -18.0 / 20.0) * std::sqrt (2.0)
+                           * std::sin (2.0 * P::kPiD * 440.0 * (double) i / rate));
+
+        for (int offset = 0; offset < n; offset += chunk)
+        {
+            const auto after = offset >= at;
+
+            if (heldMs <= 0.0 && sw.index >= 0)
+                v[(size_t) sw.index] = after ? sw.to : sw.from;
+
+            dsp.setParams (v.data(), (int) v.size());
+            dsp.setTempo (after && heldMs <= 0.0 ? sw.bpmTo : sw.bpmFrom, true, true);
+
+            float* channels[] { block.left.data() + offset, block.right.data() + offset };
+            dsp.process (channels, 2, std::min (chunk, n - offset));
+        }
+
+        return block;
+    };
+
+    std::vector<int> characters { 0 };
+
+    if (longRun)
+        characters = { 0, 1, 2 };
+
+    for (const auto c : characters)
+    {
+        for (const auto& sw : switches)
+        {
+            const auto block = render (c, sw, 0.0, (int) (7.5 * rate));
+
+            auto burst = 0.0, reference = 0.0;
+
+            for (const auto* x : { &block.left, &block.right })
+            {
+                burst = std::max (burst, loudest5ms (*x, at, at + (int) (1.2 * rate), rate));
+                reference = std::max ({ reference,
+                                        loudest5ms (*x, at - (int) (0.5 * rate), at, rate),
+                                        loudest5ms (*x, at + (int) (2.5 * rate), at + (int) (3.0 * rate), rate) });
+            }
+
+            // A glide passes every time between: the loudest of them, held.
+            if (c != P::kClean)
+            {
+                const auto lo = std::min (sw.msFrom, sw.msTo), hi = std::max (sw.msFrom, sw.msTo);
+
+                for (auto ms = lo; ms <= hi + 1.0e-9; ms += 0.25)
+                {
+                    const auto held = render (c, sw, ms, (int) (5.0 * rate));
+                    reference = std::max (reference, loudest5ms (held.left, (int) (4.0 * rate), (int) (5.0 * rate), rate));
+                }
+            }
+
+            char buf[220];
+            std::snprintf (buf, sizeof (buf), "%s on %s bursts %+.2f dB over the loudest steady level %s",
+                           sw.name, characterName (c), dbOf (burst) - dbOf (reference),
+                           c == P::kClean ? "either side" : "on its glide");
+
+            check (dbOf (burst) - dbOf (reference) < 0.5, buf);
+        }
+    }
+}
+
 } // namespace
 
 //==============================================================================
-int main()
+int main (int argc, char** argv)
 {
+    for (int i = 1; i < argc; ++i)
+        if (std::string (argv[i]) == "--long")
+            longRun = true;
+
     testSchemaIsWhatItWillAlwaysBe();
     testChoiceListsKeepTheirOrder();
     testEveryParameterIsWiredToItsOwnValue();
@@ -6091,6 +6591,10 @@ int main()
     testABucketBrigadeBoundaryNeverSpikes();
     testNoEventSpikesTheOutputOnAnyCharacter();
 
-    std::printf ("%d checks, %d failures\n", checks, failures);
+    // The 2026-10-03 review.
+    testMovingATimeNeverFeedsTheLoop();
+    testOneTimeSwitchDoesNotBurst();
+
+    std::printf ("%d checks, %d failures%s\n", checks, failures, longRun ? " (--long)" : "");
     return failures == 0 ? 0 : 1;
 }

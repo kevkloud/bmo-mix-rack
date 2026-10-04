@@ -158,6 +158,18 @@ hold after it.
   (`docs/delay/10` §11a); the tail charges the two.
 - **Every smoother lands** (`Smoother::tickLanding`): FEEDBACK, DRIVE, LANE
   LEVEL and FX AMOUNT. A plain float one-pole stalls short of its target.
+- **Clean's TIME crossfade is equal gain, `(1 - u, u)`, never equal power**
+  (2026-10-03). It sits inside the loop, so its weights are a gain on every
+  lap: `cos + sin` reaches 1.41 at the midpoint, and a TIME, NOTE, LANE TIME
+  or tempo moved every block chained the fades into a loop gain over 1 --
+  a ramp 375 -> 380 ms over 60 s held -4.0 dBFS fifty seconds after a burst
+  at FEEDBACK 85, and +1.3 at 95, measured on ICE QUEEN. A convex blend can
+  only lose: up to 3 dB mid-fade between reads that do not correlate, which
+  is why steady noise sits 2.75 dB down with a fade started every block.
+  `testMovingATimeNeverFeedsTheLoop` holds every mover, schedule, character,
+  FEEDBACK and rate to it; the default run is a subset, and
+  `dwell_dsp_tests --long` runs all 360 rows (26 min in Release on ICE
+  QUEEN). **Any second read blended into the loop takes the same law.**
 - **Never compare a host's value with `==` at the centre of a range that
   crosses zero** (2026-10-02, macOS CI). The snap `start + interval . n` is a
   fused multiply-add on macOS arm64, so LANE GAIN's 0 comes back as 1.5e-6

@@ -1279,14 +1279,42 @@ public:
             // crossfade rather than to the delay the law is steering.
             const auto modulated = advanceModulation();
 
+            // **§2's clean crossfade is equal gain, `(1 - u, u)`, and it sits
+            // inside the loop** (2026-10-03). The read it blends is what the
+            // loop feeds back, so its weights are a gain on every lap. They
+            // were equal power, `(cos, sin)`, which sum to sqrt(2) at the
+            // midpoint: two reads of a correlated signal -- a tone, or a TIME
+            // that moved a few samples -- came back up to 3 dB louder, and a
+            // TIME moved every block chained one such fade into the next.
+            // Measured on ICE QUEEN at 48 kHz, TIME drawn as a slow ramp
+            // 375 -> 380 ms over 60 s on a 2 s noise burst: the 52-62 s
+            // window peaked at -4.0 dBFS at FEEDBACK 85 against -257.0 held,
+            // and at +1.3 dBFS at FEEDBACK 95.
+            //
+            // **Why these weights can never lift the loop**: both are in
+            // [0, 1] and they sum to 1, so the blend is a convex combination
+            // of two reads and |y| <= max(|a|, |b|) sample by sample; at every
+            // frequency its response is at most the larger of the two reads'
+            // own, which is the bound a TIME held at either of them would have
+            // had (`P_c` moves under 1e-4 across the sinc's read phases at
+            // 44.1, 48 and 192 kHz). Equal power puts no such bound on it.
+            // That holds for whichever two reads are blended -- any TIME,
+            // NOTE or tempo step, either line of any
+            // stereo mode (dual offset scales both reads by the same ratio),
+            // the expanded and the plain read alike, and the lane, which is
+            // this same engine. It is the shared switch law in
+            // core/dsp/SwitchFade.h, for that file's reason: the two sides
+            // are the same signal through two paths. What it costs is a dip,
+            // never a rise: two reads that do not correlate lose up to 3 dB
+            // at the midpoint for the fade's 20 ms.
             const auto fading = ! glide && fadeCounter >= 0;
             auto fadeOld = 1.0, fadeNew = 0.0;
 
             if (fading)
             {
                 const auto u = (double) fadeCounter / (double) fadeLength;
-                fadeOld = std::cos (0.5 * kPiD * u);
-                fadeNew = std::sin (0.5 * kPiD * u);
+                fadeNew = u;
+                fadeOld = 1.0 - u;
             }
 
             // Pass one: read every line, publish the tap, and run the
@@ -1801,7 +1829,7 @@ private:
             delayTarget = target;
 
             // §2's clean law: the old tap freezes, a new one starts at the
-            // target, equal-power raised cosine across it. Tape and
+            // target, an equal-gain crossfade across it (see `process`). Tape and
             // bucket-brigade glide instead, per sample, in `advanceTime`.
             if (! usesGlide() && fadeCounter < 0)
             {

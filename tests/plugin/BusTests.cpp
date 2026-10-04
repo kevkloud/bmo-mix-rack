@@ -965,6 +965,12 @@ int main (int argc, char** argv)
 
             juce::AudioBuffer<float> b (2, kBlock);
             juce::MidiBuffer midi;
+
+            // One bypassed block first, so the 5 ms crossfade into bypass is
+            // over and what is measured is the bypass alone.
+            b.clear();
+            p.processBlockBypassed (b, midi);
+
             b.copyFrom (0, 0, signalA().data(), kBlock);
             juce::FloatVectorOperations::fill (b.getWritePointer (1), kGarbage, kBlock);
 
@@ -987,6 +993,165 @@ int main (int argc, char** argv)
         auto rack = bmo::products::createRack();
         rack->addModule (find ("util"));
         monoBypass (*rack, "the rack");
+    }
+
+    //== Switching the host's bypass in and out ================================
+    // The review of 2026-10-03: coming out of bypass was a step -- BMO EQ at
+    // 2x, flat, 57.8x the signal's own largest step (8x: 51.6x), because the
+    // engine still held the audio from the moment bypass began; BMO Util at
+    // +6 dB 14.5x each way, no fade. Now the engines keep running, unheard,
+    // while bypassed, so both paths exist at both switches and each is a
+    // 5 ms crossfade between two time-aligned signals. Both products, both
+    // directions; a module with latency, one with gain, a compressor and the
+    // delay. Steps are measured against the larger of the two paths' own.
+    {
+        const auto find = [] (const char* id) -> const bmo::ModuleDef&
+        {
+            for (const auto* def : bmo::products::registry())
+                if (juce::String (def->id) == id)
+                    return *def;
+
+            jassertfalse;
+            return *bmo::products::registry().front();
+        };
+
+        struct Case { const char* id; std::vector<std::pair<const char*, float>> settings; };
+
+        const Case kCases[] {
+            { "eq",      { { "oversampling", 1.0f } } },
+            { "eq",      { { "oversampling", 3.0f } } },
+            { "util",    { { "gain", 6.0f } } },
+            { "fetcomp", { { "input", 30.0f } } },
+            { "dwell",   { { "feedback", 60.0f }, { "mix", 50.0f } } },
+        };
+
+        const auto settle = [] (bmo::ParamSet& p, const Case& c)
+        {
+            for (const auto& [id, v] : c.settings)
+                p.setReal (id, v);
+        };
+
+        const auto makeOne = [&] (const Case& c, bool rack) -> std::unique_ptr<juce::AudioProcessor>
+        {
+            if (rack)
+            {
+                auto r = bmo::products::createRack();
+                r->addModule (find (c.id));
+                settle (r->getEngineAt (0)->params(), c);
+                return r;
+            }
+
+            auto p = makeProduct (find (c.id), Setting::defaults);
+            settle (p->getEngine().params(), c);
+            return p;
+        };
+
+        for (const auto& c : kCases)
+        {
+            for (const auto rack : { false, true })
+            {
+                for (const auto block : { 32, 512 })
+                {
+                    auto proc = makeOne (c, rack);
+                    auto ref  = makeOne (c, rack);
+
+                    for (auto* p : { proc.get(), ref.get() })
+                    {
+                        p->setPlayConfigDetails (2, 2, kRate, block);
+                        p->prepareToPlay (kRate, block);
+                    }
+
+                    juce::MessageManager::getInstance()->runDispatchLoopUntil (10);
+                    const auto latency = proc->getLatencySamples();
+
+                    const juce::String where = juce::String (rack ? "rack, " : "standalone, ") + c.id + " "
+                                             + juce::String (c.settings.front().second) + ", block "
+                                             + juce::String (block) + ": ";
+
+                    // 1 s processed, 0.5 s bypassed, 0.5 s processed.
+                    const auto into = (long long) kRate, outOf = into + (long long) kRate / 2, end = outOf + (long long) kRate / 2;
+                    const auto window = (long long) (0.030 * kRate), steadyFrom = into - (long long) (0.2 * kRate);
+
+                    std::vector<float> input ((size_t) end);
+                    for (long long n = 0; n < end; ++n)
+                        input[(size_t) n] = 0.125f * (float) std::sin (2.0 * juce::MathConstants<double>::pi * 220.0 * (double) n / kRate);
+
+                    juce::AudioBuffer<float> a (2, block), b (2, block);
+                    juce::MidiBuffer midi;
+                    float prevOut = 0.0f, prevRef = 0.0f;
+                    double processedStep = 0.0, dryStep = 0.0, steadyPeak = 0.0;
+                    double worstStep = 0.0, worstPeak = 0.0, dryErr = 0.0, wetErr = 0.0;
+
+                    for (long long start = 0; start + block <= end; start += block)
+                    {
+                        for (int i = 0; i < block; ++i)
+                            for (int ch = 0; ch < 2; ++ch)
+                            {
+                                a.setSample (ch, i, input[(size_t) (start + i)]);
+                                b.setSample (ch, i, input[(size_t) (start + i)]);
+                            }
+
+                        const auto bypassed = start >= into && start < outOf;
+
+                        if (bypassed)
+                            proc->processBlockBypassed (a, midi);
+                        else
+                            proc->processBlock (a, midi);
+
+                        ref->processBlock (b, midi);
+
+                        for (int i = 0; i < block; ++i)
+                        {
+                            const auto n = start + i;
+                            const auto x = (double) a.getSample (0, i);
+                            const auto y = (double) b.getSample (0, i);
+                            const auto step = std::abs (x - (double) prevOut);
+                            const auto refStep = std::abs (y - (double) prevRef);
+                            prevOut = (float) x;
+                            prevRef = (float) y;
+
+                            if (n >= steadyFrom && n < into)
+                            {
+                                processedStep = juce::jmax (processedStep, refStep);
+                                steadyPeak = juce::jmax (steadyPeak, std::abs (y));
+
+                                if (n > 0)
+                                    dryStep = juce::jmax (dryStep, (double) std::abs (input[(size_t) n] - input[(size_t) n - 1]));
+                            }
+
+                            if (n >= into)
+                            {
+                                worstStep = juce::jmax (worstStep, step);
+                                worstPeak = juce::jmax (worstPeak, std::abs (x));
+                            }
+
+                            // Well inside bypass: the input, delayed by the
+                            // latency, to the bit. Well after it: the never-
+                            // bypassed processor, to the bit.
+                            if (n >= into + window && n < outOf && n >= latency)
+                                dryErr = juce::jmax (dryErr, std::abs (x - (double) input[(size_t) (n - latency)]));
+
+                            if (n >= outOf + window)
+                                wetErr = juce::jmax (wetErr, std::abs (x - y));
+                        }
+                    }
+
+                    const auto steadyStep = juce::jmax (processedStep, dryStep);
+                    const auto louder = juce::jmax (steadyPeak, 0.125);
+                    const auto ratio = worstStep / steadyStep;
+                    const auto overDb = juce::Decibels::gainToDecibels (worstPeak / louder);
+
+                    check (ratio < 1.5, where + "largest step across both switches " + juce::String (ratio, 2)
+                                            + "x the larger steady step, over 1.5x");
+                    check (overDb <= 1.0, where + "a peak " + juce::String (overDb, 2)
+                                              + " dB over the louder steady level, over 1 dB");
+                    check (dryErr == 0.0, where + "bypassed, 30 ms on, the output is the input delayed by "
+                                              + juce::String (latency) + " samples, worst " + juce::String (dryErr));
+                    check (wetErr == 0.0, where + "30 ms after bypass ends the output is the never-bypassed path, worst "
+                                              + juce::String (wetErr));
+                }
+            }
+        }
     }
 
     return finish ("bus");

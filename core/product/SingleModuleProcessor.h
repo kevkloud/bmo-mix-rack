@@ -110,6 +110,12 @@ private:
     // processed block so that switching to it stays in step (BypassDelay.h).
     BypassDelay bypassDelay;
 
+    // The switch into and out of bypass, and the other path's audio while it
+    // crossfades -- the engine's while bypassed, the dry one coming back.
+    // Both sized in prepare; the audio thread's.
+    BypassCrossfade bypassFade;
+    juce::AudioBuffer<float> otherPath;
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SingleModuleProcessor)
 };
 

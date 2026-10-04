@@ -678,6 +678,7 @@ void RackProcessor::prepareToPlay (double sampleRate, int maximumExpectedSamples
                 s.engine->prepare (currentRate, currentBlock, currentChannels);
 
         bypassDelay.prepare (currentChannels);
+        bypassFade.prepare (currentRate);
 
         // One group of channels per slot for the taps, one for the chain an
         // edit is warming up (runWarming), one spare. Sized here, never in a
@@ -765,10 +766,37 @@ void RackProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
 
     auto* const* channels = buffer.getArrayOfWritePointers();
 
-    // The input as the chain gets it, kept for the host's bypass: the moment
-    // it switches, the bypass carries on from where the chain's output was.
-    bypassDelay.push (channels, numOut, numSamples);
+    if (bypassFade.restsAt (0.0f) || ! canHoldTwoPaths (numOut, numSamples))
+    {
+        // Not switching (or a block too big to hold two paths, which cuts).
+        // The input as the chain gets it is kept for the host's bypass: the
+        // moment it switches, the bypass carries on from where the chain's
+        // output was.
+        bypassFade.snap (0.0f);
+        bypassDelay.push (channels, numOut, numSamples);
+        runChain (channels, numOut, numSamples, tempo);
+        return;
+    }
 
+    // Just out of bypass: the dry path runs on beside the chain, which was
+    // kept running unheard, and the output crossfades back to the chain.
+    auto* const* dry = workspace.getArrayOfWritePointers() + (kSlots + 1) * workChannels;
+
+    for (int ch = 0; ch < numOut; ++ch)
+        juce::FloatVectorOperations::copy (dry[ch], channels[ch], numSamples);
+
+    bypassDelay.delay (dry, numOut, numSamples, juce::jmax (0, reportedLatency.load (std::memory_order_relaxed)));
+    runChain (channels, numOut, numSamples, tempo);
+    bypassFade.apply (channels, channels, dry, numOut, numSamples, 0.0f);
+}
+
+bool RackProcessor::canHoldTwoPaths (int numChannels, int numSamples) const noexcept
+{
+    return numSamples <= workspace.getNumSamples() && numChannels <= workChannels;
+}
+
+void RackProcessor::runChain (float* const* channels, int numOut, int numSamples, const HostTempo& tempo)
+{
     const juce::ScopedTryLock lock (chainLock);
 
     // Only prepare, release and an edit made while no audio was running take
@@ -935,16 +963,45 @@ void RackProcessor::processBlockBypassed (juce::AudioBuffer<float>& buffer, juce
     // out. The bypass is the processed path with the chain taken out: the
     // input widened exactly as processBlock widens it, then delayed by the
     // latency the host was last told (BypassDelay.h).
+    juce::ScopedNoDenormals noDenormals;
+    const auto tempo = readHostTempo (getPlayHead());
+
     const auto numSamples = buffer.getNumSamples();
     const auto numOut     = juce::jmin (buffer.getNumChannels(), getTotalNumOutputChannels());
+    auto* const* channels = buffer.getArrayOfWritePointers();
+    const auto canBlend   = canHoldTwoPaths (numOut, numSamples);
 
     buses::spreadInputAcrossOutputs (buffer, getTotalNumInputChannels(), numOut);
-    bypassDelay.delay (buffer.getArrayOfWritePointers(), numOut, numSamples,
-                       juce::jmax (0, reportedLatency.load (std::memory_order_relaxed)));
+
+    // The chain keeps running, unheard, on the input it would have had -- edits
+    // and their dips included -- so that the switch back is a crossfade onto
+    // warm engines rather than onto ones still holding the moment bypass
+    // began (BypassCrossfade). Its input is scrubbed as processBlock's is.
+    auto* const* processed = workspace.getArrayOfWritePointers() + (kSlots + 1) * workChannels;
+
+    if (canBlend)
+    {
+        for (int ch = 0; ch < numOut; ++ch)
+            juce::FloatVectorOperations::copy (processed[ch], channels[ch], numSamples);
+
+        finite::scrub (processed, numOut, numSamples);
+    }
+
+    bypassDelay.delay (channels, numOut, numSamples, juce::jmax (0, reportedLatency.load (std::memory_order_relaxed)));
+
+    if (canBlend)
+    {
+        runChain (processed, numOut, numSamples, tempo);
+        bypassFade.apply (channels, processed, channels, numOut, numSamples, 1.0f);
+    }
+    else
+    {
+        bypassFade.snap (1.0f);
+    }
 
     // The host's own bad samples come back out of the delay a latency later;
     // scrubbed here, on the way out, as they always were.
-    finite::scrub (buffer.getArrayOfWritePointers(), numOut, numSamples);
+    finite::scrub (channels, numOut, numSamples);
 }
 
 juce::AudioProcessorEditor* RackProcessor::createEditor()

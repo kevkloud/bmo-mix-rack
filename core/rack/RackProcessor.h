@@ -237,6 +237,14 @@ private:
     /** Destroys what the audio thread has finished with. Needs `editLock`. */
     void collectRetired();
 
+    /** Everything a block does to the chain -- the try-lock, the edit
+        handshake and swap, warming, the dip -- on `channels`, which are the
+        heard output in processBlock and the unheard one while bypassed. */
+    void runChain (float* const* channels, int numOut, int numSamples, const HostTempo&);
+
+    /** True if the workspace can hold a second path for this block. */
+    bool canHoldTwoPaths (int numChannels, int numSamples) const noexcept;
+
     /** One engine, on held values or not. */
     static void runEngine (ModuleEngine&, float* const* channels, int numChannels, int numSamples,
                            const HostTempo&, bool held);
@@ -342,6 +350,11 @@ private:
     // The host's bypass, delayed by the reported latency and fed on every
     // processed block so that switching to it stays in step (BypassDelay.h).
     BypassDelay bypassDelay;
+
+    // The switch into and out of bypass (BypassDelay.h). The audio thread's,
+    // and `chainLock`'s holder's; the other path's audio while it crossfades
+    // is the workspace's last group.
+    BypassCrossfade bypassFade;
 
     // The summed tail, cached for the getter. Refreshed wherever the latency
     // is -- on a parameter change and in prepareToPlay -- and a chain edit

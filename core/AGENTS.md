@@ -110,6 +110,15 @@ rack/     SlotParameter (one generic host parameter, remapped live),
   back undelayed and cleared the right channel on mono in / stereo out;
   never fall back to it. `bus_tests` holds both, for several chains and
   oversampling settings and across a latency change while bypassed.
+  **While bypassed the engines keep running, unheard**, on the input they
+  would have had (`BypassCrossfade`, same file), so both paths exist at both
+  switches and each switch is a 5 ms crossfade between two time-aligned
+  signals: no stale audio from the moment bypass began, no dip, settled
+  bit-exact on either path. The cost is the modules' processing while
+  bypassed, the same as while not; a host that wants the CPU back
+  deactivates the plugin. A block larger than prepare promised cuts instead
+  of fading. `bus_tests` holds both directions, both products, for BMO EQ at
+  2x and 8x, BMO Util at +6 dB, the FET compressor and the delay.
 - `SlotParameter::assign` keeps a pointer into the module's static
   `specs()` vector. Never hand it a temporary.
 - A slot's `SlotOverflow` is an `AudioProcessor` only so that its

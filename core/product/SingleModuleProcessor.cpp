@@ -72,6 +72,9 @@ void SingleModuleProcessor::prepareToPlay (double sampleRate, int maximumExpecte
 {
     engine.prepare (sampleRate, maximumExpectedSamplesPerBlock, getTotalNumOutputChannels());
     bypassDelay.prepare (getTotalNumOutputChannels());
+    bypassFade.prepare (sampleRate);
+    otherPath.setSize (juce::jmax (1, getTotalNumOutputChannels()), juce::jmax (1, maximumExpectedSamplesPerBlock));
+    otherPath.clear();
 
     const auto latency = engine.latency();
     reportedLatency.store (latency, std::memory_order_relaxed);
@@ -111,14 +114,35 @@ void SingleModuleProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
     // one channel and silence. BusLayouts.h says why at length.
     buses::spreadInputAcrossOutputs (buffer, numIn, numOut);
 
-    // The input as the module gets it, kept for the host's bypass: the moment
-    // it switches, the bypass carries on from where the module's output was.
-    bypassDelay.push (buffer.getArrayOfReadPointers(), numOut, numSamples);
+    auto* const* channels = buffer.getArrayOfWritePointers();
+    const auto canBlend = numSamples <= otherPath.getNumSamples() && numOut <= otherPath.getNumChannels();
 
     // Every block goes through the engine, which guarantees a finite output;
     // there is no early return here, and none should be added without the
     // scrub RackProcessor::processBlock does at its own edge.
-    engine.process (buffer.getArrayOfWritePointers(), numOut, numSamples, tempo);
+    if (bypassFade.restsAt (0.0f) || ! canBlend)
+    {
+        // Not switching (or a block too big to hold two paths, which cuts).
+        // The input as the module gets it is kept for the host's bypass: the
+        // moment it switches, the bypass carries on from where the module's
+        // output was.
+        bypassFade.snap (0.0f);
+        bypassDelay.push (channels, numOut, numSamples);
+        engine.process (channels, numOut, numSamples, tempo);
+        return;
+    }
+
+    // Just out of bypass: the dry path runs on beside the module's, which was
+    // kept running unheard, and the output crossfades back to the module.
+    auto* const* dry = otherPath.getArrayOfWritePointers();
+
+    for (int ch = 0; ch < numOut; ++ch)
+        juce::FloatVectorOperations::copy (dry[ch], channels[ch], numSamples);
+
+    bypassDelay.delay (dry, numOut, numSamples, juce::jmax (0, reportedLatency.load (std::memory_order_relaxed)));
+    finite::scrub (dry, numOut, numSamples);
+    engine.process (channels, numOut, numSamples, tempo);
+    bypassFade.apply (channels, channels, dry, numOut, numSamples, 0.0f);
 }
 
 void SingleModuleProcessor::processBlockBypassed (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
@@ -129,16 +153,40 @@ void SingleModuleProcessor::processBlockBypassed (juce::AudioBuffer<float>& buff
     // is the processed path with the module taken out: the input widened
     // exactly as processBlock widens it, then delayed by the latency the host
     // was last told (BypassDelay.h).
+    juce::ScopedNoDenormals noDenormals;
+    const auto tempo = readHostTempo (getPlayHead());
+
     const auto numSamples = buffer.getNumSamples();
     const auto numOut     = juce::jmin (buffer.getNumChannels(), getTotalNumOutputChannels());
+    auto* const* channels = buffer.getArrayOfWritePointers();
+    const auto canBlend   = numSamples <= otherPath.getNumSamples() && numOut <= otherPath.getNumChannels();
 
     buses::spreadInputAcrossOutputs (buffer, getTotalNumInputChannels(), numOut);
-    bypassDelay.delay (buffer.getArrayOfWritePointers(), numOut, numSamples,
-                       juce::jmax (0, reportedLatency.load (std::memory_order_relaxed)));
+
+    // The module keeps running, unheard, on the input it would have had, so
+    // that the switch back is a crossfade onto a warm engine rather than onto
+    // one still holding the moment bypass began (BypassCrossfade).
+    auto* const* processed = otherPath.getArrayOfWritePointers();
+
+    if (canBlend)
+        for (int ch = 0; ch < numOut; ++ch)
+            juce::FloatVectorOperations::copy (processed[ch], channels[ch], numSamples);
+
+    bypassDelay.delay (channels, numOut, numSamples, juce::jmax (0, reportedLatency.load (std::memory_order_relaxed)));
+
+    if (canBlend)
+    {
+        engine.process (processed, numOut, numSamples, tempo);
+        bypassFade.apply (channels, processed, channels, numOut, numSamples, 1.0f);
+    }
+    else
+    {
+        bypassFade.snap (1.0f);
+    }
 
     // The host's own bad samples come back out of the delay a latency later;
     // scrubbed here, on the way out, as they always were.
-    finite::scrub (buffer.getArrayOfWritePointers(), numOut, numSamples);
+    finite::scrub (channels, numOut, numSamples);
 }
 
 //==============================================================================

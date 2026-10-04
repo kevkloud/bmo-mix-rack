@@ -521,6 +521,16 @@ struct OneBlock
     bool silent    = true;
 };
 
+/** One bypassed block of silence, so the 5 ms crossfade into bypass is over
+    and the block measured after it is the bypass alone (BypassCrossfade). */
+void settleIntoBypass (juce::AudioProcessor& p)
+{
+    juce::AudioBuffer<float> buffer (2, kBlock);
+    juce::MidiBuffer midi;
+    buffer.clear();
+    p.processBlockBypassed (buffer, midi);
+}
+
 OneBlock oneBlock (float bad, const std::function<void (juce::AudioBuffer<float>&)>& process)
 {
     juce::AudioBuffer<float> buffer (2, kBlock);
@@ -1019,6 +1029,7 @@ int main()
             auto proc = makeProduct (named ("util"));
             proc->setPlayConfigDetails (2, 2, kRate, kBlock);
             proc->prepareToPlay (kRate, kBlock);
+            settleIntoBypass (*proc);
             expectClean (oneBlock (bad, [&] (auto& b) { proc->processBlockBypassed (b, midi); }),
                          "a module bypassed by the host", true);
 
@@ -1026,6 +1037,7 @@ int main()
             rack->addModule (halfModule());
             rack->setPlayConfigDetails (2, 2, kRate, kBlock);
             rack->prepareToPlay (kRate, kBlock);
+            settleIntoBypass (*rack);
             expectClean (oneBlock (bad, [&] (auto& b) { rack->processBlockBypassed (b, midi); }),
                          "a rack bypassed by the host", true);
         }

@@ -1146,6 +1146,71 @@ int main()
         }
     }
 
+    //== Every chain edit tells the host the session changed ===================
+    // The chain and the views are not parameters, so a host only marks a
+    // session dirty for them if it is told the non-parameter state changed.
+    // QA's probe on 2026-10-03: adding to an empty rack, removing the last
+    // module and toggling a view sent nothing of the kind -- 0 of 7 cases --
+    // and a factory rack preset rebuilt the chain twice, once empty.
+    {
+        struct HostSide final : juce::AudioProcessorListener
+        {
+            int nonParameterState = 0;
+            void audioProcessorParameterChanged (juce::AudioProcessor*, int, float) override {}
+            void audioProcessorChanged (juce::AudioProcessor*, const ChangeDetails& d) override
+            {
+                nonParameterState += d.nonParameterStateChanged ? 1 : 0;
+            }
+        };
+
+        struct Rebuilds final : RackProcessor::Listener
+        {
+            int count = 0;
+            void rackChainWillChange() override { ++count; }
+            void rackChainChanged() override {}
+        };
+
+        const auto sandbox = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                                 .getChildFile ("bmo-rack-notify-tests");
+        sandbox.deleteRecursively();
+        bmo::PresetManager::setDirectoryForTesting (sandbox);
+
+        auto rack = createRack();
+        HostSide host;
+        rack->addListener (&host);
+
+        const auto expectTold = [&] (const std::function<void()>& edit, const juce::String& what)
+        {
+            host.nonParameterState = 0;
+            edit();
+            juce::MessageManager::getInstance()->runDispatchLoopUntil (20);
+            check (host.nonParameterState > 0, what + " tells the host the non-parameter state changed");
+        };
+
+        expectTold ([&] { rack->addModule (*rack->findModule ("util")); }, "adding to an empty rack");
+        expectTold ([&] { rack->addModule (*rack->findModule ("eq")); }, "adding a module");
+        expectTold ([&] { rack->addModule (*rack->findModule ("deq")); }, "adding BMO DEQ");
+        expectTold ([&] { rack->moveModule (0, 2); }, "moving a module");
+        expectTold ([&] { rack->setSlotExpanded (1, ! rack->isSlotExpanded (1)); }, "toggling a slot's view");
+        expectTold ([&] { rack->setModule (0, *rack->findModule ("sat")); }, "replacing a module");
+        expectTold ([&] { rack->removeModule (0); rack->removeModule (0); }, "removing two");
+        expectTold ([&] { rack->removeModule (0); }, "removing the last module");
+
+        // A factory rack preset is one rebuild, so the audio never runs an
+        // empty chain on the way to the preset's.
+        Rebuilds rebuilds;
+        rack->addRackListener (&rebuilds);
+        expectTold ([&] { rack->getPresets().loadFactory (1); }, "loading a factory rack preset");
+        check (rebuilds.count == 1, "a factory rack preset rebuilds the chain once, not "
+                                        + juce::String (rebuilds.count) + " times");
+        check (rack->getNumModules() > 0, "and leaves the preset's chain");
+        rack->removeRackListener (&rebuilds);
+
+        rack->removeListener (&host);
+        sandbox.deleteRecursively();
+        bmo::PresetManager::setDirectoryForTesting ({});
+    }
+
     //== A session saved before this build plays exactly as it did ============
     // The text was written by the build at 0e4bdb0, before chain edits kept
     // their engines (RackGoldenState.h). Restoring it must give the same chain

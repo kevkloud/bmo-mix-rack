@@ -99,15 +99,25 @@ bool RackProcessor::isSlotExpanded (int slot) const noexcept
     return slot >= 0 && slot < kSlots && slots[(size_t) slot].expanded;
 }
 
-void RackProcessor::setSlotExpanded (int slot, bool shouldBe) noexcept
+void RackProcessor::setSlotExpanded (int slot, bool shouldBe)
 {
-    if (slot >= 0 && slot < kSlots)
+    if (slot < 0 || slot >= kSlots)
+        return;
+
+    bool changed = false;
+
     {
         // Under the edit lock because a capture on another thread reads it.
         const juce::ScopedLock edit (editLock);
         auto& s = slots[(size_t) slot];
-        s.expanded = shouldBe && s.def != nullptr && s.def->isExpandable();
+        const auto next = shouldBe && s.def != nullptr && s.def->isExpandable();
+        changed = next != s.expanded;
+        s.expanded = next;
     }
+
+    // The view is saved with the session, so a host is told it changed.
+    if (changed)
+        updateHostDisplay (ChangeDetails().withNonParameterStateChanged (true));
 }
 
 //==============================================================================
@@ -371,8 +381,12 @@ void RackProcessor::rebuild (std::vector<Entry> chain)
         }
     }
 
-    // Names, ranges and steps of up to 256 parameters just changed.
-    updateHostDisplay (ChangeDetails().withParameterInfoChanged (true));
+    // Names, ranges and steps of up to 256 parameters just changed, and so did
+    // the chain, which is session state but no parameter's value: without the
+    // second flag a host need not mark the session dirty, and adding to an
+    // empty rack or removing the last module changes no value at all.
+    updateHostDisplay (ChangeDetails().withParameterInfoChanged (true)
+                                      .withNonParameterStateChanged (true));
     triggerAsyncUpdate();
 
     listeners.call ([] (Listener& l) { l.rackChainChanged(); });

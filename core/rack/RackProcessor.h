@@ -107,6 +107,9 @@ public:
     bool restoreState (const juce::XmlElement&) override;
     void resetToDefaults() override;
 
+    /** A rack preset is a whole chain, so loading one is one rebuild. */
+    bool factoryPresetsAreWhole() const override { return true; }
+
     void addRackListener (Listener* l)    { listeners.add (l); }
     void removeRackListener (Listener* l) { listeners.remove (l); }
 
@@ -122,7 +125,7 @@ public:
         travels with the module through chain edits and is kept with the
         session, not with rack presets. Message thread. */
     bool isSlotExpanded (int slot) const noexcept;
-    void setSlotExpanded (int slot, bool shouldBe) noexcept;
+    void setSlotExpanded (int slot, bool shouldBe);
 
     const ProductInfo& getInfo() const noexcept   { return info; }
     PresetManager& getPresets() noexcept          { return presets; }

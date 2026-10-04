@@ -107,10 +107,13 @@ void PresetManager::loadFactory (int index)
 
     loading.store (true, std::memory_order_relaxed);
 
-    target.resetToDefaults();
+    const auto& entry = factoryPresets[(size_t) index];
 
-    if (factoryPresets[(size_t) index].apply)
-        factoryPresets[(size_t) index].apply();
+    if (! entry.apply || ! target.factoryPresetsAreWhole())
+        target.resetToDefaults();
+
+    if (entry.apply)
+        entry.apply();
 
     currentName = factoryPresets[(size_t) index].name;
 

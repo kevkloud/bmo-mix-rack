@@ -301,8 +301,9 @@ disagrees. SIZE is a set-and-leave control. `10` §4 has the tables.
   ctest failed it as a timeout. The kept-moving test runs seven of its 43
   rows by default (the five 48 kHz rows that grew on `6a37ffe`, which still
   fail there, and two live ones) and all 43 under `--long`. Default run:
-  40–59 s Release, 271–372 s Debug with other builds sharing the machine;
-  fence 1200 s.
+  40–67 s Release, 271–447 s Debug with other builds sharing the machine;
+  fence 1350 s. Of a 387 s Debug run, 250 s is the 96 and 192 kHz "tail never
+  grows" block, which was left alone.
 - **reset() with a request queued behind a move** built from where the move
   was going, not from what was asked for: 0.232, 0.000704 and 0.0318 off a
   fresh instance over 2 s of noise (SIZE queued, DECAY queued, SIZE queued

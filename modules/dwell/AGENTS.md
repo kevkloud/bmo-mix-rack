@@ -127,6 +127,26 @@ hold after it.
   bucket-brigade "impulse exception" once written at `tailSecondsFor` was the
   expander's spike, below. `tests/plugin/TailTests.cpp` lists Dwell beside
   Linger as the two modules that ring.
+- **The reported tail stops at 30 s; the loop does not** (2026-10-03).
+  `kTailCeilingSeconds` caps the figure, and somewhere between FEEDBACK 90
+  and 95 the real decay outruns it. Measured on ICE QUEEN, 48 kHz, a 3 s
+  220 Hz sine at -18 dBFS RMS, MIX 50, to 60 dB under the held output peak:
+  at FEEDBACK 90 the figure holds (reported 28.5-30 s, rang 15.8-23.2 s on
+  the three characters, Diffuse on or off); at FEEDBACK 95 it reports 30 s and the
+  loop rings **65.3 s on clean, 43.3 on tape, 78.1 on bucket-brigade**
+  (70.6, 38.6 and 76.2 with Diffuse). A host that stops processing or ends a
+  bounce at the reported tail cuts the repeats off before they reach the
+  floor. The ceiling is §9's and is left as it is; raising it is a decision,
+  not a fix.
+- **One hot sample stays in the loop as long as the loop rings** -- what a
+  delay with feedback does with it, not a defect. One sample at +60 to
+  +96 dBFS in a 220 Hz sine at -18 dBFS RMS, 48 kHz: the output is back
+  within -60 dBFS of the clean render **1.88 s** later at the defaults
+  (FEEDBACK 35, the one figure pinned until now), 7.9 s at FEEDBACK 80,
+  **18.4 s at 90 and 50.3 s at 95** on clean; bucket-brigade 17.6-18.0 and
+  50.7 s, tape 13.9-15.8 and 38.8-45.5 s (measured on ICE QUEEN with the
+  review's probe). The first repeat carries the sample as it was written
+  (+59 dBFS out for +60 in); the in-loop clip bounds every lap after it.
 - **Bucket-brigade's expander divides each tap by its own gain, then
   interpolates** (`DelayEngine::readExpanded`, 2026-10-01, fourth round). The
   gain ring holds 1.0 wherever nothing was companded -- after `prepare`, a

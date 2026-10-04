@@ -146,7 +146,15 @@ rack/     SlotParameter (one generic host parameter, remapped live),
   with the bottom on a block's last sample, the next block swaps at its first
   sample, and fades back up: 10 ms and one sample of zero, at any block size.
   Removed engines are retired, not destroyed, until the audio thread has
-  finished a block without them. **An engine the edit brings in arrives
+  finished a block without them -- and then only when the message thread
+  next looks, which is at the next edit, the next parameter change (the
+  async update) or the next prepare or release; nothing polls, so a retired
+  engine and its memory can outlive its last block by as long as the user
+  leaves the rack alone. Likewise **an edit made just before the host stops
+  calling stays pending**: the new chain is what every message-thread
+  caller sees, but the audio thread keeps the old one, held, until blocks
+  resume -- then dips and swaps as usual -- unless a prepare or release, or
+  the backlog rule below, puts it in place first. **An engine the edit brings in arrives
   warm** (`RackProcessor::runWarming`): while the output fades out, it runs
   unheard on what its slot will be fed -- the running chain's output at that
   point, kept per engine -- so at the swap a module with latency is

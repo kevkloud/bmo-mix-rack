@@ -1032,6 +1032,7 @@ public:
         }
 
         fadeLength = std::max (1, (int) std::lround (sampleRate * kCrossfadeSeconds));
+        switchFadeLength = std::max (1, (int) std::lround (sampleRate * kSwitchFadeSeconds));
         glideAlpha = 1.0 - std::exp (-1.0 / (kGlideTauSeconds * sampleRate));
 
         // 30 ms on the feedback gain and on DRIVE, 10 §9. TIME is not smoothed
@@ -1099,6 +1100,10 @@ public:
         fadeCounter = -1;
         delayCurrent = delayNext = delayTarget;
 
+        // Nothing is circulating, so a switch in flight has nothing left to
+        // fade: the chain takes the parameters' character and FX now.
+        snapSwitches();
+
         // The gain ring is all 1.0 again, so there is nothing to expand.
         samplesSinceCompanding = ringSize();
 
@@ -1126,24 +1131,16 @@ public:
         const auto cutsMoved = (p.lowCutHz != params.lowCutHz) || (p.highCutHz != params.highCutHz);
         const auto timeMoved = (p.timeMs != params.timeMs);
 
-        // Crush or Diffuse coming (back) into the loop starts from nothing;
-        // see `FxStage::engageCrush` and `engageDiffuse`.
-        const auto crushIn = p.fx && p.fxType == kCrush;
-        const auto crushWasIn = params.fx && params.fxType == kCrush;
-
-        if (crushIn && ! crushWasIn)
-            fx.engageCrush();
-
-        const auto diffuseIn = p.fx && p.fxType == kDiffuse;
-        const auto diffuseWasIn = params.fx && params.fxType == kDiffuse;
-
-        if (diffuseIn && ! diffuseWasIn)
-            fx.engageDiffuse();
-
         params = p;
 
+        // A CHARACTER or FX change is not taken here: `process` fades the
+        // character chain across it (`beginSwitches`). Only a snap takes it
+        // at once.
         if (snapNow)
+        {
             primed = false;
+            snapSwitches();
+        }
 
         if (characterMoved || cutsMoved)
             buildUserFilters();
@@ -1296,14 +1293,16 @@ public:
             const auto fxDepth = (double) fxAmount.tickLanding();
 
             advanceTime (glide);
+            beginSwitches();
 
             // The FX stage's one piece of per-engine shared state: a pan wants
             // **one** position that the two channels read opposite ends of, so
             // the LFO turns once a sample for the engine rather than once a
             // sample per channel. It is stepped at the delay period, so each
-            // repeat gets its own place (10 §11a). Turned only when FX is on,
-            // which is what `11` §4l's state signature measures.
-            if (params.fx)
+            // repeat gets its own place (10 §11a). Turned only while the stage
+            // is in the loop -- on, or fading out -- which is what `11` §4l's
+            // state signature measures.
+            if (fxTo != kFxOut || fxFade >= 0)
                 fx.advance (delayCurrent);
 
             // §5's modulation follows §2's law and is never limited by it, so
@@ -1460,6 +1459,18 @@ public:
             else if (samplesSinceCompanding < ringSize())
                 ++samplesSinceCompanding;
 
+            if (modeFade >= 0 && ++modeFade >= switchFadeLength)
+            {
+                modeFade = -1;
+                modeFrom = modeTo;
+            }
+
+            if (fxFade >= 0 && ++fxFade >= switchFadeLength)
+            {
+                fxFade = -1;
+                fxFrom = fxTo;
+            }
+
             if (fading && ++fadeCounter >= fadeLength)
             {
                 fadeCounter  = -1;
@@ -1533,16 +1544,12 @@ private:
         auto c = f.lowCut.highPass (y);
         c = f.highCut.lowPass (c);
 
-        if (params.character == kTape)
-        {
-            c = f.tapeLowPass.lowPass (c);
-            c = f.headBump.lowShelf (c, headBumpGain);
-        }
-        else if (params.character == kBucketBrigade)
-        {
-            c = f.bbdAntiAlias.process (c);
-            c = f.bbdReconstruct.process (c);
-        }
+        // The mode filters, or -- for the 20 ms after a CHARACTER move -- both
+        // characters' filters run side by side and blended (`beginSwitches`).
+        if (modeFade >= 0)
+            c = (1.0 - modeMix) * modeStage (f, modeFrom, c) + modeMix * modeStage (f, modeTo, c);
+        else
+            c = modeStage (f, modeTo, c);
 
         // **10 §11a's FX stage: after the mode filters, before the shaper, and
         // skipped outright when off.** The position is the whole of what makes
@@ -1555,8 +1562,27 @@ private:
         // that FX off is bit-identical to the loop without it -- and because
         // each engine holds its own `FxStage`, that identity holds **per path**
         // without anything here knowing which path it is on.
-        if (params.fx)
-            c = fx.process (ch, params.fxType, c, fxDepth, nch);
+        //
+        // For the 20 ms after FX is switched or its type moved, the stage
+        // going out and the one coming in run side by side and are blended,
+        // "out" being the wire (`beginSwitches`). **The stage going out is
+        // faded at its output and the one coming in at its input**: an
+        // incoming Diffuse starts from cleared lines, and fed the whole
+        // signal at once, each line's first sample arrived 7-37 ms later as
+        // a step; fed a ramp, its lines fill from nothing. The outgoing one
+        // still holds a tail, so its output is what has to reach zero before
+        // it stops running.
+        if (fxFade >= 0)
+        {
+            const auto from = fxFrom == kFxOut ? c : fx.process (ch, fxFrom, c, fxDepth, nch);
+            const auto in   = fxMix * c;
+            const auto to   = fxTo   == kFxOut ? in : fx.process (ch, fxTo, in, fxDepth, nch);
+            c = (1.0 - fxMix) * from + to;
+        }
+        else if (fxTo != kFxOut)
+        {
+            c = fx.process (ch, fxTo, c, fxDepth, nch);
+        }
 
         if (blend > 0.0)
         {
@@ -1592,6 +1618,121 @@ private:
         c = f.blocker.highPass (c);
 
         return std::tanh (c);
+    }
+
+    /** One character's mode filters: tape's rolloff and head bump,
+        bucket-brigade's clock pair, nothing on clean. */
+    double modeStage (ChannelFilters& f, int which, double c) noexcept
+    {
+        if (which == kTape)
+        {
+            c = f.tapeLowPass.lowPass (c);
+            return f.headBump.lowShelf (c, headBumpGain);
+        }
+
+        if (which == kBucketBrigade)
+        {
+            c = f.bbdAntiAlias.process (c);
+            return f.bbdReconstruct.process (c);
+        }
+
+        return c;
+    }
+
+    //==========================================================================
+    /** **A switch inside the loop is a fade, not a step** (2026-10-03).
+
+        CHARACTER swaps the mode filters and FX swaps a stage in or out, and
+        both sit in the character chain, inside the loop. Taken in one sample,
+        the chain's output stepped wherever the two paths disagreed, the step
+        went into the ring, and came out one TIME later: measured on ICE QUEEN
+        with a 440 Hz sine at FEEDBACK 60, MIX 50, bucket-brigade to clean
+        stepped 2.79 times the signal's own largest sample step, and Diffuse
+        switched off 2.42 times, against the house bound of 1.5.
+
+        So for `kSwitchFadeSeconds` after either moves, the chain runs the
+        path going out and the path coming in side by side and blends them
+        `(1 - u, u)` -- the shared switch law: the weights are in [0, 1] and
+        sum to 1, so the fade cannot add level to the loop. (An incoming FX
+        stage takes its weight at its input rather than its output, so that
+        its delay lines fill from nothing; see `character`.) The two paths
+        are the same signal through two filters, so they correlate; where
+        their phases part they dip through the fade (a 20 ms dip in one lap,
+        which the loop replays at the loop's own gain), never rise.
+
+        **What comes in starts clean.** The incoming character's filters are
+        reset, and an incoming Crush or Diffuse is cleared
+        (`FxStage::engageCrush`, `engageDiffuse`): neither has run while it
+        was out, so its state is from whenever it last ran. Pan/Tremolo holds
+        no audio. A move that arrives mid-fade waits for the fade in flight
+        and then fades from where that one landed, as §2's TIME fade does, so
+        no more than two paths ever run. Everything else a CHARACTER move
+        changes -- the time law, the interpolator, the compander, tape's
+        character floor on the read -- is not in the chain and is handed over
+        as before. */
+    void beginSwitches() noexcept
+    {
+        if (modeFade < 0 && modeTo != params.character)
+        {
+            modeFrom = modeTo;
+            modeTo = params.character;
+            modeFade = 0;
+
+            for (auto& f : filters)
+                resetModeFilters (f, modeTo);
+        }
+
+        const auto fxWanted = fxTarget();
+
+        if (fxFade < 0 && fxTo != fxWanted)
+        {
+            fxFrom = fxTo;
+            fxTo = fxWanted;
+            fxFade = 0;
+            engageFx (fxTo);
+        }
+
+        modeMix = modeFade >= 0 ? (double) modeFade / (double) switchFadeLength : 1.0;
+        fxMix   = fxFade   >= 0 ? (double) fxFade   / (double) switchFadeLength : 1.0;
+    }
+
+    /** The chain takes the parameters' character and FX at once: on
+        `prepare`, a snap and a `reset`, where nothing is circulating. */
+    void snapSwitches() noexcept
+    {
+        const auto fxWanted = fxTarget();
+
+        if (fxWanted != fxTo)
+            engageFx (fxWanted);
+
+        modeFrom = modeTo = params.character;
+        fxFrom = fxTo = fxWanted;
+        modeFade = fxFade = -1;
+        modeMix = fxMix = 1.0;
+    }
+
+    int fxTarget() const noexcept { return params.fx ? params.fxType : kFxOut; }
+
+    void engageFx (int type) noexcept
+    {
+        if (type == kCrush)
+            fx.engageCrush();
+        else if (type == kDiffuse)
+            fx.engageDiffuse();
+    }
+
+    static void resetModeFilters (ChannelFilters& f, int which) noexcept
+    {
+        if (which == kTape)
+        {
+            f.tapeLowPass.reset();
+            f.headBump.reset();
+        }
+        else if (which == kBucketBrigade)
+        {
+            f.bbdAntiAlias.reset();
+            f.bbdReconstruct.reset();
+        }
     }
 
     //==========================================================================
@@ -2134,6 +2275,10 @@ private:
     /** 20 ms, 10 §12's clean crossfade. */
     static constexpr double kCrossfadeSeconds = 0.020;
 
+    /** 20 ms, the fade a CHARACTER or FX switch takes inside the loop
+        (`beginSwitches`): the same length as the clean crossfade. */
+    static constexpr double kSwitchFadeSeconds = 0.020;
+
     /** The wear noise is deterministic on purpose: `11` §4k's block-size
         invariance compares two renders of the same settings sample for sample,
         and a modulation source seeded from the clock would fail it for the
@@ -2163,6 +2308,16 @@ private:
 
     double delayCurrent = 0.0, delayNext = 0.0, delayTarget = 0.0;
     int fadeCounter = -1, fadeLength = 1;
+
+    /** The character chain across a switch (`beginSwitches`): the character
+        whose mode filters run and the FX type in the loop (`kFxOut` for
+        none), from and to, and how far through its fade each is (-1 for
+        none). */
+    static constexpr int kFxOut = -1;
+    int modeFrom = kClean, modeTo = kClean, modeFade = -1;
+    int fxFrom = kFxOut, fxTo = kFxOut, fxFade = -1;
+    int switchFadeLength = 1;
+    double modeMix = 1.0, fxMix = 1.0;
 
     /** Writes since the last companded one, capped at the ring's length: below
         it the gain ring may still hold a compressor gain the read has to

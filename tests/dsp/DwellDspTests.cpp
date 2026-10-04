@@ -5212,9 +5212,12 @@ void testCrushHoldsWithinItsEnergyFromTheFirstBlock()
     FX off skips the stage, so its running sum and its hold were left as they
     were, and FX back on picked them up: the first hold then counted samples
     from before the stage went out. Two engines run the same history, one fed a
-    tone and one silence -- Crush on, FX off for a block, FX on again -- and
-    the moment FX is back on, before a sample is processed, their FX state must
-    agree: everything Crush held from before is gone. */
+    tone and one silence -- Crush on, FX off for two blocks, FX on again --
+    and the moment Crush is back in, their FX state must agree: everything
+    Crush held from before is gone. From 2026-10-03 a switch fades over 20 ms
+    and the stage comes back in on the first sample processed after FX is on
+    (`DelayEngine::beginSwitches`), so the off spell outlasts the fade out and
+    the state is read after that one sample, whose input weight is 0. */
 void testCrushIsClearedWhenItComesBackIn()
 {
     constexpr auto rate = 48000.0;
@@ -5229,21 +5232,31 @@ void testCrushIsClearedWhenItComesBackIn()
         v[P::Index::fxType]   = 2.0f;
         v[P::Index::fxAmount] = 100.0f;
 
-        Block block { 512 * 4 };
+        Block block { 512 * 5 };
 
         if (tone)
-            for (int i = 0; i < 512 * 4; ++i)
+            for (int i = 0; i < 512 * 5; ++i)
                 block.left[(size_t) i] = block.right[(size_t) i]
                     = (float) (0.5 * std::sin (2.0 * P::kPiD * 300.0 * (double) i / rate));
 
-        // 2.5 blocks on, so the hold is part-way through a block; one off; on.
+        // 2.5 blocks on, so the hold is part-way through a block; two off --
+        // past the 20 ms fade out, so the stage is out of the loop; on, and
+        // the first sample of the fade in.
         renderAsHost (dsp, v, block, 512 * 2 + 300, 512, [] (int) {});
         v[P::Index::fx] = 0.0f;
         dsp.setParams (v.data(), (int) v.size());
-        float* ch[] { block.left.data() + 1324, block.right.data() + 1324 };
-        dsp.process (ch, 2, 512);
+
+        for (const auto offset : { 1324, 1836 })
+        {
+            float* ch[] { block.left.data() + offset, block.right.data() + offset };
+            dsp.process (ch, 2, 512);
+        }
+
         v[P::Index::fx] = 1.0f;
         dsp.setParams (v.data(), (int) v.size());
+
+        float* ch[] { block.left.data() + 2348, block.right.data() + 2348 };
+        dsp.process (ch, 2, 1);
 
         return dsp.getCore().getMainEngine().fxStateSignature();
     };
@@ -6580,6 +6593,162 @@ void testDiffuseComesBackSilent()
     }
 }
 
+/** **A CHARACTER or FX switch inside the loop does not click, burst or
+    linger** -- on the switch and on its echo one TIME later (2026-10-03).
+
+    The owner's rule for a switch: it may dip briefly; it may not click (a
+    sample step over 1.5 times the signal's own largest), burst (over 1 dB
+    above the louder steady level) or linger (a dip held past about 30 ms).
+    Both switches sit in the character chain, inside the loop, so a step
+    they make goes into the ring and comes out a TIME later: on the starting
+    code bucket-brigade -> clean stepped 2.79 times the signal's own step and
+    Diffuse off 2.42 times, both on the echo.
+
+    The review's probe: a 440 Hz sine at -18 dBFS RMS throughout, FEEDBACK 60,
+    MIX 50, TIME 375 ms, the switch at 4.000 s on a block edge. The steady
+    references are the half second before and 2.5-3.5 s after; the step is
+    read on the switch itself and, separately, around the echo. A blend of
+    two paths of different phase can null, so the level is read through the
+    fade too, as the longest run of 5 ms windows more than 1 dB under the
+    quieter steady level. Diffuse coming in is taken again with TIME 375.013 ms
+    and the switch at 4.3 s, where a fade weighted at the stage's output
+    stepped 1.58 times as each allpass line's first sample arrived. */
+void testASwitchInTheLoopDoesNotStep()
+{
+    constexpr auto rate = 48000.0;
+    constexpr int chunk = 512;
+    const auto n = (int) (8.0 * rate);
+    const auto w = (int) (0.005 * rate);
+
+    struct Switch
+    {
+        const char* name;
+        int characterFrom, characterTo;
+        int fxFrom, fxTo;              ///< -1 for FX off, else the type
+        float timeMs = 375.0f;
+        double atSeconds = 4.0;
+    };
+
+    std::vector<Switch> switches;
+
+    for (int a = 0; a < 3; ++a)
+        for (int b = 0; b < 3; ++b)
+            if (a != b)
+                switches.push_back ({ "CHARACTER", a, b, -1, -1 });
+
+    for (int t = 0; t < 3; ++t)
+    {
+        switches.push_back ({ "FX", 0, 0, -1, t });
+        switches.push_back ({ "FX", 0, 0, t, -1 });
+    }
+
+    switches.push_back ({ "FX TYPE", 0, 0, P::kDiffuse, P::kCrush });
+    switches.push_back ({ "FX TYPE", 0, 0, P::kCrush, P::kPanTremolo });
+    switches.push_back ({ "FX TYPE", 0, 0, P::kPanTremolo, P::kDiffuse });
+    switches.push_back ({ "FX (TIME 375.013 ms, at 4.3 s)", 0, 0, -1, P::kDiffuse, 375.013f, 4.3 });
+
+    const char* const fxNames[] { "Diffuse", "Pan/Tremolo", "Crush" };
+    const auto fxName = [&] (int t) { return t < 0 ? "off" : fxNames[t]; };
+
+    const auto largestStep = [] (const std::vector<float>& x, int from, int to)
+    {
+        auto m = 0.0;
+
+        for (int i = std::max (from, 1); i < to; ++i)
+            m = std::max (m, (double) std::abs (x[(size_t) i] - x[(size_t) (i - 1)]));
+
+        return m;
+    };
+
+    for (const auto& sw : switches)
+    {
+        const auto at = (int) std::lround (sw.atSeconds * rate / chunk) * chunk;
+        const auto echo = at + (int) std::lround (sw.timeMs * 0.001 * rate);
+
+        P::DwellDsp dsp;
+        dsp.prepare (rate, chunk, 2);
+
+        auto v = defaults();
+        v[P::Index::feedback] = 60.0f;
+        v[P::Index::mix]      = 50.0f;
+        v[P::Index::time]     = sw.timeMs;
+
+        Block block { n };
+
+        for (int i = 0; i < n; ++i)
+            block.left[(size_t) i] = block.right[(size_t) i]
+                = (float) (std::pow (10.0, -18.0 / 20.0) * std::sqrt (2.0)
+                           * std::sin (2.0 * P::kPiD * 440.0 * (double) i / rate));
+
+        renderAsHost (dsp, v, block, n, chunk, [&] (int offset)
+        {
+            const auto after = offset >= at;
+            const auto fxNow = after ? sw.fxTo : sw.fxFrom;
+
+            // FX on and off keep the one type throughout; a type switch moves it.
+            const auto type = fxNow >= 0 ? fxNow : std::max (sw.fxFrom, sw.fxTo);
+
+            v[P::Index::character] = (float) (after ? sw.characterTo : sw.characterFrom);
+            v[P::Index::fx]        = fxNow >= 0 ? 1.0f : 0.0f;
+            v[P::Index::fxType]    = (float) std::max (type, 0);
+        });
+
+        auto stepNow = 0.0, stepEcho = 0.0, burst = -99.0, longestDip = 0.0;
+
+        for (const auto* x : { &block.left, &block.right })
+        {
+            const auto steady = std::max (largestStep (*x, at - (int) rate, at),
+                                          largestStep (*x, at + (int) (2.5 * rate), at + (int) (3.5 * rate)));
+
+            stepNow  = std::max (stepNow,  largestStep (*x, at, echo - (int) (0.01 * rate)) / steady);
+            stepEcho = std::max (stepEcho, largestStep (*x, echo - (int) (0.01 * rate), at + (int) (1.2 * rate)) / steady);
+
+            auto loBefore = 1.0e9, loAfter = 1.0e9, hiBefore = 0.0, hiAfter = 0.0, hiDuring = 0.0;
+
+            for (int s = at - (int) (0.5 * rate); s + w <= at; s += w / 4)
+            {
+                loBefore = std::min (loBefore, rms (*x, s, w));
+                hiBefore = std::max (hiBefore, rms (*x, s, w));
+            }
+
+            for (int s = at + (int) (2.5 * rate); s + w <= at + (int) (3.0 * rate); s += w / 4)
+            {
+                loAfter = std::min (loAfter, rms (*x, s, w));
+                hiAfter = std::max (hiAfter, rms (*x, s, w));
+            }
+
+            const auto floor = std::min (loBefore, loAfter) * std::pow (10.0, -1.0 / 20.0);
+            auto run = 0, longest = 0;
+
+            for (int s = at; s + w <= at + (int) (1.2 * rate); s += w / 4)
+            {
+                const auto r = rms (*x, s, w);
+                hiDuring = std::max (hiDuring, r);
+                run = r < floor ? run + 1 : 0;
+                longest = std::max (longest, run);
+            }
+
+            burst = std::max (burst, dbOf (hiDuring) - dbOf (std::max (hiBefore, hiAfter)));
+
+            // A run of k windows a quarter window apart spans (k - 1) / 4 + 1
+            // windows of 5 ms.
+            longestDip = std::max (longestDip, longest > 0 ? 5.0 * (1.0 + (longest - 1) * 0.25) : 0.0);
+        }
+
+        const auto what = sw.fxFrom == sw.fxTo
+                        ? std::string (characterName (sw.characterFrom)) + " -> " + characterName (sw.characterTo)
+                        : std::string (fxName (sw.fxFrom)) + " -> " + fxName (sw.fxTo) + " on clean";
+
+        char buf[300];
+        std::snprintf (buf, sizeof (buf),
+                       "%s %s: step %.2fx on the switch and %.2fx on its echo, burst %+.2f dB, "
+                       "longest dip %.1f ms",
+                       sw.name, what.c_str(), stepNow, stepEcho, burst, longestDip);
+
+        check (stepNow <= 1.5 && stepEcho <= 1.5 && burst <= 1.0 && longestDip <= 30.0, buf);
+    }
+}
+
 } // namespace
 
 //==============================================================================
@@ -6673,6 +6842,7 @@ int main (int argc, char** argv)
     testMovingATimeNeverFeedsTheLoop();
     testOneTimeSwitchDoesNotBurst();
     testDiffuseComesBackSilent();
+    testASwitchInTheLoopDoesNotStep();
 
     std::printf ("%d checks, %d failures%s\n", checks, failures, longRun ? " (--long)" : "");
     return failures == 0 ? 0 : 1;

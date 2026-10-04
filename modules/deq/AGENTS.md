@@ -243,11 +243,18 @@ small.
   tone on its 10 ms glide: +3 dB reads 1.42x, +12 dB 3.91x, and no glide
   length changes it, because the bell does pass through 1 kHz on the way
   (2026-10-03 review, measured on ICE QUEEN). Left as it is.
-- **Every band changing shape at once costs while it lasts**: both shapes
-  are redesigned every 8 samples for the 20 ms of a change, 16.6 % of a
-  192 kHz / 32-sample block for twelve bands against 4.6 % idle (one band
-  changing, 5.6 %). Redesigning every 32 samples during a change would cut
-  that by about three quarters if it is ever wanted.
+- **A change of shape is a dip, not a crossover** (round 3 of the review,
+  2026-10-03; the owner's rule for a discrete switch: it may pass through a
+  short dip, it may not click, burst or linger). The output fades out over
+  20 ms while the shape arriving warms up on a record of the band's own
+  input (`kShapeHistoryMs`, 640 ms, 2.9 MB at 48 kHz and 11.8 MB at 192 kHz
+  for twelve bands), the band takes it at the bottom and fades back in over
+  8 ms. Every blend of two shapes' outputs tried before it cancelled, went
+  over both levels, or burst from a state that was not the arriving shape's
+  own. A shape slower than 640 ms can hold (a +24 dB bell at Q 40 under
+  about 50 Hz) still arrives settling: up to 1.5 dB over at a tone off its
+  frequency (`DspCore.h`, `kShapeHistoryMs`). Twelve bands changing at once
+  cost 7.5 % of a 192 kHz / 32-sample block against 4.7 % idle.
 - **Bell precision at f0 < 3e-4 Fs**: 2e-6 dB off the knob gain from
   cancellation in the zero fit. Inaudible; fixable by computing 1 ± a1 + a2
   from the pole radius and angle rather than from a1, a2.

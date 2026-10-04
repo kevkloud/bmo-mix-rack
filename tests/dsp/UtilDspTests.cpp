@@ -97,10 +97,55 @@ namespace
 
 int main()
 {
-    // Defaults are a wire.
+    // Defaults are a wire, bit for bit. Until 2026-10-03 the mid/side matrix
+    // rounded at defaults: on uncorrelated -18 dBFS RMS noise 37 % of samples
+    // differed from the input, by up to -150.5 dBFS, and with the left at
+    // -18 and the right at -100 dBFS RMS the right's error was -69.9 dB
+    // relative to the right.
     {
         auto out = run (0.0f, 0.0f, 100.0f, false, false, false, 0.5f, -0.25f);
-        check (near (out.l.back(), 0.5f) && near (out.r.back(), -0.25f), "defaults pass audio unchanged");
+        check (out.l.back() == 0.5f && out.r.back() == -0.25f, "defaults pass a constant pair unchanged");
+
+        const struct { double l, r; const char* name; } cases[] {
+            { -18.0, -18.0, "uncorrelated noise at -18/-18 dBFS RMS" },
+            { -18.0, -100.0, "noise at -18 left, -100 dBFS RMS right" },
+        };
+
+        for (const auto& c : cases)
+        {
+            const auto n = 48000;
+            const auto inL = noise (n, c.l, 3), inR = noise (n, c.r, 4);
+            auto l = inL, r = inR;
+            Rig rig (48000.0);
+            rig.render (l.data(), r.data(), n);
+
+            int differ = 0;
+            for (size_t i = 0; i < (size_t) n; ++i)
+                differ += (l[i] != inL[i]) + (r[i] != inR[i]);
+
+            const auto what = std::string ("defaults return ") + c.name + " bit for bit ("
+                            + std::to_string (differ) + " of " + std::to_string (2 * n) + " samples differ)";
+            check (differ == 0, what.c_str());
+        }
+    }
+
+    // Width 0 is exactly mono: both channels the same bits, and those the
+    // sum's half.
+    {
+        const auto n = 48000;
+        const auto inL = noise (n, -18.0, 5), inR = noise (n, -18.0, 6);
+        auto l = inL, r = inR;
+        Rig rig (48000.0);
+        rig.v[Index::width] = 0.0f;
+        rig.dsp.setParams (rig.v, Index::count);
+        rig.dsp.reset();
+        rig.render (l.data(), r.data(), n);
+
+        int differ = 0;
+        for (size_t i = 0; i < (size_t) n; ++i)
+            differ += (l[i] != r[i]) + (l[i] != 0.5f * (inL[i] + inR[i]));
+
+        check (differ == 0, "width 0 is exactly mono: L == R == (L + R) / 2, bit for bit");
     }
 
     // Gain.
@@ -143,7 +188,10 @@ int main()
         check (near (out.l.back(), 0.5f) && near (out.r.back(), 0.5f), "mono sums to (L+R)/2 on both");
     }
 
-    // A parameter change ramps rather than steps.
+    // A parameter change ramps rather than steps, and the ramp is the one
+    // claimed: a 5 ms one-pole that lands exactly. Gain 0 -> -24 dB on DC 1.0
+    // at 48 kHz: the 240th sample (5 ms) is 1/e of the way from the target,
+    // and after 1 s the output is the target gain exactly.
     {
         UtilDsp dsp;
         float v[Index::count] { 0.0f, 0.0f, 100.0f, 0.0f, 0.0f, 0.0f };
@@ -153,12 +201,94 @@ int main()
         v[Index::gain] = -24.0f;
         dsp.setParams (v, Index::count);
 
-        std::vector<float> l (64, 1.0f), r (64, 1.0f);
+        std::vector<float> l (48000, 1.0f), r (48000, 1.0f);
         float* ch[2] { l.data(), r.data() };
-        dsp.process (ch, 2, 64);
+        dsp.process (ch, 2, 48000);
 
-        check (l[0] > 0.9f && l[63] < l[0], "gain changes are smoothed");
+        const auto target = std::pow (10.0f, -24.0f / 20.0f);
+        const auto atTau  = target + (1.0f - target) * (float) std::exp (-1.0);
+
+        bool falling = true;
+        for (size_t i = 1; i < 240; ++i)
+            falling = falling && l[i] < l[i - 1];
+
+        check (falling && near (l[239], atTau, 1.0e-4f), "a gain change is a 5 ms one-pole ramp");
+        check (l.back() == target && r.back() == target, "and lands on the target gain exactly");
     }
+
+    // A switch is a fade, not a step: polarity L, polarity R and mono, on a
+    // -18 dBFS RMS sine at 100 Hz and 1 kHz, at 48 and 192 kHz. The largest
+    // sample-to-sample step stays under 1.5 times the sine's own, and the
+    // level has no hole beyond the polarity flip's own zero crossing: a flip
+    // is under half level for at most the 5.49 ms (tau ln 3) the sign takes
+    // from +0.5 to -0.5, and mono on a hard-left signal moves each channel
+    // monotonically between its two settled levels.
+    for (const auto rate : { 48000.0, 192000.0 })
+        for (const auto hz : { 100.0, 1000.0 })
+        {
+            const auto n = (int) rate;
+            const auto at = (int) (0.5 * rate) / 512 * 512;
+            const auto in = sine (n, hz, rate);
+            const auto amp = (float) (std::sqrt (2.0) * std::pow (10.0, -18.0 / 20.0));
+
+            float ownStep = 0.0f;
+            for (size_t i = 1; i < in.size(); ++i)
+                ownStep = std::max (ownStep, std::abs (in[i] - in[i - 1]));
+
+            const auto tag = std::to_string ((int) hz) + " Hz at " + std::to_string ((int) rate) + " Hz: ";
+
+            for (const int which : { (int) Index::phaseL, (int) Index::phaseR, (int) Index::mono })
+            {
+                const auto isMono = which == Index::mono;
+                auto l = in;
+                auto r = isMono ? std::vector<float> ((size_t) n, 0.0f) : in;
+
+                Rig rig (rate);
+                rig.render (l.data(), r.data(), at);
+                rig.v[which] = 1.0f;
+                rig.render (l.data() + at, r.data() + at, n - at);
+
+                float biggest = 0.0f;
+                for (size_t i = 1; i < (size_t) n; ++i)
+                    biggest = std::max ({ biggest, std::abs (l[i] - l[i - 1]), std::abs (r[i] - r[i - 1]) });
+
+                const auto name = which == Index::phaseL ? "phase L" : which == Index::phaseR ? "phase R" : "mono";
+                const auto stepWhat = tag + name + " switches with a largest step of "
+                                    + std::to_string (biggest / ownStep) + " x the sine's own, under 1.5";
+                check (biggest < 1.5f * ownStep, stepWhat.c_str());
+
+                // Level, sample by sample, where the input is not near a zero.
+                int first = -1, last = -1;
+                bool inside = true;
+                for (int i = at; i < n; ++i)
+                {
+                    const auto x = in[(size_t) i];
+                    if (std::abs (x) < 0.1f * amp)
+                        continue;
+
+                    if (isMono)
+                    {
+                        const auto gl = l[(size_t) i] / x, gr = r[(size_t) i] / x;
+                        inside = inside && gl >= 0.5f - 1.0e-6f && gl <= 1.0f + 1.0e-6f
+                                        && gr >= -1.0e-6f && gr <= 0.5f + 1.0e-6f;
+                    }
+                    else
+                    {
+                        const auto& out = which == Index::phaseL ? l : r;
+                        if (std::abs (out[(size_t) i] / x) < 0.5f)
+                        {
+                            if (first < 0) first = i;
+                            last = i;
+                        }
+                    }
+                }
+
+                const auto holeMs = first < 0 ? 0.0 : 1000.0 * (last - first + 1) / rate;
+                const auto levelWhat = tag + name + " has no level hole beyond its own crossing (under half level for "
+                                     + std::to_string (holeMs) + " ms, 5.49 at most)";
+                check (inside && holeMs <= 5.5 + 1000.0 / hz * 0.05, levelWhat.c_str());
+            }
+        }
 
     // Mono input does not crash and gets gain and polarity.
     {

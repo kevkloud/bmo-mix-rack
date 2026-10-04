@@ -104,11 +104,25 @@ public:
             a += monoCur * (sum - a);
             b += monoCur * (sum - b);
 
-            const auto mid  = 0.5f * (a + b);
-            const auto side = 0.5f * (a - b) * widthCur;
+            // Mid/side, written as each channel plus or minus the side's
+            // change: L = a + d, R = b - d with d = (a - b) / 2 * (w - 1),
+            // which is mid + side and mid - side. At width 100 d is zero and
+            // the channels pass bit for bit; as mid + side the sum and the
+            // difference each rounded, and at defaults 37 % of samples of
+            // uncorrelated noise came back changed, by up to -150.5 dBFS.
+            // Width 0 keeps the plain sum, so mono is the same bits on both.
+            if (widthCur == 0.0f)
+            {
+                const auto mid = 0.5f * (a + b);
+                l[i] = mid * panLCur;
+                r[i] = mid * panRCur;
+                continue;
+            }
 
-            l[i] = (mid + side) * panLCur;
-            r[i] = (mid - side) * panRCur;
+            const auto d = 0.5f * (a - b) * (widthCur - 1.0f);
+
+            l[i] = (a + d) * panLCur;
+            r[i] = (b - d) * panRCur;
         }
     }
 

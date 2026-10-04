@@ -4534,9 +4534,11 @@ void testTheReportedTailIsNeverShorterThanTheDecay()
     // it comes within 3-11 % of; its FEEDBACK 80 %, TIME 100 ms row stays at
     // 48 kHz only (sixth round, for CI time: a 22 s figure the decay reaches
     // 28 % of, rendered nine times more at the two other rates).
+    // Under `--long` from 2026-10-03, with the fractional-sample rows and the
+    // sustained rows at 44.1 and 96 kHz below: the Debug run had passed 300 s.
     std::vector<TailRow> rates;
 
-    for (const auto rate : { 44100.0, 96000.0 })
+    for (const auto rate : longRun ? std::vector<double> { 44100.0, 96000.0 } : std::vector<double> {})
         for (int c = 0; c < 3; ++c)
         {
             for (const auto& [fb, t] : std::initializer_list<std::pair<float, float>> {
@@ -4564,21 +4566,26 @@ void testTheReportedTailIsNeverShorterThanTheDecay()
              { false, 0.0f, 35.0f, 375.0f }, { false, 0.0f, 60.0f, 375.0f } })
         fractional.push_back ({ 2, fb, t, fx, 0, amount, 44100.0 });
 
-    for (const auto amount : { 60.0f, 100.0f })
-        for (const auto& [fb, t] : std::initializer_list<std::pair<float, float>> {
-                 { 35.0f, 1.0f }, { 35.0f, 2.0f }, { 35.0f, 5.0f }, { 35.0f, 375.0f },
-                 { 60.0f, 1.0f }, { 60.0f, 2.0f }, { 60.0f, 5.0f } })
-            fractional.push_back ({ 2, fb, t, true, 0, amount, 44100.0 });
+    // The fourteen with Diffuse in the loop run under `--long` (2026-10-03);
+    // the boundary itself is held by `testABucketBrigadeBoundaryNeverSpikes`.
+    if (longRun)
+        for (const auto amount : { 60.0f, 100.0f })
+            for (const auto& [fb, t] : std::initializer_list<std::pair<float, float>> {
+                     { 35.0f, 1.0f }, { 35.0f, 2.0f }, { 35.0f, 5.0f }, { 35.0f, 375.0f },
+                     { 60.0f, 1.0f }, { 60.0f, 2.0f }, { 60.0f, 5.0f } })
+                fractional.push_back ({ 2, fb, t, true, 0, amount, 44100.0 });
 
     checkTailRows (fractional, "the tail is never short on bucket-brigade at a fractional-sample delay");
 
     // **A sustained input** (2026-10-01): one second of a tone in phase with
     // the loop, which builds it to 1/(1 - g) of its input before it stops.
     // The review measured clean at 48 kHz ringing 11 % past the old figure at
-    // TIME 375 ms and FEEDBACK 60 %. Every character, three rates.
+    // TIME 375 ms and FEEDBACK 60 %. Every character; 44.1 and 96 kHz under
+    // `--long`.
     std::vector<TailRow> sustained;
 
-    for (const auto rate : { 44100.0, 48000.0, 96000.0 })
+    for (const auto rate : longRun ? std::vector<double> { 44100.0, 48000.0, 96000.0 }
+                                   : std::vector<double> { 48000.0 })
         for (int c = 0; c < 3; ++c)
             for (const auto& [fb, t] : std::initializer_list<std::pair<float, float>> {
                      { 60.0f, 375.0f }, { 80.0f, 250.0f }, { 90.0f, 100.0f } })
@@ -5338,7 +5345,10 @@ void testEveryInLoopEffectLosesEnergyUnderUnity()
 
     int rows = 0;
 
-    for (const auto rate : { 44100.0, 48000.0, 96000.0 })
+    // Crush at 44.1 and 96 kHz runs under `--long` (2026-10-03, for the Debug
+    // run's time); 48 kHz, every type, character and AMOUNT, runs always.
+    for (const auto rate : longRun ? std::vector<double> { 44100.0, 48000.0, 96000.0 }
+                                   : std::vector<double> { 48000.0 })
         for (int type = 0; type < 3; ++type)
             for (int c = 0; c < 3; ++c)
                 for (const auto amount : { 0.0f, 35.0f, 60.0f, 100.0f })
@@ -5552,10 +5562,12 @@ void testTwoEnginesRingingTogetherCountDownFurther()
 
     Every character, MOD 0, 30 and 100 at 0.6 and 8 Hz, TIME 600 and 1900 ms,
     impulses on four phases of the wow at 48 kHz and two at 44.1 and 96 kHz;
-    and the lane at LANE GAIN -100 and 1000 ms with MOD 100. */
+    and the lane at LANE GAIN -100 and 1000 ms with MOD 100. The 44.1 and
+    96 kHz rows run under `--long` (2026-10-03, for the Debug run's time). */
 void testANoFeedbackRepeatIsChargedItsSwing()
 {
-    for (const auto rate : { 44100.0, 48000.0, 96000.0 })
+    for (const auto rate : longRun ? std::vector<double> { 44100.0, 48000.0, 96000.0 }
+                                   : std::vector<double> { 48000.0 })
         for (int c = 0; c < 3; ++c)
             for (const auto depth : { 0.0f, 30.0f, 100.0f })
                 for (const auto rateHz : { 0.6f, 8.0f })
@@ -5583,7 +5595,8 @@ void testANoFeedbackRepeatIsChargedItsSwing()
 
     // The lane: HOLD and SEND on, no tail (LANE GAIN -100), main FEEDBACK 0.
     // The impulse comes after the send's 5 ms opening ramp.
-    for (const auto rate : { 44100.0, 48000.0, 96000.0 })
+    for (const auto rate : longRun ? std::vector<double> { 44100.0, 48000.0, 96000.0 }
+                                   : std::vector<double> { 48000.0 })
         for (int c = 0; c < 3; ++c)
             for (const auto eighth : { 1, 5 })
             {
@@ -6283,17 +6296,14 @@ void testMovingATimeNeverFeedsTheLoop()
     else
     {
         // A subset that fails on the equal-power fade: each mover on clean,
-        // two schedules each, at both high FEEDBACKs; the gliding characters
-        // and the maximum as controls.
+        // on four schedules, at both high FEEDBACKs. The gliding characters,
+        // the maximum and 192 kHz are under `--long`.
         rows = {
             { 0, Mover::time,     Schedule::every64,    85.0f, 48000.0 },
             { 0, Mover::time,     Schedule::ramp,       95.0f, 48000.0 },
             { 0, Mover::note,     Schedule::everyBlock, 85.0f, 48000.0 },
             { 0, Mover::laneTime, Schedule::ramp,       85.0f, 48000.0 },
             { 0, Mover::tempo,    Schedule::random,     95.0f, 48000.0 },
-            { 0, Mover::time,     Schedule::every64,   100.0f, 48000.0 },
-            { 1, Mover::time,     Schedule::everyBlock, 95.0f, 48000.0 },
-            { 2, Mover::note,     Schedule::ramp,       95.0f, 48000.0 },
         };
     }
 

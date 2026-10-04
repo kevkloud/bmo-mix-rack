@@ -315,6 +315,20 @@ public:
         // a reset glided in from silence (out[0] 0.00052 on a 0.5 input,
         // measured on AURORA 2026-10-01).
         gainsPrimed = false;
+
+        // **A reset is a fresh instance, sample for sample** (2026-10-03). The
+        // next parameter set snaps everything the way the first after
+        // `prepare` does -- TIME, the character chain, FEEDBACK, DRIVE, FX
+        // AMOUNT and the gates, in both engines -- and the ramps already in
+        // flight land now, for a host that processes before it sets
+        // anything. Only MIX, LANE LEVEL and DUCK had been snapped, so a
+        // reset just after a move kept gliding the loop's own gains: up to
+        // 0.044 apart from a fresh instance at TIME 5 ms, measured on ICE
+        // QUEEN (`testResetAndPrepareLandOnAFreshInstance`).
+        parametersSeen = false;
+
+        for (auto* s : { &wetGain, &dryGain, &laneLevel, &duckAmount })
+            s->land();
     }
 
     /** **The first parameter set after `prepare` snaps; every one after it

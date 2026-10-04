@@ -109,6 +109,10 @@ public:
         return current;
     }
 
+    /** Puts the value on its target now: what a reset wants of a ramp in
+        flight. */
+    void land() noexcept { current = target; }
+
     float value() const noexcept { return current; }
 
 private:
@@ -1103,6 +1107,17 @@ public:
         // Nothing is circulating, so a switch in flight has nothing left to
         // fade: the chain takes the parameters' character and FX now.
         snapSwitches();
+
+        // **And nothing ramps** (2026-10-03): FEEDBACK, DRIVE and FX AMOUNT
+        // land on their targets, as a fresh instance starts on them. Left
+        // mid-ramp, a reset straight after a move kept gliding out of a value
+        // that no longer had anything to protect. `DspCore::reset` snaps the
+        // next parameter set as well; this is for a host that processes
+        // before it sets anything.
+        feedback.land();
+        driveBlend.land();
+        driveCurve.land();
+        fxAmount.land();
 
         // The gain ring is all 1.0 again, so there is nothing to expand.
         samplesSinceCompanding = ringSize();

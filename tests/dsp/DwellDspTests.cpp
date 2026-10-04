@@ -6749,6 +6749,150 @@ void testASwitchInTheLoopDoesNotStep()
     }
 }
 
+/** **`reset()` and `prepare()` land on a fresh instance, sample for sample**
+    (2026-10-03).
+
+    The review's probe: TIME 5 ms, FEEDBACK 60, then -- one block before the
+    reset -- TIME 7 ms, FEEDBACK 95, DRIVE 80, FX on at AMOUNT 90, so the
+    crossfade and the FEEDBACK, DRIVE and FX AMOUNT smoothers are all mid-way.
+    From the reset on, the instance must render exactly what a fresh instance
+    set to the new values renders on the same input. On the starting code it
+    differed by up to 0.036 for 2.9 s: the reset cleared the rings and left
+    the loop's own gains gliding. `prepare` is held to the same, from 48 kHz
+    and 512 to 96 kHz and 32 mid-fade, with Crush, HOLD and SEND on. Every
+    character. */
+void testResetAndPrepareLandOnAFreshInstance()
+{
+    constexpr auto rate = 48000.0;
+    constexpr int chunk = 512;
+
+    const auto noiseBlock = [] (int n, unsigned int seed)
+    {
+        Block b { n };
+        Noise noise;
+        noise.state = seed;
+
+        for (int i = 0; i < n; ++i)
+        {
+            b.left[(size_t) i]  = 0.25f * noise.next();
+            b.right[(size_t) i] = 0.25f * noise.next();
+        }
+
+        return b;
+    };
+
+    const auto worstApart = [] (const Block& a, int fromA, const Block& b, int n)
+    {
+        auto worst = 0.0f;
+
+        for (int i = 0; i < n; ++i)
+            worst = std::max ({ worst, std::abs (a.left[(size_t) (fromA + i)] - b.left[(size_t) i]),
+                                std::abs (a.right[(size_t) (fromA + i)] - b.right[(size_t) i]) });
+
+        return worst;
+    };
+
+    for (int c = 0; c < 3; ++c)
+    {
+        auto p = defaults();
+        p[P::Index::character] = (float) c;
+        p[P::Index::feedback]  = 60.0f;
+        p[P::Index::time]      = 5.0f;
+
+        auto q = p;
+        q[P::Index::time]     = 7.0f;
+        q[P::Index::feedback] = 95.0f;
+        q[P::Index::drive]    = 80.0f;
+        q[P::Index::fx]       = 1.0f;
+        q[P::Index::fxAmount] = 90.0f;
+
+        // reset() at block 100, the move to q at block 99.
+        {
+            const auto n = (int) (3.0 * rate) / chunk * chunk;
+            const auto resetBlock = 100;
+            auto input = noiseBlock (n, 4u);
+
+            P::DwellDsp moved;
+            moved.prepare (rate, chunk, 2);
+            auto v = p;
+            auto block = input;
+
+            for (int b = 0; b * chunk < n; ++b)
+            {
+                if (b == resetBlock)
+                    moved.reset();
+
+                v = b < resetBlock - 1 ? p : q;
+                moved.setParams (v.data(), (int) v.size());
+                moved.setTempo (120.0, false, false);
+
+                float* ch[] { block.left.data() + b * chunk, block.right.data() + b * chunk };
+                moved.process (ch, 2, chunk);
+            }
+
+            const auto tail = n - resetBlock * chunk;
+            Block fresh { tail };
+            std::copy (input.left.begin() + resetBlock * chunk, input.left.end(), fresh.left.begin());
+            std::copy (input.right.begin() + resetBlock * chunk, input.right.end(), fresh.right.begin());
+
+            P::DwellDsp freshDsp;
+            freshDsp.setParams (q.data(), (int) q.size());
+            freshDsp.prepare (rate, chunk, 2);
+            renderAsHost (freshDsp, q, fresh, tail, chunk, [] (int) {});
+
+            char buf[200];
+            const auto apart = worstApart (block, resetBlock * chunk, fresh, tail);
+            std::snprintf (buf, sizeof (buf),
+                           "reset() mid-crossfade and mid-ramp on %s renders as a fresh instance "
+                           "(worst difference %.3g)", characterName (c), (double) apart);
+            check (apart == 0.0f, buf);
+        }
+
+        // prepare() mid-fade: 48 kHz / 512 to 96 kHz / 32.
+        {
+            auto r = q;
+            r[P::Index::fxType] = 2.0f;
+            r[P::Index::hold]   = 1.0f;
+            r[P::Index::send]   = 1.0f;
+            r[P::Index::time]   = 900.0f;
+
+            P::DwellDsp moved;
+            moved.setParams (r.data(), (int) r.size());
+            moved.prepare (rate, chunk, 2);
+
+            auto warm = noiseBlock ((int) rate, 7u);
+            auto v = q;
+            renderAsHost (moved, v, warm, (int) rate, chunk, [&] (int offset)
+            {
+                v = offset < 90 * chunk ? q : r;
+                v[P::Index::fxType] = 2.0f;
+                v[P::Index::hold]   = 1.0f;
+                v[P::Index::send]   = 1.0f;
+            });
+
+            moved.setParams (r.data(), (int) r.size());
+            moved.prepare (96000.0, 32, 2);
+
+            const auto n = 96000 * 2;
+            auto a = noiseBlock (n, 9u);
+            auto b = a;
+            renderAsHost (moved, r, a, n, 32, [] (int) {});
+
+            P::DwellDsp freshDsp;
+            freshDsp.setParams (r.data(), (int) r.size());
+            freshDsp.prepare (96000.0, 32, 2);
+            renderAsHost (freshDsp, r, b, n, 32, [] (int) {});
+
+            char buf[200];
+            const auto apart = worstApart (a, 0, b, n);
+            std::snprintf (buf, sizeof (buf),
+                           "prepare() mid-crossfade on %s, 48 kHz / 512 to 96 kHz / 32, renders as a fresh "
+                           "instance (worst difference %.3g)", characterName (c), (double) apart);
+            check (apart == 0.0f, buf);
+        }
+    }
+}
+
 } // namespace
 
 //==============================================================================
@@ -6843,6 +6987,7 @@ int main (int argc, char** argv)
     testOneTimeSwitchDoesNotBurst();
     testDiffuseComesBackSilent();
     testASwitchInTheLoopDoesNotStep();
+    testResetAndPrepareLandOnAFreshInstance();
 
     std::printf ("%d checks, %d failures%s\n", checks, failures, longRun ? " (--long)" : "");
     return failures == 0 ? 0 : 1;

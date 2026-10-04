@@ -114,9 +114,17 @@ public:
 
         for (int i = 0; i < size(); ++i)
         {
+            // A parameter a host has just set to NaN, before its owner puts it
+            // back (SingleModuleProcessor), is left out rather than written as
+            // value="nan": a restore then gives it its default.
+            const auto real = getReal (i);
+
+            if (std::isnan (real))
+                continue;
+
             auto* e = xml->createNewChildElement (kParamTag);
             e->setAttribute ("id", spec (i).id);
-            e->setAttribute ("value", (double) getReal (i));
+            e->setAttribute ("value", (double) real);
         }
 
         return xml;

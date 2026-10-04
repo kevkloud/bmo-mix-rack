@@ -77,6 +77,14 @@ public:
 
     void setValue (float newValue) override
     {
+        // A host that sends something that is not a number has not sent a
+        // value, so the lane keeps the one it had. Stored, a NaN read "nan dB",
+        // silenced the slot for as long as it stayed and was saved with the
+        // session (the review of 2026-10-03); an infinity, clamped, would have
+        // jumped to a rail the host never asked for.
+        if (! std::isfinite (newValue))
+            return;
+
         value.store (juce::jlimit (0.0f, 1.0f, newValue), std::memory_order_relaxed);
     }
 

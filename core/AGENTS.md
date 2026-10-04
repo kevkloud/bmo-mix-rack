@@ -199,7 +199,14 @@ rack/     SlotParameter (one generic host parameter, remapped live),
   Dwell, BMO Tune RT, BMO FET (`FetCell.h`) and BMO DEQ (`Dynamics.h`)
   carry checks from before it; they are redundant, not a pattern.
   `finite_tests` walks the registry, Tune included, and the processors'
-  bypass and skip paths, and holds all of this.
+  bypass and skip paths, and holds all of this. **The same for a parameter
+  value a host sends**: a rack lane ignores one that is not finite
+  (`SlotParameter::setValue`) and keeps its value; a standalone parameter is
+  the framework's class, which stores a NaN (an infinity it clamps to a rail
+  itself), so `ModuleEngine` holds the last finite value from the next block,
+  `SingleModuleProcessor` puts the parameter back on the message thread, and
+  `ParamSet::toXml` never writes value="nan" in between. `RackTests` holds
+  both products.
 - **Every module is handed the host's tempo, once per block**
   (`ModuleDsp::setTempo`), so a module can sync to it without either
   processor knowing which modules care. Both processors read the playhead at

@@ -33,6 +33,11 @@ public:
     {
         jassert (paramSet.size() == moduleDef.numParams());
 
+        // The defaults until the first read: what a parameter that is not
+        // finite from the start is held at (see read()).
+        for (int i = 0; i < paramSet.size(); ++i)
+            values[(size_t) i] = paramSet.spec (i).def;
+
         // A module whose parameters write each other gets its link here and
         // nowhere else. **One engine exists per running module in both
         // products** -- the standalone's own, and one per occupied rack slot
@@ -134,6 +139,16 @@ public:
         the next occupant's values in the meantime. Message thread. */
     void dropLink() noexcept { paramLink.reset(); }
 
+    /** True once since the last call if a block found a parameter that was
+        not finite (and held its last finite value instead). Audio thread. */
+    bool takeNonFiniteSeen() noexcept { return nonFiniteSeen.exchange (false, std::memory_order_relaxed); }
+
+    /** The value the module is running on for parameter `i`, in real units:
+        for a parameter that is not finite, the last finite one. Read on the
+        message thread only for such a parameter, whose held value the audio
+        thread no longer writes. */
+    float heldValue (int i) const noexcept { return values[(size_t) i]; }
+
 private:
     void run (float* const* channels, int numChannels, int numSamples, const HostTempo& tempo)
     {
@@ -227,7 +242,22 @@ public:
     AnalyserTap* analyser() noexcept { return dsp->analyser(); }
 
 private:
-    void read() noexcept { paramSet.readAll (values.data()); }
+    // A value that is not finite -- a host can set one on a parameter that
+    // stores what it is given -- is not read: the module keeps the last finite
+    // value it had, and the owner is told (`takeNonFiniteSeen`) so it can put
+    // the parameter back. One isfinite per parameter per block.
+    void read() noexcept
+    {
+        for (int i = 0; i < paramSet.size(); ++i)
+        {
+            const auto v = paramSet.getReal (i);
+
+            if (std::isfinite (v))
+                values[(size_t) i] = v;
+            else
+                nonFiniteSeen.store (true, std::memory_order_relaxed);
+        }
+    }
 
     const ModuleDef& moduleDef;
     ParamSet paramSet;
@@ -242,6 +272,7 @@ private:
     Meter inMeter;
     GainReductionMeter grMeter;
     std::atomic<double> rate { 0.0 };
+    std::atomic<bool> nonFiniteSeen { false };
 };
 
 } // namespace bmo

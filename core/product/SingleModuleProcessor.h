@@ -80,6 +80,9 @@ private:
     void parameterChanged (const juce::String&, float) override;
     void handleAsyncUpdate() override;
 
+    /// engine.process, and a parameter a host set to NaN put back afterwards.
+    void runEngine (float* const* channels, int numChannels, int numSamples, const HostTempo&);
+
     static std::vector<FactoryEntry> factoryEntries (const ModuleDef&, ParamSet&);
 
     const ModuleDef& def;

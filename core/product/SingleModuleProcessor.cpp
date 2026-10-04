@@ -55,8 +55,30 @@ void SingleModuleProcessor::parameterChanged (const juce::String&, float)
     triggerAsyncUpdate();
 }
 
+void SingleModuleProcessor::runEngine (float* const* channels, int numChannels, int numSamples, const HostTempo& tempo)
+{
+    engine.process (channels, numChannels, numSamples, tempo);
+
+    // A host set a parameter to something that is not a number. The engine
+    // is already holding that parameter's last finite value; the parameter
+    // itself -- the framework's class, which stores what it is given -- is put
+    // back to it on the message thread (handleAsyncUpdate).
+    if (engine.takeNonFiniteSeen())
+        triggerAsyncUpdate();
+}
+
 void SingleModuleProcessor::handleAsyncUpdate()
 {
+    auto& params = engine.params();
+
+    for (int i = 0; i < params.size(); ++i)
+    {
+        auto& p = params.param (i);
+
+        if (! std::isfinite (p.getValue()))
+            p.setValueNotifyingHost (p.convertTo0to1 (engine.heldValue (i)));
+    }
+
     const auto latency = engine.latency();
 
     if (reportedLatency.exchange (latency, std::memory_order_relaxed) != latency)
@@ -128,7 +150,7 @@ void SingleModuleProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
         // output was.
         bypassFade.snap (0.0f);
         bypassDelay.push (channels, numOut, numSamples);
-        engine.process (channels, numOut, numSamples, tempo);
+        runEngine (channels, numOut, numSamples, tempo);
         return;
     }
 
@@ -141,7 +163,7 @@ void SingleModuleProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
 
     bypassDelay.delay (dry, numOut, numSamples, juce::jmax (0, reportedLatency.load (std::memory_order_relaxed)));
     finite::scrub (dry, numOut, numSamples);
-    engine.process (channels, numOut, numSamples, tempo);
+    runEngine (channels, numOut, numSamples, tempo);
     bypassFade.apply (channels, channels, dry, numOut, numSamples, 0.0f);
 }
 
@@ -176,7 +198,7 @@ void SingleModuleProcessor::processBlockBypassed (juce::AudioBuffer<float>& buff
 
     if (canBlend)
     {
-        engine.process (processed, numOut, numSamples, tempo);
+        runEngine (processed, numOut, numSamples, tempo);
         bypassFade.apply (channels, processed, channels, numOut, numSamples, 1.0f);
     }
     else

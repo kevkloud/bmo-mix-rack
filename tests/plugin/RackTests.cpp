@@ -1527,5 +1527,106 @@ int main()
                "and is over, sample-exact, within 30 ms, not " + juce::String (run.settledAt * 1000.0 / kEditRate, 1));
     }
 
+    //== A NaN or an infinity from the host is not a value =====================
+    // The review of 2026-10-03: a host's setValue (NaN) on a rack lane was
+    // stored -- the lane read "nan dB", the slot's output was 0 for as long as
+    // it stayed, and the saved state then carried value="nan". The same on a
+    // standalone parameter. A value that is not finite is now ignored where
+    // it comes in and the previous value stands: on a rack lane at once, on a
+    // standalone parameter (the framework's own class, which stores what it
+    // is given) by the engine holding its last finite value from the next
+    // block and the parameter being put back on the message thread.
+    {
+        const float notValues[] { std::numeric_limits<float>::quiet_NaN(),
+                                  std::numeric_limits<float>::infinity(),
+                                  -std::numeric_limits<float>::infinity() };
+
+        const auto peak = [] (juce::AudioProcessor& p, int blocks)
+        {
+            juce::AudioBuffer<float> b (2, 512);
+            juce::MidiBuffer midi;
+            float pk = 0.0f;
+
+            for (int k = 0; k < blocks; ++k)
+            {
+                for (int i = 0; i < 512; ++i)
+                    for (int ch = 0; ch < 2; ++ch)
+                        b.setSample (ch, i, 0.125f * (float) std::sin (2.0 * juce::MathConstants<double>::pi * 220.0 * (k * 512 + i) / 48000.0));
+
+                p.processBlock (b, midi);
+                pk = juce::jmax (pk, b.getMagnitude (0, 512));
+            }
+
+            return pk;
+        };
+
+        const auto savedGain = [] (juce::AudioProcessor& p, bool rack)
+        {
+            juce::MemoryBlock block;
+            p.getStateInformation (block);
+            auto xml = juce::AudioProcessor::getXmlFromBinary (block.getData(), (int) block.getSize());
+            const juce::XmlElement* params = xml.get();
+
+            if (rack && xml != nullptr)
+                if (auto* slot = xml->getChildByName (RackProcessor::kSlotTag))
+                    params = slot->getChildByName (bmo::ParamSet::kRootTag);
+
+            if (params != nullptr)
+                for (auto* e : params->getChildWithTagNameIterator (bmo::ParamSet::kParamTag))
+                    if (e->getStringAttribute ("id") == bmo::util::kGain)
+                        return e->getStringAttribute ("value");
+
+            return juce::String ("<none>");
+        };
+
+        for (const auto bad : notValues)
+        {
+            const juce::String what = juce::String ("host value ") + juce::String (bad);
+
+            // The rack.
+            {
+                auto rack = createRack();
+                rack->addModule (*rack->findModule ("util"));
+                rack->setPlayConfigDetails (2, 2, 48000.0, 512);
+                rack->prepareToPlay (48000.0, 512);
+
+                auto& lane = rack->getSlotParameter (0, bmo::util::Index::gain);
+                lane.setValue (0.25f);                  // -12 dB
+                peak (*rack, 4);
+                lane.setValue (bad);
+
+                checkClose (lane.getValue(), 0.25, 1.0e-6, "rack, " + what + ": the lane keeps its value");
+                check (! lane.getCurrentValueAsText().containsIgnoreCase ("nan"),
+                       "rack, " + what + ": the lane reads '" + lane.getCurrentValueAsText() + "'");
+                checkClose (peak (*rack, 50), 0.125 * juce::Decibels::decibelsToGain (-12.0), 0.002,
+                            "rack, " + what + ": the slot still plays at -12 dB");
+                check (savedGain (*rack, true).getFloatValue() == -12.0f,
+                       "rack, " + what + ": the session saves gain " + savedGain (*rack, true));
+            }
+
+            // Standalone. Only a NaN: the framework's parameter clamps an
+            // infinity to the rail it points at before any code here sees it,
+            // which is a value, if not the previous one.
+            if (std::isnan (bad))
+            {
+                bmo::SingleModuleProcessor proc (bmo::util::module(), bmo::products::rackInfo());
+                proc.setPlayConfigDetails (2, 2, 48000.0, 512);
+                proc.prepareToPlay (48000.0, 512);
+
+                auto& param = proc.getEngine().params().param (bmo::util::Index::gain);
+                param.setValue (0.25f);
+                peak (proc, 4);
+                param.setValue (bad);
+
+                checkClose (peak (proc, 50), 0.125 * juce::Decibels::decibelsToGain (-12.0), 0.002,
+                            "standalone, " + what + ": the module still plays at -12 dB");
+                juce::MessageManager::getInstance()->runDispatchLoopUntil (20);
+                checkClose (param.getValue(), 0.25, 1.0e-6, "standalone, " + what + ": the parameter is back at its value");
+                check (savedGain (proc, false).getFloatValue() == -12.0f,
+                       "standalone, " + what + ": the session saves gain " + savedGain (proc, false));
+            }
+        }
+    }
+
     return finish ("BMO Mix Rack");
 }

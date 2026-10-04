@@ -1086,6 +1086,25 @@ and is on the open list.
 
 ## The late network while SIZE moves
 
+**SIZE is a set-and-leave control.** A length move is weighted by when a
+sample was written, so it cannot add energy to the loop -- and the price is
+that every move takes some away. On held noise that passes: the network
+refills and settles at the new SIZE's own level. On a decaying tail it does
+not: one move at 48 kHz, DECAY 5 s, leaves the tail 1.2 dB under SIZE held
+for 12 -> 30 m or 12 -> 80 m, 10.8 dB for 80 -> 12 m and 19.5 dB for
+80 -> 0.5 m, for good -- shrinking costs more than growing. Under
+automation the losses add up: at DECAY 20 s, both multipliers 2.0, the
+tail's T60 is 39.45 s held, 21.58 s with SIZE on a 12..13 m LFO with a
+10 s period, 6.65 s on 12..30 m every 4 s, 1.91 s toggled 12 <-> 30 m every
+64 blocks of 32; held noise comes out 3.22 to 12.68 dB under its held
+level. **Frosty, 2026-10-03: "a held SIZE is untouched; automating SIZE
+thins the tail" is the behaviour for 0.2.6**, with gliding the line lengths
+as the fallback if the listening pass disagrees. The figures and the
+mechanism are in `10` §4's as-built list; "What automating SIZE costs the
+tail" in `reverb_dsp_tests` pins three of them in both directions, and the
+kept-moving test counts the rows it judged on a tail the moves had already
+taken under -120 dBFS.
+
 **DECAY, LOW x and HIGH x wait for a length move to end.** A SIZE move or a
 TYPE dip takes no new request until it is over (`applyPendingConfig`'s early
 return), and the three coefficients are requests like any other. With SIZE

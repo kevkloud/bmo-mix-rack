@@ -3035,7 +3035,7 @@ int main (int argc, char** argv)
 
     //== SIZE and TYPE kept moving never make the tail grow =====================
     //
-    // QA, 2026-10-04, PR #38, third pass. Frosty's rule for a feedback loop:
+    // QA, 2026-10-03, PR #38, third pass. Frosty's rule for a feedback loop:
     // under 100 % feedback it loses energy and never rings indefinitely, and a
     // parameter change while signal is in the loop is part of that. A length
     // move re-read each line at its new delay, and reading at a longer delay
@@ -3672,7 +3672,7 @@ int main (int argc, char** argv)
         // (d): reset() **after** the bottom of the dip, when the length move
         // has begun and the incoming filter bank is running beside the live
         // one. (c) resets 11 ms in, before the 30 ms bottom, and never reaches
-        // it (QA, 2026-10-04). Four blocks is 43 ms.
+        // it (QA, 2026-10-03). Four blocks is 43 ms.
         {
             DspCore::Params p;
             tailOnly (p);
@@ -3758,7 +3758,7 @@ int main (int argc, char** argv)
     //
     // The realised-gain sweep above reads the live bank. A move runs a second
     // one beside it, for the path it is going to, and that one was never read
-    // (QA, 2026-10-04). Here a full-range SIZE move is started in each
+    // (QA, 2026-10-03). Here a full-range SIZE move is started in each
     // direction and both banks are read while it is in flight.
     {
         double worst = 0.0;
@@ -4174,7 +4174,7 @@ int main (int argc, char** argv)
         // **SIZE and TYPE are held to the step ratio instead**, 11 section 6's
         // "no click": no sample-to-sample step bigger than the signal had
         // before the move, allowing for where it settles. Both open a gap in
-        // the tail by design -- TYPE dips to silence, and since 2026-10-04 a
+        // the tail by design -- TYPE dips to silence, and since 2026-10-03 a
         // SIZE move leaves each growing line quiet between its old delay and
         // its new one, so nothing is replayed -- and on a steady sine eight
         // lines dropping out and coming back pass through near-cancellation,

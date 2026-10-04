@@ -185,7 +185,7 @@ review found gaps in the tests. All on ICE QUEEN.
 `build-dsp` and `build-full` figures are in the commit that carries this
 note.
 
-## QA's third pass, on `6a37ffe`, 2026-10-04
+## QA's third pass, on `6a37ffe`, 2026-10-03
 
 The last round held. QA found a blocker that had been in the late network
 since the first head they saw: **SIZE kept moving makes the tail grow without
@@ -214,7 +214,7 @@ filters each under one, is held by measurement, and the code says so.
 
 **Tests, written first:**
 - SIZE, TYPE, and both together, alternating every 1, 64 and 2048 blocks of
-  32 samples over a 40 s tail at 48 and 192 kHz, 43 rows: the 10 s window
+  32 samples over a 30 s tail at 48 and 192 kHz, 43 rows: the 10 s window
   peaks may never rise. On `6a37ffe` 8 rows grew; now none.
 - Both filter banks, live and incoming, realise under 1 while a move is in
   flight: 144 moves, worst 0.99935. Shown failing with a 1 % error in the
@@ -239,11 +239,13 @@ filters each under one, is held by measurement, and the code says so.
 | 80 → 12 m | 0.9 dB down | 300 ms | 246 ms |
 
 Growing a room opens a gap in the tail, because nothing is replayed to fill
-it. Shrinking one is nearly seamless. A move lasts the longest line plus
-30 ms, and the next move waits for it. **Frosty accepted this on
-2026-10-04**, and named the fallback if the gap ever matters in use: glide
-the line lengths, which has no gap and no replay but pitch-bends the tail
-during the move. It is not built. `10` §4's as-built list has both.
+it. On held noise, shrinking one barely dips; on a decaying tail it costs
+more than growing, for good (see the fourth pass below). A move lasts the
+longest line plus 30 ms, and the next move waits for it. **Frosty accepted
+this on 2026-10-03**, and named the fallback if the gap ever matters in
+use: glide the line lengths, which has no gap and no replay but
+pitch-bends the tail during the move. It is not built. `10` §4's as-built
+list has both.
 
 **One test criterion changed with it.** The single SIZE 12 → 30 m move is
 held to the step ratio again (1.00), not the 1 ms energy jump (3.8 dB). The
@@ -255,3 +257,65 @@ for coefficient changes; both figures are printed.
 quiet machine): mean 10.4 % of the block, 99th percentile 39.9 %, against
 10.5 % and 40.0 % on `6a37ffe`. Held: 4.99 % against 4.95 %. The spec now
 says its figures are for held settings.
+
+## QA's fourth pass, on `f3e91db`, 2026-10-03
+
+Nothing grows any more: about 3,000 kept-moving rows in QA's probe, the
+worst realised loop gain in flight 0.99935, no out-of-bounds read, no
+allocation. Five smaller things were left, all closed on ICE QUEEN.
+
+**What a move costs, which the third pass undersold.** "Shrinking is nearly
+seamless" is true of held noise only. With signal still arriving the
+network refills and settles at the new SIZE's level, so a move costs only
+its dip. On a decaying tail nothing refills it, and every move leaves the
+tail quieter than SIZE held at either end, for good. Probe `gap`, Room
+unless named, DECAY 5 s, a 10 ms burst at −18 dBFS RMS at 0, one move at
+0.3 s, 48 kHz / 32, the late output 1–2 s after the move against SIZE held
+at the old size:
+
+| move | 1–2 s after |
+|---|---|
+| 12 → 13 m | −1.2 dB |
+| 12 → 30 m | −1.2 dB |
+| 12 → 80 m | −1.2 dB (silent for 80 ms of the move) |
+| 0.5 → 80 m | −5.0 dB |
+| 30 → 12 m | −4.5 dB |
+| 80 → 12 m | −10.8 dB |
+| 80 → 0.5 m | −19.5 dB |
+| Ambience 80 → 0.5 m | −18.3 dB |
+
+Shrinking costs more than growing: a shrinking line reads its pre-move
+samples at the old delay to the end, and the new path stays silent until
+they are done. Under automation the losses add up (probe `autolevel`, Room,
+DECAY 20 s, both multipliers 2.0): T60 39.45 s held, 21.58 s on a 12..13 m
+LFO with a 10 s period, 18.44 s on 12..15 m, 6.65 s on 12..30 m every 4 s,
+1.91 s toggled 12 ↔ 30 m every 64 blocks; held noise 3.22, 6.05, 8.79 and
+12.68 dB under the held level. **Frosty, 2026-10-03: "a held SIZE is
+untouched; automating SIZE thins the tail" is the behaviour for 0.2.6**,
+with gliding the line lengths as the fallback if the listening pass
+disagrees. SIZE is a set-and-leave control. `10` §4 has the tables.
+
+**Fixed, one commit each, tests first:**
+- **The suite fit its limit in Release only.** `scripts/build.sh` tests
+  Debug, where `reverb_dsp_tests` took 374–404 s against a 300 s fence and
+  ctest failed it as a timeout. The kept-moving test runs seven of its 43
+  rows by default (the five 48 kHz rows that grew on `6a37ffe`, which still
+  fail there, and two live ones) and all 43 under `--long`. Default run:
+  40–59 s Release, 271–372 s Debug with other builds sharing the machine;
+  fence 1200 s.
+- **reset() with a request queued behind a move** built from where the move
+  was going, not from what was asked for: 0.232, 0.000704 and 0.0318 off a
+  fresh instance over 2 s of noise (SIZE queued, DECAY queued, SIZE queued
+  mid-dip). Now 0 in all three, and asserted.
+- **DECAY and the multipliers wait for a move to end**, every 111–289 ms
+  under SIZE automation against 0.7 ms with SIZE held. Left as it is: the
+  two-path sum is held by measurement, and that measurement ran with the
+  coefficients still. Written into `10` §4 and `modules/reverb/AGENTS.md`,
+  and pinned: a request 10 ms into Room 12 → 80 m arrives 236.7 ms later.
+- **The loss is pinned in both directions**: T60 39.45 s held, 21.6 s on the
+  12..13 m LFO, 1.91 s toggled, and −3.22 dB on noise, ±2 % and ±0.25 dB.
+  And the kept-moving test now says which rows it judged on a tail the moves
+  had already taken under −120 dBFS: 5 of the default 7 (every row that grew
+  on `6a37ffe`), 2 live.
+- **Docs**: this section, `10` §4, `modules/reverb/AGENTS.md` and `README.md`;
+  and the third pass's dates, which read 2026-10-04, are 2026-10-03.

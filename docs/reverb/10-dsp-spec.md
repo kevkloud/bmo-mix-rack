@@ -444,7 +444,7 @@ where it is coded. Everything else above stands.
   T60/τ̄: Hall at 1 m peaked +0.8 dBFS on pink noise at −18 dBFS RMS. Both
   are CALIBRATE.
 - **A length change runs two whole paths, weighted by when a sample was
-  written** (third form, 2026-10-04). The old read goes through the old
+  written** (third form, 2026-10-03). The old read goes through the old
   filters at the old level and the new read through the new filters at the
   new level. A sample written before the move is read at the old delay, in
   full, and never again; a sample written after it is read at the new delay;
@@ -474,12 +474,58 @@ where it is coded. Everything else above stands.
   A line that grows is quiet between its old delay and its new one, because
   nothing written since the move has reached the new delay yet. A move lasts
   the longest line, old or new, plus 30 ms, and the next move waits for it,
-  so SIZE under automation steps at that pace. Shrinking is nearly
-  seamless. **The ER generator keeps §3's 30 ms crossfade**: it is
-  feed-forward, has no loop to feed, and so cannot grow. "ER and late
-  sharing the scheme" (§5) no longer holds, on purpose.
+  so SIZE under automation steps at that pace. **The ER generator keeps §3's
+  30 ms crossfade**: it is feed-forward, has no loop to feed, and so cannot
+  grow. "ER and late sharing the scheme" (§5) no longer holds, on purpose.
 
-  **Frosty accepted this trade-off on 2026-10-04, with a fallback named.**
+  **On held noise the cost passes; on a decaying tail it stays.** With
+  signal still arriving, the network refills and settles at the new SIZE's
+  own level, so a move costs only the dip in the table above. With nothing
+  arriving, whatever a move drops is gone: every move makes the tail
+  quieter than SIZE held at either end, for good, and **shrinking costs
+  more than growing**. A shrinking line reads its pre-move samples at the
+  old delay to the end, and the new path stays silent until they are done,
+  so what was written in between is lost. Measured on ICE QUEEN (QA's
+  probe, `gap`; Room unless named, DECAY 5 s, a 10 ms burst at −18 dBFS RMS
+  at 0, one move at 0.3 s, 48 kHz / 32, the late output alone), the level
+  1–2 s after the move against SIZE held at the old size:
+
+  | move | during the move | 1–2 s after, for good |
+  |---|---|---|
+  | 12 → 13 m | 3.2 dB down | −1.2 dB |
+  | 12 → 30 m | 17.4 dB down | −1.2 dB |
+  | 12 → 80 m | silent, 80 ms more than 20 dB down | −1.2 dB |
+  | 0.5 → 80 m | silent, 110 ms more than 20 dB down | −5.0 dB |
+  | 30 → 12 m | 6.6 dB down | −4.5 dB |
+  | 80 → 12 m | 11.8 dB down | −10.8 dB |
+  | 80 → 0.5 m | 20.9 dB down | −19.5 dB |
+  | Ambience 80 → 0.5 m | 20.4 dB down | −18.3 dB |
+
+  Against SIZE held at the *new* size the figures are within 0.2 dB of these.
+
+  **Under automation the losses add up**, one per move. QA's `autolevel`
+  (Room, DECAY 20 s, both multipliers 2.0, 48 kHz, SIZE written once per
+  32-sample block; ICE QUEEN): the loop energy's T60, fitted 5–35 dB under
+  its peak after a 10 ms burst, and the output level on held noise at
+  −18 dBFS RMS over 10–60 s against SIZE held at 12 m:
+
+  | SIZE | tail T60 | held noise |
+  |---|---|---|
+  | held at 12 m | 39.45 s | 0 dB |
+  | LFO 12..13 m, 10 s period | 21.58 s | −3.22 dB |
+  | LFO 12..15 m, 10 s period | 18.44 s | −6.05 dB |
+  | LFO 12..30 m, 4 s period | 6.65 s | −8.79 dB |
+  | toggled 12 ↔ 30 m every 64 blocks | 1.91 s | −12.68 dB |
+
+  `reverb_dsp_tests` pins the held row, the first LFO and the toggle (on the
+  output's energy, which gives 39.45, 21.6 and 1.91 s and −3.22 dB), so a
+  change to the loss in either direction fails.
+
+  **Frosty, 2026-10-03: "a held SIZE is untouched; automating SIZE thins the
+  tail" is the behaviour for 0.2.6**, with gliding the line lengths as the
+  fallback if the listening pass disagrees. SIZE is a set-and-leave control.
+
+  **Frosty accepted this trade-off on 2026-10-03, with a fallback named.**
   If the gap on a growing SIZE move turns out to matter in use, the
   fallback is to **glide the line lengths** instead: no gap and no replay,
   at the price §5 refused it for, a pitch bend across the whole tail for as
@@ -573,7 +619,7 @@ Frosty, not assumed to fit. 48 kHz / 128 stays at ≤1.5 % (measured
 the tail runs two paths and the early reflections rebuild their table, and
 at 192 kHz / 32 QA measured a mean of about 10.5 % of the block with a 99th
 percentile near 40 % (Room, SIZE 30 ↔ 12 m toggled every block and every 64
-blocks; 2026-10-04, ICE QUEEN, and the same before and after the move was
+blocks; 2026-10-03, ICE QUEEN, and the same before and after the move was
 reworked that day: 10.4 % and 39.9 % on a quiet machine). No dropout at
 that; it is a cost of moving SIZE or TYPE, not of holding them.
 

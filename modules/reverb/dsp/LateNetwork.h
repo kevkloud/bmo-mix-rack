@@ -310,7 +310,7 @@ public:
                 // in the tests (seven by default, all 43 under --long) and 72
                 // in QA's probe, none growing.
                 //
-                // Until QA's third pass (2026-10-04) both paths were weighted
+                // Until QA's third pass (2026-10-03) both paths were weighted
                 // by one crossfade in *read* time. Reading at a longer delay
                 // then replayed samples that had already been round the loop,
                 // every move put energy back, and SIZE toggling 12 <-> 30 m

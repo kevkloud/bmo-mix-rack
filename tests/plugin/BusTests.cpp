@@ -600,10 +600,17 @@ const Golden kSwept[]
     // peak 1.16623 -> 0.98509. The branch this was made on also carried BMO
     // EQ's switch fixes, which had moved this row to -12.3533 / 1.16854 on
     // their own; the figures here are both together.
+    // Regenerated once more on ICE QUEEN, 2026-10-03, with --print, when the
+    // Dimension, dynamic equaliser, LTV Comp and Defang fixes were brought
+    // together on top of all of the above. Mono RMS, built at each step:
+    // -11.7196 (before) -> -11.4156 with Dimension (OUTPUT +6.2 dB at 0.63),
+    // -> -16.1270 with the DEQ cut Q cap, unchanged by LTV Comp, -> -14.9040
+    // with Defang's shelf decision. Peak 1.16199 -> 0.98121. No tolerance
+    // was touched.
     { "rack",
-      -11.7195631752, 1.16198933125,
-      -11.317069677, 1.15757536888, -11.2731589041, 1.15886342525,
-      -11.854487306, 1.15360951424, -11.8121786505, 1.15331184864 },
+      -14.904039426, 0.98121213913,
+      -16.1090252929, 0.984293937683, -16.8254629299, 0.96965867281,
+      -13.4428295266, 0.98645991087, -13.7304542727, 0.979837238789 },
 };
 
 const Golden* goldenFor (const Golden* table, size_t n, const char* id)

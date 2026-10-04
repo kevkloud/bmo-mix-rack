@@ -53,9 +53,16 @@ target_link_libraries(reverb_dsp_tests PRIVATE bmo_reverb_dsp)
 add_test(NAME reverb_dsp COMMAND reverb_dsp_tests)
 # A regression that hangs has to fail here, not stall the job until the
 # runner gives up: reset() before prepare() spun forever on 6067809 and only
-# a probe run by hand found it. The suite takes about a minute and a half;
-# five is the fence. (ctest's own default is 1500 s.)
-set_tests_properties(reverb_dsp PROPERTIES TIMEOUT 300)
+# a probe run by hand found it. (ctest's own default is 1500 s.)
+#
+# **The fence is set by the Debug build**, because scripts/build.sh tests
+# that one. On ICE QUEEN (2026-10-03) the default run takes 40 s in Release
+# and 271 s in Debug, so the fence is 900 s, a little over three times the
+# slower. It was 300 s while the kept-moving test ran all 43 rows by
+# default, which took 404 s in Debug and timed the suite out; those rows are
+# behind --long now, which ctest does not pass. A run that reaches the fence
+# still fails, as a timeout.
+set_tests_properties(reverb_dsp PROPERTIES TIMEOUT 900)
 
 endif()
 

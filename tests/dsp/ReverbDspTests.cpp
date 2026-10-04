@@ -3047,7 +3047,19 @@ int main (int argc, char** argv)
     // A 10 ms burst at -18 dBFS RMS, then silence, DECAY 20 s and both
     // multipliers at 2.0, while SIZE, TYPE or both alternate every N blocks
     // of 32 samples: the peak in each 10 s window may never rise.
+    //
+    // **The default run keeps seven of the 43 rows; --long runs them all.**
+    // scripts/build.sh runs ctest on the Debug build, where all 43 took 374
+    // to 404 s on ICE QUEEN (2026-10-03) against a 300 s limit, so the suite
+    // failed by timing out. Kept: the five rows at 48 kHz that grew on
+    // 6a37ffe, the read-time crossfade this test was written against (Room,
+    // Ambience, and Room <-> Ambience, SIZE 12 <-> 30 m every 1 or 64
+    // blocks), and two at 2048 blocks that keep a tail well above the floor
+    // for all 30 s, so the default run also judges a tail that is still
+    // there. The three 192 kHz rows that grew are behind --long with the rest.
     {
+        const bool longRun = argc > 1 && std::string (argv[1]) == "--long";
+
         struct Row { double rate; int type; float sizeA, sizeB; int typeB; int everyBlocks; };
         std::vector<Row> rows;
 
@@ -3069,6 +3081,25 @@ int main (int argc, char** argv)
                 rows.push_back ({ 48000.0, (int) room, 12.0f, 30.0f, typeB, every });
             }
         rows.push_back ({ 192000.0, (int) room, 12.0f, 30.0f, (int) plate, 64 });
+
+        const auto allRows = rows.size();
+        if (! longRun)
+        {
+            const auto kept = [] (const Row& w)
+            {
+                const auto is = [&w] (int type, float sizeB, int typeB, int every)
+                {
+                    return w.rate == 48000.0 && w.type == type && w.sizeA == 12.0f && w.sizeB == sizeB
+                        && w.typeB == typeB && w.everyBlocks == every;
+                };
+                return is (room, 30.0f, room, 1) || is (room, 30.0f, room, 64)
+                    || is (ambience, 30.0f, ambience, 1) || is (ambience, 30.0f, ambience, 64)
+                    || is (room, 30.0f, ambience, 1)
+                    || is (room, 12.5f, room, 2048) || is (room, 30.0f, plate, 2048);
+            };
+            rows.erase (std::remove_if (rows.begin(), rows.end(), [&kept] (const Row& w) { return ! kept (w); }), rows.end());
+            check (rows.size() == 7, "the default run keeps its seven kept-moving rows");
+        }
 
         int grew = 0;
 
@@ -3124,7 +3155,8 @@ int main (int argc, char** argv)
             }
         }
 
-        std::cout << "  SIZE / TYPE kept moving over a 40 s tail: " << grew << " of " << rows.size() << " rows grew\n";
+        std::cout << "  SIZE / TYPE kept moving over a 30 s tail: " << grew << " of " << rows.size() << " rows grew"
+                  << (longRun ? "" : " (the default seven of " + std::to_string (allRows) + "; --long runs all of them)") << "\n";
         check (grew == 0, "no cadence of SIZE or TYPE moves makes the tail's 10 s window peaks rise");
     }
 

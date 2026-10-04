@@ -296,8 +296,9 @@ public:
                 // move), and the sum of two differently filtered signals is
                 // not covered by that argument. That last step is held by
                 // measurement: SIZE and TYPE toggled at every cadence from
-                // one block to a third of a second over a 40 s tail, 43 rows
-                // in the tests and 72 in QA's probe, none growing.
+                // one block to a third of a second over a 30 s tail, 43 rows
+                // in the tests (seven by default, all 43 under --long) and 72
+                // in QA's probe, none growing.
                 //
                 // Until QA's third pass (2026-10-04) both paths were weighted
                 // by one crossfade in *read* time. Reading at a longer delay

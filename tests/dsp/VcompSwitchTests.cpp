@@ -5,6 +5,12 @@
 // holds the transitions -- a control changing while a signal passes, or after
 // one has stopped -- which none of those tests can see, because each of them
 // builds a fresh core, sets it once and measures the result.
+//
+// **The default run is a subset; `vcomp_switch_tests --long` runs every
+// row.** The default keeps, in every section, the rows that failed on the
+// code the section was written against, at 48 kHz and one other rate (the
+// stereo pass at 48 kHz alone), with the extreme settings; ctest runs the
+// default. Run --long before merging any change to modules/vcomp/dsp.
 
 #include "modules/vcomp/dsp/DspCore.h"
 #include "modules/vcomp/presets/FactoryPresets.h"
@@ -16,6 +22,7 @@
 #include <cstdio>
 #include <functional>
 #include <iostream>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -24,7 +31,7 @@ using Params = DspCore::Params;
 
 namespace
 {
-    int failures = 0;
+    int failures = 0, checks = 0;
     constexpr double kPi = 3.14159265358979323846;
     std::vector<double> kRates { 44100.0, 48000.0, 96000.0, 192000.0 };
 
@@ -36,8 +43,29 @@ namespace
     bool gHeavy = true;
     std::string gMode;
 
+    /** --long runs every row of every grid; the default run keeps the
+        subset `pick` and `kept` choose. scripts/build.sh tests the Debug
+        build, where the whole suite took 756 s on ICE QUEEN (2026-10-03). */
+    bool longRun = false;
+
+    /** `all` under --long, `keep` by default. Every value in `keep` is in
+        `all`, so the default run is a subset and asserts the same bounds. */
+    template <typename T>
+    std::vector<T> pick (std::initializer_list<T> all, std::initializer_list<T> keep)
+    {
+        return longRun ? std::vector<T> (all) : std::vector<T> (keep);
+    }
+
+    /** Whether a named row runs: always under --long, and by default when
+        its name is in `names`. */
+    bool kept (const std::string& name, std::initializer_list<const char*> names)
+    {
+        return longRun || std::any_of (names.begin(), names.end(), [&name] (const char* n) { return name == n; });
+    }
+
     void check (bool ok, const std::string& what)
     {
+        ++checks;
         if (! ok) { std::cerr << "FAIL: " << what << gMode << '\n'; ++failures; }
     }
 
@@ -627,6 +655,18 @@ void sections()
         sweep ("LOW THRU dragged 21 -> 500 -> 21",    true,  21.0f,   500.0f);
         sweep ("HIGH THRU dragged 2k -> 19999 -> 2k", false, 2000.0f, 19999.0f);
 
+        // The default run keeps the three moves quoted above as failing, the
+        // other COMPLEX row with its special case, a whole-range glide each
+        // way, a move reversed 2 ms in and a drag; --long runs all 25.
+        if (! longRun)
+            moves.erase (std::remove_if (moves.begin(), moves.end(), [] (const Move& m)
+            {
+                return ! kept (m.name, { "COMPLEX on -> off (bands only)", "COMPLEX off -> on (knobs moved)",
+                                         "LOW THRU 200 -> 20", "LOW THRU 21 -> 500", "LOW THRU 20 -> 300 -> 20",
+                                         "HIGH THRU 20k -> 6k", "HIGH THRU 2k -> 19999",
+                                         "LOW THRU dragged 21 -> 500 -> 21" });
+            }), moves.end());
+
         for (const auto fs : kRates)
             for (const auto hz : { 150.0, 1000.0 })
                 for (const auto& m : moves)
@@ -838,6 +878,16 @@ void sections()
 
         moves.push_back ({ "HIGH THRU 20k -> 6000, LOW THRU 200", at (200, hi), at (200, 6000), { 200.0, 6000.0 } });
         moves.push_back ({ "LOW THRU 200 -> 20, HIGH THRU 6000",  at (200, 6000), at (lo, 6000), { 200.0, 6000.0 } });
+
+        // The default run keeps each side's widest move both ways and the
+        // two moves with the other side in; --long runs all fourteen.
+        if (! longRun)
+            moves.erase (std::remove_if (moves.begin(), moves.end(), [] (const Move& m)
+            {
+                return ! kept (m.name, { "LOW THRU 20 -> 500", "LOW THRU 500 -> 20", "HIGH THRU 20k -> 2000",
+                                         "HIGH THRU 2000 -> 20k", "HIGH THRU 20k -> 6000, LOW THRU 200",
+                                         "LOW THRU 200 -> 20, HIGH THRU 6000" });
+            }), moves.end());
         // COMPLEX is not here: it is a switch, and a switch goes through a
         // dip by decision (section 10), which this section would read as one.
 
@@ -900,7 +950,7 @@ void glideFlatness()
     double worst = 0.0;
     std::string where;
 
-    for (const auto fs : { 48000.0, 192000.0 })
+    for (const auto fs : pick ({ 48000.0, 192000.0 }, { 48000.0 }))
         for (const auto& m : moves)
             for (const auto hz : { 30.0, 60.0, 150.0, 400.0, 1000.0, 3000.0, 8000.0, 15000.0, 0.0 })
             {
@@ -1204,9 +1254,24 @@ void heldIsUnchanged (bool print)
 // ARC off, HIGH THRU 6000, LOW THRU 200 and 500, SIDECHAIN 20 and 500 -- so
 // the compressor is working and the two modes disagree about everything.
 
-/** The suite's voice (tests/plugin/TestUtil.h voice()) at any rate. */
-std::vector<float> suiteVoice (double fs, size_t n)
+/** The suite's voice (tests/plugin/TestUtil.h voice()) at any rate.
+
+    Made once for each rate and length and kept: rows that ask for the same
+    one used to synthesise it again, 120 harmonics a sample, and the 60 s of
+    it the preset recalls take cost more than the recalls. The harmonics'
+    weights do not depend on the sample, so they are worked out once too.
+    Every sample is the same arithmetic as before, so the same float. */
+const std::vector<float>& suiteVoice (double fs, size_t n)
 {
+    static std::map<std::pair<double, size_t>, std::vector<float>> made;
+
+    if (const auto found = made.find ({ fs, n }); found != made.end())
+        return found->second;
+
+    double weight[121] {};
+    for (int h = 1; h <= 120; ++h)
+        weight[h] = std::pow ((double) h, -1.4);
+
     std::vector<float> out (n);
     double sumSquares = 0.0;
 
@@ -1219,7 +1284,7 @@ std::vector<float> suiteVoice (double fs, size_t n)
         double sum = 0.0;
 
         for (int h = 1; h <= 120 && 75.0 * h <= fs * 0.49; ++h)
-            sum += std::pow ((double) h, -1.4) * std::sin (2.0 * kPi * 75.0 * h * t);
+            sum += weight[h] * std::sin (2.0 * kPi * 75.0 * h * t);
 
         out[i] = (float) (env * sum);
         sumSquares += (double) out[i] * out[i];
@@ -1230,7 +1295,7 @@ std::vector<float> suiteVoice (double fs, size_t n)
     for (auto& v : out)
         v = (float) (v * gain);
 
-    return out;
+    return made[{ fs, n }] = std::move (out);
 }
 
 /** Mono, any block size, with a hook called before each block. */
@@ -1301,9 +1366,9 @@ void complexSwitchLevels()
     double worstExtra = 0.0, worstLimit = -1.0e9, latest = 0.0, latestDetector = 0.0, worstAbsLimiter = 0.0;
     std::string extraWhere, limitWhere;
 
-    for (const auto fs : { 48000.0, 96000.0 })
-        for (const auto lowHz : { 200.0f, 500.0f })
-            for (const auto sc : { 20.0f, 500.0f })
+    for (const auto fs : pick ({ 48000.0, 96000.0 }, { 48000.0 }))
+        for (const auto lowHz : pick ({ 200.0f, 500.0f }, { 500.0f }))
+            for (const auto sc : pick ({ 20.0f, 500.0f }, { 500.0f }))
                 for (const auto toOn : { true, false })
                 {
                     const auto from = reviewerKnobs (lowHz, sc, ! toOn), to = reviewerKnobs (lowHz, sc, toOn);
@@ -1430,8 +1495,8 @@ void complexSwitchSteps()
 
     const auto from = reviewerKnobs (200.0f, 500.0f, false), to = reviewerKnobs (200.0f, 500.0f, true);
 
-    for (const auto fs : { 44100.0, 48000.0, 96000.0, 192000.0 })
-        for (const auto block : { 1, 32, 441, 512 })
+    for (const auto fs : pick ({ 44100.0, 48000.0, 96000.0, 192000.0 }, { 44100.0, 48000.0 }))
+        for (const auto block : pick ({ 1, 32, 441, 512 }, { 1, 441 }))
             for (const auto hz : { 20.0, 30.0, 60.0, 150.0, 300.0, 1000.0, 0.0 })
             {
                 // Block 1 is a sample-by-sample host and costs the most to run;
@@ -1540,6 +1605,10 @@ void complexToggled()
 
     for (const auto& pattern : patterns)
     {
+        // By default, the pattern quoted failing on the code this was written against.
+        if (! kept (pattern.name, { "every 64 blocks" }))
+            continue;
+
         const auto finalOn = pattern.isOn ((long) (stop / (size_t) block) - 1);
         const auto y = renderBlocks (fs, x, block, [&] (size_t s)
         {
@@ -1712,10 +1781,14 @@ void knobLevelsCompressing()
     double worst = 0.0;
     std::string where;
 
-    for (const auto fs : { 48000.0, 192000.0 })
+    for (const auto fs : pick ({ 48000.0, 192000.0 }, { 48000.0 }))
         for (const auto& m : moves)
             for (const auto hz : { 60.0, 150.0, 400.0, 1000.0, 3000.0, 8000.0, 0.0 })
             {
+                // By default, each side's whole range, one each way.
+                if (! kept (m.name, { "LOW THRU 500 -> 21", "HIGH THRU 2k -> 19999" }))
+                    continue;
+
                 const auto n = (size_t) (2.2 * fs);
                 const auto sw = (size_t) (0.5 * fs) / 64 * 64;
                 const auto members = hz > 0.0 ? 4 : 8;
@@ -1847,7 +1920,7 @@ void unheardSettingsLand()
 // always-off instance for half a second, and Keep The Chest -> In Front with
 // the limiter 5.76 dB over a fresh In Front (reviewer, 2026-10-03).
 //
-// Every ordered pair of the factory presets, 56 of them, recalled at 1 s into
+// Every ordered pair of the factory presets, 72 of them (six by default), recalled at 1 s into
 // the suite's voice at -18 dBFS RMS, at 48 kHz in 512-sample blocks: against a
 // fresh instance of the target preset, outside the dip --
 //
@@ -1912,12 +1985,48 @@ void presetRecalls()
     auto railed = [] (Params p) { p.lowThruHz = kLowThruOffHz; p.highThruHz = kHighThruOffHz; return p; };
     auto quiet  = [] (Params p) { p.outputDb -= 24.0f; return p; };
 
+    // The renders of a preset held, which every recall into it (and, for the
+    // short one, out of it) is measured against, are made once per preset
+    // rather than once per pair. A fresh instance fed the same blocks gives
+    // the same samples, and the short render is the first four seconds of the
+    // long one (shortN is a whole number of blocks), so every figure is what
+    // rendering them again for each pair gave.
+    struct Held { std::vector<float> f, fl, fq, f2, f2q; };
+    std::vector<Held> heldOf (presets.size());
+
+    const auto heldFor = [&] (size_t i) -> const Held&
+    {
+        auto& h = heldOf[i];
+
+        if (h.fl.empty())
+        {
+            const auto p = presetParams (presets[i]);
+            const auto heldShort = [&] (const Params& q) { return renderBlocks (fs, xs, block, [&] (size_t) { return q; }); };
+            h.fl  = renderBlocks (fs, x, block, [&] (size_t) { return p; });
+            h.f   = std::vector<float> (h.fl.begin(), h.fl.begin() + (long) shortN);
+            h.fq  = heldShort (quiet (p));
+            h.f2  = heldShort (railed (p));
+            h.f2q = heldShort (quiet (railed (p)));
+        }
+
+        return h;
+    };
+
+    int pairs = 0;
+
     for (size_t ia = 0; ia < presets.size(); ++ia)
         for (size_t ib = 0; ib < presets.size(); ++ib)
         {
             if (ia == ib)
                 continue;
 
+            // By default, the recalls among Init and the two presets in the
+            // pairs quoted failing on the code this was written against.
+            if (! kept (presets[ia].name, { "Init", "Fast Vocal", "Keep The Chest" })
+                || ! kept (presets[ib].name, { "Init", "Fast Vocal", "Keep The Chest" }))
+                continue;
+
+            ++pairs;
             const auto a = presetParams (presets[ia]), b = presetParams (presets[ib]);
             const auto name = std::string (presets[ia].name) + " -> " + presets[ib].name;
 
@@ -1929,13 +2038,18 @@ void presetRecalls()
             const auto from = dipped ? sw + 2 * half + 1 : sw;
 
             auto recall = [&] (const Params& p, const Params& q) { return renderBlocks (fs, xs, block, [&] (size_t s) { return s < sw ? p : q; }); };
-            auto held   = [&] (const Params& p) { return renderBlocks (fs, xs, block, [&] (size_t) { return p; }); };
 
-            const auto y  = recall (a, b),                         yq  = recall (quiet (a), quiet (b));
-            const auto f  = held (b),                              fq  = held (quiet (b));
+            // The long recall's first four seconds are the short one.
+            const auto yl = renderBlocks (fs, x, block, [&] (size_t s) { return s < sw ? a : b; });
+            const std::vector<float> y (yl.begin(), yl.begin() + (long) shortN);
+            const auto yq = recall (quiet (a), quiet (b));
             const auto y2 = recall (railed (a), railed (b)),       y2q = recall (quiet (railed (a)), quiet (railed (b)));
-            const auto f2 = held (railed (b)),                     f2q = held (quiet (railed (b)));
-            const auto fa = held (a);
+
+            const auto& hb = heldFor (ib);
+            const auto& f  = hb.f;   const auto& fq  = hb.fq;
+            const auto& f2 = hb.f2;  const auto& f2q = hb.f2q;
+            const auto& fl = hb.fl;
+            const auto& fa = heldFor (ia).f;
 
             const auto ly = limiterReduction (y, yq), lf = limiterReduction (f, fq);
             const auto l2 = limiterReduction (y2, y2q), lf2 = limiterReduction (f2, f2q);
@@ -1982,9 +2096,6 @@ void presetRecalls()
             check (step < 1.5, name + " steps " + fixed (step) + "x the presets' own");
 
             // Sample for sample, over a long render.
-            const auto yl = renderBlocks (fs, x, block, [&] (size_t s) { return s < sw ? a : b; });
-            const auto fl = renderBlocks (fs, x, block, [&] (size_t) { return b; });
-
             size_t lastDifferent = sw;
             for (auto i = sw; i < longN; ++i)
                 if (yl[i] != fl[i])
@@ -2001,7 +2112,7 @@ void presetRecalls()
             if (after > worstTime)        { worstTime = after;        timeWhere = name; }
         }
 
-    std::cout << "Preset recalls, 56 pairs: level " << fixed (worstLevel) << " dB beyond the split-held-out recall (" << levelWhere
+    std::cout << "Preset recalls, " << pairs << " pairs: level " << fixed (worstLevel) << " dB beyond the split-held-out recall (" << levelWhere
               << "); limiter " << fixed (worstLimit) << " dB beyond it (" << limitWhere << "), " << fixed (worstAbsLimit)
               << " dB over a fresh target at most; step " << fixed (worstStep) << "x (" << stepWhere << "); sample-exact after "
               << fixed (worstTime, 2) << " s at worst (" << timeWhere << ")\n";
@@ -2009,20 +2120,24 @@ void presetRecalls()
 
 int main (int argc, char** argv)
 {
+    longRun = argc > 1 && std::string (argv[1]) == "--long";
+
     if (argc > 1 && std::string (argv[1]) == "--print-hashes")
     {
         heldIsUnchanged (true);
         return 0;
     }
 
-    // Mono at every rate the suite runs at; then the step and silence
+    // Mono at every rate the suite runs at (44.1 and 48 kHz by default, 48
+    // kHz alone in stereo); then the step and silence
     // sections again in stereo, each channel judged, where every channel's
     // split has to move in step with the first's.
+    kRates = pick ({ 44100.0, 48000.0, 96000.0, 192000.0 }, { 44100.0, 48000.0 });
     sections();
 
     gChannels = 2;
     gHeavy = false;
-    kRates = { 48000.0, 192000.0 };
+    kRates = pick ({ 48000.0, 192000.0 }, { 48000.0 });
 
     for (const auto right : { false, true })
     {
@@ -2034,7 +2149,7 @@ int main (int argc, char** argv)
     gChannels = 1;
     gTakeRight = false;
     gMode.clear();
-    kRates = { 44100.0, 48000.0, 96000.0, 192000.0 };
+    kRates = pick ({ 44100.0, 48000.0, 96000.0, 192000.0 }, { 44100.0, 48000.0 });
 
     glideFlatness();
     complexReturn();
@@ -2049,6 +2164,8 @@ int main (int argc, char** argv)
     presetRecalls();
     heldIsUnchanged (false);
 
+    std::cout << checks << " checks, " << failures << " failures"
+              << (longRun ? "" : " (the default subset; --long runs every row)") << "\n";
     if (failures == 0)
         std::cout << "All LTV Comp switch tests passed.\n";
 

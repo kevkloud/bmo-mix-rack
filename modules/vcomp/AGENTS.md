@@ -343,7 +343,11 @@ Two things this changed that are worth knowing:
   (a recall, COMPLEX unchanged) dips too; a crossover knob moved on its own
   glides. With no side running and none wanted COMPLEX moves only the
   detector and switches at once. `vcomp_switch_tests` sections 10 and 12
-  (all 56 preset-to-preset recalls) hold it.
+  (all 72 preset-to-preset recalls under `--long`) hold it.
+
+`vcomp_switch_tests` runs a subset of every section's grid by default, which
+is what ctest runs (six of the 72 recalls, for one); `vcomp_switch_tests
+--long` runs every row. Run `--long` before merging any change to `dsp/`.
 - **A separate limiter on the thru path** was the third candidate and is not
   needed now. It only bit near full scale, and the thru band no longer gets
   anywhere near it.

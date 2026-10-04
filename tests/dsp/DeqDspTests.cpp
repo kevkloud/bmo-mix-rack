@@ -2360,6 +2360,73 @@ namespace
         return h;
     }
 
+    /** The engine's own double-precision render of twelve held bands -- the
+        output's RMS, its peak and four fixed samples -- for pinning against
+        6f6b8c3. In double, a maths library's last-place differences stay at
+        the 1e-12 level while a real change of design does not. */
+    Settings heldEngineSettings (bool dynamic)
+    {
+        Settings s;
+        const Shape shapes[12] { Shape::lowCut, Shape::lowShelf, Shape::bell, Shape::bell, Shape::bell, Shape::highShelf,
+                                 Shape::bell, Shape::lowShelf, Shape::bell, Shape::bell, Shape::highShelf, Shape::highCut };
+        for (int b = 0; b < 12; ++b)
+        {
+            auto& x = s.bands[(size_t) b];
+            x.enabled = true; x.shape = shapes[b];
+            x.frequencyHz = 40.0 * (b + 1) * (b + 1);
+            x.gainDb = b % 2 ? 4.5 : -6.0;
+            x.q = (shapes[b] == Shape::lowCut || shapes[b] == Shape::highCut) ? 0.5
+                                                                               : std::min (0.4 + 0.3 * b, shapes[b] == Shape::bell ? 40.0 : 2.0);
+            x.placement = (Placement) (b % 3);
+            x.dynamics.enabled = dynamic && hasGain (shapes[b]);
+            x.dynamics.direction = (b / 2) % 2 ? Direction::below : Direction::above;
+            x.dynamics.thresholdDb = -45.0 + 3.0 * b;
+            x.dynamics.rangeDb = b % 3 == 0 ? 9.0 : -12.0;
+            x.dynamics.ratio = 1.5 + b;
+            x.dynamics.attackMs = 0.5 + 3.0 * b;
+            x.dynamics.releaseMs = 20.0 + 150.0 * b;
+        }
+        return s;
+    }
+
+    std::array<double, 6> heldEngineFigures (bool dynamic, double rate)
+    {
+        const auto n = (size_t) rate;
+        std::vector<double> l (n), r (n);
+        {
+            uint32_t a = 101u, b = 202u;
+            double la = 0.0, lb = 0.0;
+            for (size_t i = 0; i < n; ++i)
+            {
+                a = a * 1664525u + 1013904223u; b = b * 1664525u + 1013904223u;
+                const auto wa = (double) a / 4294967296.0 * 2.0 - 1.0, wb = (double) b / 4294967296.0 * 2.0 - 1.0;
+                la = 0.9 * la + 0.1 * wa; lb = 0.9 * lb + 0.1 * wb;
+                l[i] = 0.06 * wa + 0.25 * la; r[i] = 0.06 * wb + 0.25 * lb;
+            }
+        }
+
+        DspCore e;
+        e.prepare (rate, 512, 2);
+        e.setSettings (heldEngineSettings (dynamic));
+        for (size_t pos = 0; pos < n; pos += 512)
+        {
+            double* ch[2] { l.data() + pos, r.data() + pos };
+            e.process (ch, 2, (int) std::min ((size_t) 512, n - pos));
+        }
+
+        double sum = 0.0, peak = 0.0;
+        for (size_t i = 0; i < n; ++i)
+        {
+            sum += l[i] * l[i] + r[i] * r[i];
+            peak = std::max ({ peak, std::abs (l[i]), std::abs (r[i]) });
+        }
+
+        std::array<double, 6> f { std::sqrt (sum / (2.0 * (double) n)), peak, 0.0, 0.0, 0.0, 0.0 };
+        for (size_t k = 1; k <= 4; ++k)
+            f[k + 1] = l[n * k / 5] + r[n * k / 5 + 1];
+        return f;
+    }
+
     void testHeldSettingsAreUnchanged()
     {
         const double rates[] { 44100.0, 48000.0, 96000.0 };
@@ -2370,28 +2437,47 @@ namespace
             check (heldHash (1, rate) == heldHash (2, rate),
                    "Held: DYN off is the static EQ to the bit, whatever the dynamics knobs say, " + std::to_string ((int) rate) + " Hz");
 
-        // The renders themselves, against 6f6b8c3's, captured on ICE QUEEN
-        // from that tree with MSVC and the DLL runtime (/MD, as this build
-        // links) on 2026-10-03. Pinned for MSVC only: the last bits are a
-        // toolchain's and its maths library's -- the static runtime's exp or
-        // pow differs in the last place and moved one of these six -- and a
-        // hash has no tolerance (BusTests' tolerances say the same).
+        // The figures themselves, against 6f6b8c3's: RMS, peak and four
+        // samples of the engine's double output, captured on ICE QUEEN from
+        // that tree on 2026-10-03. They agree to 3.9e-12 relative between the
+        // DLL and the static runtime (/MD, /MT) -- 6f6b8c3 and this tree are
+        // bit-identical under each -- and a 1e-9 error in one coefficient
+        // moves them by 6e-9 to 4e-8. So 1e-10 under MSVC, 25 times the
+        // spread measured, catches that; elsewhere, where no spread has been
+        // measured, 1e-9 is the bound, and it may miss an error that small.
+        // The float output's exact hash is printed, for the record only: it
+        // differs in the last place between runtimes.
 #if defined (_MSC_VER)
-        const uint64_t pinned[2][3] {
-            { 0x6469a8ac3c9a84c7ull, 0xed2d470b3cb983d3ull, 0x09d0f80ac9c39876ull },   // dynamic
-            { 0x7db48dff20aedf88ull, 0x8aabeba150373086ull, 0x31897c8368849bd5ull },   // static
+        constexpr double tolerance = 1.0e-10;
+#else
+        constexpr double tolerance = 1.0e-9;
+#endif
+        const double pinned[2][3][6] {
+            {   // dynamic
+                { 0.04765819572534296, 0.19197901171426757, 0.0051584221808478881, -0.014753304787781616, -0.086915310788695924, -0.16743542885715382 },
+                { 0.046839222204263939, 0.18266891146935921, 0.036383053901249587, 0.065243938846074392, -0.044714106865857861, 0.02716817334030212 },
+                { 0.041971532365942282, 0.19119157594160865, -0.015083977264030775, -0.033139035876273301, 0.044692853989185717, -0.15027950541184065 },
+            },
+            {   // static
+                { 0.058391020817543431, 0.23182606005486331, 0.0035353217750529325, -0.023945993810449775, -0.10821508551253761, -0.19767088073262332 },
+                { 0.057417000220107546, 0.22762664416342648, 0.040835577444195172, 0.076565963087499495, -0.055461633902529436, 0.037210753167592918 },
+                { 0.051481891610753089, 0.23377207783261333, -0.020468243065762708, -0.032412158572005759, 0.020400191887946107, -0.17308793254136778 },
+            },
         };
+        const char* names[] { "RMS", "peak", "sample 1", "sample 2", "sample 3", "sample 4" };
 
         for (int which = 0; which < 2; ++which)
             for (int i = 0; i < 3; ++i)
             {
-                const auto got = heldHash (which, rates[i]);
-                if (got != pinned[which][i])
-                    std::cerr << "  held hash " << which << " at " << rates[i] << ": 0x" << std::hex << got << std::dec << '\n';
-                check (got == pinned[which][i], std::string ("Held: ") + (which == 0 ? "dynamic" : "static")
-                       + " bands render bit-identically to 6f6b8c3 at " + std::to_string ((int) rates[i]) + " Hz");
+                const auto got = heldEngineFigures (which == 0, rates[i]);
+                for (size_t k = 0; k < got.size(); ++k)
+                    checkClose (got[k], pinned[which][i][k], tolerance * std::abs (pinned[which][i][k]),
+                                std::string ("Held: ") + (which == 0 ? "dynamic" : "static") + " bands' " + names[k]
+                                + " as 6f6b8c3's at " + std::to_string ((int) rates[i]) + " Hz");
+
+                std::cout << "  held " << (which == 0 ? "dynamic" : "static") << " at " << rates[i] << ": float output hash 0x"
+                          << std::hex << heldHash (which == 0 ? 0 : 1, rates[i]) << std::dec << '\n';
             }
-#endif
     }
 
     /** reset() before prepare() returns, and leaves the module a wire. */

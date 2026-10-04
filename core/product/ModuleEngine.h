@@ -96,6 +96,47 @@ public:
     void process (float* const* channels, int numChannels, int numSamples, const HostTempo& tempo)
     {
         read();
+        run (channels, numChannels, numSamples, tempo);
+    }
+
+    /** One block on the values the last block read, without touching the
+        parameters at all.
+
+        For the rack while a chain edit is under way: the message thread is
+        re-pointing lanes and ParamSets that this engine would otherwise read,
+        so the engine keeps running -- its DSP state carries on, which is the
+        point -- on what it already holds. Values that do not change across an
+        edit, which is all of them unless a hand is on a knob at that moment,
+        give exactly the samples `process` would. Never before the first
+        `prepare`, which is what fills the held values. */
+    void processHeld (float* const* channels, int numChannels, int numSamples, const HostTempo& tempo)
+    {
+        run (channels, numChannels, numSamples, tempo);
+    }
+
+    /** Points the engine at other parameter objects for the same specs, and
+        rebuilds the module's link on them. Message thread, with the audio
+        thread holding off this engine's reads (`processHeld`). The DSP is not
+        touched: a module moved to another rack slot keeps its state. */
+    void rebind (std::vector<juce::RangedAudioParameter*> params)
+    {
+        paramLink.reset();
+        paramSet.rebind (std::move (params));
+
+        if (moduleDef.createParamLink != nullptr)
+            paramLink = moduleDef.createParamLink (paramSet);
+    }
+
+    /** Lets go of the module's link before the parameters it listens to are
+        given to another module. For an engine a chain edit retires: it may run
+        on for a few milliseconds while the output fades, and is destroyed only
+        once the audio thread has let go of it too, but it must not react to
+        the next occupant's values in the meantime. Message thread. */
+    void dropLink() noexcept { paramLink.reset(); }
+
+private:
+    void run (float* const* channels, int numChannels, int numSamples, const HostTempo& tempo)
+    {
         dsp->setParams (values.data(), (int) values.size());
         dsp->setTempo (tempo.bpm, tempo.valid, tempo.playing);
 
@@ -139,6 +180,7 @@ public:
         grMeter.publish (dsp->currentGainReductionDb());
     }
 
+public:
     /** Latency for the parameters as they are now. Safe from any thread. */
     int latency() const
     {

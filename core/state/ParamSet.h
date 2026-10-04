@@ -24,6 +24,17 @@ public:
 
     int size() const noexcept { return (int) paramList.size(); }
 
+    /** The same specs, other parameter objects: a rack slot's engine that a
+        chain edit moves to another slot reads that slot's lanes from then on.
+        The caller copies the values across first and owns the threading --
+        `RackProcessor::rebuild` holds the audio thread off these reads while
+        it does this. */
+    void rebind (std::vector<juce::RangedAudioParameter*> params)
+    {
+        jassert (params.size() == paramList.size());
+        paramList = std::move (params);
+    }
+
     const ParamSpecs& specs() const noexcept                 { return specList; }
     const ParamSpec& spec (int i) const noexcept             { return specList[(size_t) i]; }
     juce::RangedAudioParameter& param (int i) const noexcept { return *paramList[(size_t) i]; }

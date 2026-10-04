@@ -14,6 +14,7 @@
 */
 
 #include "TestUtil.h"
+#include "RackGoldenState.h"
 #include "core/product/SingleModuleProcessor.h"
 #include "core/rack/RackEditor.h"
 #include "products/rack/Product.h"
@@ -224,6 +225,95 @@ namespace
                                         : nullptr)
                                   : xml.get();
         return params != nullptr ? params->getStringAttribute (bmo::kViewAttribute, "<none>") : "<none>";
+    }
+
+    //== A chain edit while audio runs =========================================
+    // Two racks fed the same signal: `edited` starts from one chain and is
+    // edited mid-stream; `reference` holds the chain the edit arrives at from
+    // the first block. A module the edit does not remove or replace keeps its
+    // engine, so once the dip is over the two must agree to the sample.
+    constexpr double kEditRate  = 48000.0;
+    constexpr int    kEditBlock = 512;
+
+    struct EditRun
+    {
+        float steadyStep = 0.0f, steadyPeak = 0.0f;   // the 20 blocks before the edit
+        float worstStep  = 0.0f, worstPeak  = 0.0f;   // every block from the edit on
+        int   settledAt  = 0;                         // samples after the edit until edited == reference for good
+        int   latencyBefore = 0, latencyAfter = 0;
+    };
+
+    /** A 220 Hz sine at -18 dBFS peak, the same in both channels. With `tail`
+        it stops after 100 blocks (1.07 s), so the edit lands in the ringing of
+        a delay or a reverb rather than on a held note. */
+    EditRun runEdit (RackProcessor& edited, RackProcessor& reference,
+                     const std::function<void()>& edit, bool tail)
+    {
+        constexpr int pre = 150, steadyBlocks = 20, post = 40, stopAt = 100;
+
+        for (auto* r : { &edited, &reference })
+        {
+            r->setPlayConfigDetails (2, 2, kEditRate, kEditBlock);
+            r->prepareToPlay (kEditRate, kEditBlock);
+        }
+
+        EditRun run;
+        run.latencyBefore = edited.getLatencySamples();
+
+        juce::AudioBuffer<float> a (2, kEditBlock), b (2, kEditBlock);
+        juce::MidiBuffer midi;
+        float prev[2] {};
+        long long n = 0;
+        int lastDiff = -1;
+
+        for (int k = 0; k < pre + post; ++k)
+        {
+            for (int i = 0; i < kEditBlock; ++i, ++n)
+            {
+                const auto v = tail && k >= stopAt ? 0.0f
+                             : 0.125f * (float) std::sin (2.0 * juce::MathConstants<double>::pi * 220.0 * (double) n / kEditRate);
+                for (int ch = 0; ch < 2; ++ch)
+                {
+                    a.setSample (ch, i, v);
+                    b.setSample (ch, i, v);
+                }
+            }
+
+            if (k == pre)
+                edit();
+
+            edited.processBlock (a, midi);
+            reference.processBlock (b, midi);
+
+            for (int ch = 0; ch < 2; ++ch)
+            {
+                for (int i = 0; i < kEditBlock; ++i)
+                {
+                    const auto x = a.getSample (ch, i);
+                    const auto step = std::abs (x - prev[ch]);
+                    prev[ch] = x;
+
+                    if (k >= pre - steadyBlocks && k < pre)
+                    {
+                        run.steadyStep = juce::jmax (run.steadyStep, step);
+                        run.steadyPeak = juce::jmax (run.steadyPeak, std::abs (x));
+                    }
+                    else if (k >= pre)
+                    {
+                        run.worstStep = juce::jmax (run.worstStep, step);
+                        run.worstPeak = juce::jmax (run.worstPeak, std::abs (x));
+
+                        if (x != b.getSample (ch, i))
+                            lastDiff = juce::jmax (lastDiff, (k - pre) * kEditBlock + i);
+                    }
+                }
+            }
+        }
+
+        juce::MessageManager::getInstance()->runDispatchLoopUntil (20);
+        run.latencyAfter = edited.getLatencySamples();
+        run.settledAt = lastDiff + 1;
+        return run;
     }
 }
 
@@ -606,10 +696,16 @@ int main()
 
         checkClose (buffer.getSample (0, 511), 0.25, 0.005, "two -6 dB utils in series give -12 dB");
 
-        // An empty rack is a wire.
+        // An empty rack is a wire, once the edit that emptied it has dipped
+        // through: two blocks, down and back up (kEditDipMs each way).
         rack->clearChain();
-        juce::FloatVectorOperations::fill (buffer.getWritePointer (0), 0.7f, 512);
-        rack->processBlock (buffer, midi);
+
+        for (int b = 0; b < 3; ++b)
+        {
+            juce::FloatVectorOperations::fill (buffer.getWritePointer (0), 0.7f, 512);
+            rack->processBlock (buffer, midi);
+        }
+
         checkClose (buffer.getSample (0, 100), 0.7, 1.0e-6, "an empty rack passes audio");
     }
 
@@ -886,6 +982,139 @@ int main()
 
         sandbox.deleteRecursively();
         bmo::PresetManager::setDirectoryForTesting ({});
+    }
+
+    //== A session saved before this build plays exactly as it did ============
+    // The text was written by the build at 0e4bdb0, before chain edits kept
+    // their engines (RackGoldenState.h). Restoring it must give the same chain
+    // and the same values, and saving it again must give the same text back.
+    {
+        auto golden = juce::parseXML (juce::String (golden::kRackState0e4bdb0));
+        check (golden != nullptr, "the golden session parses");
+
+        if (golden != nullptr)
+        {
+            juce::MemoryBlock block;
+            juce::AudioProcessor::copyXmlToBinary (*golden, block);
+
+            auto rack = createRack();
+            rack->setStateInformation (block.getData(), (int) block.getSize());
+            juce::MessageManager::getInstance()->runDispatchLoopUntil (50);
+
+            check (chainIds (*rack) == std::vector<juce::String> { "eq", "sat", "deq", "opto", "dwell", "fetcomp", "reverb", "util" },
+                   "the golden session restores its chain");
+            check (rack->isSlotExpanded (2), "and BMO DEQ's view");
+
+            juce::MemoryBlock again;
+            rack->getStateInformation (again);
+            auto resaved = juce::AudioProcessor::getXmlFromBinary (again.getData(), (int) again.getSize());
+            const auto format = juce::XmlElement::TextFormat().withoutHeader();
+
+            check (resaved != nullptr && resaved->toString (format) == golden->toString (format),
+                   "re-saving the golden session gives back the same text, every value included");
+        }
+    }
+
+    //== A chain edit keeps every engine it does not remove or replace =========
+    // QA's figures on 2026-10-03, before this: adding a utility module after
+    // a compressor rebuilt the compressor too, a sample step of 7.97x (FET),
+    // 12.94x (levelling) and 45.60x (LTV, a block at -0.1 dBFS against a
+    // -18 dBFS sine) the steady signal's; a delay's echoes at -21.3 dBFS and a
+    // reverb's tail were cut to digital zero. Now the untouched module runs on
+    // through the edit, the output dips to silence and back around it, and
+    // after the dip it is the sample a rack that had the new chain all along
+    // would give.
+    {
+        struct Kept
+        {
+            const char* id;
+            std::vector<std::pair<const char*, float>> settings;
+            bool tail;
+        };
+
+        const Kept kKept[] {
+            { "fetcomp", { { "input", 30.0f } }, false },
+            { "opto",    { { "crush", 90.0f } }, false },
+            { "ltvcomp", { { "amount", 80.0f } }, false },
+            { "dwell",   { { "feedback", 60.0f }, { "mix", 100.0f } }, true },
+            // On a held note: on this branch BMO Linger's late field is not
+            // in yet, so its output is the early reflections and nothing
+            // rings past them for an edit to land in.
+            { "reverb",  { { "mix", 100.0f } }, false },
+        };
+
+        struct Edit
+        {
+            const char* what;
+            std::vector<const char*> before, after;     // "K" is the kept module
+            std::function<void (RackProcessor&)> apply;
+        };
+
+        const Edit kEdits[] {
+            { "a utility module added after it", { "K" },         { "K", "util" },
+              [] (RackProcessor& r) { r.addModule (*r.findModule ("util")); } },
+            { "the utility module before it removed", { "util", "K" }, { "K" },
+              [] (RackProcessor& r) { r.removeModule (0); } },
+            { "it moved ahead of the utility module", { "util", "K" }, { "K", "util" },
+              [] (RackProcessor& r) { r.moveModule (0, 1); } },
+            { "the utility module after it replaced", { "K", "util" }, { "K", "util" },
+              [] (RackProcessor& r) { r.setModule (1, *r.findModule ("util")); } },
+            { "BMO EQ at 2x after it removed, latency and all", { "K", "eq" }, { "K" },
+              [] (RackProcessor& r) { r.removeModule (1); } },
+        };
+
+        const auto build = [&] (const Kept& kept, const std::vector<const char*>& ids)
+        {
+            auto rack = createRack();
+
+            for (int s = 0; s < (int) ids.size(); ++s)
+            {
+                const auto isKept = juce::String (ids[(size_t) s]) == "K";
+                rack->addModule (*rack->findModule (isKept ? kept.id : ids[(size_t) s]));
+
+                auto& p = rack->getEngineAt (s)->params();
+
+                if (isKept)
+                    for (const auto& [id, v] : kept.settings)
+                        p.setReal (id, v);
+                else if (juce::String (ids[(size_t) s]) == "eq")
+                    p.setReal (bmo::eq::kOversampling, 1.0f);
+            }
+
+            juce::MessageManager::getInstance()->runDispatchLoopUntil (20);
+            return rack;
+        };
+
+        const auto limit = (int) std::lround (0.030 * kEditRate);
+
+        for (const auto& kept : kKept)
+        {
+            for (const auto& e : kEdits)
+            {
+                auto edited    = build (kept, e.before);
+                auto reference = build (kept, e.after);
+                const auto run = runEdit (*edited, *reference, [&] { e.apply (*edited); }, kept.tail);
+
+                const juce::String where = juce::String (kept.id) + ", " + e.what + ": ";
+                const auto ratio = run.steadyStep > 0.0f ? run.worstStep / run.steadyStep : 0.0f;
+                const auto overDb = juce::Decibels::gainToDecibels (run.worstPeak, -240.0f)
+                                  - juce::Decibels::gainToDecibels (run.steadyPeak, -240.0f);
+
+                check (run.steadyPeak > 1.0e-3f, where + "the module is audible before the edit, peak "
+                                                     + juce::String (run.steadyPeak, 6));
+                check (ratio < 1.5f, where + "largest sample step " + juce::String (ratio, 2)
+                                         + "x the steady signal's, over the 1.5x bound");
+                check (overDb <= 1.0f, where + "a block " + juce::String (overDb, 2)
+                                           + " dB over the steady peak, over the 1 dB bound");
+                check (run.settledAt <= limit, where + "edited and never-edited racks agree only "
+                                                   + juce::String (run.settledAt) + " samples ("
+                                                   + juce::String (run.settledAt * 1000.0 / kEditRate, 1)
+                                                   + " ms) after the edit, over the 30 ms bound");
+                check (run.latencyAfter == reference->getLatencySamples(),
+                       where + "the reported latency is the new chain's sum, "
+                           + juce::String (run.latencyAfter) + " vs " + juce::String (reference->getLatencySamples()));
+            }
+        }
     }
 
     return finish ("BMO Mix Rack");

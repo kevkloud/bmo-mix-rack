@@ -23,8 +23,11 @@ namespace bmo
     knob drag calls them. Nothing hosts it, runs audio through it or asks it
     for state. It owns parameters and that is all it does.
 
-    Built and destroyed by RackProcessor::rebuild, under the chain lock and
-    after the slot's engine has gone, like everything else in a slot.
+    Built by RackProcessor::rebuild for a module arriving in a slot, new or
+    moved there, since its parameters are named and numbered for the slot. It
+    is retired with its engine when the module leaves the chain, or alone when
+    the module moves on, and destroyed only after the engine and after the
+    audio thread has finished with both.
 */
 class SlotOverflow final : public juce::AudioProcessor
 {

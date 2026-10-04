@@ -52,9 +52,11 @@ public:
     int getIndex() const noexcept { return paramIndex; }
 
     //== Assignment ===========================================================
-    // Message thread, under the rack's chain lock. The value is reset to the
-    // spec's default: a module arriving in a slot starts from Init, never
-    // from whatever the previous module left in the lane.
+    // Message thread, inside RackProcessor::rebuild, which holds the audio
+    // thread off every lane while it runs. The value is reset to the spec's
+    // default: a module arriving in a slot starts from Init, never from
+    // whatever the previous module left in the lane. A module moved here by
+    // an edit has its own values written over that straight after.
 
     void assign (const ParamSpec* s)
     {

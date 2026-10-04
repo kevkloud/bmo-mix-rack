@@ -152,12 +152,25 @@ bool RackProcessor::audioIsRunning() const
 {
     const auto last = lastBlockMs.load (std::memory_order_relaxed);
 
+    // Never prepared, or no block since the last prepare or release: nothing
+    // will run a block until the host prepares again, which completes the
+    // swap anyway, so it is made now.
     if (! prepared || last == 0)
         return false;
 
-    // Four blocks or 200 ms, whichever is longer: a host that has not asked
-    // for a block in that long is not running this instance, and an edit can
-    // be put in place at once rather than left for a block that may not come.
+    // Otherwise the swap is the audio thread's, however long ago the last
+    // block was. It used to be decided by the clock -- 200 ms without a block
+    // and the swap was made here, with no dip -- which a loaded machine or a
+    // debugger could trip on an edit made while audio was running. The clock
+    // now only bounds what a host that has stopped calling leaves pending:
+    // once a run of edits has retired a whole rack's worth of engines, or
+    // queued more chains than that, and no block has come for four blocks or
+    // 200 ms, the swap is made here and the backlog destroyed.
+    const auto backlog = retired.size() >= (size_t) kSlots || chains.size() > (size_t) (4 * kSlots);
+
+    if (! backlog)
+        return true;
+
     const auto blockMs = currentRate > 0.0 ? 1000.0 * (double) currentBlock / currentRate : 0.0;
     const auto patience = (juce::uint32) std::max (200.0, 4.0 * blockMs);
 

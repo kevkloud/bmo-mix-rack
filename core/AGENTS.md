@@ -171,9 +171,15 @@ rack/     SlotParameter (one generic host parameter, remapped live),
   changed, so it marks the session modified; a restore or a rack preset
   never does, or a host would mark a project modified as it opens it.
 - The audio thread takes the rack's `chainLock` only as a try-lock, and only
-  prepare, release and an edit made while no block has come for 200 ms (or
-  four blocks) ever hold it; a block that meets it goes out silent, never
-  dry. Everything else that reads or changes the chain off the audio thread
+  prepare, release and an edit the audio thread will not swap in ever hold
+  it; a block that meets it goes out silent, never dry. Which edits those
+  are is not a matter of the clock: a rack never prepared, or with no block
+  since its last prepare or release, swaps at once; one that has had a block
+  leaves the swap to the audio thread however long ago that block was,
+  unless a backlog has built up -- a rack's worth of retired engines, or
+  more than 32 queued chains -- and no block has come for 200 ms or four
+  blocks (`audioIsRunning`). So RackTests' edit cases dip on a loaded
+  machine too. Everything else that reads or changes the chain off the audio thread
   serialises on `editLock`, which the audio thread never takes. Never block
   the audio thread on either.
 - **No processor hands a host, and no module's DSP is ever handed, a NaN,

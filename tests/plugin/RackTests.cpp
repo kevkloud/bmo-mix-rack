@@ -249,7 +249,7 @@ namespace
         a delay or a reverb rather than on a held note. */
     EditRun runEdit (RackProcessor& edited, RackProcessor& reference,
                      const std::function<void()>& edit, bool tail,
-                     double rate = kEditRate, int block = kEditBlock)
+                     double rate = kEditRate, int block = kEditBlock, double stallMs = 0.0)
     {
         // The same stretches of time at any rate and block size: 1.6 s before
         // the edit, the last 213 ms of it steady, 427 ms after it.
@@ -287,7 +287,14 @@ namespace
             }
 
             if (k == pre)
+            {
+                // A host may leave a gap before the block after an edit -- a
+                // loaded machine, a debugger -- and the result must not care.
+                if (stallMs > 0.0)
+                    std::this_thread::sleep_for (std::chrono::microseconds ((long long) (stallMs * 1000.0)));
+
                 edit();
+            }
 
             edited.processBlock (a, midi);
             reference.processBlock (b, midi);
@@ -1480,6 +1487,44 @@ int main()
                             check (nearMs <= 250.0, where + "within 1e-4 of a never-edited rack only "
                                                         + juce::String (nearMs, 1) + " ms after the edit, over 250 ms");
                     }
+    }
+
+    //== An edit after a gap in the host's blocks still dips ===================
+    // The review of 2026-10-03: whether an edit dipped or was put in place at
+    // once depended on the wall clock -- with 250 ms between the last block
+    // and the edit, the rack decided no audio was running and swapped with no
+    // dip, 36.9x the steady step, so the suite would fail on a loaded machine.
+    // Now a rack that has had a block since its last prepare leaves the swap
+    // to the audio thread whatever the clock says, and the same edit dips.
+    {
+        const auto build = [&] (std::vector<const char*> ids)
+        {
+            auto rack = createRack();
+
+            for (int s = 0; s < (int) ids.size(); ++s)
+            {
+                rack->addModule (*rack->findModule (ids[(size_t) s]));
+
+                if (juce::String (ids[(size_t) s]) == "fetcomp")
+                    rack->getEngineAt (s)->params().setReal ("input", 30.0f);
+                else
+                    rack->getEngineAt (s)->params().setReal ("oversampling", 1.0f);
+            }
+
+            juce::MessageManager::getInstance()->runDispatchLoopUntil (20);
+            return rack;
+        };
+
+        auto edited    = build ({ "fetcomp", "eq" });
+        auto reference = build ({ "fetcomp" });
+        const auto run = runEdit (*edited, *reference, [&] { edited->removeModule (1); }, false,
+                                  kEditRate, kEditBlock, 250.0);
+        const auto ratio = run.steadyStep > 0.0f ? run.worstStep / run.steadyStep : 0.0f;
+
+        check (ratio < 1.5f, "an edit 250 ms after the last block steps " + juce::String (ratio, 2)
+                                 + "x the steady signal's: it did not dip");
+        check (run.settledAt * 1000.0 / kEditRate <= 30.0,
+               "and is over, sample-exact, within 30 ms, not " + juce::String (run.settledAt * 1000.0 / kEditRate, 1));
     }
 
     return finish ("BMO Mix Rack");

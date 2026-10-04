@@ -465,15 +465,41 @@ public:
     /** Crush coming back into the loop -- FX on again, or the type moved to
         Crush -- starts its hold from nothing. The stage is skipped while it is
         out, so without this its running sum and its hold were picked up again
-        from before it went out (sixth round, 2026-10-02). The other types'
-        state is left alone: an allpass picked up where it was left is a
-        smear, not a level. */
+        from before it went out (sixth round, 2026-10-02). */
     void engageCrush() noexcept
     {
         held.fill (0.0);
         holdCounter.fill (0);
         heldSum.fill (0.0);
         heldCount.fill (0);
+    }
+
+    /** **Diffuse coming back into the loop starts from silence** (2026-10-03).
+
+        Its allpass lines are skipped while it is out, so they kept whatever
+        they held when it went out, and switching it back on replayed that
+        into the loop however long it had been: measured on ICE QUEEN, AMOUNT
+        100 switched off after a noise burst and on again 28 s later, in
+        silence, put out -23.5 dBFS. Until then this stage was left alone on
+        the reading that an allpass picked up where it was left is a smear;
+        it is a smear of audio the user had stopped hearing.
+
+        Cleared rather than kept running, because a stage that ran while off
+        would break §11a's "off is skipped, not run at zero" -- `11` §4l
+        asserts it -- and cost six allpasses a sample a channel on every
+        engine with FX off. The clear is a fill of the six lines, once, when
+        the type comes in: about 34 800 floats a channel at 192 kHz (each line
+        a power of two over its longest delay), 9 000 at 48 kHz.
+
+        Pan/Tremolo holds no audio -- only its stepped LFO's position -- so it
+        has nothing to replay and is left as it was. */
+    void engageDiffuse() noexcept
+    {
+        for (auto& ch : lines)
+            for (auto& line : ch)
+                std::fill (line.begin(), line.end(), 0.0f);
+
+        writeIdx.fill (0);
     }
 
     /** The allpass lengths, taken from AMOUNT **once per block**.
@@ -1100,13 +1126,19 @@ public:
         const auto cutsMoved = (p.lowCutHz != params.lowCutHz) || (p.highCutHz != params.highCutHz);
         const auto timeMoved = (p.timeMs != params.timeMs);
 
-        // Crush coming (back) into the loop starts from nothing; see
-        // `FxStage::engageCrush`.
+        // Crush or Diffuse coming (back) into the loop starts from nothing;
+        // see `FxStage::engageCrush` and `engageDiffuse`.
         const auto crushIn = p.fx && p.fxType == kCrush;
         const auto crushWasIn = params.fx && params.fxType == kCrush;
 
         if (crushIn && ! crushWasIn)
             fx.engageCrush();
+
+        const auto diffuseIn = p.fx && p.fxType == kDiffuse;
+        const auto diffuseWasIn = params.fx && params.fxType == kDiffuse;
+
+        if (diffuseIn && ! diffuseWasIn)
+            fx.engageDiffuse();
 
         params = p;
 

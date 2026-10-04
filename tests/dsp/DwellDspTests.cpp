@@ -6502,6 +6502,84 @@ void testOneTimeSwitchDoesNotBurst()
     }
 }
 
+/** **Diffuse switched back on in silence comes back silent** (2026-10-03).
+
+    The allpass lines are skipped while FX is off, so they kept what they held
+    when it went off, and FX on replayed it into the loop however long after:
+    the review's probe put out -23.5 dBFS 28 s after the switch, in silence
+    (AMOUNT 100, FEEDBACK 35). Here, shorter and on every character and in
+    the lane: TIME 50 ms so the loop is empty -- exact zeros -- well before
+    FX comes back, a 1 s noise burst with FX on, FX off at 1 s, back on at
+    5 s. The second before must be exact zeros and so must the second after.
+    The lane takes the same stage through FX LINK, HOLD on and SEND open
+    while the burst plays. */
+void testDiffuseComesBackSilent()
+{
+    constexpr auto rate = 48000.0;
+    constexpr int chunk = 512;
+    const auto n = (int) (6.0 * rate);
+    const auto offAt = (int) (1.0 * rate) / chunk * chunk;
+    const auto onAt  = (int) (5.0 * rate) / chunk * chunk;
+    const auto second = (int) rate;
+
+    for (const auto lane : { false, true })
+    {
+        for (int c = 0; c < 3; ++c)
+        {
+            P::DwellDsp dsp;
+            dsp.prepare (rate, chunk, 2);
+
+            auto v = defaults();
+            v[P::Index::character] = (float) c;
+            v[P::Index::fxType]    = 0.0f;     // Diffuse
+            v[P::Index::fxAmount]  = 100.0f;
+            v[P::Index::mix]       = 100.0f;
+
+            if (lane)
+            {
+                v[P::Index::feedback] = 0.0f;
+                v[P::Index::time]     = 50.0f;
+                v[P::Index::hold]     = 1.0f;
+                v[P::Index::laneTime] = 50.0f;
+                v[P::Index::laneGain] = laneGainMatching (35.0f);
+            }
+            else
+            {
+                v[P::Index::feedback] = 35.0f;
+                v[P::Index::time]     = 50.0f;
+            }
+
+            Block block { n };
+            Noise noise;
+
+            for (int i = 0; i < offAt; ++i)
+                block.left[(size_t) i] = block.right[(size_t) i] = 0.2f * noise.next();
+
+            renderAsHost (dsp, v, block, n, chunk, [&] (int offset)
+            {
+                v[P::Index::fx] = (offset >= offAt && offset < onAt) ? 0.0f : 1.0f;
+
+                if (lane)
+                    v[P::Index::send] = offset < offAt ? 1.0f : 0.0f;
+            });
+
+            const auto before = std::max (peakOf (block.left, onAt - second, second),
+                                          peakOf (block.right, onAt - second, second));
+            const auto after  = std::max (peakOf (block.left, onAt, second),
+                                          peakOf (block.right, onAt, second));
+
+            char buf[220];
+            std::snprintf (buf, sizeof (buf),
+                           "Diffuse back on in silence, %s on %s: the second before peaks at %.3g and the "
+                           "second after at %.3g (%.1f dBFS); both must be exact zeros",
+                           lane ? "in the lane" : "in the main loop", characterName (c),
+                           (double) before, (double) after, dbOf (after));
+
+            check (before == 0.0f && after == 0.0f, buf);
+        }
+    }
+}
+
 } // namespace
 
 //==============================================================================
@@ -6594,6 +6672,7 @@ int main (int argc, char** argv)
     // The 2026-10-03 review.
     testMovingATimeNeverFeedsTheLoop();
     testOneTimeSwitchDoesNotBurst();
+    testDiffuseComesBackSilent();
 
     std::printf ("%d checks, %d failures%s\n", checks, failures, longRun ? " (--long)" : "");
     return failures == 0 ? 0 : 1;

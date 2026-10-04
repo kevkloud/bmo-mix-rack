@@ -3101,7 +3101,8 @@ int main (int argc, char** argv)
             check (rows.size() == 7, "the default run keeps its seven kept-moving rows");
         }
 
-        int grew = 0;
+        int grew = 0, silenced = 0;
+        constexpr double kFloorDb = -120.0;
 
         for (const auto& row : rows)
         {
@@ -3144,20 +3145,159 @@ int main (int argc, char** argv)
                     peak = std::max ({ peak, std::abs (l[i]), std::abs (r[i]) });
             }
 
+            // **A row can pass because there was nothing left to grow.** Every
+            // move now costs the tail energy (see "What automating SIZE costs
+            // the tail" below), so a fast cadence can take the tail to the
+            // flush before it is judged, and "never rose" then says nothing.
+            // Each row says which windows it was judged on: a window whose
+            // peak is under kFloorDb is counted as silenced, not as a pass.
+            const auto db = [] (float x) { return 20.0 * std::log10 (std::max (x, 1.0e-30f)); };
+            const auto silencedFrom = db (peaks[1]) < kFloorDb ? 1 : db (peaks[2]) < kFloorDb ? 2 : 0;
+            if (silencedFrom != 0)
+                ++silenced;
+
             const bool rose = peaks[1] > peaks[0] || peaks[2] > peaks[1];
             if (rose)
-            {
                 ++grew;
-                const auto db = [] (float x) { return 20.0 * std::log10 (std::max (x, 1.0e-30f)); };
-                std::cout << "  GREW: " << row.rate << " Hz, " << kTypeNames[row.type] << " <-> " << kTypeNames[row.typeB]
-                          << ", SIZE " << row.sizeA << " <-> " << row.sizeB << " every " << row.everyBlocks
-                          << " blocks: " << db (peaks[0]) << ", " << db (peaks[1]) << ", " << db (peaks[2]) << " dBFS\n";
-            }
+
+            std::cout << "  " << (rose ? "GREW" : silencedFrom == 0 ? "live" : "SILENCED") << ": " << row.rate << " Hz, "
+                      << kTypeNames[row.type] << " <-> " << kTypeNames[row.typeB] << ", SIZE " << row.sizeA << " <-> " << row.sizeB
+                      << " every " << row.everyBlocks << " blocks: " << db (peaks[0]) << ", " << db (peaks[1]) << ", "
+                      << db (peaks[2]) << " dBFS"
+                      << (silencedFrom == 1 ? " -- under the floor from 10 s, so judged on nothing"
+                          : silencedFrom == 2 ? " -- under the floor from 20 s, so judged on 10..20 s only" : "")
+                      << "\n";
         }
 
-        std::cout << "  SIZE / TYPE kept moving over a 30 s tail: " << grew << " of " << rows.size() << " rows grew"
+        std::cout << "  SIZE / TYPE kept moving over a 30 s tail: " << grew << " of " << rows.size() << " rows grew; "
+                  << silenced << " of them were judged on a tail the moves had taken under " << kFloorDb << " dBFS"
                   << (longRun ? "" : " (the default seven of " + std::to_string (allRows) + "; --long runs all of them)") << "\n";
         check (grew == 0, "no cadence of SIZE or TYPE moves makes the tail's 10 s window peaks rise");
+        check ((int) rows.size() - silenced >= 2, "and at least two rows were judged on a tail that was still there");
+    }
+
+    //== What automating SIZE costs the tail, pinned in both directions ========
+    //
+    // A length move cannot add energy (see `LateNetwork::process`), and the
+    // price is that every move takes some away. Frosty accepted that for
+    // 0.2.6 on 2026-10-03: **a held SIZE is untouched; automating SIZE thins
+    // the tail**, with gliding the line lengths as the fallback if the
+    // listening pass disagrees. Nothing asserted the loss, so a change to it
+    // in either direction -- a move that lost more, or a glide that lost
+    // nothing -- would have passed unseen. These are QA's `autolevel` figures
+    // (2026-10-03, ICE QUEEN), measured on the output rather than the loop.
+    //
+    // The late network alone, Room, 48 kHz, DECAY 20 s, both multipliers
+    // 2.0, SIZE written once per 32-sample block as a host lane would:
+    //
+    //   - tail: a 10 ms burst at -18 dBFS RMS, then silence, 60 s; T60 fitted
+    //     to the output energy in 100 ms windows from 5 to 35 dB under its peak
+    //   - held noise at -18 dBFS RMS: output RMS over 10..60 s, against SIZE
+    //     held at 12 m over 10..30 s
+    //
+    // On ICE QUEEN (MSVC): T60 39.45 s held, 21.6 s under an LFO 12..13 m
+    // with a 10 s period, 1.91 s with SIZE toggled 12 <-> 30 m every 64
+    // blocks; the LFO's noise 3.2 dB under the held level. Tolerances are 2 %
+    // on a T60 and 0.25 dB on a level. They are for the other CI toolchains'
+    // libm and fused multiply-adds, which were not measured here; every
+    // figure is an average over seconds of signal, so a rounding difference
+    // should move it by far less. And they are narrow enough that 6a37ffe's
+    // read-time crossfade, at 22.3 s under the same LFO, fails the second
+    // check as well as the third.
+    {
+        constexpr double rate = 48000.0;
+        constexpr int block = 32;
+        using Late = DspCore::Late;
+        const auto tri = [] (double t, double period)
+        {
+            const auto ph = std::fmod (t / period, 1.0);
+            return ph < 0.5 ? 2.0 * ph : 2.0 - 2.0 * ph;
+        };
+
+        // Output energy per 100 ms window (tail), or output RMS over
+        // [from, to) seconds (noise).
+        const auto run = [&] (const std::function<float (double)>& sizeAt, bool noise, double seconds, double from, double to,
+                              std::vector<double>* windows)
+        {
+            LateConfig c;
+            c.type = room;
+            c.sizeM = sizeAt (0.0);
+            c.decaySeconds = 20.0f;
+            c.dampLo = c.dampHi = 2.0f;
+            c.loKneeHz = constantsFor (room).dampLoFreqHz;
+            c.hiKneeHz = constantsFor (room).dampHiFreqHz;
+            Late late;
+            late.setConfig (c);
+            late.prepare (rate, block);
+
+            float in[block], l[block], r[block];
+            const auto total = (long long) (seconds * rate), perWindow = (long long) (0.1 * rate), burst = (long long) (0.01 * rate);
+            double acc = 0.0, e = 0.0;
+            long long inWindow = 0, n = 0;
+
+            for (long long s = 0; s + block <= total; s += block)
+            {
+                c.sizeM = sizeAt ((double) s / rate);
+                late.setConfig (c);
+                for (int i = 0; i < block; ++i)
+                    in[i] = noise || s + i < burst ? noiseAt ((int) (s + i)) * 0.4362f : 0.0f;
+                late.process (in, l, r, block);
+
+                for (int i = 0; i < block; ++i)
+                {
+                    const auto v = 0.5 * ((double) l[i] * l[i] + (double) r[i] * r[i]);
+                    const auto t = (double) (s + i) / rate;
+                    if (t >= from && t < to) { e += v; ++n; }
+                    acc += v;
+                    if (++inWindow == perWindow && windows != nullptr)
+                    {
+                        windows->push_back (acc / (double) perWindow);
+                        acc = 0.0;
+                        inWindow = 0;
+                    }
+                }
+            }
+            return n > 0 ? std::sqrt (e / (double) n) : 0.0;
+        };
+
+        const auto t60 = [&] (const std::function<float (double)>& sizeAt)
+        {
+            std::vector<double> w;
+            run (sizeAt, false, 60.0, 0.0, 0.0, &w);
+            const auto peakAt = (size_t) (std::max_element (w.begin(), w.end()) - w.begin());
+            std::vector<double> xs, ys;
+            for (auto k = peakAt; k < w.size(); ++k)
+            {
+                const auto d = 10.0 * std::log10 (std::max (w[k] / w[peakAt], 1.0e-300));
+                if (d < -35.0) break;
+                if (d <= -5.0) { xs.push_back (0.1 * (double) k); ys.push_back (d); }
+            }
+            if (xs.size() < 3) return -1.0;
+            double mx = 0.0, my = 0.0;
+            for (size_t i = 0; i < xs.size(); ++i) { mx += xs[i]; my += ys[i]; }
+            mx /= (double) xs.size();
+            my /= (double) xs.size();
+            double sxy = 0.0, sxx = 0.0;
+            for (size_t i = 0; i < xs.size(); ++i) { sxy += (xs[i] - mx) * (ys[i] - my); sxx += (xs[i] - mx) * (xs[i] - mx); }
+            return sxy < 0.0 ? -60.0 * sxx / sxy : -1.0;
+        };
+
+        const std::function<float (double)> held   = [] (double) { return 12.0f; };
+        const std::function<float (double)> lfo    = [&] (double t) { return (float) (12.0 * std::pow (13.0 / 12.0, tri (t, 10.0))); };
+        const std::function<float (double)> toggle = [&] (double t) { return ((long long) (t * rate) / block / 64) % 2 == 1 ? 30.0f : 12.0f; };
+
+        const auto heldT60 = t60 (held), lfoT60 = t60 (lfo), toggleT60 = t60 (toggle);
+        const auto lfoDb = 20.0 * std::log10 (run (lfo, true, 60.0, 10.0, 60.0, nullptr) / run (held, true, 30.0, 10.0, 30.0, nullptr));
+
+        std::cout << "  SIZE automated, Room, DECAY 20 s, x2.0 / x2.0, 48 kHz / 32: tail T60 held " << heldT60 << " s, LFO 12..13 m / 10 s "
+                  << lfoT60 << " s, toggled 12 <-> 30 m every 64 blocks " << toggleT60 << " s; held noise under the LFO "
+                  << lfoDb << " dB re SIZE held\n";
+
+        const auto within = [] (double got, double want, double fraction) { return std::abs (got - want) <= fraction * want; };
+        check (within (heldT60, 39.45, 0.02), "a held SIZE is untouched: T60 39.45 s +-2 % at DECAY 20 s x 2.0");
+        check (within (lfoT60, 21.6, 0.02), "SIZE on an LFO 12..13 m, 10 s period: T60 21.6 s +-2 %");
+        check (within (toggleT60, 1.91, 0.02), "SIZE toggled 12 <-> 30 m every 64 blocks: T60 1.91 s +-2 %");
+        check (std::abs (lfoDb - (-3.22)) <= 0.25, "SIZE on the LFO: held noise 3.22 dB +-0.25 under SIZE held");
     }
 
     //== A short tail reaches exactly zero, in the suite CI runs ================

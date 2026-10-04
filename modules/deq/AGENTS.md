@@ -149,6 +149,10 @@ that moves is a design that changed.
 
 ## Where the spec was changed in the tests, and why
 
+`deq_dsp_tests` runs a subset of its switch, cut-peak and shape-change grids
+by default, which is what ctest runs; `deq_dsp_tests --long` runs every row.
+Run `--long` before merging any change to `dsp/`.
+
 Every one of these is argued with numbers in `spec/review-v0.1.md`.
 
 - **T2 absolute targets** are asserted only at f0 ≤ 200 Hz. Above that, a wide

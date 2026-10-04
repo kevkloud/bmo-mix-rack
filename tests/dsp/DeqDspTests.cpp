@@ -2,6 +2,12 @@
 // spec's T-suites. Each group says which T it is and, where the spec's own
 // wording could not be met or measured as written, what it asserts instead
 // and why. modules/deq/AGENTS.md has the reasoning in full.
+//
+// **The default run is a subset; `deq_dsp_tests --long` runs every row.**
+// The switch, cut-peak and shape-change tests keep by default the rows
+// that failed on the code each was written against, at 48 kHz and one
+// other rate, with the extreme settings; ctest runs the default. Run
+// --long before merging any change to modules/deq/dsp.
 
 #include "modules/deq/dsp/DspCore.h"
 #include "modules/deq/dsp/DeqDsp.h"
@@ -22,15 +28,17 @@ namespace ref = bmo::deq::reference;
 
 namespace
 {
-    int failures = 0;
+    int failures = 0, checks = 0;
 
     void check (bool ok, const std::string& what)
     {
+        ++checks;
         if (! ok) { std::cerr << "FAIL: " << what << '\n'; ++failures; }
     }
 
     void checkClose (double actual, double expected, double tol, const std::string& what)
     {
+        ++checks;
         if (! (std::abs (actual - expected) <= tol))
         {
             std::cerr << "FAIL: " << what << " -- expected " << expected
@@ -41,11 +49,26 @@ namespace
 
     void checkAtMost (double actual, double limit, const std::string& what)
     {
+        ++checks;
         if (! (actual <= limit))
         {
             std::cerr << "FAIL: " << what << " -- limit " << limit << ", got " << actual << '\n';
             ++failures;
         }
+    }
+
+    /** --long runs every row of every grid; the default run keeps the subset
+        `pick` chooses in the switch, cut-peak and shape-change tests.
+        scripts/build.sh tests the Debug build, where the whole suite took
+        206 s on ICE QUEEN (2026-10-03). */
+    bool longRun = false;
+
+    /** `all` under --long, `kept` by default. Every value in `kept` is in
+        `all`, so the default run is a subset and asserts the same bounds. */
+    template <typename T>
+    std::vector<T> pick (std::initializer_list<T> all, std::initializer_list<T> kept)
+    {
+        return longRun ? std::vector<T> (all) : std::vector<T> (kept);
     }
 
     std::string cfg (Shape s, double f0, double q, double g)
@@ -1633,7 +1656,7 @@ namespace
     {
         const auto switches = everySwitch();
 
-        for (double rate : { 44100.0, 48000.0, 96000.0 })
+        for (double rate : pick ({ 44100.0, 48000.0, 96000.0 }, { 44100.0, 48000.0 }))
             for (float hz : { 100.0f, 1000.0f })
                 for (const auto& sw : switches)
                 {
@@ -1645,7 +1668,7 @@ namespace
                                  + " Hz, " + std::to_string ((int) rate) + " Hz, step over steady");
                 }
 
-        for (double rate : { 44100.0, 96000.0 })
+        for (double rate : pick ({ 44100.0, 96000.0 }, { 44100.0 }))
             for (const auto& sw : switches)
             {
                 // Digital silence from the start: nothing comes out.
@@ -1998,8 +2021,8 @@ namespace
         double worstAll = -300.0;
         std::string where;
 
-        for (double rate : { 44100.0, 48000.0, 96000.0, 192000.0 })
-            for (double f0 : { 30.0, 100.0, 1000.0, 10000.0, 14000.0, 18000.0 })
+        for (double rate : pick ({ 44100.0, 48000.0, 96000.0, 192000.0 }, { 44100.0, 48000.0 }))
+            for (double f0 : pick ({ 30.0, 100.0, 1000.0, 10000.0, 14000.0, 18000.0 }, { 30.0, 1000.0, 18000.0 }))
             {
                 std::vector<double> ws;
                 for (int k = 0; k < 64; ++k) ws.push_back (2.0 * kPi * 10.0 * std::pow (0.499 * rate / 10.0, (double) k / 63.0) / rate);
@@ -2162,9 +2185,9 @@ namespace
                 double worstPair = 0.0, worstStep = 0.0, longestPair = 0.0;
                 std::string where;
 
-                for (float gain : { -24.0f, 0.0f, 24.0f })
+                for (float gain : pick ({ -24.0f, 0.0f, 24.0f }, { -24.0f, 24.0f }))
                     for (float q : { 0.71f, 2.0f })
-                        for (double m : { 1.0, 0.66, 1.5 })
+                        for (double m : pick ({ 1.0, 0.66, 1.5 }, { 1.0, 1.5 }))
                         {
                             Values p;
                             p.at (0, Control::on) = 1.0f;      p.at (0, Control::freq) = 1000.0f;
@@ -2759,12 +2782,12 @@ namespace
             for (int b = 0; b < 5; ++b)
                 if (a != b)
                 {
-                    for (double f0 : { 30.0, 1000.0, 18000.0 })
-                        for (float q : { 0.1f, 40.0f })
+                    for (double f0 : pick ({ 30.0, 1000.0, 18000.0 }, { 30.0 }))
+                        for (float q : pick ({ 0.1f, 40.0f }, { 40.0f }))
                             for (float gain : { -24.0f, 24.0f })
                                 cell (48000.0, a, b, f0, gain, q);
 
-                    for (double rate : { 44100.0, 96000.0, 192000.0 })
+                    for (double rate : pick ({ 44100.0, 96000.0, 192000.0 }, { 44100.0 }))
                         cell (rate, a, b, 30.0, 24.0f, 40.0f);
                 }
 
@@ -2804,9 +2827,9 @@ namespace
 
                 double pairHole = 0.0;
 
-                for (double f0 : { 30.0, 100.0, 1000.0, 10000.0, 18000.0 })
-                    for (float q : { 0.1f, 0.71f, 2.0f, 40.0f })
-                        for (float gain : { -24.0f, 0.0f, 24.0f })
+                for (double f0 : pick ({ 30.0, 100.0, 1000.0, 10000.0, 18000.0 }, { 100.0, 1000.0 }))
+                    for (float q : pick ({ 0.1f, 0.71f, 2.0f, 40.0f }, { 0.1f, 2.0f, 40.0f }))
+                        for (float gain : pick ({ -24.0f, 0.0f, 24.0f }, { -24.0f, 24.0f }))
                         {
                             const auto r = measureShapeChange (rate, a, b, f0, gain, q, true);
                             const auto label = std::string (kShapeNames[a]) + " to " + kShapeNames[b] + ", " + std::to_string ((int) f0)
@@ -2967,8 +2990,10 @@ namespace
     }
 }
 
-int main()
+int main (int argc, char** argv)
 {
+    longRun = argc > 1 && std::string (argv[1]) == "--long";
+
     testLatency();
     testBlockSizeInvariance();
     testAccuracy();
@@ -2999,6 +3024,8 @@ int main()
     testShapeTogglingNeverSteps();
     testShapeWarmUpIsBudgeted();
 
+    std::cout << checks << " checks, " << failures << " failures"
+              << (longRun ? "" : " (the default subset; --long runs every row)") << "\n";
     if (failures == 0)
         std::cout << "deq_dsp: all passed\n";
 

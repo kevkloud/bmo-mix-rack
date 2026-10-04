@@ -215,7 +215,7 @@ void RackProcessor::collectRetired()
     The audio thread waits on nothing. The message thread waits at most for
     the block in progress, in step 1. If no audio is running, the swap is made
     here instead, under `chainLock`, so nothing is left waiting for a block. */
-void RackProcessor::rebuild (std::vector<Entry> chain)
+void RackProcessor::rebuild (std::vector<Entry> chain, Origin origin)
 {
     jassert (juce::MessageManager::getInstance()->currentThreadHasLockedMessageManager());
     jassert ((int) chain.size() <= kSlots);
@@ -383,12 +383,14 @@ void RackProcessor::rebuild (std::vector<Entry> chain)
         }
     }
 
-    // Names, ranges and steps of up to 256 parameters just changed, and so did
-    // the chain, which is session state but no parameter's value: without the
-    // second flag a host need not mark the session dirty, and adding to an
-    // empty rack or removing the last module changes no value at all.
+    // Names, ranges and steps of up to 256 parameters just changed. And for a
+    // user's edit, so did the session: the chain is session state but no
+    // parameter's value, so without the second flag a host need not mark the
+    // session dirty -- adding to an empty rack or removing the last module
+    // changes no value at all. Never for a restore: a host opening a session,
+    // told it changed, marks the project modified as it opens.
     updateHostDisplay (ChangeDetails().withParameterInfoChanged (true)
-                                      .withNonParameterStateChanged (true));
+                                      .withNonParameterStateChanged (origin == Origin::user));
     triggerAsyncUpdate();
 
     listeners.call ([] (Listener& l) { l.rackChainChanged(); });
@@ -401,7 +403,7 @@ bool RackProcessor::addModule (const ModuleDef& def)
 
     auto chain = currentChain();
     chain.push_back ({ &def, -1, nullptr });
-    rebuild (std::move (chain));
+    rebuild (std::move (chain), Origin::user);
     presets.noteChange();
     return true;
 }
@@ -417,7 +419,7 @@ void RackProcessor::setModule (int slot, const ModuleDef& def)
     else
         return;
 
-    rebuild (std::move (chain));
+    rebuild (std::move (chain), Origin::user);
     presets.noteChange();
 }
 
@@ -429,7 +431,7 @@ void RackProcessor::removeModule (int slot)
         return;
 
     chain.erase (chain.begin() + slot);
-    rebuild (std::move (chain));
+    rebuild (std::move (chain), Origin::user);
     presets.noteChange();
 }
 
@@ -444,13 +446,13 @@ void RackProcessor::moveModule (int from, int to)
     auto item = std::move (chain[(size_t) from]);
     chain.erase (chain.begin() + from);
     chain.insert (chain.begin() + to, std::move (item));
-    rebuild (std::move (chain));
+    rebuild (std::move (chain), Origin::user);
     presets.noteChange();
 }
 
 void RackProcessor::clearChain()
 {
-    rebuild ({});
+    rebuild ({}, Origin::user);
 }
 
 //==============================================================================
@@ -507,13 +509,13 @@ bool RackProcessor::restoreState (const juce::XmlElement& xml)
         chain.push_back ({ def, -1, std::move (state) });
     }
 
-    rebuild (std::move (chain));
+    rebuild (std::move (chain), Origin::restore);
     return true;
 }
 
 void RackProcessor::resetToDefaults()
 {
-    clearChain();
+    rebuild ({}, Origin::restore);
 }
 
 void RackProcessor::getStateInformation (juce::MemoryBlock& destData)
@@ -597,7 +599,7 @@ void RackProcessor::applyPreset (const RackPreset& preset)
         chain.push_back ({ def, -1, std::move (state) });
     }
 
-    rebuild (std::move (chain));
+    rebuild (std::move (chain), Origin::restore);
 }
 
 //==============================================================================

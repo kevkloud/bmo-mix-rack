@@ -1165,6 +1165,12 @@ int main()
     // QA's probe on 2026-10-03: adding to an empty rack, removing the last
     // module and toggling a view sent nothing of the kind -- 0 of 7 cases --
     // and a factory rack preset rebuilt the chain twice, once empty.
+    //
+    // But only the user's edits: a restore -- a host opening a session, a
+    // rack preset -- is not a change to the session, and a host told it is
+    // marks the project modified as it opens (the review of 2026-10-03: one
+    // such notification per setStateInformation). So each edit tells the host
+    // exactly once and a restore never does.
     {
         struct HostSide final : juce::AudioProcessorListener
         {
@@ -1192,12 +1198,19 @@ int main()
         HostSide host;
         rack->addListener (&host);
 
-        const auto expectTold = [&] (const std::function<void()>& edit, const juce::String& what)
+        const auto told = [&] (const std::function<void()>& edit)
         {
             host.nonParameterState = 0;
             edit();
             juce::MessageManager::getInstance()->runDispatchLoopUntil (20);
-            check (host.nonParameterState > 0, what + " tells the host the non-parameter state changed");
+            return host.nonParameterState;
+        };
+
+        const auto expectTold = [&] (const std::function<void()>& edit, const juce::String& what, int times = 1)
+        {
+            const auto n = told (edit);
+            check (n == times, what + " tells the host the non-parameter state changed "
+                                   + juce::String (times) + " time(s), told it " + juce::String (n));
         };
 
         expectTold ([&] { rack->addModule (*rack->findModule ("util")); }, "adding to an empty rack");
@@ -1206,18 +1219,33 @@ int main()
         expectTold ([&] { rack->moveModule (0, 2); }, "moving a module");
         expectTold ([&] { rack->setSlotExpanded (1, ! rack->isSlotExpanded (1)); }, "toggling a slot's view");
         expectTold ([&] { rack->setModule (0, *rack->findModule ("sat")); }, "replacing a module");
-        expectTold ([&] { rack->removeModule (0); rack->removeModule (0); }, "removing two");
+        expectTold ([&] { rack->removeModule (0); rack->removeModule (0); }, "removing two", 2);
         expectTold ([&] { rack->removeModule (0); }, "removing the last module");
 
         // A factory rack preset is one rebuild, so the audio never runs an
         // empty chain on the way to the preset's.
         Rebuilds rebuilds;
         rack->addRackListener (&rebuilds);
-        expectTold ([&] { rack->getPresets().loadFactory (1); }, "loading a factory rack preset");
+        expectTold ([&] { rack->getPresets().loadFactory (1); }, "loading a factory rack preset", 0);
         check (rebuilds.count == 1, "a factory rack preset rebuilds the chain once, not "
                                         + juce::String (rebuilds.count) + " times");
         check (rack->getNumModules() > 0, "and leaves the preset's chain");
         rack->removeRackListener (&rebuilds);
+
+        // A host opening a session, on a fresh instance and on this one.
+        juce::MemoryBlock session;
+        rack->getStateInformation (session);
+        expectTold ([&] { rack->setStateInformation (session.getData(), (int) session.getSize()); },
+                    "restoring a session", 0);
+
+        auto fresh = createRack();
+        HostSide freshHost;
+        fresh->addListener (&freshHost);
+        fresh->setStateInformation (session.getData(), (int) session.getSize());
+        juce::MessageManager::getInstance()->runDispatchLoopUntil (20);
+        check (freshHost.nonParameterState == 0, "a fresh rack opening a session is told it changed "
+                                                     + juce::String (freshHost.nonParameterState) + " time(s), not 0");
+        fresh->removeListener (&freshHost);
 
         rack->removeListener (&host);
         sandbox.deleteRecursively();

@@ -157,7 +157,10 @@ rack/     SlotParameter (one generic host parameter, remapped live),
   `rackChainWillChange` before and `rackChainChanged` after, synchronously.
   An engine an edit takes out is destroyed some time after the first call,
   never before it, so a listener that drops every panel there is safe; a
-  kept engine is the same object afterwards. Keep it that way.
+  kept engine is the same object afterwards. Keep it that way. A user's
+  edit, and a view toggle, also tell the host the non-parameter state
+  changed, so it marks the session modified; a restore or a rack preset
+  never does, or a host would mark a project modified as it opens it.
 - The audio thread takes the rack's `chainLock` only as a try-lock, and only
   prepare, release and an edit made while no block has come for 200 ms (or
   four blocks) ever hold it; a block that meets it goes out silent, never

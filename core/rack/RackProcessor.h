@@ -210,9 +210,12 @@ private:
     void handleAsyncUpdate() override;
 
     /** Makes `chain` the chain, keeping every engine it carries, and tells
-        the listeners either side. Message thread, or a thread holding the
+        the listeners either side. `Origin` says whether the user made the
+        edit -- which the host is told changed the session -- or a restore or
+        preset did, which it is not. Message thread, or a thread holding the
         message manager's lock. See the definition for the threading. */
-    void rebuild (std::vector<Entry> chain);
+    enum class Origin { user, restore };
+    void rebuild (std::vector<Entry> chain, Origin);
 
     /** The chain as it is, every engine carried: what an edit starts from. */
     std::vector<Entry> currentChain() const;

@@ -3548,6 +3548,70 @@ int main (int argc, char** argv)
             check (lengthsOf (*core) == lengthsOf (*freshPlate), "reset() past the dip's bottom gives Plate's lengths");
             sameNetwork (*core, *fresh (48000.0, p), "reset() past the dip's bottom");
         }
+
+        // (e), (f) and (g): reset() with a request **queued** behind a move.
+        // A move holds every new request until it ends, so the settings the
+        // network was last given are not the ones it is building. reset()
+        // built from what was in flight, where prepare() takes the request
+        // first; at f3e91db the three cases below differed from a fresh
+        // instance by 0.232, 0.000704 and 0.0318 over 2 s of noise (QA's
+        // probe, 2026-10-03), while reset() with nothing queued was exact.
+        {
+            // (e) SIZE 12 -> 80 m in flight, then 30 m asked for.
+            DspCore::Params p;
+            tailOnly (p);
+            p.decaySeconds = 5.0f;
+            auto core = fresh (48000.0, p);
+            run (*core, 20);
+            p.sizeM = 80.0f;
+            core->setParams (p);
+            run (*core, 1);
+            p.sizeM = 30.0f;
+            core->setParams (p);
+            run (*core, 1);
+            check (core->lateNetwork().isMoving(), "the 12 -> 80 m move is still in flight when 30 m is queued and reset() lands");
+
+            core->reset();
+            check (lengthsOf (*core) == lengthsOf (*fresh (48000.0, p)), "reset() with SIZE queued gives the queued SIZE's lengths");
+            sameNetwork (*core, *fresh (48000.0, p), "reset() mid-move with SIZE 30 m queued");
+        }
+        {
+            // (f) The same move, then DECAY 5 -> 0.5 s asked for.
+            DspCore::Params p;
+            tailOnly (p);
+            p.decaySeconds = 5.0f;
+            auto core = fresh (48000.0, p);
+            run (*core, 20);
+            p.sizeM = 80.0f;
+            core->setParams (p);
+            run (*core, 1);
+            p.decaySeconds = 0.5f;
+            core->setParams (p);
+            run (*core, 1);
+            check (core->lateNetwork().isMoving(), "the move is still in flight when DECAY is queued and reset() lands");
+
+            core->reset();
+            sameNetwork (*core, *fresh (48000.0, p), "reset() mid-move with DECAY 0.5 s queued");
+        }
+        {
+            // (g) Room -> Plate dipping, then SIZE 30 m asked for.
+            DspCore::Params p;
+            tailOnly (p);
+            p.decaySeconds = 5.0f;
+            auto core = fresh (48000.0, p);
+            run (*core, 20);
+            p.type = Type::plate;
+            core->setParams (p);
+            run (*core, 1);
+            p.sizeM = 30.0f;
+            core->setParams (p);
+            run (*core, 1);
+            check (core->lateNetwork().isMoving(), "the TYPE dip is still in flight when SIZE is queued and reset() lands");
+
+            core->reset();
+            check (lengthsOf (*core) == lengthsOf (*fresh (48000.0, p)), "reset() mid-dip with SIZE queued gives Plate's lengths at 30 m");
+            sameNetwork (*core, *fresh (48000.0, p), "reset() mid-dip with SIZE 30 m queued");
+        }
     }
 
     //== Both filter banks lose energy while a length move is in flight ==========

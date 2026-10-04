@@ -158,8 +158,7 @@ public:
         }
 
         // Whatever was in flight belongs to the old rate and buffer; reset()
-        // builds everything from `current` below.
-        current = requested;
+        // builds everything from the settings last asked for.
         fading = dipping = preFading = false;
 
         reset();
@@ -184,6 +183,17 @@ public:
         // (reads at index -13,438), kept a stale SIZE after the setting had
         // moved again, and left a TYPE dip cut short on the old type's
         // lengths and diffusers.
+        //
+        // **And `current` is first brought up to `requested`.** A move takes
+        // no new request until it ends, so with one queued behind it
+        // `current` is where the move was going and not what the network was
+        // last told. Building from it left SIZE, DECAY or both multipliers on
+        // the move's values: at f3e91db, reset() mid-move with 30 m queued
+        // differed from a fresh instance at 30 m by 0.232 over 2 s of noise,
+        // with DECAY 0.5 s queued by 0.000704, and mid-dip with SIZE queued
+        // by 0.0318 (QA's probe, 2026-10-03). prepare() already did this
+        // before calling here, which is why it was exact and reset() was not.
+        current = requested;
         primeLengths (current, lengths);
         sizeAtBuild = current.sizeM;
         levelNow = levelTo = levelFor (current);

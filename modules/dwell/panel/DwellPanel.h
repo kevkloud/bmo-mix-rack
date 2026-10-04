@@ -219,6 +219,11 @@ private:
 
     void refreshFxEnablement();
 
+    /** **A control a mode makes inert is dimmed** (modules/AGENTS.md): every
+        lane control while HOLD is off, and RATE while DEPTH is 0 on the two
+        characters with no wow of their own. */
+    void refreshInert();
+
     /** Draws the lane's FX type row and AMOUNT as following the main delay's,
         or as the lane's own. */
     void refreshFxLinkFollowing();
@@ -257,6 +262,11 @@ private:
     std::unique_ptr<ui::PlainKnob> fxAmount;
 
     DwellScreen screen;
+
+    /** The parameters an inert control's dim follows. Attachments rather
+        than the timer, so a host's automation, a preset recall and a click
+        all dim at once, and a test sees it without running a message loop. */
+    std::unique_ptr<juce::ParameterAttachment> holdWatch, laneFxWatch, modDepthWatch, characterWatch;
 
     int  fxAmountType = -1;
     int  laneFxAmountType = -1;

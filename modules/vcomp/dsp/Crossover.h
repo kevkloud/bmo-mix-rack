@@ -387,6 +387,10 @@ public:
         allpass phase shift whether or not anything is in its outer bands. */
     bool inCircuit() const noexcept { return lowRunning() || highRunning(); }
 
+    /** Whether each side was last told to be in, whatever it is doing about it. */
+    bool wantsLow() const noexcept  { return wantLow; }
+    bool wantsHigh() const noexcept { return wantHigh; }
+
     //== Switching, as against moving a knob ===================================
     //
     // A side brought in or taken out by a *switch* -- COMPLEX, which puts both

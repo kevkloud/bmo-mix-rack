@@ -242,6 +242,13 @@ public:
 
     void setParams (const Params& p) noexcept
     {
+        // Anything but the two crossover knobs moved in this block: the mark
+        // of a preset recall or a host snapshot rather than a knob.
+        const auto othersMoved = p.amountPercent != params.amountPercent || p.outputDb != params.outputDb
+                              || p.gateDb != params.gateDb || p.complex != params.complex
+                              || p.attackMs != params.attackMs || p.releaseMs != params.releaseMs
+                              || p.arc != params.arc || p.sidechainHz != params.sidechainHz;
+
         params = p;
         amountSmoother.setTarget (p.amountPercent);
         outputSmoother.setTarget (p.outputDb);
@@ -263,36 +270,54 @@ public:
         // change uses. Nothing heard since prepare() or reset() means nothing
         // to fade, and the change is made at once.
         //
-        // Only when the switch moves the split, though. With LOW THRU and
-        // HIGH THRU at their rails COMPLEX changes nothing but the detector's
-        // settings, which are continuous and change as a knob does, so the
-        // switch is made at once, as it always was.
-        if (p.complex != activeComplex && ! movesSplit (p.complex))
+        // Only when the split is in the path on either side of the switch,
+        // though: with no side running now and none wanted after, COMPLEX
+        // changes nothing but the detector's settings, which are continuous
+        // and change as a knob does, so the switch is made at once, as it
+        // always was. What the split is *running* decides, not what the knobs
+        // now say: a preset recall or a host snapshot moves COMPLEX and the
+        // two knobs in the same block, and judged on the new knobs alone,
+        // COMPLEX on -> off with both going to their rails looked like
+        // nothing to move -- and the running sides left by the knobs' slow
+        // way, the voice +1.2 dB over where it settles for half a second
+        // (reviewer, 2026-10-03). Everything that changes with the switch
+        // lands at the bottom of the one dip, knobs included.
+        //
+        // The same goes for a side coming in or going out *with other
+        // settings*, COMPLEX unchanged: Fast Vocal -> Keep The Chest brings
+        // LOW THRU in along with five other settings, and by the knob's way
+        // it came out 8.4 dB off a fresh Keep The Chest. A crossover knob
+        // moved on its own -- dragged, typed, automated -- still glides.
+        const auto complexChanges = p.complex != activeComplex;
+        const auto sidesChange    = sidesChangeFor (p.complex);
+        const auto wantsDip       = (complexChanges && movesSplit (p.complex)) || (sidesChange && othersMoved);
+
+        if (! heard)
         {
+            switchNow = complexChanges;
+
             if (complexDip.isPending())
                 complexDip.cancel();
-
-            switchNow = ! heard;
-
-            if (heard)
-            {
-                activeComplex = p.complex;
-                applyTimings();
-                return;
-            }
-        }
-        else if (p.complex != activeComplex)
-        {
-            if (! heard)
-                switchNow = true;
-            else if (! complexDip.isPending())
-                complexDip.request();
         }
         else if (complexDip.isPending())
         {
-            // Changed back before the dip reached the bottom: nothing to
-            // change, and the output comes back up from where it got to.
-            complexDip.cancel();
+            // On its way down. Changed back before the bottom -- nothing would
+            // change there -- and the output comes back up from where it got
+            // to; otherwise whatever has arrived since lands at the bottom too.
+            if (! complexChanges && ! sidesChange)
+                complexDip.cancel();
+        }
+        else if (wantsDip)
+        {
+            complexDip.request();
+        }
+        else if (complexChanges)
+        {
+            // COMPLEX with the split out on both sides of it: the detector's
+            // settings only, at once.
+            activeComplex = p.complex;
+            applyTimings();
+            return;
         }
 
         if (switchNow)
@@ -533,11 +558,23 @@ private:
         parameters. Everything downstream reads the result and cannot tell
         which it got, which is the point. */
     float lowThruFor (bool complex) const noexcept  { return complex ? params.lowThruHz  : kStandardLowThruHz; }
-    /** True when running COMPLEX as `complex` would put a side of the split
-        in or out, or move one, against the COMPLEX being run. */
+    /** True when a switch to `complex` involves the split: a side of it is in
+        the path now -- in, fading or gliding -- or one would be after. */
+    /** True when running COMPLEX as `complex` with the knobs as they are
+        would put a side of the split in or take one out, against what the
+        split was last told. */
+    bool sidesChangeFor (bool complex) const noexcept
+    {
+        const auto& bands = channels[0].bands;
+        return (lowThruFor (complex) > kLowThruOffHz) != bands.wantsLow()
+            || (highThruFor (complex) < kHighThruOffHz) != bands.wantsHigh();
+    }
+
     bool movesSplit (bool complex) const noexcept
     {
-        return lowThruFor (complex) != lowThruFor (activeComplex) || highThruFor (complex) != highThruFor (activeComplex);
+        return channels[0].bands.inCircuit()
+            || lowThruFor (complex) > kLowThruOffHz
+            || highThruFor (complex) < kHighThruOffHz;
     }
 
     float highThruFor (bool complex) const noexcept { return complex ? params.highThruHz : kStandardHighThruHz; }
@@ -565,11 +602,17 @@ private:
         {
             ch.sidechain.setCutoff (sidechainHz);
 
+            // While a switch is on its way down, the split holds what it is
+            // running and primes what the switch brings in; the knobs' new
+            // settings, which may have arrived with the switch, are applied
+            // at the bottom by switchTo() rather than glided to now.
             if (complexDip.isPending())
+            {
                 ch.bands.primeFor (lowThruFor (params.complex), highThruFor (params.complex));
-            else
-                ch.bands.cancelPrime();
+                continue;
+            }
 
+            ch.bands.cancelPrime();
             ch.bands.setCutoffs (lowHz, highHz);
         }
     }

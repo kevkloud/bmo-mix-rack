@@ -7,6 +7,7 @@
 // builds a fresh core, sets it once and measures the result.
 
 #include "modules/vcomp/dsp/DspCore.h"
+#include "modules/vcomp/presets/FactoryPresets.h"
 
 #include <algorithm>
 #include <cmath>
@@ -1803,6 +1804,175 @@ void unheardSettingsLand()
         }
 }
 
+//== 12. A preset recalled from any other ======================================
+//
+// A preset recall or a host snapshot changes COMPLEX and the knobs in the same
+// block. The round-3 dip was decided on the new knobs alone, so COMPLEX on ->
+// off with LOW and HIGH THRU going to their rails in the same block skipped it
+// and the running sides left by the knobs' slow way: the voice +1.2 dB over an
+// always-off instance for half a second, and Keep The Chest -> In Front with
+// the limiter 5.76 dB over a fresh In Front (reviewer, 2026-10-03).
+//
+// Every ordered pair of the factory presets, 56 of them, recalled at 1 s into
+// the suite's voice at -18 dBFS RMS, at 48 kHz in 512-sample blocks: against a
+// fresh instance of the target preset, outside the dip --
+//
+//   - the level of every 10 ms window within 1 dB, and the limiter within
+//     0.5 dB, beyond what the same recall with the split held out of both
+//     presets (LOW and HIGH THRU at their rails: AMOUNT, MAKEUP and the
+//     detector's settings change, nothing else) does;
+//   - the largest sample step under 1.5x the larger of the two presets' own;
+//   - and sample for sample the fresh instance within kRecallForgottenWithin.
+
+Params presetParams (const bmo::FactoryPreset& preset)
+{
+    const auto& list = specs();
+    std::vector<float> v;
+
+    for (const auto& s : list)
+        v.push_back (s.def);
+
+    for (const auto& s : preset.settings)
+        v[(size_t) bmo::indexOfParam (list, s.id)] = s.value;
+
+    Params p;
+    p.amountPercent = v[amount];
+    p.gateDb        = v[gate];
+    p.outputDb      = v[output];
+    p.complex       = v[complex] > 0.5f;
+    p.attackMs      = v[attack];
+    p.releaseMs     = v[release];
+    p.arc           = v[arc] > 0.5f;
+    p.sidechainHz   = v[sidechain];
+    p.lowThruHz     = v[lowThru];
+    p.highThruHz    = v[highThru];
+    return p;
+}
+
+/** What bounds this: ARC's slow branch. Two instances that heard different
+    settings hold different slow-branch states, and the difference decays
+    only at that branch's own rate -- its charge (1.2 x RELEASE) while a
+    phrase is loud and its release (10 x RELEASE) in the gaps, 4 s at Smooth
+    Lead's 400 ms -- until it is under a float's last bit and the two round
+    alike. Nothing short of clearing the branch, which would be wrong for the
+    reason section 1 gives, can hurry it. The reviewer saw 22.4 s on the base
+    for one pair; here the worst is 45.6 s (In Front -> Smooth Lead), a
+    recall with no split on either side and no dip: ARC, not the switch. */
+constexpr double kRecallForgottenWithin = 50.0;
+
+void presetRecalls()
+{
+    const double fs = 48000.0;
+    const int block = 512;
+    const auto shortN = (size_t) (4.0 * fs), longN = (size_t) (60.0 * fs);
+    const auto sw = (size_t) (1.0 * fs) / (size_t) block * (size_t) block;
+    const auto half = (size_t) std::lround (0.014 * fs);    // DspCore::kComplexDipMs
+    const auto x = suiteVoice (fs, longN);
+    const std::vector<float> xs (x.begin(), x.begin() + (long) shortN);
+
+    const auto& presets = factory();
+
+    double worstLevel = -1.0e9, worstLimit = -1.0e9, worstAbsLimit = -1.0e9, worstStep = 0.0, worstTime = 0.0;
+    std::string levelWhere, limitWhere, stepWhere, timeWhere;
+
+    auto railed = [] (Params p) { p.lowThruHz = kLowThruOffHz; p.highThruHz = kHighThruOffHz; return p; };
+    auto quiet  = [] (Params p) { p.outputDb -= 24.0f; return p; };
+
+    for (size_t ia = 0; ia < presets.size(); ++ia)
+        for (size_t ib = 0; ib < presets.size(); ++ib)
+        {
+            if (ia == ib)
+                continue;
+
+            const auto a = presetParams (presets[ia]), b = presetParams (presets[ib]);
+            const auto name = std::string (presets[ia].name) + " -> " + presets[ib].name;
+
+            const auto sideA = a.complex && (a.lowThruHz > kLowThruOffHz || a.highThruHz < kHighThruOffHz);
+            const auto sideB = b.complex && (b.lowThruHz > kLowThruOffHz || b.highThruHz < kHighThruOffHz);
+            const auto lowA  = a.complex && a.lowThruHz > kLowThruOffHz,   lowB  = b.complex && b.lowThruHz > kLowThruOffHz;
+            const auto highA = a.complex && a.highThruHz < kHighThruOffHz, highB = b.complex && b.highThruHz < kHighThruOffHz;
+            const auto dipped = (a.complex != b.complex && (sideA || sideB)) || lowA != lowB || highA != highB;
+            const auto from = dipped ? sw + 2 * half + 1 : sw;
+
+            auto recall = [&] (const Params& p, const Params& q) { return renderBlocks (fs, xs, block, [&] (size_t s) { return s < sw ? p : q; }); };
+            auto held   = [&] (const Params& p) { return renderBlocks (fs, xs, block, [&] (size_t) { return p; }); };
+
+            const auto y  = recall (a, b),                         yq  = recall (quiet (a), quiet (b));
+            const auto f  = held (b),                              fq  = held (quiet (b));
+            const auto y2 = recall (railed (a), railed (b)),       y2q = recall (quiet (railed (a)), quiet (railed (b)));
+            const auto f2 = held (railed (b)),                     f2q = held (quiet (railed (b)));
+            const auto fa = held (a);
+
+            const auto ly = limiterReduction (y, yq), lf = limiterReduction (f, fq);
+            const auto l2 = limiterReduction (y2, y2q), lf2 = limiterReduction (f2, f2q);
+
+            const auto w = (size_t) (0.01 * fs);
+            double level = -1.0e9, limit = -1.0e9, absLimit = -1.0e9;
+
+            for (auto s = sw; s + w <= shortN; s += w)
+            {
+                if (s < from)
+                    continue;
+
+                double ey = 0.0, ef = 0.0, e2 = 0.0, ef2 = 0.0;
+                float my = 0.0f, mf = 0.0f, m2 = 0.0f, mf2 = 0.0f;
+
+                for (size_t i = s; i < s + w; ++i)
+                {
+                    ey += (double) y[i] * y[i];   ef += (double) f[i] * f[i];
+                    e2 += (double) y2[i] * y2[i]; ef2 += (double) f2[i] * f2[i];
+                    my = std::max (my, ly[i]);    mf = std::max (mf, lf[i]);
+                    m2 = std::max (m2, l2[i]);    mf2 = std::max (mf2, lf2[i]);
+                }
+
+                const auto excess  = (double) (my - mf);
+                const auto excess2 = std::max (0.0, (double) (m2 - mf2));
+                limit    = std::max (limit, excess - excess2);
+                absLimit = std::max (absLimit, excess);
+
+                if (10.0 * std::log10 (std::max (ef, 1.0e-300) / (double) w) < -60.0)
+                    continue;
+
+                const auto dy = 10.0 * std::log10 (std::max (ey, 1.0e-300) / ef);
+                const auto d2 = 10.0 * std::log10 (std::max (e2, 1.0e-300) / std::max (ef2, 1.0e-300));
+                level = std::max (level, std::abs (dy) - std::abs (d2));
+            }
+
+            const auto own  = std::max (largestStep (f, 1, shortN), largestStep (fa, 1, shortN));
+            const auto step = largestStep (y, sw, shortN) / own;
+
+            check (level <= 1.0, name + ": " + fixed (level) + " dB further from a fresh " + presets[ib].name
+                                     + " than the recall with the split held out is, outside the dip");
+            check (limit <= 0.5, name + ": the limiter " + fixed (limit) + " dB over a fresh " + presets[ib].name
+                                     + " beyond the recall with the split held out");
+            check (step < 1.5, name + " steps " + fixed (step) + "x the presets' own");
+
+            // Sample for sample, over a long render.
+            const auto yl = renderBlocks (fs, x, block, [&] (size_t s) { return s < sw ? a : b; });
+            const auto fl = renderBlocks (fs, x, block, [&] (size_t) { return b; });
+
+            size_t lastDifferent = sw;
+            for (auto i = sw; i < longN; ++i)
+                if (yl[i] != fl[i])
+                    lastDifferent = i + 1;
+
+            const auto after = (double) (lastDifferent - sw) / fs;
+            check (after <= kRecallForgottenWithin && lastDifferent + (size_t) (2.0 * fs) < longN,
+                   name + ": sample for sample a fresh " + presets[ib].name + " only " + fixed (after, 2) + " s after the recall");
+
+            if (level > worstLevel)       { worstLevel = level;       levelWhere = name; }
+            if (limit > worstLimit)       { worstLimit = limit;       limitWhere = name; }
+            if (absLimit > worstAbsLimit) { worstAbsLimit = absLimit; }
+            if (step > worstStep)         { worstStep = step;         stepWhere = name; }
+            if (after > worstTime)        { worstTime = after;        timeWhere = name; }
+        }
+
+    std::cout << "Preset recalls, 56 pairs: level " << fixed (worstLevel) << " dB beyond the split-held-out recall (" << levelWhere
+              << "); limiter " << fixed (worstLimit) << " dB beyond it (" << limitWhere << "), " << fixed (worstAbsLimit)
+              << " dB over a fresh target at most; step " << fixed (worstStep) << "x (" << stepWhere << "); sample-exact after "
+              << fixed (worstTime, 2) << " s at worst (" << timeWhere << ")\n";
+}
+
 int main (int argc, char** argv)
 {
     if (argc > 1 && std::string (argv[1]) == "--print-hashes")
@@ -1842,6 +2012,7 @@ int main (int argc, char** argv)
     sideFromRest();
     knobLevelsCompressing();
     unheardSettingsLand();
+    presetRecalls();
     heldIsUnchanged (false);
 
     if (failures == 0)

@@ -337,8 +337,13 @@ Two things this changed that are worth knowing:
   brings in run unheard on the input at their settings, the split and the
   detector change at the bottom, and the output fades back over 14 ms. The
   glide is for knobs only, including a knob leaving or reaching its rail.
-  With LOW and HIGH THRU at their rails COMPLEX moves only the detector and
-  switches at once. `vcomp_switch_tests` section 10 holds it.
+  What the split is *running* decides, not the new knobs: a preset recall
+  moves COMPLEX and the knobs in one block, and everything lands at the
+  bottom of one dip. A side brought in or out together with other settings
+  (a recall, COMPLEX unchanged) dips too; a crossover knob moved on its own
+  glides. With no side running and none wanted COMPLEX moves only the
+  detector and switches at once. `vcomp_switch_tests` sections 10 and 12
+  (all 56 preset-to-preset recalls) hold it.
 - **A separate limiter on the thru path** was the third candidate and is not
   needed now. It only bit near full scale, and the thru band no longer gets
   anywhere near it.

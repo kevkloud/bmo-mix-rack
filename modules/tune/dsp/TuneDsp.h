@@ -15,9 +15,10 @@ namespace bmo::tune
 
     It needs nothing ModuleDsp does not carry -- the voice is the only input
     (no MIDI, no sidechain; Frosty, 2026-09-10) -- so the rack's own
-    SingleModuleProcessor can host it unchanged. The core is mono: the first
-    channel is processed and copied to the rest, since a tuner on a stereo
-    channel is still correcting one voice.
+    SingleModuleProcessor can host it unchanged. The core is mono: on a
+    stereo channel it is fed (L + R) / 2 and its result is written to every
+    output, since a tuner on a stereo channel is still correcting one voice,
+    wherever in the image that voice sits.
 */
 class TuneDsp final : public ModuleDsp
 {
@@ -41,6 +42,20 @@ public:
     {
         if (numChannels <= 0 || numSamples <= 0)
             return;
+
+        // Stereo in: the core hears the average of left and right (the
+        // owner's decision, 2026-10-03). Until then it heard the left alone,
+        // so a voice on the right only came out as silence. Written as
+        // L + (R - L) / 2 rather than (L + R) / 2 so that dual mono (L == R)
+        // hands the core exactly L, and plays bit for bit what it did before.
+        if (numChannels > 1)
+        {
+            auto* l = channels[0];
+            const auto* r = channels[1];
+
+            for (int i = 0; i < numSamples; ++i)
+                l[i] += 0.5f * (r[i] - l[i]);
+        }
 
         core.process (channels[0], numSamples);
 

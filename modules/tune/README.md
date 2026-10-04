@@ -11,6 +11,11 @@ new note in about two and a half cycles of that note -- 5 ms on an A4, 11 ms
 on an A3 -- and tracks it to a small fraction of a cent. Breaths, consonants
 and silence are left alone.
 
+On a stereo track it listens to the average of the two channels, (L + R) / 2,
+and writes the corrected voice to both. A voice on one side only comes out on
+both, 6 dB down; the same signal on both sides comes out exactly as on a mono
+track. (Until 2026-10-03 it listened to the left channel only.)
+
 ## What it does about it
 
 It pulls the voice to the nearest allowed note -- chromatic by default, or a

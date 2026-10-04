@@ -232,8 +232,9 @@ int main()
     // one after another into one processor, whose reset() is the base
     // AudioProcessor's and does nothing to the DSP, over 3 s with one phrase
     // in it, so each figure carries the move from the preset before it -- 2.3
-    // dB for Fast Vocal (after In Front's AMOUNT, which ARC remembers) and
-    // Keep The Chest (whose LOW THRU comes in by its knob's way).
+    // dB for Fast Vocal (after In Front's AMOUNT, which ARC remembers), 1.4
+    // for Keep The Chest (whose LOW THRU comes in through the recall's dip
+    // since 2026-10-03, and by its knob's slow way before, at -2.3).
     {
         auto proc = createVcomp();
         proc->setPlayConfigDetails (2, 2, 48000.0, 512);
@@ -269,7 +270,7 @@ int main()
         const std::map<juce::String, double> expected {
             { "Lift",           -0.13 }, { "Forward",     -0.62 }, { "In Front", -0.71 },
             { "Fast Vocal",     -2.34 }, { "Smooth Lead",  0.00 },
-            { "Keep The Chest", -2.32 }, { "Keep The Air", -0.39 }, { "Manual",   -0.20 },
+            { "Keep The Chest", -1.35 }, { "Keep The Air", -0.40 }, { "Manual",   -0.20 },
         };
 
         for (int index = 1; index < (int) factory.size(); ++index)

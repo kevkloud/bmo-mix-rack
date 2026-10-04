@@ -71,6 +71,7 @@ void SingleModuleProcessor::handleAsyncUpdate()
 void SingleModuleProcessor::prepareToPlay (double sampleRate, int maximumExpectedSamplesPerBlock)
 {
     engine.prepare (sampleRate, maximumExpectedSamplesPerBlock, getTotalNumOutputChannels());
+    bypassDelay.prepare (getTotalNumOutputChannels());
 
     const auto latency = engine.latency();
     reportedLatency.store (latency, std::memory_order_relaxed);
@@ -110,21 +111,34 @@ void SingleModuleProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
     // one channel and silence. BusLayouts.h says why at length.
     buses::spreadInputAcrossOutputs (buffer, numIn, numOut);
 
+    // The input as the module gets it, kept for the host's bypass: the moment
+    // it switches, the bypass carries on from where the module's output was.
+    bypassDelay.push (buffer.getArrayOfReadPointers(), numOut, numSamples);
+
     // Every block goes through the engine, which guarantees a finite output;
     // there is no early return here, and none should be added without the
     // scrub RackProcessor::processBlock does at its own edge.
     engine.process (buffer.getArrayOfWritePointers(), numOut, numSamples, tempo);
 }
 
-void SingleModuleProcessor::processBlockBypassed (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
+void SingleModuleProcessor::processBlockBypassed (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
 {
-    // A host's bypass is JUCE's pass-through, which hands the host its own
-    // buffer back and so its own bad samples with it. Scrubbed after, so the
-    // pass-through itself is JUCE's, unchanged.
-    AudioProcessor::processBlockBypassed (buffer, midi);
-    finite::scrub (buffer.getArrayOfWritePointers(),
-                   juce::jmin (buffer.getNumChannels(), getTotalNumOutputChannels()),
-                   buffer.getNumSamples());
+    // Not JUCE's pass-through, which handed the input back undelayed -- early
+    // by the latency the host is compensating for, 40 samples with BMO EQ at
+    // 2x -- and cleared the right channel on mono in / stereo out. The bypass
+    // is the processed path with the module taken out: the input widened
+    // exactly as processBlock widens it, then delayed by the latency the host
+    // was last told (BypassDelay.h).
+    const auto numSamples = buffer.getNumSamples();
+    const auto numOut     = juce::jmin (buffer.getNumChannels(), getTotalNumOutputChannels());
+
+    buses::spreadInputAcrossOutputs (buffer, getTotalNumInputChannels(), numOut);
+    bypassDelay.delay (buffer.getArrayOfWritePointers(), numOut, numSamples,
+                       juce::jmax (0, reportedLatency.load (std::memory_order_relaxed)));
+
+    // The host's own bad samples come back out of the delay a latency later;
+    // scrubbed here, on the way out, as they always were.
+    finite::scrub (buffer.getArrayOfWritePointers(), numOut, numSamples);
 }
 
 //==============================================================================

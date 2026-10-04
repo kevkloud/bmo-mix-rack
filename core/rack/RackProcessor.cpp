@@ -647,6 +647,7 @@ void RackProcessor::prepareToPlay (double sampleRate, int maximumExpectedSamples
             if (s.engine != nullptr)
                 s.engine->prepare (currentRate, currentBlock, currentChannels);
 
+        bypassDelay.prepare (currentChannels);
         editDip.prepare (currentRate, kEditDipMs);
         dipLength   = std::max (1, (int) std::lround (std::max (currentRate, 0.0) * kEditDipMs * 0.001));
         dipDownLeft = 0;
@@ -725,6 +726,11 @@ void RackProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
     finite::scrub (buffer.getArrayOfWritePointers(), numOut, numSamples);
 
     auto* const* channels = buffer.getArrayOfWritePointers();
+
+    // The input as the chain gets it, kept for the host's bypass: the moment
+    // it switches, the bypass carries on from where the chain's output was.
+    bypassDelay.push (channels, numOut, numSamples);
+
     const juce::ScopedTryLock lock (chainLock);
 
     // Only prepare, release and an edit made while no audio was running take
@@ -813,15 +819,24 @@ void RackProcessor::applyDip (float* const* channels, int numChannels, int numSa
     }
 }
 
-void RackProcessor::processBlockBypassed (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
+void RackProcessor::processBlockBypassed (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
 {
-    // A host's bypass is JUCE's pass-through, which hands the host its own
-    // buffer back and so its own bad samples with it. Scrubbed after, so the
-    // pass-through itself is JUCE's, unchanged.
-    AudioProcessor::processBlockBypassed (buffer, midi);
-    finite::scrub (buffer.getArrayOfWritePointers(),
-                   juce::jmin (buffer.getNumChannels(), getTotalNumOutputChannels()),
-                   buffer.getNumSamples());
+    // Not JUCE's pass-through, which handed the input back undelayed -- early
+    // by the latency the host is compensating for, 80 samples with BMO EQ and
+    // BMO Saturator at 2x -- and cleared the right channel on mono in / stereo
+    // out. The bypass is the processed path with the chain taken out: the
+    // input widened exactly as processBlock widens it, then delayed by the
+    // latency the host was last told (BypassDelay.h).
+    const auto numSamples = buffer.getNumSamples();
+    const auto numOut     = juce::jmin (buffer.getNumChannels(), getTotalNumOutputChannels());
+
+    buses::spreadInputAcrossOutputs (buffer, getTotalNumInputChannels(), numOut);
+    bypassDelay.delay (buffer.getArrayOfWritePointers(), numOut, numSamples,
+                       juce::jmax (0, reportedLatency.load (std::memory_order_relaxed)));
+
+    // The host's own bad samples come back out of the delay a latency later;
+    // scrubbed here, on the way out, as they always were.
+    finite::scrub (buffer.getArrayOfWritePointers(), numOut, numSamples);
 }
 
 juce::AudioProcessorEditor* RackProcessor::createEditor()

@@ -101,6 +101,15 @@ rack/     SlotParameter (one generic host parameter, remapped live),
   into both channels, never cleared. The flag is the last field in
   `ModuleDef` and false for every other module, which keeps each of them on
   exactly the layouts it had before; `bus_tests` holds the table per product.
+- **A host's bypass is the processed path with the modules taken out**
+  (2026-10-03), in both processors: the input widened exactly as
+  `processBlock` widens it, delayed by the latency the host was last told
+  (`product/BypassDelay.h`, sized in prepare), then scrubbed. `processBlock`
+  feeds the same line every block, so the switch into bypass is in step with
+  what the processed path was producing. JUCE's default handed the input
+  back undelayed and cleared the right channel on mono in / stereo out;
+  never fall back to it. `bus_tests` holds both, for several chains and
+  oversampling settings and across a latency change while bypassed.
 - `SlotParameter::assign` keeps a pointer into the module's static
   `specs()` vector. Never hand it a temporary.
 - A slot's `SlotOverflow` is an `AudioProcessor` only so that its

@@ -2,6 +2,7 @@
 
 #include "SlotOverflow.h"
 #include "SlotParameter.h"
+#include "core/product/BypassDelay.h"
 #include "core/dsp/SwitchFade.h"
 #include "core/product/ModuleEngine.h"
 #include "core/product/ProductInfo.h"
@@ -316,6 +317,10 @@ private:
     PresetManager presets;
 
     std::atomic<int> reportedLatency { -1 };
+
+    // The host's bypass, delayed by the reported latency and fed on every
+    // processed block so that switching to it stays in step (BypassDelay.h).
+    BypassDelay bypassDelay;
 
     // The summed tail, cached for the getter. Refreshed wherever the latency
     // is -- on a parameter change and in prepareToPlay -- and a chain edit

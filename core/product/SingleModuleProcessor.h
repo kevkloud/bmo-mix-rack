@@ -1,5 +1,6 @@
 #pragma once
 
+#include "BypassDelay.h"
 #include "ModuleDef.h"
 #include "ModuleEngine.h"
 #include "ProductInfo.h"
@@ -104,6 +105,10 @@ private:
     std::atomic<double> reportedTail { 0.0 };
 
     std::atomic<bool> expanded { def.isExpandable() };
+
+    // The host's bypass, delayed by the reported latency and fed on every
+    // processed block so that switching to it stays in step (BypassDelay.h).
+    BypassDelay bypassDelay;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SingleModuleProcessor)
 };

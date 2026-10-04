@@ -155,7 +155,29 @@ struct Settings
         allows, so the knob's own 0.71 runs as itself. The default leaves
         cuts alone. */
     double cutMaxQ = DesignLimits::kMaxQ;
+
+    /** The widest a Low Shelf or High Shelf is designed (BMO DEQ: kShelfMaxQ,
+        params.h). The cap lives here, applied by every design (designQ),
+        rather than in the Q handed over, so that the band's Q -- one glide
+        whatever the shape -- stays the knob's when the shape changes: a band
+        toggled between a bell at Q 2 and a cut used to see its Q pulled
+        toward the cut's 0.71 and back, and stepped 1.6x doing it. */
+    double shelfMaxQ = DesignLimits::kMaxQ;
 };
+
+/** The Q a design of `shape` runs at: the band's own, or its shape's cap. A
+    cut is compared with half a knob step of slack, so the knob's own 0.71 --
+    0.71000004 once a host has snapped it -- runs as itself. */
+inline double designQ (const Settings& s, Shape shape, double q) noexcept
+{
+    if ((shape == Shape::lowShelf || shape == Shape::highShelf) && q > s.shelfMaxQ)
+        return s.shelfMaxQ;
+
+    if ((shape == Shape::lowCut || shape == Shape::highCut) && q > s.cutMaxQ + 0.005)
+        return s.cutMaxQ;
+
+    return q;
+}
 
 //==============================================================================
 /** The zero-latency dynamic EQ, JUCE-free. A ModuleDsp adapter maps a params.h

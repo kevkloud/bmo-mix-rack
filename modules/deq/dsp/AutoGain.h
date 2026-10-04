@@ -50,7 +50,7 @@ inline double staticBroadbandGain (const Settings& s, const DesignGrid& grid) no
 
         if (counts[i])
         {
-            designs[i] = designMatched (b.shape, b.frequencyHz, b.q, b.gainDb, grid);
+            designs[i] = designMatched (b.shape, b.frequencyHz, designQ (s, b.shape, b.q), b.gainDb, grid);
             any = true;
         }
     }

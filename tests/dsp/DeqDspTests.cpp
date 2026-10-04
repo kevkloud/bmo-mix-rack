@@ -2510,6 +2510,13 @@ namespace
     // owner's rule for a discrete switch (2026-10-03): it may pass through a
     // short dip, and it may not click, burst or linger.
     //==========================================================================
+    // What the shape grid measures (testShapeChangeGrid), on ICE QUEEN,
+    // 2026-10-03: the arriving shape's output is bit-identical to an
+    // always-final instance's within 545 ms wherever it settles inside the
+    // render, and the dip's deepest 2 ms is 28.25 dB under the lower level.
+    constexpr double kIdenticalMs = 600.0;
+    constexpr double kDipDepthDb = 28.5;
+
     struct ShapeChange
     {
         double overTone = -1.0e9;   // largest tone envelope after the change over the louder steady level, dB
@@ -2666,6 +2673,127 @@ namespace
         std::cout << "  shape changes, worst over the louder level: tone " << worstTone << " dB (" << whereTone
                   << "), noise " << worstNoise << " dB (" << whereNoise << ")\n";
     }
+
+    /** The owner's criteria for a discrete switch, over the whole grid of
+        shape changes at 48 kHz (the probe runs it at 44.1, 96 and 192 too):
+        every ordered pair, f0 30 / 100 / 1k / 10k / 18k Hz, Q 0.1 / 0.71 / 2 /
+        40 (as the caps leave them), gain -24 / 0 / +24, a tone at f0 and
+        noise.
+          (a) the largest sample step, under 1.5x the signal's own;
+          (b) never more than 1 dB over the louder steady level;
+          (c) over in 28 ms, then bit-identical to an instance always at the
+              final shape -- within kIdenticalMs wherever the arriving shape
+              settles inside the render, which is every cell but the
+              slowest, recorded;
+          (d) the dip's depth, recorded per pair and pinned at what it
+              measures.
+        Round 3 of the review (2026-10-03) measured the series pair on 8ea4cd2
+        against these: Low Cut to High Cut at Q 0.1, 1 kHz, 14 dB over both
+        settings mid-change with a 5.0x step; High Shelf to Low Shelf at
+        100 Hz, Q 2, 1.79x. */
+    void testShapeChangeGrid()
+    {
+        constexpr double rate = 48000.0;
+        double worstStep = 0.0, worstOver = -1.0e9, worstHole = 0.0, worstIdentical = 0.0;
+        int neverIdentical = 0, cells = 0;
+        std::string whereStep, whereOver, whereHole, whereIdentical;
+
+        for (int a = 0; a < 5; ++a)
+            for (int b = 0; b < 5; ++b)
+            {
+                if (a == b)
+                    continue;
+
+                double pairHole = 0.0;
+
+                for (double f0 : { 30.0, 100.0, 1000.0, 10000.0, 18000.0 })
+                    for (float q : { 0.1f, 0.71f, 2.0f, 40.0f })
+                        for (float gain : { -24.0f, 0.0f, 24.0f })
+                        {
+                            const auto r = measureShapeChange (rate, a, b, f0, gain, q, true);
+                            const auto label = std::string (kShapeNames[a]) + " to " + kShapeNames[b] + ", " + std::to_string ((int) f0)
+                                             + " Hz, gain " + std::to_string ((int) gain) + ", Q " + std::to_string (q);
+                            ++cells;
+
+                            checkAtMost (r.step, 1.5, "Shape grid: (a) no step, " + label);
+                            checkAtMost (std::max (r.overTone, r.overNoise), 1.0, "Shape grid: (b) never over the louder level, " + label);
+
+                            if (r.identicalMs < 0.0)
+                            {
+                                ++neverIdentical;
+                                std::cout << "  grid: not yet bit-identical to the final shape when the render ends, " << label << "\n";
+                            }
+                            else
+                            {
+                                checkAtMost (r.identicalMs, kIdenticalMs, "Shape grid: (c) the final shape's own output, bit for bit, " + label);
+                                if (r.identicalMs > worstIdentical) { worstIdentical = r.identicalMs; whereIdentical = label; }
+                            }
+
+                            checkAtMost (-r.hole, kDipDepthDb, "Shape grid: (d) the dip no deeper than it measures, " + label);
+
+                            if (r.step > worstStep) { worstStep = r.step; whereStep = label; }
+                            if (std::max (r.overTone, r.overNoise) > worstOver) { worstOver = std::max (r.overTone, r.overNoise); whereOver = label; }
+                            if (r.hole < worstHole) { worstHole = r.hole; whereHole = label; }
+                            pairHole = std::min (pairHole, r.hole);
+                        }
+
+                std::cout << "  grid " << kShapeNames[a] << " to " << kShapeNames[b] << ": deepest dip " << pairHole << " dB\n";
+            }
+
+        std::cout << "  shape grid, " << cells << " cells: worst step " << worstStep << "x (" << whereStep << "), worst over "
+                  << worstOver << " dB (" << whereOver << "), deepest dip " << worstHole << " dB (" << whereHole
+                  << "), bit-identical to the final shape by " << worstIdentical << " ms (" << whereIdentical << "), "
+                  << neverIdentical << " cells not within the render\n";
+    }
+
+    /** A shape asked for again and again, every block or every few, never
+        steps either: Bell and Low Cut, Low Cut and High Cut, the two shelves,
+        High Shelf and High Cut, at 100 Hz and 1 kHz, against the louder
+        static shape's own largest step. Round 3 of the review measured the
+        shelves toggling at 100 Hz at 1.96x on 8ea4cd2. */
+    void testShapeTogglingNeverSteps()
+    {
+        constexpr double rate = 48000.0;
+        constexpr size_t block = 64;
+        const auto m = (size_t) (2.0 * rate);
+
+        for (double f0 : { 100.0, 1000.0 })
+            for (std::pair<int, int> pr : { std::pair { 0, 3 }, std::pair { 3, 4 }, std::pair { 1, 2 }, std::pair { 2, 4 } })
+                for (int every : { 1, 3, 64 })
+                {
+                    auto run = [&] (bool toggle, int fixed)
+                    {
+                        Values p;
+                        p.at (0, Control::on) = 1.0f; p.at (0, Control::freq) = (float) f0;
+                        p.at (0, Control::gain) = 12.0f; p.at (0, Control::q) = 2.0f;
+                        p.at (0, Control::shape) = (float) (toggle ? pr.first : fixed);
+
+                        std::vector<float> x (m);
+                        for (size_t i = 0; i < m; ++i) x[i] = (float) (0.178 * std::sin (2.0 * kPi * f0 * (double) i / rate + 0.3));
+
+                        DeqDsp d;
+                        d.setParams (p.v.data(), (int) p.v.size());
+                        d.prepare (rate, (int) block, 1);
+                        int k = 0;
+                        for (size_t pos = 0; pos < m; pos += block)
+                        {
+                            if (toggle && pos >= (size_t) (0.5 * rate) && (pos / block) % (size_t) every == 0)
+                                p.at (0, Control::shape) = (float) (k++ % 2 ? pr.first : pr.second);
+                            d.setParams (p.v.data(), (int) p.v.size());
+                            float* ch[1] { x.data() + pos };
+                            d.process (ch, 1, (int) block);
+                        }
+                        return x;
+                    };
+
+                    const auto half = (size_t) (0.5 * rate);
+                    const auto steady = std::max (largestStep (run (false, pr.first), half, m), largestStep (run (false, pr.second), half, m));
+                    const auto toggled = largestStep (run (true, 0), half, m);
+
+                    checkAtMost (toggled / steady, 1.5, std::string ("Shape toggling: ") + kShapeNames[pr.first] + " and " + kShapeNames[pr.second]
+                                 + " every " + std::to_string (every) + " blocks at " + std::to_string ((int) f0) + " Hz, step over the louder shape's");
+                }
+    }
 }
 
 int main()
@@ -2696,6 +2824,8 @@ int main()
     testHeldSettingsAreUnchanged();
     testResetBeforePrepare();
     testShapeChangeNeverBursts();
+    testShapeChangeGrid();
+    testShapeTogglingNeverSteps();
 
     if (failures == 0)
         std::cout << "deq_dsp: all passed\n";

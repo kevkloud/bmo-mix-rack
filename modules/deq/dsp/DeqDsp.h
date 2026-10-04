@@ -28,10 +28,12 @@ namespace bmo::deq
       own smoothing, so switching it or dragging a band glides.
     - **Output** is a trim after the bands, smoothed like BMO Util's gain.
 
-    A shelf's Q is capped at kShelfMaxQ here and a cut's at kCutMaxQ
-    (params.h, effectiveQ), so automation or an old session asking for a
-    resonant shelf gets the widest one the design is good for, and one asking
-    for a resonant cut gets one that does not boost.
+    A shelf's Q is capped at kShelfMaxQ and a cut's at kCutMaxQ (params.h)
+    by every design the engine makes (designQ, Settings), so automation or an
+    old session asking for a resonant shelf gets the widest one the design is
+    good for, and one asking for a resonant cut gets one that does not boost.
+    The engine is handed the knob's own Q, so the band's Q does not move when
+    only its shape does.
 */
 class DeqDsp final : public ModuleDsp
 {
@@ -76,6 +78,7 @@ public:
         // never switched on, cost nothing (Settings::bandCount).
         settings.bandCount = kBands;
         settings.cutMaxQ = kCutMaxQ;
+        settings.shelfMaxQ = kShelfMaxQ;
 
         for (int b = 0; b < kBands; ++b)
         {
@@ -88,7 +91,7 @@ public:
             band.enabled     = active && at (Control::on) > 0.5f;
             band.shape       = shapeFor (shapeChoice);
             band.frequencyHz = at (Control::freq);
-            band.q           = effectiveQ (shapeChoice, at (Control::q));
+            band.q           = at (Control::q);   // the knob's: each design caps it (designQ)
             band.gainDb      = at (Control::gain);
             band.placement   = placementFor ((int) std::lround (at (Control::place)));
             band.msAmount    = 1.0;

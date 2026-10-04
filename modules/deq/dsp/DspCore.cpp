@@ -113,14 +113,6 @@ namespace
         return radius > 0.0 && radius < 1.0 ? -1.0 / std::log (radius) : 0.0;
     }
 
-    /** The Q a design of `shape` uses: a cut's stops at `cutMaxQ`
-        (Settings::cutMaxQ). */
-    double designQ (Shape shape, double q, double cutMaxQ) noexcept
-    {
-        const auto cut = shape == Shape::lowCut || shape == Shape::highCut;
-        return cut && q > cutMaxQ + 0.005 ? cutMaxQ : q;
-    }
-
     /** The level a detector placed here listens to. */
     double placedLevel (Placement placement, double sm, double ss) noexcept
     {
@@ -382,7 +374,6 @@ void DspCore::controlTick() noexcept
             b.changing = true;
             b.arriving = s.shape;
             b.arriveInit = true;
-            b.logQ.snap (qT);   // the shape arriving at its own Q from the start
 
             if (! b.shapeFade.isMoving())
                 b.shapeFade.prepare (rate, kShapeFadeOutMs);
@@ -398,7 +389,6 @@ void DspCore::controlTick() noexcept
         {
             b.arriving = s.shape;
             b.arriveInit = true;
-            b.logQ.snap (qT);   // the shape arriving at its own Q from the start
         }
 
         if (b.changing)
@@ -410,7 +400,7 @@ void DspCore::controlTick() noexcept
             b.arriveStatic = arriveGain ? clampGainDb (s.gainDb) : 0.0;
             b.arriveOffset = b.offsetDb;
             b.arriveHz = hz;
-            b.arriveQ = std::exp (b.logQ.tick);
+            b.arriveQ = std::exp (qT);   // its own Q, not the glide toward it
             b.arriveCoeffs = designFor (b.arriving, hz, b.arriveQ, arriveGain ? clampGainDb (b.arriveStatic + b.offsetDb) : 0.0);
 
             if (b.arriveInit)
@@ -625,6 +615,7 @@ void DspCore::processImpl (Sample* const* channels, int numChannels, int numSamp
                     b.designedHz = b.arriveHz;     b.designedQ = b.arriveQ;
                     b.designedStatic = b.arriveStatic; b.designedOffset = b.arriveOffset;
                     b.gainDb.snap (b.arriveStatic);
+                    b.logQ.snap (std::log (b.arriveQ));   // silent here: the gain is 0
                     b.appliedGainDb = hasGain (b.shape) ? clampGainDb (b.arriveStatic + b.arriveOffset) : 0.0;
                     b.changing = false;
 
@@ -782,13 +773,13 @@ double DspCore::currentGainReductionDb() const noexcept
 
 SvfCoeffs DspCore::designFor (Shape shape, double hz, double q, double gainDb) const noexcept
 {
-    return SvfCoeffs::fromBiquad (designMatched (shape, hz, designQ (shape, q, current.cutMaxQ), gainDb, grid));
+    return SvfCoeffs::fromBiquad (designMatched (shape, hz, designQ (current, shape, q), gainDb, grid));
 }
 
 Biquad DspCore::bandDesign (int band) const noexcept
 {
     const auto& s = current.bands[(size_t) band];
-    return designMatched (s.shape, s.frequencyHz, designQ (s.shape, s.q, current.cutMaxQ), s.gainDb, grid);
+    return designMatched (s.shape, s.frequencyHz, designQ (current, s.shape, s.q), s.gainDb, grid);
 }
 
 std::complex<double> DspCore::staticResponseAt (double hz) const noexcept

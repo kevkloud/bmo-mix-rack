@@ -3670,6 +3670,94 @@ int main (int argc, char** argv)
         check (worst < 1.0, "both filter banks realise under 1 while a length move is in flight");
     }
 
+    //== DECAY and the multipliers wait for a length move to end ===============
+    //
+    // **Pinned as it is, so that a change to it is seen.** A length move or a
+    // TYPE dip takes no new request until it ends, and that includes DECAY,
+    // LOW x and HIGH x: under SIZE automation they reach the network once a
+    // move, every 111 ms (Room 12 <-> 30 m) to 289 ms (Ambience 0.5 -> 80 m)
+    // at 48 kHz, against one 32-sample block, 0.7 ms, with SIZE held (QA's
+    // probe, 2026-10-03). Letting them through mid-move was looked at and
+    // left: the two-path sum in `LateNetwork::process` is held by
+    // measurement rather than proof, and every row of that measurement ran
+    // with the coefficients standing still through each move. A change here
+    // needs that measurement redone first.
+    //
+    // Two networks run in step, Room at 48 kHz, block 32, DECAY 5 s; 10 ms
+    // after SIZE 12 -> 80 m starts, one of them is asked for a new DECAY,
+    // LOW x or HIGH x. The block in which the two first differ is when the
+    // request reached the network: the first block after the move ends.
+    {
+        constexpr double rate = 48000.0;
+        constexpr int block = 32, requestAt = 15;   // 15 blocks is 10 ms
+        using Late = DspCore::Late;
+
+        for (const bool sizeMoves : { false, true })
+            for (int which = 0; which < 3; ++which)
+            {
+                LateConfig c;
+                c.type = room;
+                c.sizeM = 12.0f;
+                c.decaySeconds = 5.0f;
+                c.dampLo = 1.2f;
+                c.dampHi = 0.4f;
+                c.loKneeHz = constantsFor (room).dampLoFreqHz;
+                c.hiKneeHz = constantsFor (room).dampHiFreqHz;
+
+                Late a, b;
+                a.setConfig (c);
+                b.setConfig (c);
+                a.prepare (rate, block);
+                b.prepare (rate, block);
+
+                float in[block] {}, l[block], r[block];
+                if (sizeMoves)
+                {
+                    c.sizeM = 80.0f;
+                    a.setConfig (c);
+                    b.setConfig (c);
+                }
+
+                int moveEnded = -1, arrived = -1;
+                for (int k = 0; k < 2000 && arrived < 0; ++k)
+                {
+                    if (k == requestAt)
+                    {
+                        auto d = c;
+                        if (which == 0) d.decaySeconds = 0.5f;
+                        if (which == 1) d.dampLo = 2.0f;
+                        if (which == 2) d.dampHi = 2.0f;
+                        b.setConfig (d);
+                    }
+                    a.process (in, l, r, block);
+                    b.process (in, l, r, block);
+                    if (moveEnded < 0 && ! a.isMoving())
+                        moveEnded = k;
+                    // The realised response and not the anchors: the anchors'
+                    // maximum does not move while HIGH x climbs under LOW x.
+                    for (int i = 0; i < Late::kLines && arrived < 0; ++i)
+                        for (const auto hz : { 0.0, 1000.0, 20000.0 })
+                            if (a.realisedGain (i, hz) != b.realisedGain (i, hz))
+                                arrived = k;
+                }
+
+                const char* names[] { "DECAY", "LOW x", "HIGH x" };
+                const auto lagMs = (arrived - requestAt) * block * 1000.0 / rate;
+                const auto label = std::string (names[which]) + (sizeMoves ? " asked for 10 ms into SIZE 12 -> 80 m" : " with SIZE held");
+                std::cout << "  " << label << ": reaches the network " << lagMs << " ms after it is asked for"
+                          << (sizeMoves ? "; the move lasts " + std::to_string ((moveEnded + 1) * block * 1000.0 / rate) + " ms" : "") << "\n";
+
+                if (! sizeMoves)
+                    check (arrived == requestAt, (label + ": arrives in the block it was asked for").c_str());
+                else
+                {
+                    check (moveEnded > requestAt && arrived == moveEnded + 1,
+                           (label + ": arrives in the first block after the move ends, and not before").c_str());
+                    check (lagMs > 200.0 && lagMs < 250.0, (label + ": which is 200 to 250 ms after it was asked for").c_str());
+                }
+            }
+    }
+
     //== The tail a host is told is at least the tail that rings ================
     //
     // The last sample above -60 dB of the peak, measured, against

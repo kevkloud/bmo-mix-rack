@@ -487,6 +487,13 @@ where it is coded. Everything else above stands.
   third option was set aside: letting the old room ring out beside the new
   one, which has no gap and cannot grow but doubles the tail's memory and
   its cost during a move.
+- **DECAY and both multipliers wait for a length move to end**, departing
+  from §5's 20 ms smoothing while SIZE moves. A move takes no new request
+  until it is over, so under SIZE automation the three reach the network once
+  a move: every 111 ms (Room 12 ↔ 30 m) to 289 ms (Ambience 0.5 → 80 m) at
+  48 kHz, against one 32-sample block (0.7 ms) with SIZE held. Left on
+  purpose: the two-path sum during a move is held by measurement, and that
+  measurement ran with the coefficients still. `reverb_dsp_tests` pins it.
 
 Four more, from QA's two passes on PR #38 (2026-10-03):
 

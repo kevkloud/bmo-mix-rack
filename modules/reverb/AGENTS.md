@@ -1084,6 +1084,28 @@ reprint, paste. **The panel draws Room's table for every type** — it always
 did, and the engine now plays the type's own — which is the panel's to close
 and is on the open list.
 
+## The late network while SIZE moves
+
+**DECAY, LOW x and HIGH x wait for a length move to end.** A SIZE move or a
+TYPE dip takes no new request until it is over (`applyPendingConfig`'s early
+return), and the three coefficients are requests like any other. With SIZE
+held they reach the network in the next block, 0.7 ms at 48 kHz / 32; under
+SIZE automation they reach it once a move, which at 48 kHz is every 111 ms
+(Room 12 <-> 30 m) to 247 ms (Room up to 80 m), 273 ms on Ambience
+automated 0.5..80 m and 289 ms for one Ambience 0.5 -> 80 m move (QA's probe,
+2026-10-03, on ICE QUEEN). A request made 10 ms into Room 12 -> 80 m arrives
+236.7 ms later, in the first block after the move ends.
+
+That is left as it is, on purpose. Letting the three through mid-move would
+not touch either filter bank's own gain -- each is designed from DECAY and
+the multipliers with the same ceiling, moving or not -- but the sum of the
+two paths during a move is held by measurement and not by proof (see
+`LateNetwork::process`), and every row of that measurement ran with the
+coefficients standing still through each move. **Changing this needs that
+measurement redone first.** "DECAY and the multipliers wait for a length move
+to end" in `reverb_dsp_tests` pins the behaviour: it fails if a request
+arrives before the move ends, or later than the first block after it.
+
 ## What is not here yet, and where it goes
 
 - **Tail reporting is done** (`11` section 2a, milestone M5).

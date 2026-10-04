@@ -172,17 +172,20 @@ public:
 
     double coeff() const noexcept { return gCoeff; }
 
-    /** |H(e^jw)| of the low-pass built from `g`. */
-    static double lowPassMagnitude (double g, double omega) noexcept
+    /** |H(e^jw)| of the low-pass built from `g`, at `z = e^-jw`.
+
+        All three magnitudes take `z` rather than `w` so that the sweep can
+        hand them the `std::polar (1, -w)` it cached at `prepare`: the same
+        call on the same argument, so the same bits, without a sine and a
+        cosine per grid point per stage on every TIME move. */
+    static double lowPassMagnitude (double g, std::complex<double> z) noexcept
     {
-        const auto z = std::polar (1.0, -omega);
         return std::abs ((g * (1.0 + z)) / ((1.0 + g) + (g - 1.0) * z));
     }
 
     /** |H(e^jw)| of the high-pass built from `g`, i.e. 1 - the low-pass. */
-    static double highPassMagnitude (double g, double omega) noexcept
+    static double highPassMagnitude (double g, std::complex<double> z) noexcept
     {
-        const auto z = std::polar (1.0, -omega);
         return std::abs ((1.0 - z) / ((1.0 + g) + (g - 1.0) * z));
     }
 
@@ -192,9 +195,8 @@ public:
         This is the one stage in the loop whose magnitude is allowed above
         unity (10 §4), so it is also the one whose closed form has to be
         right: `P_tape` is this number and almost nothing else. */
-    static double lowShelfMagnitude (double g, double gain, double omega) noexcept
+    static double lowShelfMagnitude (double g, double gain, std::complex<double> z) noexcept
     {
-        const auto z = std::polar (1.0, -omega);
         const auto gg = gain * g;
         return std::abs (((gg + 1.0) + (gg - 1.0) * z) / ((1.0 + g) + (g - 1.0) * z));
     }
@@ -246,10 +248,10 @@ public:
     double damping() const noexcept { return kCoeff; }
 
     /** g^2 (1 + z)^2 / ((1 + kg + g^2) + (2g^2 - 2) z + (1 - kg + g^2) z^2),
-        the bilinear transform of 1/(s^2 + k s + 1) at the prewarped `g`. */
-    static double magnitude (double g, double k, double omega) noexcept
+        the bilinear transform of 1/(s^2 + k s + 1) at the prewarped `g`,
+        at `z = e^-jw` (see `TptOnePole::lowPassMagnitude` for why `z`). */
+    static double magnitude (double g, double k, std::complex<double> z) noexcept
     {
-        const auto z = std::polar (1.0, -omega);
         const auto gg = g * g;
         const auto num = gg * (1.0 + z) * (1.0 + z);
         const auto den = (1.0 + k * g + gg) + (2.0 * gg - 2.0) * z + (1.0 - k * g + gg) * z * z;
@@ -1021,9 +1023,12 @@ public:
         probe.assign ((size_t) kProbeSize, 0.0f);
 
         gridOmega.assign ((size_t) kSweepPoints, 0.0);
+        gridZ.assign ((size_t) kSweepPoints, std::complex<double> { 1.0, 0.0 });
         gridHz.assign ((size_t) kSweepPoints, 0.0);
         filterMagnitude.assign ((size_t) kSweepPoints, 1.0);
+        referenceMagnitude.assign ((size_t) kSweepPoints, 1.0);
         kernelMagnitude.assign ((size_t) kSweepPoints, 1.0);
+        referenceBuiltFor = { -1.0, -1.0, -1.0 };
 
         const auto lo = 10.0;
         const auto hi = std::max (0.45 * sampleRate, lo * 2.0);
@@ -1033,6 +1038,7 @@ public:
             const auto f = lo * std::pow (hi / lo, (double) i / (double) (kSweepPoints - 1));
             gridHz[(size_t) i]    = f;
             gridOmega[(size_t) i] = 2.0 * kPiD * f / sampleRate;
+            gridZ[(size_t) i]     = std::polar (1.0, -gridOmega[(size_t) i]);
         }
 
         fadeLength = std::max (1, (int) std::lround (sampleRate * kCrossfadeSeconds));
@@ -2192,24 +2198,45 @@ private:
         construction and so contributes exactly 1 and is not swept. */
     void buildFilterMagnitudes() noexcept
     {
+        // **The reference cuts and the blocker are cached** (2026-10-03).
+        // They sit at fixed corners -- 20 Hz, the cap, 10 Hz -- so their
+        // product moves only with the sample rate, yet it was rebuilt, three
+        // complex divisions and three sines and cosines a point, on every
+        // bucket-brigade TIME move, where the clock filters do move. The
+        // product is the same three factors multiplied in the same order, so
+        // `m` comes out bit for bit what it was.
+        const std::array<double, 3> reference { referenceLowCut, referenceHighCut, referenceBlocker };
+
+        if (reference != referenceBuiltFor)
+        {
+            for (int i = 0; i < (int) referenceMagnitude.size(); ++i)
+            {
+                const auto z = gridZ[(size_t) i];
+
+                referenceMagnitude[(size_t) i] = TptOnePole::highPassMagnitude (referenceLowCut,  z)
+                                               * TptOnePole::lowPassMagnitude  (referenceHighCut, z)
+                                               * TptOnePole::highPassMagnitude (referenceBlocker, z);
+            }
+
+            referenceBuiltFor = reference;
+        }
+
         for (int i = 0; i < (int) filterMagnitude.size(); ++i)
         {
-            const auto w = gridOmega[(size_t) i];
+            const auto z = gridZ[(size_t) i];
 
-            auto m = TptOnePole::highPassMagnitude (referenceLowCut,  w)
-                   * TptOnePole::lowPassMagnitude  (referenceHighCut, w)
-                   * TptOnePole::highPassMagnitude (referenceBlocker, w);
+            auto m = referenceMagnitude[(size_t) i];
 
             if (params.character == kTape)
             {
-                m *= TptOnePole::lowPassMagnitude (filters[0].tapeLowPass.coeff(), w);
-                m *= TptOnePole::lowShelfMagnitude (filters[0].headBump.coeff(), headBumpGain, w);
+                m *= TptOnePole::lowPassMagnitude (filters[0].tapeLowPass.coeff(), z);
+                m *= TptOnePole::lowShelfMagnitude (filters[0].headBump.coeff(), headBumpGain, z);
             }
             else if (params.character == kBucketBrigade)
             {
                 const auto g = filters[0].bbdAntiAlias.coeff();
                 const auto k = filters[0].bbdAntiAlias.damping();
-                const auto one = TptSvfLowPass::magnitude (g, k, w);
+                const auto one = TptSvfLowPass::magnitude (g, k, z);
                 m *= one * one;
             }
 
@@ -2259,9 +2286,10 @@ private:
             hermiteKernel (phase, kernel.data());
         }
 
+        // `step` is the cached `std::polar (1, -w)`; see `gridZ`.
         for (int i = 0; i < (int) kernelMagnitude.size(); ++i)
         {
-            const auto step = std::polar (1.0, -gridOmega[(size_t) i]);
+            const auto step = gridZ[(size_t) i];
             std::complex<double> power { 1.0, 0.0 };
             std::complex<double> acc { 0.0, 0.0 };
 
@@ -2347,6 +2375,14 @@ private:
     std::uint32_t noiseState = kNoiseSeed;
 
     std::vector<double> gridOmega, gridHz, filterMagnitude, kernelMagnitude;
+
+    /** `e^-jw` at every grid point, taken once at `prepare`, and the
+        reference cuts' and blocker's magnitude product with the three
+        coefficients it was built for: the parts of the sweep that do not
+        move with TIME (`buildFilterMagnitudes`). */
+    std::vector<std::complex<double>> gridZ;
+    std::vector<double> referenceMagnitude;
+    std::array<double, 3> referenceBuiltFor { -1.0, -1.0, -1.0 };
     double referenceLowCut = 0.0, referenceHighCut = 0.0, referenceBlocker = 0.0;
     double kernelDelay = -1.0;
     double loopPeak = 1.0, loopPeakHz = 0.0;

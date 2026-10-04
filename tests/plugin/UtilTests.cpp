@@ -111,6 +111,39 @@ int main()
                             juce::String ("preset \"") + preset.name + "\" sets " + s.id);
         }
 
+        // The names, in order. A preset is named for what it does: width 200
+        // doubles the side and keeps the mid (+3.99 dB RMS on uncorrelated
+        // noise), so it is "Wide"; until 2026-10-03 it was "Side Only".
+        {
+            juce::StringArray names;
+            for (const auto& p : P::factory())
+                names.add (p.name);
+
+            check (names == juce::StringArray { "Init", "Mono Check", "Flip Polarity", "Wide", "Narrow", "Pad -6" },
+                   "the factory presets are Init, Mono Check, Flip Polarity, Wide, Narrow, Pad -6; got "
+                       + names.joinIntoString (", "));
+        }
+
+        // Nothing saved refers to a factory preset by name: a session and a
+        // user preset hold parameter values only, so renaming one cannot
+        // break either.
+        for (int i = 0; i < (int) P::factory().size(); ++i)
+        {
+            const juce::String name { P::factory()[(size_t) i].name };
+            presets.loadFactory (i);
+
+            juce::MemoryBlock session;
+            proc->getStateInformation (session);
+            const auto xml = juce::AudioProcessor::getXmlFromBinary (session.getData(), (int) session.getSize());
+            check (xml != nullptr && ! xml->toString().contains (name),
+                   "a session saved after \"" + name + "\" does not name it");
+
+            check (presets.saveUser ("Named Check"), "a user preset saves after \"" + name + "\"");
+            check (! presets.directory().getChildFile ("Named Check" + presets.extension()).loadFileAsString().contains (name),
+                   "a user preset saved after \"" + name + "\" does not name it");
+            presets.deleteUser ("Named Check");
+        }
+
         presets.loadFactory (0);
         setValue (*proc, P::kWidth, 30.0f);
         check (presets.saveUser ("Round Trip"), "a user preset saves");

@@ -18,7 +18,9 @@ presets/FactoryPresets.h  eleven presets, Init first
 Tests: `tests/dsp/SatDspTests.cpp` (the character: curve, asymmetry, band
 placement, crest factor, Auto Gain's level match), `tests/dsp/SatSwitchTests.cpp`
 (what happens while a control moves), `tests/plugin/SatTests.cpp` (schema,
-presets, preset levels).
+presets, preset levels). `sat_switch_tests` runs a subset of its grid by
+default, which is what ctest runs; `sat_switch_tests --long` runs every row.
+Run `--long` before merging any change to `dsp/`.
 
 ## Rules
 

@@ -4,6 +4,12 @@
 // the transitions -- a control changing while a signal passes -- which none of
 // those tests can see, because each of them builds a fresh core, sets it once
 // and measures the result.
+//
+// **The default run is a subset; `sat_switch_tests --long` runs every row.**
+// The default keeps, in every section, the rows that failed on the code the
+// section was written against, at 48 kHz and one other rate, with the
+// extreme settings; ctest runs the default. Run --long before merging any
+// change to modules/sat/dsp.
 
 #include "modules/sat/dsp/DspCore.h"
 
@@ -19,12 +25,13 @@ using namespace bmo::sat;
 
 namespace
 {
-    int failures = 0;
+    int failures = 0, checks = 0;
     constexpr double kPi = 3.14159265358979323846;
     constexpr double kAmplitude = 0.17782794;   // a -18 dBFS RMS sine's peak
 
     void check (bool ok, const std::string& what)
     {
+        ++checks;
         if (! ok) { std::cerr << "FAIL: " << what << '\n'; ++failures; }
     }
 
@@ -127,10 +134,36 @@ namespace
     }
 
     const int kFactors[] { 1, 2, 4, 8 };
+
+    /** --long runs every row of every grid below; the default run keeps the
+        subset `pick` and `keepPair` choose. scripts/build.sh tests the Debug
+        build, where the whole grid took 259 s on ICE QUEEN (2026-10-03). */
+    bool longRun = false;
+
+    /** `all` under --long, `kept` by default. Every value in `kept` is in
+        `all`, so the default run is a subset and asserts the same bounds. */
+    template <typename T>
+    std::vector<T> pick (std::initializer_list<T> all, std::initializer_list<T> kept)
+    {
+        return longRun ? std::vector<T> (all) : std::vector<T> (kept);
+    }
+
+    /** The oversampling changes the default run keeps: up from 1x, where
+        the latency starts at zero, to the nearest and the farthest factor;
+        all the way back down; and down between two factors that both have
+        latency. 8x -> 1x and 1x -> 8x are the rows section 1 quoted failing
+        on the unfixed code. */
+    bool keepPair (int from, int to)
+    {
+        return longRun || (from == 1 && to == 2) || (from == 1 && to == 8)
+                       || (from == 8 && to == 1) || (from == 4 && to == 2);
+    }
 }
 
-int main()
+int main (int argc, char** argv)
 {
+    longRun = argc > 1 && std::string (argv[1]) == "--long";
+
     //== 1. Changing the oversampling dips through zero instead of cutting ===
     // A change of oversampling changes the latency, so no blend of before
     // and after exists: the two are not aligned in time. It used to reset
@@ -142,11 +175,11 @@ int main()
     // and the latency reported for the new factor from the first process()
     // after the change, exactly as before.
     {
-        for (double fs : { 44100.0, 48000.0, 96000.0 })
+        for (double fs : pick ({ 44100.0, 48000.0, 96000.0 }, { 44100.0, 48000.0 }))
             for (int from : kFactors)
                 for (int to : kFactors)
                 {
-                    if (from == to)
+                    if (from == to || ! keepPair (from, to))
                         continue;
 
                     for (float mix : { 100.0f, 50.0f })
@@ -278,7 +311,7 @@ int main()
     // and the plain signal (2.0x at Drive 40, 6.4x worst case). Each now fades
     // over kSwitchFadeMs. Both directions, Drive 40 and 100, 1x and 2x.
     {
-        for (double fs : { 44100.0, 48000.0, 96000.0 })
+        for (double fs : pick ({ 44100.0, 48000.0, 96000.0 }, { 44100.0, 48000.0 }))
             for (int os : { 1, 2 })
                 for (float drive : { 40.0f, 100.0f })
                     for (int which = 0; which < 2; ++which)
@@ -435,7 +468,7 @@ int main()
             return std::sqrt (acc / (double) length);
         };
 
-        for (double fs : { 44100.0, 48000.0, 96000.0 })
+        for (double fs : pick ({ 44100.0, 48000.0, 96000.0 }, { 44100.0, 48000.0 }))
             for (int os : { 1, 2 })
                 for (const auto& setting : settings)
                     for (int start = 3; start < 6; ++start)
@@ -523,7 +556,7 @@ int main()
     // from a change a callback does exactly one path's worth.
     {
         for (double fs : { 48000.0, 192000.0 })
-            for (int block : { 32, 512 })
+            for (int block : pick ({ 32, 512 }, { 32 }))
                 for (int from : kFactors)
                     for (int to : kFactors)
                     {
@@ -604,11 +637,11 @@ int main()
             return x;
         };
 
-        for (double fs : { 44100.0, 48000.0, 96000.0 })
+        for (double fs : pick ({ 44100.0, 48000.0, 96000.0 }, { 44100.0, 48000.0 }))
             for (int from : kFactors)
                 for (int to : kFactors)
                 {
-                    if (from == to)
+                    if (from == to || ! keepPair (from, to))
                         continue;
 
                     auto a = settings; a.oversampling = from;
@@ -706,6 +739,8 @@ int main()
             }
     }
 
+    std::cout << checks << " checks, " << failures << " failures"
+              << (longRun ? "" : " (the default subset; --long runs every row)") << "\n";
     if (failures == 0)
         std::cout << "All Saturator switch tests passed.\n";
 

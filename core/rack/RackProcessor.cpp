@@ -206,7 +206,9 @@ void RackProcessor::collectRetired()
          output to zero over `kEditDipMs`, placed so that the bottom lands on
          the block's last sample; the block after swaps chains at its first
          sample and fades back up. An engine the edit kept is in both chains
-         and runs every block of the edit, so its state never misses a sample.
+         and runs every block of the edit, so its state never misses a sample;
+         one the edit brings in runs unheard alongside (`runWarming`), so it
+         is mid-stream at the swap.
       3. What the edit took out is retired, not destroyed, until the audio
          thread has finished a block without it (`collectRetired`).
 
@@ -674,6 +676,14 @@ void RackProcessor::prepareToPlay (double sampleRate, int maximumExpectedSamples
                 s.engine->prepare (currentRate, currentBlock, currentChannels);
 
         bypassDelay.prepare (currentChannels);
+
+        // One group of channels per slot for the taps, one for the chain an
+        // edit is warming up (runWarming), one spare. Sized here, never in a
+        // block.
+        workChannels = std::max (currentChannels, 1);
+        workspace.setSize (workChannels * (kSlots + 2), std::max (currentBlock, 1));
+        workspace.clear();
+
         editDip.prepare (currentRate, kEditDipMs);
         dipLength   = std::max (1, (int) std::lround (std::max (currentRate, 0.0) * kEditDipMs * 0.001));
         dipDownLeft = 0;
@@ -797,21 +807,91 @@ void RackProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
     // on what its engines already hold; see ModuleEngine::processHeld.
     const auto held = live->generation != edit;
 
-    for (int s = 0; s < live->size; ++s)
-    {
-        auto* engine = live->engines[(size_t) s];
-
-        if (held)
-            engine->processHeld (channels, numOut, numSamples, tempo);
-        else
-            engine->process (channels, numOut, numSamples, tempo);
-    }
+    if (newest != live)
+        runWarming (*newest, channels, numOut, numSamples, tempo, held, newest->generation != edit);
+    else
+        for (int s = 0; s < live->size; ++s)
+            runEngine (*live->engines[(size_t) s], channels, numOut, numSamples, tempo, held);
 
     applyDip (channels, numOut, numSamples);
 
     audioGeneration.store (live->generation, std::memory_order_release);
     lastBlockMs.store (std::max (1u, juce::Time::getMillisecondCounter()), std::memory_order_relaxed);
     inBlock.store (false);
+}
+
+void RackProcessor::runEngine (ModuleEngine& engine, float* const* channels, int numChannels, int numSamples,
+                               const HostTempo& tempo, bool held)
+{
+    if (held)
+        engine.processHeld (channels, numChannels, numSamples, tempo);
+    else
+        engine.process (channels, numChannels, numSamples, tempo);
+}
+
+void RackProcessor::runWarming (const Chain& next, float* const* channels, int numChannels, int numSamples,
+                                const HostTempo& tempo, bool held, bool nextHeld)
+{
+    const auto liveIndexOf = [this] (const ModuleEngine* e)
+    {
+        for (int s = 0; s < live->size; ++s)
+            if (live->engines[(size_t) s] == e)
+                return s;
+
+        return -1;
+    };
+
+    bool anyArriving = false;
+
+    for (int j = 0; j < next.size; ++j)
+        anyArriving = anyArriving || liveIndexOf (next.engines[(size_t) j]) < 0;
+
+    // Nothing arriving (a remove, a move), or a block larger than the host
+    // promised at prepare, which the workspace was sized for: the running
+    // chain alone. An engine that then arrives in the swap starts cold.
+    if (! anyArriving || numSamples > workspace.getNumSamples() || numChannels > workChannels)
+    {
+        for (int s = 0; s < live->size; ++s)
+            runEngine (*live->engines[(size_t) s], channels, numChannels, numSamples, tempo, held);
+
+        return;
+    }
+
+    const auto group = [this] (int g) { return workspace.getArrayOfWritePointers() + g * workChannels; };
+    const auto copy  = [numChannels, numSamples] (float* const* to, const float* const* from)
+    {
+        for (int ch = 0; ch < numChannels; ++ch)
+            juce::FloatVectorOperations::copy (to[ch], from[ch], numSamples);
+    };
+
+    // The running chain as usual, with what each engine hands on kept.
+    auto* const* warm = group (kSlots);
+    copy (warm, channels);
+
+    for (int s = 0; s < live->size; ++s)
+    {
+        runEngine (*live->engines[(size_t) s], channels, numChannels, numSamples, tempo, held);
+        copy (group (s), channels);
+    }
+
+    // Then the next chain in its own order, unheard, so that every engine it
+    // brings in is fed what its slot will be fed and is mid-stream when the
+    // swap comes: a kept engine is not run twice -- its output from the
+    // running chain stands in for it -- and an arriving one runs on the
+    // signal that reaches it. Exact wherever the engines before the arriving
+    // one are in the same order in both chains, which is every add and every
+    // replace; after a move as well, what is fed is the nearest the running
+    // chain has.
+    for (int j = 0; j < next.size; ++j)
+    {
+        auto* engine = next.engines[(size_t) j];
+        const auto k = liveIndexOf (engine);
+
+        if (k >= 0)
+            copy (warm, group (k));
+        else
+            runEngine (*engine, warm, numChannels, numSamples, tempo, nextHeld);
+    }
 }
 
 void RackProcessor::applyDip (float* const* channels, int numChannels, int numSamples) noexcept

@@ -137,10 +137,22 @@ rack/     SlotParameter (one generic host parameter, remapped live),
   with the bottom on a block's last sample, the next block swaps at its first
   sample, and fades back up: 10 ms and one sample of zero, at any block size.
   Removed engines are retired, not destroyed, until the audio thread has
-  finished a block without them. `RackTests` holds an untouched compressor,
-  delay and reverb sample-exact with a never-edited rack after the dip,
-  under 1.5x the steady step and 1 dB over the steady peak, for every kind of
-  edit.
+  finished a block without them. **An engine the edit brings in arrives
+  warm** (`RackProcessor::runWarming`): while the output fades out, it runs
+  unheard on what its slot will be fed -- the running chain's output at that
+  point, kept per engine -- so at the swap a module with latency is
+  mid-stream rather than handing out its latency's worth of zeros. That
+  costs the arriving engines' processing for the 5 ms: at 192 kHz / 32 with
+  every one of eight slots replaced, about 150 us a block against 100 us
+  steady and a 167 us period. A block larger than prepare promised skips
+  the warming. `RackTests` holds an untouched compressor, delay and reverb
+  sample-exact with a never-edited rack after the dip for add, remove, move
+  and replace; and for BMO EQ at 2x and 8x and BMO Saturator at 2x added,
+  swapped in or moved at 48 and 96 kHz and blocks of 32 and 512, the step
+  under 1.5x, no block 1 dB over, a move sample-exact within 30 ms and an
+  arrival within 1e-4 of a never-edited rack by 250 ms -- not to the bit,
+  because 5 ms of warming is not an engine's whole history and the rest
+  decays at the module's own rate.
 - Everything that changes the chain goes through `rebuild`, which calls
   `rackChainWillChange` before and `rackChainChanged` after, synchronously.
   An engine an edit takes out is destroyed some time after the first call,

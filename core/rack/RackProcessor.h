@@ -234,6 +234,16 @@ private:
     /** Destroys what the audio thread has finished with. Needs `editLock`. */
     void collectRetired();
 
+    /** One engine, on held values or not. */
+    static void runEngine (ModuleEngine&, float* const* channels, int numChannels, int numSamples,
+                           const HostTempo&, bool held);
+
+    /** A block while `next` waits to be swapped in: the running chain on
+        `channels`, and every engine `next` brings in run unheard on what its
+        slot will be fed, so it arrives warm. */
+    void runWarming (const Chain& next, float* const* channels, int numChannels, int numSamples,
+                     const HostTempo&, bool held, bool nextHeld);
+
     /** The edit dip, applied to the chain's output; nothing while idle. */
     void applyDip (float* const* channels, int numChannels, int numSamples) noexcept;
 
@@ -300,6 +310,11 @@ private:
     // The audio thread's, and `chainLock`'s holder's.
     dsp::Dip editDip;
     int dipLength = 1, dipDownLeft = 0;
+
+    // Scratch for runWarming, sized in prepare: `workChannels` channels per
+    // group, kSlots + 2 groups. The audio thread's, and `chainLock`'s holder's.
+    juce::AudioBuffer<float> workspace;
+    int workChannels = 0;
 
     // Serialises everything that changes or reads the chain off the audio
     // thread: edits, restores, prepare and release, state captures. The audio

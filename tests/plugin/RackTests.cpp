@@ -241,37 +241,44 @@ namespace
         float worstStep  = 0.0f, worstPeak  = 0.0f;   // every block from the edit on
         int   settledAt  = 0;                         // samples after the edit until edited == reference for good
         int   latencyBefore = 0, latencyAfter = 0;
+        int   nearAt = 0;                             // the same, to within 1e-4 (-80 dBFS) rather than to the bit
     };
 
     /** A 220 Hz sine at -18 dBFS peak, the same in both channels. With `tail`
         it stops after 100 blocks (1.07 s), so the edit lands in the ringing of
         a delay or a reverb rather than on a held note. */
     EditRun runEdit (RackProcessor& edited, RackProcessor& reference,
-                     const std::function<void()>& edit, bool tail)
+                     const std::function<void()>& edit, bool tail,
+                     double rate = kEditRate, int block = kEditBlock)
     {
-        constexpr int pre = 150, steadyBlocks = 20, post = 40, stopAt = 100;
+        // The same stretches of time at any rate and block size: 1.6 s before
+        // the edit, the last 213 ms of it steady, 427 ms after it.
+        const auto f = (rate / (double) block) / (kEditRate / (double) kEditBlock);
+        const int pre = (int) std::lround (150 * f), steadyBlocks = (int) std::lround (20 * f),
+                  post = (int) std::lround (40 * f), stopAt = (int) std::lround (100 * f);
 
         for (auto* r : { &edited, &reference })
         {
-            r->setPlayConfigDetails (2, 2, kEditRate, kEditBlock);
-            r->prepareToPlay (kEditRate, kEditBlock);
+            r->setPlayConfigDetails (2, 2, rate, block);
+            r->prepareToPlay (rate, block);
         }
 
         EditRun run;
         run.latencyBefore = edited.getLatencySamples();
 
-        juce::AudioBuffer<float> a (2, kEditBlock), b (2, kEditBlock);
+        juce::AudioBuffer<float> a (2, block), b (2, block);
         juce::MidiBuffer midi;
         float prev[2] {};
         long long n = 0;
         int lastDiff = -1;
+        int lastFar = -1;
 
         for (int k = 0; k < pre + post; ++k)
         {
-            for (int i = 0; i < kEditBlock; ++i, ++n)
+            for (int i = 0; i < block; ++i, ++n)
             {
                 const auto v = tail && k >= stopAt ? 0.0f
-                             : 0.125f * (float) std::sin (2.0 * juce::MathConstants<double>::pi * 220.0 * (double) n / kEditRate);
+                             : 0.125f * (float) std::sin (2.0 * juce::MathConstants<double>::pi * 220.0 * (double) n / rate);
                 for (int ch = 0; ch < 2; ++ch)
                 {
                     a.setSample (ch, i, v);
@@ -287,7 +294,7 @@ namespace
 
             for (int ch = 0; ch < 2; ++ch)
             {
-                for (int i = 0; i < kEditBlock; ++i)
+                for (int i = 0; i < block; ++i)
                 {
                     const auto x = a.getSample (ch, i);
                     const auto step = std::abs (x - prev[ch]);
@@ -304,7 +311,12 @@ namespace
                         run.worstPeak = juce::jmax (run.worstPeak, std::abs (x));
 
                         if (x != b.getSample (ch, i))
-                            lastDiff = juce::jmax (lastDiff, (k - pre) * kEditBlock + i);
+                            lastDiff = juce::jmax (lastDiff, (k - pre) * block + i);
+
+                        const auto diff = std::abs (x - b.getSample (ch, i));
+
+                        if (diff > 1.0e-4f)
+                            lastFar = juce::jmax (lastFar, (k - pre) * block + i);
                     }
                 }
             }
@@ -313,6 +325,7 @@ namespace
         juce::MessageManager::getInstance()->runDispatchLoopUntil (20);
         run.latencyAfter = edited.getLatencySamples();
         run.settledAt = lastDiff + 1;
+        run.nearAt = lastFar + 1;
         return run;
     }
 }
@@ -1342,6 +1355,103 @@ int main()
                            + juce::String (run.latencyAfter) + " vs " + juce::String (reference->getLatencySamples()));
             }
         }
+    }
+
+    //== A module with latency arrives warm ====================================
+    // The review of 2026-10-03, on the commit before this: a module added or
+    // swapped in mid-play was swapped in cold, so its latency's worth of zeros
+    // ate into the fade-in and then the input jumped in. With the FET
+    // compressor kept in slot 1 on a 220 Hz sine at -18 dBFS, adding BMO EQ
+    // at 2x stepped 2.04 to 5.12x the steady signal's largest step, BMO EQ at
+    // 8x 3.18 to 7.89x, BMO Saturator at 2x 2.70 to 6.66x. Now an arriving
+    // engine runs on what its slot will be fed while the output fades out, so
+    // at the swap it is mid-stream. Add, replace and move, at two rates and
+    // two block sizes.
+    {
+        struct Arrival { const char* id; float oversampling; };
+        const Arrival kArrivals[] { { "eq", 1.0f }, { "eq", 3.0f }, { "sat", 1.0f } };
+
+        struct Edit
+        {
+            const char* what;
+            std::vector<const char*> before, after;     // "X" is the arriving module
+            std::function<void (RackProcessor&, const Arrival&)> apply;
+        };
+
+        const auto arrive = [] (RackProcessor& r, int slot, const Arrival& x)
+        {
+            r.getEngineAt (slot)->params().setReal ("oversampling", x.oversampling);
+        };
+
+        const Edit kEdits[] {
+            { "added after it", { "fetcomp" }, { "fetcomp", "X" },
+              [&] (RackProcessor& r, const Arrival& x) { r.addModule (*r.findModule (x.id)); arrive (r, 1, x); } },
+            { "swapped in for the utility module after it", { "fetcomp", "util" }, { "fetcomp", "X" },
+              [&] (RackProcessor& r, const Arrival& x) { r.setModule (1, *r.findModule (x.id)); arrive (r, 1, x); } },
+            { "moved ahead of the utility module", { "fetcomp", "util", "X" }, { "fetcomp", "X", "util" },
+              [&] (RackProcessor& r, const Arrival&) { r.moveModule (2, 1); } },
+        };
+
+        const auto build = [&] (const Arrival& x, const std::vector<const char*>& ids)
+        {
+            auto rack = createRack();
+
+            for (int s = 0; s < (int) ids.size(); ++s)
+            {
+                const auto isX = juce::String (ids[(size_t) s]) == "X";
+                rack->addModule (*rack->findModule (isX ? x.id : ids[(size_t) s]));
+
+                if (isX)
+                    arrive (*rack, s, x);
+                else if (juce::String (ids[(size_t) s]) == "fetcomp")
+                    rack->getEngineAt (s)->params().setReal ("input", 30.0f);
+            }
+
+            juce::MessageManager::getInstance()->runDispatchLoopUntil (20);
+            return rack;
+        };
+
+        for (const auto& x : kArrivals)
+            for (const auto& e : kEdits)
+                for (const auto rate : { 48000.0, 96000.0 })
+                    for (const auto block : { 32, 512 })
+                    {
+                        auto edited    = build (x, e.before);
+                        auto reference = build (x, e.after);
+                        const auto run = runEdit (*edited, *reference, [&] { e.apply (*edited, x); }, false, rate, block);
+
+                        const juce::String where = juce::String (x.id) + " at " + juce::String (1 << (int) x.oversampling)
+                                                 + "x " + e.what + ", " + juce::String (rate / 1000.0) + " kHz, block "
+                                                 + juce::String (block) + ": ";
+                        const auto ratio = run.steadyStep > 0.0f ? run.worstStep / run.steadyStep : 0.0f;
+                        const auto overDb = juce::Decibels::gainToDecibels (run.worstPeak, -240.0f)
+                                          - juce::Decibels::gainToDecibels (run.steadyPeak, -240.0f);
+                        const auto settledMs = run.settledAt * 1000.0 / rate;
+                        const auto nearMs    = run.nearAt * 1000.0 / rate;
+                        const auto moved     = e.after.size() == 3;
+
+                        check (ratio < 1.5f, where + "largest sample step " + juce::String (ratio, 2)
+                                                 + "x the steady signal's, over the 1.5x bound");
+                        check (overDb <= 1.0f, where + "a block " + juce::String (overDb, 2)
+                                                   + " dB over the steady peak, over the 1 dB bound");
+
+                        // A moved engine is the same engine, so the rack is
+                        // the never-edited one to the bit once the dip is
+                        // over. An arriving one is not: 5 ms of warming
+                        // cannot give it the history of an engine that has run
+                        // since the start, and what remains decays at the
+                        // module's own rate -- BMO EQ by about a decade per
+                        // 95 ms (1e-3 at 52 ms, 1e-4 at 191 ms, 1e-6 at
+                        // 376 ms), BMO Saturator faster. So the bound for an
+                        // arrival is agreement within 1e-4, 73 dB under the
+                        // signal, by 250 ms.
+                        if (moved)
+                            check (settledMs <= 30.0, where + "sample-exact with a never-edited rack only "
+                                                          + juce::String (settledMs, 1) + " ms after the edit, over 30 ms");
+                        else
+                            check (nearMs <= 250.0, where + "within 1e-4 of a never-edited rack only "
+                                                        + juce::String (nearMs, 1) + " ms after the edit, over 250 ms");
+                    }
     }
 
     return finish ("BMO Mix Rack");

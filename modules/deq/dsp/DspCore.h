@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <atomic>
 #include <memory>
+#include <vector>
 #include <complex>
 
 namespace bmo::deq
@@ -28,23 +29,52 @@ inline constexpr int kControlInterval = 8;
 /** Static parameters glide to a new value over roughly this long. */
 inline constexpr double kSmoothingMs = 10.0;
 
-/** A switch -- shape, placement, DYN, direction, solo -- crosses over in this
-    long rather than stepping (core/dsp/SwitchFade.h, and the house rule in
+/** A switch -- placement, DYN, direction, solo -- crosses over in this long
+    rather than stepping (core/dsp/SwitchFade.h, and the house rule in
     core/AGENTS.md: under 1.5x the steady signal's largest step). A change
     asked for while one is in progress waits for it, then crosses over from
     there: the latest choice wins, at most one crossover late. DYN and
     direction blend two gain laws rather than two filters, so they simply
-    turn round from where they are. A shape goes out to nothing and comes
-    in from nothing in series rather than as a blend of two outputs, which
-    can cancel (Band, DspCore::designAt). */
+    turn round from where they are. A change of shape is not a crossover at
+    all; see kShapeFadeOutMs. */
 inline constexpr double kSwitchFadeMs = 10.0;
 
-/** A change of shape takes this long: the shape leaving goes to nothing while
-    the one arriving comes from nothing, in series (DspCore::designAt). Twice
-    a switch, because what changes is two whole filters at once -- up to 24 dB
-    of gain and half a turn of phase at the band's frequency -- and the step
-    bound has to hold through all of it. */
-inline constexpr double kShapeChangeMs = 20.0;
+/** A change of shape dips the output through silence (Band): it fades out
+    over kShapeFadeOutMs while the shape arriving warms up on the band's own
+    input, the band takes the arriving shape at the bottom, and the output
+    fades back in over kShapeFadeInMs -- 28 ms in all.
+
+    The owner's rule for a discrete switch (2026-10-03): it may pass through
+    a short dip; it may not click, burst or linger. Every crossover tried
+    here broke one of those. A blend of the two shapes' outputs cancels where
+    they are out of phase (a full null for Low Cut against High Cut at one
+    corner); two shapes half applied in series go over both (14 dB for two
+    Q 0.1 cuts); and either way the shape arriving has to start from some
+    state, and the leaving shape's -- a +24 dB bell at Q 40 and 30 Hz holds
+    seconds of resonance -- burst 30 dB over the louder level. A dip cannot
+    go over either level, and the fade out is the shape arriving's warm-up,
+    so it comes in already settled on what the band is hearing. The fade in
+    is the shorter, because the slower a fade the smaller its step and at
+    30 Hz 8 ms is already under 1.2x. */
+inline constexpr double kShapeFadeOutMs = 20.0;
+inline constexpr double kShapeFadeInMs = 8.0;
+
+/** The shape arriving warms up on the band's own input as recorded, from rest
+    this many of its slowest time constants back, so that it comes in settled
+    to within e^-6 (-52 dB) of what it would be had it always been there. An
+    attenuating filter cannot attenuate a tone it has not heard for its own
+    time constant -- a -24 dB bell at Q 40 and 30 Hz needs 107 ms of it --
+    and the 28 ms of a change is not long enough to hear it live. It works
+    through the record faster than real time during the fade out. */
+inline constexpr double kWarmTimeConstants = 6.0;
+
+/** How much of each band's input is kept for that: enough for six time
+    constants of anything slower than a 30 Hz Q 40 cut (107 ms), and capped
+    there; slower still, a shape arrives less than fully settled. Kept for the
+    product's bands only (Settings::bandCount, at most kShapeHistoryBands), as
+    floats: 12 bands take 2.9 MB at 48 kHz and 11.8 MB at 192 kHz. */
+inline constexpr double kShapeHistoryMs = 640.0;
+inline constexpr int kShapeHistoryBands = 16;
 
 /** A dynamic band is only redesigned when its gain offset has moved by more
     than this since the last design. Static settings are always followed
@@ -221,12 +251,12 @@ public:
         a band that has never been switched on hears none. */
     std::uint64_t detectorTicks (int band) const noexcept { return bands[(size_t) band].listened; }
 
-    /** The coefficients a band is running this sample: its own, or with
-        `outgoing` those of the shape it is changing from (which stay where
-        they were once a change is over). */
-    SvfCoeffs bandCoefficients (int band, bool outgoing = false) const noexcept
+    /** The coefficients a band is running this sample, or with `arriving`
+        those of the shape it is changing to while it warms up (which stay
+        where they were once a change is over). */
+    SvfCoeffs bandCoefficients (int band, bool arriving = false) const noexcept
     {
-        return outgoing ? bands[(size_t) band].oldCoeffs : bands[(size_t) band].cur;
+        return arriving ? bands[(size_t) band].arriveCoeffs : bands[(size_t) band].cur;
     }
 
     /** No subnormal anywhere in filter or detector state. */
@@ -298,21 +328,28 @@ private:
         dsp::Ramp dynMix, dirMix, placeMix;
         Placement placement = Placement::stereo, fromPlacement = Placement::stereo;
 
-        // A change of shape (DspCore::designAt): the shape leaving and the
-        // shape arriving run in series, the one leaving going to nothing
-        // while the one arriving comes from nothing, so the band is the
-        // product of two filters and never a sum that can cancel. The one
-        // leaving keeps its state and runs on; the one arriving starts from
-        // rest at nothing -- a 0 dB design, or a cut wholly blended with its
-        // input -- whose output is its input whatever its state, so it has
-        // no start-up transient and nothing stale to replay.
-        dsp::Ramp shapeMix;             // how far the arriving shape has come
-        Shape     shape = Shape::bell;  // the shape arriving, or running
-        Shape     oldShape = Shape::bell;
-        double    oldGainDb = 0.0, oldHz = 1000.0, oldQ = 0.707;  // the leaving shape as it left
-        SvfCoeffs oldCoeffs, oldNext, oldStep;
-        SvfState  oldM, oldS;
-        float     designedAmount = 1.0f;
+        // A change of shape (kShapeFadeOutMs): the output fades through
+        // silence while the shape arriving runs in its own filter, on the
+        // band's input, from rest -- or from the running filter's state when
+        // the two have the same poles (a Low Cut and a High Cut at one corner
+        // and Q), where that state is exactly its own -- and the band takes it
+        // at the bottom. The shape leaving keeps its state to the end, so its
+        // fade is its own sound getting quieter and nothing else.
+        dsp::Ramp shapeFade;               // the band's output gain through a change
+        bool      changing = false;        // a shape is arriving
+        Shape     shape = Shape::bell;     // the shape the band is running
+        Shape     arriving = Shape::bell;  // and the one it is changing to
+        SvfCoeffs arriveCoeffs;
+        SvfState  arriveM, arriveS;
+        double    arriveHz = 1000.0, arriveQ = 0.707, arriveStatic = 0.0, arriveOffset = 0.0;  // what it was designed from
+        bool      arriveInit = false;      // its state is still to be set
+        int       behind = 0;              // recorded samples it has still to hear
+        int       warmStep = 1;            // how many it hears per sample, catching up
+
+        // The band's own input, M and S, the last kShapeHistoryMs of it, for
+        // a shape arriving to warm up on. Allocated in prepare().
+        std::vector<float> histM, histS;
+        int       histPos = 0, histFilled = 0;
 
         // What `next` was designed from, so a static band is not redesigned.
         Shape  designedShape = Shape::bell;
@@ -326,14 +363,9 @@ private:
 
     void controlTick() noexcept;
 
-    /** A design of `shape` a fraction `amount` of the way from nothing to its
-        settings, for a change of shape. A bell or shelf scales its gain in
-        dB, so it goes through the same filters its GAIN knob would. A cut,
-        which has no gain, moves its corner from the edge of the band (5 Hz
-        for a Low Cut, 0.499 fs for a High Cut) to its frequency on a log
-        scale, and is blended with its input over the first fifth of the way
-        (cutWeight); at an amount of 1 it is the band's ordinary design. */
-    SvfCoeffs designAt (Shape shape, double hz, double q, double gainDb, float amount) const noexcept;
+    /** The design of `shape` at these settings, its Q capped where it is a
+        cut (designQ). */
+    SvfCoeffs designFor (Shape shape, double hz, double q, double gainDb) const noexcept;
 
     /** Back to rest: the band's filter always, its listener too when asked. */
     void resetBand (Band& b, bool listenerToo) noexcept;
@@ -353,7 +385,7 @@ private:
     DesignGrid grid;
     std::unique_ptr<Shared> shared = std::make_unique<Shared>();
     double rate = 48000.0, tickAlpha = 0.0;
-    int tickPhase = 0, bandsInUse = 0;
+    int tickPhase = 0, bandsInUse = 0, shapeWarmSamples = 1;
     bool primed = false, prepared = false;
 
     // Solo crosses over from what was being heard (-1: the whole EQ) to what

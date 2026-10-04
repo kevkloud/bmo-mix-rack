@@ -1979,20 +1979,22 @@ namespace
             return toDb (peak);
         };
 
-        struct Route { const char* name; void (*before) (Values&); void (*after) (Values&); bool cutIsOutgoing; };
+        // Which coefficients are a cut's, and when: the shape arriving's while it
+        // warms up, and the band's own while the cut is the one running.
+        struct Route { const char* name; void (*before) (Values&); void (*after) (Values&); bool arrivingIsCut; double curFromMs, curToMs; };
         const Route routes[] {
             { "a bell at Q 40 changed to a Low Cut while on",
               [] (Values& p) { p.at (0, Control::shape) = 0.0f; },
-              [] (Values& p) { p.at (0, Control::shape) = 3.0f; }, false },
+              [] (Values& p) { p.at (0, Control::shape) = 3.0f; }, true, 30.0, 50.0 },
             { "a bell at Q 40 changed to a High Cut while on",
               [] (Values& p) { p.at (0, Control::shape) = 0.0f; },
-              [] (Values& p) { p.at (0, Control::shape) = 4.0f; }, false },
+              [] (Values& p) { p.at (0, Control::shape) = 4.0f; }, true, 30.0, 50.0 },
             { "a Low Cut changed to a bell at Q 40 while on",
               [] (Values& p) { p.at (0, Control::shape) = 3.0f; },
-              [] (Values& p) { p.at (0, Control::shape) = 0.0f; }, true },
+              [] (Values& p) { p.at (0, Control::shape) = 0.0f; }, false, 0.0, 15.0 },
             { "a preset turning an off bell at Q 40 into a Low Cut that is on",
               [] (Values& p) { p.at (0, Control::shape) = 0.0f; p.at (0, Control::on) = 0.0f; },
-              [] (Values& p) { p.at (0, Control::shape) = 3.0f; p.at (0, Control::on) = 1.0f; }, false },
+              [] (Values& p) { p.at (0, Control::shape) = 3.0f; p.at (0, Control::on) = 1.0f; }, false, 0.0, 50.0 },
         };
 
         for (const auto& route : routes)
@@ -2015,16 +2017,22 @@ namespace
                     d.setParams (p.v.data(), (int) p.v.size());
                     float* ch[1] { x.data() };
                     d.process (ch, 1, 1);
-                    if (sample)
-                        worst = std::max (worst, peakDb (d.engine().bandCoefficients (0, route.cutIsOutgoing)));
+                    const auto ms = (double) n / rate * 1000.0;
+                    if (sample && route.arrivingIsCut)
+                        worst = std::max (worst, peakDb (d.engine().bandCoefficients (0, true)));
+                    if (sample && ms >= route.curFromMs && ms < route.curToMs)
+                        worst = std::max (worst, peakDb (d.engine().bandCoefficients (0)));
                 }
                 return worst;
             };
 
-            // Live as a bell first, so a band switched off has been listening.
+            // Live as a bell first, so a band switched off has been listening,
+            // and long enough after the change before it for a band switched
+            // off to have faded out completely (its fade is a one-pole of 10 ms,
+            // settled to 1e-9 in 207 ms).
             run ((int) (0.1 * rate), false);
             route.before (p);
-            run ((int) (0.2 * rate), false);
+            run ((int) (0.3 * rate), false);
             route.after (p);
             const auto worst = run ((int) (0.05 * rate), true);
             checkAtMost (worst, 0.05, std::string ("Cut peak: ") + route.name + ", every sample for 50 ms");
@@ -2102,23 +2110,26 @@ namespace
         return lowest - std::min (before, after);
     }
 
-    /** A change of shape leaves no hole: for every ordered pair of shapes, at
-        the band's frequency and at 0.66 and 1.5 times it, with gains of -24,
-        0 and +24 dB and Q 0.71 and 2, the lowest 2 ms level during the change
-        is within 3 dB of the lower of the two steady levels, and no step
-        passes 1.5x. 3 dB is what an equal-gain blend of two signals in
-        quadrature gives; the worst measured is printed (1.39 dB on
-        2026-10-03, a -24 dB bell at Q 2 changed to a Low Cut, at 0.66 f0).
+    /** A change of shape dips through silence and does nothing else: for
+        every ordered pair of shapes, at the band's frequency and at 0.66 and
+        1.5 times it, with gains of -24, 0 and +24 dB and Q 0.71 and 2, the
+        level is under the lower of the two steady levels by 3 dB or more for
+        no longer than the dip itself (20 ms: the last 14.1 ms of a 20 ms fade
+        out and the first 5.7 ms of an 8 ms fade in), and
+        no step passes 1.5x. The dip is the owner's rule for a discrete
+        switch (2026-10-03); its depth, silence at the bottom, is printed per
+        pair rather than bounded.
 
-        Round 2 of the review (2026-10-03): the shape crossover blended the
-        two filters' outputs, which cancel where they are out of phase -- Low
-        Cut against High Cut at the same corner is exact anti-phase there, a
-        full null at mid-fade; a -24 dB bell against a Low Cut reached -88.7 dB
-        at 0.66 f0. The step was gone and a 10 ms notch had replaced it. */
+        Round 2 of the review (2026-10-03) found the crossover before this one
+        blended the two filters' outputs, which cancel where they are out of
+        phase -- Low Cut against High Cut at one corner is exact anti-phase
+        there, a full null at mid-fade. Round 3 found the series pair that
+        replaced it went 14 dB over both settings for two Q 0.1 cuts and
+        burst from the leaving filter's state. */
     void testShapeChangeLeavesNoHole()
     {
         const double rate = 48000.0;
-        double worstAll = 0.0;
+        double worstAll = 0.0, longestAll = 0.0;
 
         for (int a = 0; a < 5; ++a)
             for (int b = 0; b < 5; ++b)
@@ -2126,7 +2137,7 @@ namespace
                 if (a == b)
                     continue;
 
-                double worstPair = 0.0, worstStep = 0.0;
+                double worstPair = 0.0, worstStep = 0.0, longestPair = 0.0;
                 std::string where;
 
                 for (float gain : { -24.0f, 0.0f, 24.0f })
@@ -2143,15 +2154,21 @@ namespace
                                                              [b] (Values& v, DeqDsp&) { v.at (0, Control::shape) = (float) b; }, flip);
 
                             const auto hole = worstHoleDb (e2, flip, rate);
-                            const auto bound = -3.0;
+                            const auto lower = std::min (meanDb (e2, flip - (size_t) (0.05 * rate), flip),
+                                                         meanDb (e2, flip + (size_t) (0.1 * rate), flip + (size_t) (0.15 * rate)));
+                            size_t under = 0;
+                            for (size_t i = flip; i < flip + (size_t) (0.06 * rate); ++i)
+                                if (10.0 * std::log10 (std::max (e2[i], 1.0e-300)) < lower - 3.0)
+                                    ++under;
+                            const auto underMs = (double) under / rate * 1000.0;
 
                             const auto label = std::string (kShapeNames[a]) + " to " + kShapeNames[b] + ", gain "
                                              + std::to_string ((int) gain) + ", Q " + std::to_string (q) + ", at "
                                              + std::to_string (m) + " f0";
-                            check (hole >= bound, "Shape change: no hole deeper than " + std::to_string ((int) -bound)
-                                                  + " dB under the lower level, " + label + " -- got " + std::to_string (hole));
+                            checkAtMost (underMs, 20.0, "Shape change: under the lower level by 3 dB for no longer than the dip, " + label);
 
                             if (hole < worstPair) { worstPair = hole; where = label; }
+                            longestPair = std::max (longestPair, underMs);
 
                             // And no step, measured the house way on a real tone.
                             const Switch sw { label,
@@ -2164,11 +2181,12 @@ namespace
                         }
 
                 worstAll = std::min (worstAll, worstPair);
-                std::cout << "  shape " << kShapeNames[a] << " to " << kShapeNames[b] << ": worst hole " << worstPair
-                          << " dB (" << where << "), worst step " << worstStep << "x\n";
+                longestAll = std::max (longestAll, longestPair);
+                std::cout << "  shape " << kShapeNames[a] << " to " << kShapeNames[b] << ": dip " << worstPair
+                          << " dB at its deepest 2 ms, under -3 dB for " << longestPair << " ms, worst step " << worstStep << "x\n";
             }
 
-        std::cout << "  shape changes, worst hole over every pair: " << worstAll << " dB\n";
+        std::cout << "  shape changes, deepest 2 ms of any dip " << worstAll << " dB, longest under -3 dB " << longestAll << " ms\n";
     }
 
     /** Solo is bounded, not fixed. It crosses between two different signals
@@ -2399,6 +2417,169 @@ namespace
         e.process (one, 1, 64);
         check (x == in, "Before prepare: the engine's reset() returns and it stays a wire");
     }
+
+    //==========================================================================
+    // A change of shape, measured whole: band 1 alone at f0, settled, then
+    // its shape changed at a block boundary (blocks of 32), against the
+    // owner's rule for a discrete switch (2026-10-03): it may pass through a
+    // short dip, and it may not click, burst or linger.
+    //==========================================================================
+    struct ShapeChange
+    {
+        double overTone = -1.0e9;   // largest tone envelope after the change over the louder steady level, dB
+        double overNoise = -1.0e9;  // largest 5 ms noise RMS after it over the band held at the louder shape, dB
+        double hole = 0.0;          // lowest 2 ms tone level in the change under the lower steady level, dB
+        double step = 0.0;          // largest sample step in 30 ms over the steady signal's own
+        double changeMs = 0.0;      // from the request until the output is the final shape's alone
+        double identicalMs = -1.0;  // from the request until bit-identical to an always-final instance; -1 never
+    };
+
+    /** How long a band at this setting takes to settle, s: five of its
+        slowest time constants (a bell's pole Q moves with its gain), at least
+        0.15 s and at most 1.5 s. */
+    double settleSeconds (int shape, float q, double f0, float gain)
+    {
+        auto poleQ = (double) effectiveQ (shape, q);
+        if (shape == 0) poleQ *= std::pow (10.0, std::abs ((double) gain) / 40.0);
+        return std::min (1.5, 0.15 + 5.0 * poleQ / (kPi * f0));
+    }
+
+    ShapeChange measureShapeChange (double rate, int a, int b, double f0, float gain, float q, bool withIdentity = false)
+    {
+        constexpr size_t block = 32;
+        const auto flip = (size_t) (settleSeconds (a, q, f0, gain) * rate) / block * block;
+        const auto n = flip + (size_t) ((settleSeconds (b, q, f0, gain) + 0.25) * rate) / block * block;
+        const auto w2 = (size_t) (0.002 * rate), w5 = (size_t) (0.005 * rate), w30 = (size_t) (0.03 * rate);
+        const auto hz = std::min (f0, 0.45 * rate);
+
+        auto setUp = [&] (int shape)
+        {
+            Values p;
+            p.at (0, Control::on) = 1.0f; p.at (0, Control::shape) = (float) shape; p.at (0, Control::freq) = (float) f0;
+            p.at (0, Control::gain) = gain; p.at (0, Control::q) = q;
+            return p;
+        };
+
+        auto render = [&] (std::vector<float> x, bool change, int from)
+        {
+            auto p = setUp (from);
+            DeqDsp d;
+            d.setParams (p.v.data(), (int) p.v.size());
+            d.prepare (rate, (int) block, 1);
+            for (size_t pos = 0; pos < n; pos += block)
+            {
+                if (change && pos == flip) p.at (0, Control::shape) = (float) b;
+                d.setParams (p.v.data(), (int) p.v.size());
+                float* ch[1] { x.data() + pos };
+                d.process (ch, 1, (int) std::min (block, n - pos));
+            }
+            return x;
+        };
+
+        std::vector<float> s (n), c (n);
+        for (size_t i = 0; i < n; ++i)
+        {
+            const auto ph = 2.0 * kPi * hz * (double) i / rate + 0.3;
+            s[i] = (float) (0.1259 * std::sin (ph));      // -18 dBFS RMS
+            c[i] = (float) (0.1259 * std::cos (ph));
+        }
+        const auto noiseIn = heldNoise (n, 3u + (uint32_t) (a * 7 + b));
+
+        const auto ys = render (s, true, a), yc = render (c, true, a), yn = render (noiseIn, true, a);
+
+        ShapeChange r;
+        std::vector<double> e2 (n);
+        for (size_t i = 0; i < n; ++i) e2[i] = (double) ys[i] * ys[i] + (double) yc[i] * yc[i];
+
+        auto meanDbOf = [&] (const std::vector<double>& v, size_t from, size_t to)
+        {
+            double sum = 0.0;
+            for (size_t i = from; i < to; ++i) sum += v[i];
+            return 10.0 * std::log10 (std::max (sum / (double) (to - from), 1.0e-300));
+        };
+
+        const auto before = meanDbOf (e2, flip - w5, flip), after = meanDbOf (e2, n - 4 * w5, n);
+        const auto louder = std::max (before, after), lower = std::min (before, after);
+
+        double peak = 0.0;
+        for (size_t i = flip; i < n; ++i) peak = std::max (peak, e2[i]);
+        r.overTone = 10.0 * std::log10 (std::max (peak, 1.0e-300)) - louder;
+
+        for (size_t i = flip; i + w2 <= flip + (size_t) (0.06 * rate); i += 4)
+            r.hole = std::min (r.hole, meanDbOf (e2, i, i + w2) - lower);
+
+        // Noise against the same noise through the band held at either shape,
+        // window by window, so that what is measured is the change and not
+        // the noise's own variation.
+        const auto heldA = render (noiseIn, false, a), heldB = render (noiseIn, false, b);
+        std::vector<double> n2 (n), a2 (n), b2 (n);
+        for (size_t i = 0; i < n; ++i)
+        {
+            n2[i] = (double) yn[i] * yn[i];
+            a2[i] = (double) heldA[i] * heldA[i];
+            b2[i] = (double) heldB[i] * heldB[i];
+        }
+        for (size_t i = flip; i + w5 <= n; i += w5 / 4)
+            r.overNoise = std::max (r.overNoise, meanDbOf (n2, i, i + w5) - std::max (meanDbOf (a2, i, i + w5), meanDbOf (b2, i, i + w5)));
+
+        const auto steady = std::max ({ largestStep (ys, flip - 4 * w30, flip), largestStep (ys, n - 4 * w30, n), 1.0e-12 });
+        r.step = largestStep (ys, flip, flip + w30) / steady;
+
+        if (withIdentity)
+        {
+            size_t last = flip;
+            for (size_t i = flip; i < n; ++i)
+                if (yn[i] != heldB[i]) last = i + 1;
+            r.identicalMs = last >= n ? -1.0 : (double) (last - flip) / rate * 1000.0;
+        }
+
+        return r;
+    }
+
+    /** A change of shape never bursts: during and after it the output stays
+        within 1 dB of the louder of the two steady levels, for a tone at the
+        band's frequency and for noise.
+
+        Round 3 of the review (2026-10-03): the shape arriving carried on from
+        the leaving filter's state, and a bell at +24 dB, Q 40, 30 Hz -- whose
+        state holds a resonance built up over seconds -- changed to a Low
+        Shelf peaked at +37.7 dBFS on a -15 dBFS tone, 30.8 dB over the
+        louder steady level, for 141 ms over by 6 dB. Every ordered pair at
+        30 Hz, 1 kHz and 18 kHz, Q 0.1 and 40, gain -24 and +24 at 48 kHz, and
+        the 30 Hz Q 40 cells at 44.1, 96 and 192 kHz too; the whole grid is
+        the probe's. */
+    void testShapeChangeNeverBursts()
+    {
+        double worstTone = -1.0e9, worstNoise = -1.0e9;
+        std::string whereTone, whereNoise;
+
+        auto cell = [&] (double rate, int a, int b, double f0, float gain, float q)
+        {
+            const auto r = measureShapeChange (rate, a, b, f0, gain, q);
+            const auto label = std::string (kShapeNames[a]) + " to " + kShapeNames[b] + ", " + std::to_string ((int) f0) + " Hz, gain "
+                             + std::to_string ((int) gain) + ", Q " + std::to_string (q) + ", " + std::to_string ((int) rate) + " Hz";
+            checkAtMost (r.overTone, 1.0, "Shape change: a tone at f0 stays within 1 dB of the louder level, " + label);
+            checkAtMost (r.overNoise, 1.0, "Shape change: noise stays within 1 dB of the louder level, " + label);
+            if (r.overTone > worstTone) { worstTone = r.overTone; whereTone = label; }
+            if (r.overNoise > worstNoise) { worstNoise = r.overNoise; whereNoise = label; }
+        };
+
+        for (int a = 0; a < 5; ++a)
+            for (int b = 0; b < 5; ++b)
+                if (a != b)
+                {
+                    for (double f0 : { 30.0, 1000.0, 18000.0 })
+                        for (float q : { 0.1f, 40.0f })
+                            for (float gain : { -24.0f, 24.0f })
+                                cell (48000.0, a, b, f0, gain, q);
+
+                    for (double rate : { 44100.0, 96000.0, 192000.0 })
+                        cell (rate, a, b, 30.0, 24.0f, 40.0f);
+                }
+
+        std::cout << "  shape changes, worst over the louder level: tone " << worstTone << " dB (" << whereTone
+                  << "), noise " << worstNoise << " dB (" << whereNoise << ")\n";
+    }
 }
 
 int main()
@@ -2428,6 +2609,7 @@ int main()
     testPlacementDipIsBounded();
     testHeldSettingsAreUnchanged();
     testResetBeforePrepare();
+    testShapeChangeNeverBursts();
 
     if (failures == 0)
         std::cout << "deq_dsp: all passed\n";

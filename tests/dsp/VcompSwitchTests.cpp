@@ -1052,30 +1052,44 @@ void gateReturn()
 // x64, Release, /fp:precise, on ICE QUEEN): `vcomp_switch_tests
 // --print-hashes`.
 //
-// - **The RMS and peak of each channel, held to 1e-4 dB on every compiler.**
-//   The Linux and macOS jobs cannot hold a hash -- float results are promised
-//   bit-identical only within one compiler and maths library -- and until
-//   2026-10-03 they printed it and asserted nothing. A level this close is
-//   far tighter than any change that matters and far looser than a library's
-//   last-bit differences.
+// - **The RMS of each channel, and the peak where it is off the ceiling,
+//   held to kHeldLevelWithinDb on every compiler.** The Linux and macOS jobs
+//   cannot hold a hash -- float results are promised bit-identical only
+//   within one compiler and maths library -- and until 2026-10-03 they
+//   printed it and asserted nothing. Rows 0 and 1 compress into the limiter,
+//   so their peaks sit at the ceiling whatever happens upstream and are not
+//   pinned; rows 2 and 3 are the same settings 18 dB lower, where a peak can
+//   move.
 // - **The exact hash, on MSVC x64**, where the pins were made: there it is
 //   bit for bit or nothing.
+/** What the pins are held to. Built against 6f6b8c3 with the static and the
+    DLL runtime (/MT, /MD), at /O2 and /Od, and against this branch, every
+    figure here came out bit-identical -- a spread of 0 -- so the bound is
+    set by what it has to catch rather than by noise: a 1e-6 relative error
+    in one coefficient moves a row's RMS by as little as 5.6e-6 dB (the
+    reviewer, 2026-10-03), which the 1e-4 dB this started at let through.
+    1e-7 dB catches it with fifty to spare and stays a thousand times above
+    the 1e-10 dB the RMS is printed to. */
+constexpr double kHeldLevelWithinDb = 1.0e-7;
+
 struct HeldRender { uint64_t hash; double rmsDb[2], peakDb[2]; };
 
 HeldRender heldRender (double fs, int mode)
 {
     Params p;
 
-    if (mode == 0)
-    {
-        p = standard (80.0f, 6.0f);         // compressing hard, into the limiter
-        p.gateDb = -40.0f;
-    }
+    // Modes 0 and 1 compress hard into the limiter, so their peaks sit at the
+    // ceiling and only their RMS and hash say anything; 2 and 3 are the same
+    // settings 18 dB lower, off the ceiling, so their peaks are worth pinning.
+    if (mode % 2 == 0)
+        p = standard (80.0f, 6.0f);
     else
-    {
         p = complexMode (70.0f, 3.0f, 150.0f, true, 120.0f, 160.0f, 6000.0f, 6.0f);
-        p.gateDb = -40.0f;
-    }
+
+    p.gateDb = -40.0f;
+
+    if (mode >= 2)
+        p.outputDb -= 18.0f;
 
     const auto n = (size_t) (2.0 * fs);
     std::vector<float> left (n), right (n);
@@ -1129,12 +1143,18 @@ HeldRender heldRender (double fs, int mode)
 struct Pinned { double fs; int mode; uint64_t hash; double rmsDb[2], peakDb[2]; };
 
 const Pinned kPinned[] {
-    { 44100.0, 0, 0xd2a8a38afda2dae0ull, { -9.694980, -9.410685 }, { -0.099999, -0.099999 } },
-    { 44100.0, 1, 0xc7613ccfa6001f25ull, { -8.301412, -9.991611 }, { -0.099999, -0.099999 } },
-    { 48000.0, 0, 0xd3f393ebd20ffad2ull, { -9.689943, -9.405692 }, { -0.099999, -0.099999 } },
-    { 48000.0, 1, 0x18f0437f7442e53cull, { -8.306237, -9.997872 }, { -0.099999, -0.099999 } },
-    { 96000.0, 0, 0x424735c13e660a0eull, { -9.725237, -9.441162 }, { -0.099999, -0.099999 } },
-    { 96000.0, 1, 0xb46e7a59b3d2e1beull, { -8.335780, -10.037542 }, { -0.099999, -0.099999 } },
+    { 44100.0, 0, 0xd2a8a38afda2dae0ull, { -9.6949803407, -9.4106845017 }, { -0.0999988460, -0.0999993697 } },
+    { 44100.0, 1, 0xc7613ccfa6001f25ull, { -8.3014117451, -9.9916113113 }, { -0.0999993697, -0.0999993697 } },
+    { 44100.0, 2, 0x6dedb258a0357bb1ull, { -26.0596909446, -25.6729448119 }, { -1.8866905977, -2.9279873826 } },
+    { 44100.0, 3, 0xe8e998d135cb0931ull, { -22.3751760322, -24.3079955165 }, { -12.4029212081, -12.3425055505 } },
+    { 48000.0, 0, 0xd3f393ebd20ffad2ull, { -9.6899429094, -9.4056922630 }, { -0.0999993697, -0.0999993697 } },
+    { 48000.0, 1, 0x18f0437f7442e53cull, { -8.3062366334, -9.9978716887 }, { -0.0999993697, -0.0999993697 } },
+    { 48000.0, 2, 0x958abfa6094e3e20ull, { -26.0654586164, -25.6785911792 }, { -1.9476802137, -2.9219618364 } },
+    { 48000.0, 3, 0x0462274d16dcda12ull, { -22.3773954122, -24.3106897319 }, { -12.3173128962, -12.3337898430 } },
+    { 96000.0, 0, 0x424735c13e660a0eull, { -9.7252368393, -9.4411623247 }, { -0.0999993697, -0.0999993697 } },
+    { 96000.0, 1, 0xb46e7a59b3d2e1beull, { -8.3357800600, -10.0375417888 }, { -0.0999993697, -0.0999993697 } },
+    { 96000.0, 2, 0x3b3289ebeeb0da71ull, { -26.0919831534, -25.7042098446 }, { -1.8959297653, -2.9033294854 } },
+    { 96000.0, 3, 0xfb5091180443aebaull, { -22.3932341987, -24.3384671524 }, { -12.3718863702, -12.3185352496 } },
 };
 
 void heldIsUnchanged (bool print)
@@ -1145,18 +1165,20 @@ void heldIsUnchanged (bool print)
 
         if (print)
         {
-            std::printf ("    { %.1f, %d, 0x%016llxull, { %.6f, %.6f }, { %.6f, %.6f } },\n", p.fs, p.mode,
+            std::printf ("    { %.1f, %d, 0x%016llxull, { %.10f, %.10f }, { %.10f, %.10f } },\n", p.fs, p.mode,
                          (unsigned long long) r.hash, r.rmsDb[0], r.rmsDb[1], r.peakDb[0], r.peakDb[1]);
             continue;
         }
 
-        const auto what = std::string (p.mode == 0 ? "standard" : "COMPLEX, both sides in") + " held at " + rateName (p.fs);
+        const auto what = std::string (p.mode % 2 == 0 ? "standard" : "COMPLEX, both sides in")
+                        + (p.mode >= 2 ? ", off the ceiling," : "") + " held at " + rateName (p.fs);
 
         for (int c = 0; c < 2; ++c)
         {
-            check (std::abs (r.rmsDb[c] - p.rmsDb[c]) <= 1.0e-4,
+            check (std::abs (r.rmsDb[c] - p.rmsDb[c]) <= kHeldLevelWithinDb,
                    what + ", channel " + std::to_string (c) + ": RMS " + fixed (r.rmsDb[c], 6) + " dB, at 6f6b8c3 " + fixed (p.rmsDb[c], 6));
-            check (std::abs (r.peakDb[c] - p.peakDb[c]) <= 1.0e-4,
+            if (p.mode >= 2)
+                check (std::abs (r.peakDb[c] - p.peakDb[c]) <= kHeldLevelWithinDb,
                    what + ", channel " + std::to_string (c) + ": peak " + fixed (r.peakDb[c], 6) + " dB, at 6f6b8c3 " + fixed (p.peakDb[c], 6));
         }
 
@@ -1272,9 +1294,11 @@ Params reviewerKnobs (float lowHz, float sidechainHz, bool complex)
     detector-only switch makes it take. The time the switch itself is more
     than 1 dB off the always-new instance is printed, beside the
     detector-only switch's, which is what explains it. */
+constexpr double kSwitchLimiterAtMostDb = 2.9;
+
 void complexSwitchLevels()
 {
-    double worstExtra = 0.0, worstLimit = -1.0e9, latest = 0.0, latestDetector = 0.0;
+    double worstExtra = 0.0, worstLimit = -1.0e9, latest = 0.0, latestDetector = 0.0, worstAbsLimiter = 0.0;
     std::string extraWhere, limitWhere;
 
     for (const auto fs : { 48000.0, 96000.0 })
@@ -1371,6 +1395,16 @@ void complexSwitchLevels()
                                    + " beyond what the same switch with the split at its rails is");
 
                         const auto excessY = limY - limR, excess2 = std::max (0.0, lim2 - lim2r);
+                        // And absolutely, so that this bound cannot loosen by the
+                        // detector-only switch getting worse: no more than the
+                        // worst it measured when written, 2.39 dB (on -> off,
+                        // LOW 200, SIDECHAIN 500, on the voice: standard mode's
+                        // 5 ms attack catching up), and a half.
+                        check (excessY <= kSwitchLimiterAtMostDb,
+                               name + ": the limiter takes " + fixed (excessY) + " dB over its settled figure, more than "
+                                   + fixed (kSwitchLimiterAtMostDb));
+                        worstAbsLimiter = std::max (worstAbsLimiter, excessY);
+
                         check (excessY <= excess2 + 0.5,
                                name + ": the limiter takes " + fixed (excessY) + " dB over its settled figure, against "
                                    + fixed (excess2) + " for the switch with the split at its rails");
@@ -1386,7 +1420,7 @@ void complexSwitchLevels()
     std::cout << "COMPLEX switch: worst 10 ms window from the end of the dip " << fixed (worstExtra) << " dB beyond the detector-only switch ("
               << extraWhere << "); more than 1 dB off the always-new instance until " << fixed (latest, 3) << " s, the detector-only switch until "
               << fixed (latestDetector, 3) << " s; limiter at most " << fixed (worstLimit) << " dB over the detector-only switch's excess ("
-              << limitWhere << ")\n";
+              << limitWhere << "), " << fixed (worstAbsLimiter) << " dB over its settled figure at most\n";
 }
 
 void complexSwitchSteps()

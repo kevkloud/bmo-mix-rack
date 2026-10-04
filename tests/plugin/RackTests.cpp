@@ -984,6 +984,69 @@ int main()
         bmo::PresetManager::setDirectoryForTesting ({});
     }
 
+    //== A state capture never races a chain edit =============================
+    // A host may ask for the session from any thread. QA's probe on
+    // 2026-10-03: getStateInformation on a worker thread while the message
+    // thread made 3000 moveModule calls crashed the process. Twenty rounds of
+    // the same, and every capture must be a whole chain -- one of the four
+    // rotations a move from the first slot to the last makes -- never a torn
+    // one.
+    {
+        const std::vector<juce::String> order { "util", "eq", "sat", "dim" };
+        std::atomic<int> saves { 0 }, torn { 0 };
+
+        for (int round = 0; round < 20; ++round)
+        {
+            auto rack = createRack();
+
+            for (const auto& id : order)
+                rack->addModule (*rack->findModule (id));
+
+            std::atomic<bool> stop { false };
+
+            std::thread worker ([&]
+            {
+                while (! stop)
+                {
+                    juce::MemoryBlock block;
+                    rack->getStateInformation (block);
+                    auto xml = juce::AudioProcessor::getXmlFromBinary (block.getData(), (int) block.getSize());
+
+                    std::vector<juce::String> ids;
+
+                    if (xml != nullptr)
+                        for (auto* e : xml->getChildWithTagNameIterator (RackProcessor::kSlotTag))
+                            ids.push_back (e->getStringAttribute ("module"));
+
+                    bool whole = false;
+
+                    for (size_t r = 0; r < order.size() && ! whole && ids.size() == order.size(); ++r)
+                    {
+                        whole = true;
+
+                        for (size_t i = 0; i < order.size(); ++i)
+                            whole = whole && ids[i] == order[(i + r) % order.size()];
+                    }
+
+                    if (! whole)
+                        ++torn;
+
+                    ++saves;
+                }
+            });
+
+            for (int i = 0; i < 3000; ++i)
+                rack->moveModule (0, 3);
+
+            stop = true;
+            worker.join();
+        }
+
+        check (saves > 0, "the worker captured the state while the chain was edited");
+        check (torn == 0, juce::String (torn.load()) + " of " + juce::String (saves.load())
+                              + " captures taken during chain edits were not a whole chain");
+    }
+
     //== A session saved before this build plays exactly as it did ============
     // The text was written by the build at 0e4bdb0, before chain edits kept
     // their engines (RackGoldenState.h). Restoring it must give the same chain

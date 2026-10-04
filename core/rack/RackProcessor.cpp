@@ -103,6 +103,8 @@ void RackProcessor::setSlotExpanded (int slot, bool shouldBe) noexcept
 {
     if (slot >= 0 && slot < kSlots)
     {
+        // Under the edit lock because a capture on another thread reads it.
+        const juce::ScopedLock edit (editLock);
         auto& s = slots[(size_t) slot];
         s.expanded = shouldBe && s.def != nullptr && s.def->isExpandable();
     }
@@ -438,6 +440,13 @@ void RackProcessor::clearChain()
 //==============================================================================
 std::unique_ptr<juce::XmlElement> RackProcessor::captureState()
 {
+    // A host may ask for the state from any thread, while the message thread
+    // is in the middle of an edit: before this lock, a worker saving during a
+    // run of moves read slots being emptied and refilled and crashed. The
+    // edit lock is the one the audio thread never takes, so a capture can
+    // wait for an edit, never the other way round with audio involved.
+    const juce::ScopedLock edit (editLock);
+
     auto xml = std::make_unique<juce::XmlElement> (kRootTag);
     xml->setAttribute ("stateVersion", info.stateVersion);
 
@@ -493,6 +502,9 @@ void RackProcessor::resetToDefaults()
 
 void RackProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
+    // Held across the capture and the views, so both come from one chain.
+    const juce::ScopedLock edit (editLock);
+
     if (auto xml = captureState())
     {
         // Views go in the session and not in captureState, which rack preset

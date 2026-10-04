@@ -1620,7 +1620,7 @@ void checkDeesserPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
     //== Q dims in SHELF, where it reaches nothing ============================
     //
     // A control a mode makes inert is dimmed (modules/AGENTS.md). A shelf runs
-    // at kShelfQ whatever the knob says (the owner's decision, 2026-10-04), so
+    // at kShelfQ whatever the knob says (the owner's decision, 2026-10-03), so
     // Q does nothing there, and the panel must say so on the same function the
     // engine designs through. Driven through the parameter rather than a click,
     // because automation and a preset recall reach the panel that way; and the

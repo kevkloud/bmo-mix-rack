@@ -34,7 +34,7 @@ inline constexpr auto kFreq = "freq";
 
 // Q, one parameter whatever the shape. A bell runs at it, with the engine
 // clamping 0.1-40 behind it; a shelf runs at `kShelfQ` whatever it says, by
-// the owner's decision of 2026-10-04 (see `kShelfQ` below).
+// the owner's decision of 2026-10-03 (see `kShelfQ` below).
 inline constexpr auto kQ = "q";
 
 // THRESHOLD in **prominence dB, not dBFS** -- how far the band stands out
@@ -66,7 +66,7 @@ inline constexpr int kSchemaVersion = 1;
 enum ShapeChoice { bell = 0, highShelf, numShapes };
 
 /** The one Q a shelf runs at, whatever the knob says. **The owner's decision,
-    2026-10-04: in SHELF shape there is no boost, and the cut never goes past
+    2026-10-03: in SHELF shape there is no boost, and the cut never goes past
     RANGE.**
 
     The panel's band sketch found the first problem -- at the default Q of 2.5

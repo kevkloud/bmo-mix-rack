@@ -540,7 +540,7 @@ const Golden kSwept[]
       -7.16919915094, 0.988553106785,
       -10.8123103775, 0.853308975697, -9.8115626611, 0.988553166389,
       -7.16919915094, 0.988553106785, -7.16919915094, 0.988553106785 },
-    // BMO Defang at 0.63 of normalised is in SHELF shape, and on 2026-10-04
+    // BMO Defang at 0.63 of normalised is in SHELF shape, and on 2026-10-03
     // the owner decided a shelf has no boost and never cuts past RANGE: it
     // runs at Q 0.707 whatever the knob says, and its detector at the same Q.
     // Regenerated on ICE QUEEN with --print for this row alone, as the record

@@ -1042,7 +1042,7 @@ void extremesOf (const bmo::dsp::Biquad& b, double rate, double& boostDb, double
 }
 
 /** **In SHELF shape there is no boost, and the cut never goes past RANGE**
-    (the owner, 2026-10-04).
+    (the owner, 2026-10-03).
 
     The shelf ran at its knob's Q up to a cap of 2, and a shelf that resonant
     rises above unity below its corner and dips past its depth above it. At

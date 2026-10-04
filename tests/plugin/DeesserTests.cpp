@@ -216,7 +216,7 @@ int main()
     // BMO DEQ's idiom. The panel's band sketch found the first problem, a
     // resonant dip below the corner and a climb back above it at the default
     // Q of 2.5; a cap of 2 still rose +3.5 dB and cut 5 dB past RANGE. The
-    // owner decided on 2026-10-04 that the shelf has no boost and never cuts
+    // owner decided on 2026-10-03 that the shelf has no boost and never cuts
     // past RANGE, so it runs at 0.707 whatever the knob says. These rows are
     // the record of that decision, and they also keep the rule from quietly
     // becoming a narrower *parameter* range instead.

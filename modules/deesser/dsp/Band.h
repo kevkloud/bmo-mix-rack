@@ -35,7 +35,7 @@ enum class Shape { bell = 0, highShelf };
 
     A shelf's Q goes through `effectiveQ` here as everywhere else, so the
     engine, the panel sketch and the tests cannot disagree about what a shelf
-    at Q 4 actually is: since 2026-10-04 it is a shelf at `kShelfQ`. */
+    at Q 4 actually is: since 2026-10-03 it is a shelf at `kShelfQ`. */
 inline dsp::Biquad cutDesign (Shape shape, double hz, double q, double depthDb,
                               const dsp::DesignGrid& grid) noexcept
 {

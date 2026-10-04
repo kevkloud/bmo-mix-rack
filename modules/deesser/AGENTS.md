@@ -109,7 +109,7 @@ different unit.
 back above it, which is not a shelf and is not what RANGE says it is doing.
 `params.h` carries `kShelfQ` and `effectiveQ`. It was first a cap of 2, BMO
 DEQ's figure, and a cap of 2 still rose +3.5 dB below the corner and cut 5 dB
-past RANGE; **since 2026-10-04, by the owner's decision, a shelf runs at 0.707
+past RANGE; **since 2026-10-03, by the owner's decision, a shelf runs at 0.707
 whatever the knob says**, which rises nowhere and never cuts past RANGE.
 **Q stays one parameter whatever the shape** — 0.7 to 6 on the knob in both —
 and the shelf's value is applied behind it, so in shelf shape Q is a control

@@ -10,6 +10,25 @@ rack, full (600) standalone, switched from the bar above the panel. The DAW
 pass is `testing-notes/deq-testing-checklist.md`; serial vs parallel can be
 compared by ear first with `testing-notes/deq-topology-listening.md`.
 
+## Changing a band's shape dips the whole output
+
+A change of SHAPE is not a crossover. The **whole output** -- every band and
+the signal under them, not only the band changing -- fades to zero over
+20 ms, the band takes its new shape at the bottom, and the output fades back
+in over 8 ms. Measured 2026-10-03 at 48 kHz: a 10 kHz tone with a band at
+100 Hz changing shape goes to zero, under -3 dB for 19.8 ms and under -20 dB
+for 2.8 ms; a 0 dB Bell changed to a shelf dips the same; two bands changed
+15 ms apart hold it under -3 dB for 33.2 ms.
+
+The new shape warms up during the fade on a 640 ms record of each band's
+input, allocated in prepare() for all twelve bands: 2.95 MB at 48 kHz and
+11.8 MB at 192 kHz, per instance. A band changing alone uses all of it;
+bands changing together share one band's catch-up work and look back less.
+A slow shape still settles after the change: into a +24 dB Bell at Q 40 and
+30 Hz, 10 to 12 s to come within -63 dB of an instance that always had it,
+which is that bell's own time constant (1.7 s). `AGENTS.md` has the costs
+and what is still outside the switch criteria.
+
 ## What is here
 
 ```

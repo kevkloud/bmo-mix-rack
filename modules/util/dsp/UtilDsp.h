@@ -75,15 +75,21 @@ public:
         auto* l = channels[0];
         auto* r = numChannels > 1 ? channels[1] : nullptr;
 
+        auto moving = ! settled();
+
         for (int i = 0; i < numSamples; ++i)
         {
-            gainCur  += smoothCoeff * (gainTarget  - gainCur);
-            widthCur += smoothCoeff * (widthTarget - widthCur);
-            panLCur  += smoothCoeff * (panLTarget  - panLCur);
-            panRCur  += smoothCoeff * (panRTarget  - panRCur);
-            signLCur += smoothCoeff * (signLTarget - signLCur);
-            signRCur += smoothCoeff * (signRTarget - signRCur);
-            monoCur  += smoothCoeff * (monoTarget  - monoCur);
+            if (moving)
+            {
+                step (gainCur,  gainTarget);
+                step (widthCur, widthTarget);
+                step (panLCur,  panLTarget);
+                step (panRCur,  panRTarget);
+                step (signLCur, signLTarget);
+                step (signRCur, signRTarget);
+                step (monoCur,  monoTarget);
+                moving = ! settled();
+            }
 
             if (r == nullptr)
             {
@@ -109,6 +115,28 @@ public:
     int latencyForParams (const float*, int) const override { return 0; }
 
 private:
+    /** One step of the one-pole, landing on the target once a step no longer
+        moves it. Left to itself a float one-pole stalls short of its target,
+        where the step rounds away: 7.2e-6 short of unity gain at 48 kHz and
+        2.9e-5 at 192 kHz, so a copy flipped while running nulled against the
+        original only to -102.9 and -90.9 dB. Landing changes nothing before
+        the stall, so the 5 ms time constant is untouched, and it depends on
+        the state alone, so the block size still changes nothing. */
+    void step (float& x, float target) const noexcept
+    {
+        const auto next = x + smoothCoeff * (target - x);
+        x = next == x ? target : next;
+    }
+
+    /** Every smoother on its target: the per-sample work can stop. */
+    bool settled() const noexcept
+    {
+        return gainCur == gainTarget && widthCur == widthTarget
+            && panLCur == panLTarget && panRCur == panRTarget
+            && signLCur == signLTarget && signRCur == signRTarget
+            && monoCur == monoTarget;
+    }
+
     float smoothCoeff = 1.0f;
     float gainTarget = 1.0f, gainCur = 1.0f;
     float widthTarget = 1.0f, widthCur = 1.0f;

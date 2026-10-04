@@ -1022,6 +1022,35 @@ int main()
             expect (audioRan, "the try-lock case ran its block while the chain lock was held");
             expect (locked.finite, "a rack whose try-lock failed, one " + what + " in: every sample out is finite");
             expect (locked.silent, "a rack whose try-lock failed, one " + what + " in: the block goes out silent");
+
+            // And the silence ends through the edit dip's fade-in, not as a
+            // step: the review of 2026-10-03 measured 15 to 34x the steady
+            // step on the way out. 0.5 in, halved by the slot: the first
+            // sample after the silence is near zero, and the output reaches
+            // 0.25 in a straight line over kEditDipMs.
+            {
+                juce::AudioBuffer<float> after (2, kBlock);
+                juce::MidiBuffer m;
+
+                for (int ch = 0; ch < 2; ++ch)
+                    juce::FloatVectorOperations::fill (after.getWritePointer (ch), 0.5f, kBlock);
+
+                rack->processBlock (after, m);
+
+                const auto dipLength = (int) std::lround (kRate * RackProcessor::kEditDipMs * 0.001);
+                float worstRise = 0.0f;
+
+                for (int i = 1; i < kBlock; ++i)
+                    worstRise = juce::jmax (worstRise, after.getSample (0, i) - after.getSample (0, i - 1));
+
+                expect (after.getSample (0, 0) <= 0.25f * 2.0f / (float) dipLength,
+                        "after a failed try-lock, the first sample is " + juce::String (after.getSample (0, 0))
+                            + ", not faded in from silence");
+                expect (worstRise <= 0.25f * 1.5f / (float) dipLength,
+                        "after a failed try-lock, the output rises by at most a dip's slope, rose "
+                            + juce::String (worstRise) + " in a sample");
+                expect (after.getSample (0, kBlock - 1) == 0.25f, "and arrives at the processed 0.25");
+            }
         }
 
         // The host's bypass, standalone and in the rack.

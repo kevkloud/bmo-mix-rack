@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <thread>
+#include <utility>
 
 namespace bmo
 {
@@ -812,21 +813,30 @@ void RackProcessor::runChain (float* const* channels, int numOut, int numSamples
 {
     const juce::ScopedTryLock lock (chainLock);
 
-    // Only prepare, release and an edit made while no audio was running take
-    // this lock, so a block meets it only when the host has just started
-    // calling again. It goes out silent: never the input, which would be the
-    // dry signal and early by the chain's latency.
+    // Only prepare, release and an edit the audio thread will not swap in take
+    // this lock (audioIsRunning), so a block meets it only when the host
+    // breaks the rule that prepare and release never overlap a block, or as
+    // the first block after the host has started calling again -- after
+    // silence of its own, so going silent here has nothing audible to cut.
+    // It goes out silent: never the input, which would be the dry signal and
+    // early by the chain's latency.
     if (! lock.isLocked())
     {
         for (int ch = 0; ch < numOut; ++ch)
             juce::FloatVectorOperations::clear (channels[ch], numSamples);
 
+        lockedOut = true;
         return;
     }
 
     // The other half of holdAudioReads' handshake: say a block is running,
     // then look for an edit.
     inBlock.store (true);
+
+    // Coming out of a silence the try-lock imposed, fade back up through the
+    // edit dip rather than stepping straight back to the chain's output.
+    if (std::exchange (lockedOut, false))
+        editDip.restartFromSilence();
     const auto edit = editGeneration.load();
     auto* const newest = pending.load (std::memory_order_acquire);
 

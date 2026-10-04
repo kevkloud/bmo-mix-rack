@@ -179,7 +179,14 @@ rack/     SlotParameter (one generic host parameter, remapped live),
   unless a backlog has built up -- a rack's worth of retired engines, or
   more than 32 queued chains -- and no block has come for 200 ms or four
   blocks (`audioIsRunning`). So RackTests' edit cases dip on a loaded
-  machine too. Everything else that reads or changes the chain off the audio thread
+  machine too. **A silent block's start cannot be faded and need not be**:
+  the lock is held only where no block should be running -- prepare and
+  release, which a host must not overlap with a block, and the swaps above,
+  made only before audio starts or after the host has stopped calling -- so
+  the block that meets it is the first of a resumed stream, after the
+  host's own silence. Its end is faded: the next block comes back up
+  through the edit dip (`Dip::restartFromSilence`), and `finite_tests`
+  holds that. Everything else that reads or changes the chain off the audio thread
   serialises on `editLock`, which the audio thread never takes. Never block
   the audio thread on either.
 - **No processor hands a host, and no module's DSP is ever handed, a NaN,

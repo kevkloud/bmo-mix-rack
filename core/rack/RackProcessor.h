@@ -322,6 +322,10 @@ private:
     dsp::Dip editDip;
     int dipLength = 1, dipDownLeft = 0;
 
+    // Set by a block the try-lock turned away (silent), so the next one fades
+    // back up. Only the audio thread touches it.
+    bool lockedOut = false;
+
     // Scratch for runWarming, sized in prepare: `workChannels` channels per
     // group, kSlots + 2 groups. The audio thread's, and `chainLock`'s holder's.
     juce::AudioBuffer<float> workspace;

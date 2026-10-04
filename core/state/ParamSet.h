@@ -94,7 +94,8 @@ public:
     void apply (const std::vector<Setting>& settings) const
     {
         for (const auto& s : settings)
-            setReal (s.id, s.value);
+            if (! std::isnan (s.value))
+                setReal (s.id, s.value);
     }
 
     //== State ================================================================
@@ -121,7 +122,14 @@ public:
         return xml;
     }
 
-    /** Defaults first, then whatever the element carries. */
+    /** Defaults first, then whatever the element carries.
+
+        A value that is not a number keeps the default. Nothing this code
+        writes is ever one, but a file can say value="nan", and a NaN set on a
+        parameter stays there: QA's probe on 2026-10-03 had BMO Util's gain
+        reading "nan dB" and the module silent on every block, in the rack and
+        standalone alike. An infinity is left to the parameter, which clamps
+        it to the rail it points at, as it always has. */
     void applyXml (const juce::XmlElement& xml) const
     {
         resetToDefaults();
@@ -132,9 +140,10 @@ public:
                 continue;
 
             const auto i = indexOf (e->getStringAttribute ("id").toRawUTF8());
+            const auto value = (float) e->getDoubleAttribute ("value");
 
-            if (i >= 0)
-                setReal (i, (float) e->getDoubleAttribute ("value"));
+            if (i >= 0 && ! std::isnan (value))
+                setReal (i, value);
         }
     }
 

@@ -1047,6 +1047,105 @@ int main()
                               + " captures taken during chain edits were not a whole chain");
     }
 
+    //== A non-finite value in a saved state takes the default =================
+    // QA's probe on 2026-10-03: value="nan" on BMO Util's gain left the lane
+    // reading "nan dB" and the slot silent on every block, in the rack and
+    // standalone alike. A NaN in a session or a preset file is now the
+    // parameter's default; "inf" and "-inf" still clamp to the rails, +24 and
+    // -24 dB, as they did. Every other value in the same element still lands.
+    {
+        auto& util = bmo::util::module();
+        const auto defaultGain = util.specs[(size_t) bmo::util::Index::gain].def;
+
+        const auto params = [] (const char* gain)
+        {
+            auto p = std::make_unique<juce::XmlElement> (bmo::ParamSet::kRootTag);
+            p->setAttribute ("stateVersion", 1);
+
+            auto* g = p->createNewChildElement (bmo::ParamSet::kParamTag);
+            g->setAttribute ("id", bmo::util::kGain);
+            g->setAttribute ("value", gain);
+
+            auto* w = p->createNewChildElement (bmo::ParamSet::kParamTag);
+            w->setAttribute ("id", bmo::util::kWidth);
+            w->setAttribute ("value", 140.0);
+            return p;
+        };
+
+        const auto peakOver50Blocks = [] (juce::AudioProcessor& p)
+        {
+            p.setPlayConfigDetails (2, 2, 48000.0, 512);
+            p.prepareToPlay (48000.0, 512);
+
+            juce::AudioBuffer<float> b (2, 512);
+            juce::MidiBuffer midi;
+            float peak = 0.0f;
+
+            for (int k = 0; k < 50; ++k)
+            {
+                for (int i = 0; i < 512; ++i)
+                    for (int ch = 0; ch < 2; ++ch)
+                        b.setSample (ch, i, 0.125f * (float) std::sin (2.0 * juce::MathConstants<double>::pi * 220.0 * (k * 512 + i) / 48000.0));
+
+                p.processBlock (b, midi);
+                peak = juce::jmax (peak, b.getMagnitude (0, 512));
+            }
+
+            return peak;
+        };
+
+        const struct { const char* value; float expected; } kCases[] {
+            { "nan", defaultGain }, { "inf", 24.0f }, { "-inf", -24.0f },
+        };
+
+        for (const auto& c : kCases)
+        {
+            const juce::String what = juce::String ("gain value=\"") + c.value + "\"";
+
+            // The rack, from a session.
+            {
+                juce::XmlElement state ("RACK");
+                state.setAttribute ("stateVersion", 1);
+                auto* slot = state.createNewChildElement (RackProcessor::kSlotTag);
+                slot->setAttribute ("index", 0);
+                slot->setAttribute ("module", "util");
+                slot->setAttribute ("schema", 1);
+                slot->addChildElement (params (c.value).release());
+
+                juce::MemoryBlock block;
+                juce::AudioProcessor::copyXmlToBinary (state, block);
+
+                auto rack = createRack();
+                rack->setStateInformation (block.getData(), (int) block.getSize());
+                auto& lane = rack->getSlotParameter (0, bmo::util::Index::gain);
+
+                checkClose (rack->getEngineAt (0)->params().getReal (bmo::util::kGain), c.expected, 1.0e-4,
+                            "rack, " + what + ": the gain");
+                check (! lane.getCurrentValueAsText().containsIgnoreCase ("nan"),
+                       "rack, " + what + ": the lane reads '" + lane.getCurrentValueAsText() + "'");
+                checkClose (rack->getEngineAt (0)->params().getReal (bmo::util::kWidth), 140.0, 0.01,
+                            "rack, " + what + ": the element's other values still land");
+                check (peakOver50Blocks (*rack) > 0.005f, "rack, " + what + ": the slot passes audio");
+            }
+
+            // Standalone, from a session.
+            {
+                bmo::SingleModuleProcessor proc (util, bmo::products::rackInfo());
+                juce::MemoryBlock block;
+                juce::AudioProcessor::copyXmlToBinary (*params (c.value), block);
+                proc.setStateInformation (block.getData(), (int) block.getSize());
+
+                checkClose (proc.getEngine().params().getReal (bmo::util::kGain), c.expected, 1.0e-4,
+                            "standalone, " + what + ": the gain");
+                check (! proc.getEngine().params().param (bmo::util::Index::gain).getCurrentValueAsText().containsIgnoreCase ("nan"),
+                       "standalone, " + what + ": the parameter does not read nan");
+                checkClose (proc.getEngine().params().getReal (bmo::util::kWidth), 140.0, 0.01,
+                            "standalone, " + what + ": the element's other values still land");
+                check (peakOver50Blocks (proc) > 0.005f, "standalone, " + what + ": the module passes audio");
+            }
+        }
+    }
+
     //== A session saved before this build plays exactly as it did ============
     // The text was written by the build at 0e4bdb0, before chain edits kept
     // their engines (RackGoldenState.h). Restoring it must give the same chain

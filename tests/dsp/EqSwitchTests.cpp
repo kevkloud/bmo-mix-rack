@@ -4,6 +4,12 @@
 // the transitions -- a control changing while a signal passes, or after one
 // has stopped -- which none of those tests can see, because each of them
 // builds a fresh core, sets it once and measures the result.
+//
+// **The default run is a subset; `eq_switch_tests --long` runs every row.**
+// The default keeps, in every section, the rows that failed on the code the
+// section was written against, at 48 kHz and one other rate, with the
+// extreme settings; ctest runs the default. Run --long before merging any
+// change to modules/eq/dsp.
 
 #include "modules/eq/dsp/DspCore.h"
 
@@ -18,11 +24,12 @@ using namespace bmo::eq;
 
 namespace
 {
-    int failures = 0;
+    int failures = 0, checks = 0;
     constexpr double kPi = 3.14159265358979323846;
 
     void check (bool ok, const std::string& what)
     {
+        ++checks;
         if (! ok) { std::cerr << "FAIL: " << what << '\n'; ++failures; }
     }
 
@@ -152,10 +159,50 @@ namespace
     {
         return std::to_string (std::round (r * 100.0) / 100.0).substr (0, 5) + "x";
     }
+
+    /** --long runs every row of every grid below; the default run keeps the
+        subset `pick`, `keepPair` and `keptTos` choose. scripts/build.sh
+        tests the Debug build, where the whole grid took 521 s on ICE QUEEN
+        (2026-10-03). */
+    bool longRun = false;
+
+    /** `all` under --long, `kept` by default. Every value in `kept` is in
+        `all`, so the default run is a subset and asserts the same bounds. */
+    template <typename T>
+    std::vector<T> pick (std::initializer_list<T> all, std::initializer_list<T> kept)
+    {
+        return longRun ? std::vector<T> (all) : std::vector<T> (kept);
+    }
+
+    /** The oversampling changes the default run keeps: up from 1x, where
+        the latency starts at zero, to the nearest and the farthest factor;
+        all the way back down; and down between two factors that both have
+        latency. */
+    bool keepPair (int from, int to)
+    {
+        return longRun || (from == 1 && to == 2) || (from == 1 && to == 8)
+                       || (from == 8 && to == 1) || (from == 4 && to == 2);
+    }
+
+    /** The choices above `from` that a band's frequency moves to. Under
+        --long, all of them; by default, the pairs that span the whole range
+        (the mid's is the 360 Hz -> 7.2 kHz move section 2d quoted failing)
+        and the step at each end of it. */
+    std::vector<int> keptTos (int from, int choices)
+    {
+        std::vector<int> tos;
+        for (int to = from + 1; to < choices; ++to)
+            if (longRun || (from == 0 && to == choices - 1) || (from == 0 && to == 1)
+                        || (from == choices - 2 && to == choices - 1))
+                tos.push_back (to);
+        return tos;
+    }
 }
 
-int main()
+int main (int argc, char** argv)
 {
+    longRun = argc > 1 && std::string (argv[1]) == "--long";
+
     //== 1. A cut switched back on does not replay what it heard before ======
     // Low Cut and High Cut used to keep their filter state while switched
     // off, frozen at whatever the signal was doing when they went off, and
@@ -163,7 +210,7 @@ int main()
     // digital silence, Low Cut 360 back on, and the output peaked at -6.5 dBFS.
     // A filter that has never been used gives about 4e-11 there.
     {
-        for (double fs : { 44100.0, 48000.0, 96000.0, 192000.0 })
+        for (double fs : pick ({ 44100.0, 48000.0, 96000.0, 192000.0 }, { 44100.0, 48000.0 }))
             for (int highCut = 0; highCut < 2; ++highCut)
                 for (int choice = 1; choice <= (highCut ? 5 : 4); ++choice)
                 {
@@ -221,9 +268,14 @@ int main()
     {
         constexpr double kBound = 1.5;
 
-        for (double fs : { 44100.0, 48000.0, 96000.0 })
-            for (int os : { 1, 2, 4, 8 })
+        for (double fs : pick ({ 44100.0, 48000.0, 96000.0 }, { 44100.0, 48000.0 }))
+            for (int os : pick ({ 1, 2, 4, 8 }, { 1, 8 }))
             {
+                // By default 1x runs at both rates and 8x, the costliest,
+                // at 48 kHz only.
+                if (! longRun && os == 8 && fs != 48000.0)
+                    continue;
+
                 DspCore::Params base;
                 base.oversampling = os;
 
@@ -236,13 +288,13 @@ int main()
                     check (off < kBound, name + " off" + where + " steps " + ratioText (off));
                 };
 
-                for (int choice = 1; choice <= 4; ++choice)
+                for (int choice : pick ({ 1, 2, 3, 4 }, { 1, 4 }))
                 {
                     auto p = base; p.hpfIndex = choice;
                     both ("Low Cut " + std::to_string ((int) hpfFreqHz (choice)), base, p, 100.0);
                 }
 
-                for (int choice = 1; choice <= 5; ++choice)
+                for (int choice : pick ({ 1, 2, 3, 4, 5 }, { 1, 5 }))
                 {
                     auto p = base; p.lpfIndex = choice;
                     both ("High Cut " + std::to_string ((int) lpfFreqHz (choice)), base, p, 5000.0);
@@ -285,7 +337,7 @@ int main()
 
         double worstPhase = 0.0, worstCut = 0.0;
 
-        for (double fs : { 44100.0, 48000.0, 96000.0 })
+        for (double fs : pick ({ 44100.0, 48000.0, 96000.0 }, { 44100.0, 48000.0 }))
             for (int os : { 1, 2 })
             {
                 DspCore::Params base;
@@ -295,7 +347,7 @@ int main()
                 worstPhase = std::max ({ worstPhase, switchStepRatio (fs, base, flipped, 25.0),
                                                      switchStepRatio (fs, flipped, base, 25.0) });
 
-                for (int choice = 1; choice <= 4; ++choice)
+                for (int choice : pick ({ 1, 2, 3, 4 }, { 1, 4 }))
                 {
                     auto cut = base; cut.hpfIndex = choice;
                     worstCut = std::max ({ worstCut, switchStepRatio (fs, base, cut, 25.0),
@@ -335,14 +387,14 @@ int main()
             { "LF",  4, [] (int i) noexcept { return lowShelfFreqHz (i); },  &DspCore::Params::lfFreqIndex,  &DspCore::Params::lfGainDb,  16.0f },
         };
 
-        for (double fs : { 44100.0, 48000.0, 96000.0 })
+        for (double fs : pick ({ 44100.0, 48000.0, 96000.0 }, { 44100.0, 48000.0 }))
             for (const auto& band : bands)
             {
                 double worst = 0.0;
                 std::string worstWhere;
 
                 for (int from = 0; from < band.choices; ++from)
-                    for (int to = from + 1; to < band.choices; ++to)
+                    for (int to : keptTos (from, band.choices))
                         for (float sign : { 1.0f, -1.0f })
                             for (int hiQ = 0; hiQ < (band.index == &DspCore::Params::midFreqIndex ? 2 : 1); ++hiQ)
                             {
@@ -393,7 +445,7 @@ int main()
             { "HF gain at 10 kHz",  &DspCore::Params::hfGainDb,  16.0f, 10000.0, 1 },
         };
 
-        for (double fs : { 44100.0, 48000.0, 96000.0 })
+        for (double fs : pick ({ 44100.0, 48000.0, 96000.0 }, { 44100.0, 48000.0 }))
             for (int os : { 1, 2 })
                 for (const auto& j : jumps)
                 {
@@ -420,7 +472,7 @@ int main()
     // state exactly as a stopped cut does: the same fault as section 1, one
     // switch along.
     {
-        for (double fs : { 44100.0, 48000.0, 96000.0, 192000.0 })
+        for (double fs : pick ({ 44100.0, 48000.0, 96000.0, 192000.0 }, { 44100.0, 48000.0 }))
         {
             DspCore::Params in;
             in.midGainDb = 18.0f;
@@ -462,11 +514,11 @@ int main()
     // new factor from the first process() after the change, exactly as
     // before.
     {
-        for (double fs : { 44100.0, 48000.0, 96000.0 })
+        for (double fs : pick ({ 44100.0, 48000.0, 96000.0 }, { 44100.0, 48000.0 }))
             for (int from : { 1, 2, 4, 8 })
                 for (int to : { 1, 2, 4, 8 })
                 {
-                    if (from == to)
+                    if (from == to || ! keepPair (from, to))
                         continue;
 
                     for (float mix : { 100.0f, 50.0f })
@@ -577,11 +629,11 @@ int main()
             return worst;
         };
 
-        for (double fs : { 44100.0, 48000.0, 96000.0 })
+        for (double fs : pick ({ 44100.0, 48000.0, 96000.0 }, { 44100.0, 48000.0 }))
             for (int from : { 1, 2, 4, 8 })
                 for (int to : { 1, 2, 4, 8 })
                 {
-                    if (from == to)
+                    if (from == to || ! keepPair (from, to))
                         continue;
 
                     auto a = settings; a.oversampling = from;
@@ -723,7 +775,7 @@ int main()
             return std::sqrt (acc / (double) length);
         };
 
-        for (double fs : { 44100.0, 48000.0, 96000.0 })
+        for (double fs : pick ({ 44100.0, 48000.0, 96000.0 }, { 44100.0, 48000.0 }))
             for (int os : { 1, 2 })
                 for (const auto& setting : settings)
                     for (int start = 0; start < 3; ++start)
@@ -787,8 +839,8 @@ int main()
                              { "Input -24 -> 0",    -24.0f, 0.0f, 0.0f, 0.0f },
                              { "Input 0 -> -24",    0.0f, -24.0f, 0.0f, 0.0f } };
 
-        for (double fs : { 44100.0, 48000.0, 96000.0 })
-            for (int block : { 1, 32, 441, 512 })
+        for (double fs : pick ({ 44100.0, 48000.0, 96000.0 }, { 44100.0, 48000.0 }))
+            for (int block : pick ({ 1, 32, 441, 512 }, { 32, 441 }))
                 for (const auto& move : moves)
                     for (double hz : { 100.0, 1000.0 })
                     {
@@ -810,7 +862,7 @@ int main()
         // The same move at every block size is the same audio: the move lands
         // on a sample that starts a block for all four (a shorter first block
         // puts it there for 441), and the renders must agree to the bit.
-        for (double fs : { 44100.0, 48000.0, 96000.0 })
+        for (double fs : pick ({ 44100.0, 48000.0, 96000.0 }, { 44100.0, 48000.0 }))
             for (int which = 0; which < 2; ++which)
             {
                 const auto sw = (size_t) (0.1 * fs) / 512 * 512;
@@ -927,7 +979,7 @@ int main()
         // a fresh instance held at the target gives, to the bit. Output is
         // the last gain in the chain and nothing upstream depends on it, so
         // the two must agree exactly once the trim has landed.
-        for (double fs : { 44100.0, 48000.0, 96000.0 })
+        for (double fs : pick ({ 44100.0, 48000.0, 96000.0 }, { 44100.0, 48000.0 }))
             for (const auto& move : moves)
             {
                 DspCore::Params a;
@@ -971,7 +1023,7 @@ int main()
     // land: 250 ms after a move the output is a fresh instance's at the
     // target, bit for bit.
     {
-        for (double fs : { 44100.0, 48000.0, 96000.0 })
+        for (double fs : pick ({ 44100.0, 48000.0, 96000.0 }, { 44100.0, 48000.0 }))
         {
             DspCore::Params dry;
             dry.hpfIndex = 4;
@@ -1004,7 +1056,7 @@ int main()
                              { "Mix 100 -> 0", busy, mix0, 0.0 }, { "Auto Gain off -> on", agOff, agOn, 0.0 },
                              { "Auto Gain on, mid +12 -> -6", agOn, agMoved, 1.0e-6 } };
 
-        for (double fs : { 44100.0, 48000.0, 96000.0 })
+        for (double fs : pick ({ 44100.0, 48000.0, 96000.0 }, { 44100.0, 48000.0 }))
             for (const auto& move : moves)
             {
                 std::vector<float> x ((size_t) (0.8 * fs));
@@ -1110,7 +1162,7 @@ int main()
         constexpr unsigned long long kSlack = 0;
 
         for (double fs : { 48000.0, 192000.0 })
-            for (int block : { 32, 512 })
+            for (int block : pick ({ 32, 512 }, { 32 }))
                 for (int from : { 1, 2, 4, 8 })
                     for (int to : { 1, 2, 4, 8 })
                     {
@@ -1167,6 +1219,8 @@ int main()
                     }
     }
 
+    std::cout << checks << " checks, " << failures << " failures"
+              << (longRun ? "" : " (the default subset; --long runs every row)") << "\n";
     if (failures == 0)
         std::cout << "All EQ switch tests passed.\n";
 

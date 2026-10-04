@@ -160,6 +160,10 @@ void DspCore::prepare (double sampleRate, int, int) noexcept
         b.histS.assign (length, 0.0f);
     }
 
+    // One band's whole record, heard over the fade out: what a band changing
+    // alone needs, and so what all of them share (kShapeWarmBudget).
+    warmBudget = historyBands > 0 ? kShapeWarmBudget * (int) ((historyLength - 1 + (size_t) shapeWarmSamples - 1) / (size_t) shapeWarmSamples) : 0;
+
     soloMix.prepare (rate, kSwitchFadeMs);
 
     reset();
@@ -171,6 +175,7 @@ void DspCore::reset() noexcept
         resetBand (b, true);
 
     tickPhase = 0;
+    warmPeak = 0;
     primed = false;
     soloMix.snap (1.0f);
     soloPrimed = false;
@@ -196,6 +201,7 @@ void DspCore::resetBand (Band& b, bool listenerToo) noexcept
     b.arriveM.reset(); b.arriveS.reset();
     b.histPos = b.histFilled = 0;
     b.behind = 0;
+    b.warmPending = false;
 
     if (listenerToo)
     {
@@ -214,6 +220,7 @@ void DspCore::controlTick() noexcept
 {
     const auto snapAll = ! primed;
     primed = true;
+    warmAsked = false;
 
     const auto listening = std::clamp (current.bandCount, 0, kMaxBands);
 
@@ -410,8 +417,9 @@ void DspCore::controlTick() noexcept
                 // the arriving filter's own, and it carries on from there.
                 // Otherwise the arriving filter starts from rest that many of
                 // its own time constants back in the band's recorded input
-                // (kWarmTimeConstants, capped by what is recorded), and
-                // catches up to the present by the bottom of the fade.
+                // (kWarmTimeConstants, capped by what is recorded, and by its
+                // share of kShapeWarmBudget, given at the end of this tick),
+                // and catches up to the present by the bottom of the fade.
                 const auto samePoles = std::abs (b.next.g - b.arriveCoeffs.g) <= 1.0e-9 * b.arriveCoeffs.g
                                     && std::abs (b.next.k - b.arriveCoeffs.k) <= 1.0e-9 * b.arriveCoeffs.k;
 
@@ -429,8 +437,9 @@ void DspCore::controlTick() noexcept
                     b.behind = (int) std::min ((double) b.histFilled, std::ceil (kWarmTimeConstants * tau));
                 }
 
-                b.warmStep = 1 + (b.behind + shapeWarmSamples - 1) / shapeWarmSamples;
+                b.warmPending = true;
                 b.arriveInit = false;
+                warmAsked = true;
             }
         }
 
@@ -472,6 +481,9 @@ void DspCore::controlTick() noexcept
         b.arriveM.flushTiny(); b.arriveS.flushTiny();
     }
 
+    if (warmAsked)
+        shareWarmUp();
+
     // The per-sample loop stops at the last band doing anything, so the
     // engine's spare bands are not visited every sample to be skipped.
     bandsInUse = 0;
@@ -482,6 +494,54 @@ void DspCore::controlTick() noexcept
             bandsInUse = i;
             break;
         }
+}
+
+void DspCore::shareWarmUp() noexcept
+{
+    // What the bands still catching up from an earlier tick have taken, they
+    // keep until they have caught up: taking it back would leave them short
+    // at the bottom of their fade.
+    int left = warmBudget, pending = 0;
+
+    for (const auto& b : bands)
+    {
+        if (b.warmPending)
+            ++pending;
+        else if (b.changing && b.behind > 0)
+            left -= b.warmStep - 1;
+    }
+
+    left = std::max (left, 0);
+
+    // The band needing least is given its need or an equal part of what is
+    // left, whichever is smaller, then the next, so that nothing a band needs
+    // is held back for one that needs less.
+    for (; pending > 0; --pending)
+    {
+        Band* least = nullptr;
+        int leastNeed = 0;
+
+        for (auto& b : bands)
+            if (b.warmPending)
+            {
+                const auto need = (b.behind + shapeWarmSamples - 1) / shapeWarmSamples;
+
+                if (least == nullptr || need < leastNeed)
+                {
+                    least = &b;
+                    leastNeed = need;
+                }
+            }
+
+        const auto given = std::min (leastNeed, left / pending);
+        left -= given;
+
+        // Shortened from its oldest end: it starts nearer the present.
+        least->behind = std::min (least->behind, given * shapeWarmSamples);
+        least->warmStep = 1 + (least->behind + shapeWarmSamples - 1) / shapeWarmSamples;
+        least->lookBack = least->behind;
+        least->warmPending = false;
+    }
 }
 
 //==============================================================================
@@ -544,6 +604,7 @@ void DspCore::processImpl (Sample* const* channels, int numChannels, int numSamp
         const auto soloCrossing = soloMix.isMoving();
         double yl = xl, yr = xr, accL = 0.0, accR = 0.0, soloL = 0.0, soloR = 0.0, fromL = 0.0, fromR = 0.0;
         double shapeGain = 1.0;
+        int warmSteps = 0;
 
         for (int i = 0; i < bandsInUse; ++i)
         {
@@ -639,12 +700,14 @@ void DspCore::processImpl (Sample* const* channels, int numChannels, int numSamp
                             if (stereo) b.arriveS.process (arriveTaps, b.arriveCoeffs, (double) b.histS[(size_t) at]);
                             if (++at >= historyLength) at = 0;
                             --b.behind;
+                            ++warmSteps;
                         }
                     }
                     else
                     {
                         b.arriveM.process (arriveTaps, b.arriveCoeffs, mid);
                         if (stereo) b.arriveS.process (arriveTaps, b.arriveCoeffs, side);
+                        ++warmSteps;
                     }
                 }
             }
@@ -680,6 +743,8 @@ void DspCore::processImpl (Sample* const* channels, int numChannels, int numSamp
             if (i == soloTo) { soloL = e * wl; soloR = e * wr; }
             if (soloCrossing && i == soloFrom) { fromL = e * wl; fromR = e * wr; }
         }
+
+        warmPeak = std::max (warmPeak, warmSteps);
 
         if (! serial)
         {

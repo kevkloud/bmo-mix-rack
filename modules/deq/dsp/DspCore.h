@@ -72,9 +72,30 @@ inline constexpr double kWarmTimeConstants = 6.0;
     constants of anything slower than a 30 Hz Q 40 cut (107 ms), and capped
     there; slower still, a shape arrives less than fully settled. Kept for the
     product's bands only (Settings::bandCount, at most kShapeHistoryBands), as
-    floats: 12 bands take 2.9 MB at 48 kHz and 11.8 MB at 192 kHz. */
+    floats, allocated in prepare(): 12 bands take 2.95 MB at 48 kHz and
+    11.8 MB at 192 kHz. */
 inline constexpr double kShapeHistoryMs = 640.0;
 inline constexpr int kShapeHistoryBands = 16;
+
+/** How much catching up the shapes arriving may do between them, in bands'
+    worth: one band's whole record heard over the fade out, 32 filter steps a
+    sample beyond the one each band changing takes to keep pace. A band
+    changing alone has all of it. Bands that begin a change together share it,
+    the ones that need least taking their need first and the rest an equal
+    part, and a band's look-back is shortened from its oldest end, because
+    the nearest past is what a filter's state is mostly made of: twelve slow
+    bands at once look back 40 to 60 ms each. A band that begins while others
+    are still catching up has what they leave, which may be nothing: it then
+    warms up on the 20 ms of the fade out alone. The dip is the same either
+    way; only how settled the arriving shape is at its bottom changes.
+
+    Round 4 of the review (2026-10-03): without it, twelve bands changing in
+    one block (Low Shelves to Bells, 30-46.5 Hz, Q 40) each caught up on all
+    of their record, 396 steps a sample, 53.6 % of a 192 kHz / 32-sample
+    block at its 99th percentile; with it, 44 steps and 16.7 %. Three bands'
+    worth measured 23.2 % and still left the twelve-band case outside the
+    switch criteria (modules/deq/AGENTS.md has the figures). */
+inline constexpr int kShapeWarmBudget = 1;
 
 /** A dynamic band is only redesigned when its gain offset has moved by more
     than this since the last design. Static settings are always followed
@@ -281,6 +302,20 @@ public:
         return arriving ? bands[(size_t) band].arriveCoeffs : bands[(size_t) band].cur;
     }
 
+    /** The most filter steps the shapes arriving have taken in any one
+        sample since prepare() or reset(), all bands together: one a sample
+        for each band changing shape, to keep pace, and the rest catching up
+        on its record (kShapeWarmBudget). */
+    int peakWarmSteps() const noexcept { return warmPeak; }
+
+    /** How far back in its record, samples, the band's latest change of
+        shape started the shape arriving (kWarmTimeConstants), as granted. */
+    int shapeLookBack (int band) const noexcept { return bands[(size_t) band].lookBack; }
+
+    /** How many catch-up steps a sample the shapes arriving may take
+        together, beyond one each (kShapeWarmBudget). */
+    int shapeWarmBudget() const noexcept { return warmBudget; }
+
     /** No subnormal anywhere in filter or detector state. */
     bool allStateNormal() const noexcept;
 
@@ -367,6 +402,8 @@ private:
         bool      arriveInit = false;      // its state is still to be set
         int       behind = 0;              // recorded samples it has still to hear
         int       warmStep = 1;            // how many it hears per sample, catching up
+        int       lookBack = 0;            // how far back it started (shapeLookBack)
+        bool      warmPending = false;     // its share of kShapeWarmBudget is still to be given
 
         // The band's own input, M and S, the last kShapeHistoryMs of it, for
         // a shape arriving to warm up on. Allocated in prepare().
@@ -384,6 +421,10 @@ private:
     void processImpl (Sample* const* channels, int numChannels, int numSamples) noexcept;
 
     void controlTick() noexcept;
+
+    /** Shares what kShapeWarmBudget has left among the bands that began a
+        change of shape this tick, shortening their look-backs to fit. */
+    void shareWarmUp() noexcept;
 
     /** The design of `shape` at these settings, its Q capped where it is a
         cut (designQ). */
@@ -408,7 +449,8 @@ private:
     std::unique_ptr<Shared> shared = std::make_unique<Shared>();
     double rate = 48000.0, tickAlpha = 0.0;
     int tickPhase = 0, bandsInUse = 0, shapeWarmSamples = 1;
-    bool primed = false, prepared = false;
+    int warmBudget = 0, warmPeak = 0;
+    bool primed = false, prepared = false, warmAsked = false;
 
     // Solo crosses over from what was being heard (-1: the whole EQ) to what
     // is asked for. The first block after prepare()/reset() takes it as it is.

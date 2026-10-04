@@ -2892,6 +2892,79 @@ namespace
                                  + " every " + std::to_string (every) + " blocks at " + std::to_string ((int) f0) + " Hz, step over the louder shape's");
                 }
     }
+
+    /** Catching up costs a fixed budget however many bands change shape at
+        once, and a band changing alone still hears its whole record. Round 4
+        of the review (2026-10-03): on 6061b89 every band changing caught up on
+        all of its record over the fade out, up to 33 filter steps a sample
+        each, so twelve Low Shelves at 30-46.5 Hz and Q 40 turned into Bells in
+        one block took 396 steps a sample -- 50.8 % of a 192 kHz / 32-sample
+        block at its 99th percentile. Counted in steps, not timed: the harness
+        may not depend on the wall clock. */
+    void testShapeWarmUpIsBudgeted()
+    {
+        for (double rate : { 48000.0, 192000.0 })
+        {
+            const auto record = (int) std::lround (rate * kShapeHistoryMs * 0.001) - 1;
+
+            auto changeShapes = [rate] (int changing, DspCore& e)
+            {
+                Settings s;
+                s.bandCount = 12;
+
+                for (int i = 0; i < 12; ++i)
+                {
+                    auto& b = s.bands[(size_t) i];
+                    b.enabled = true; b.shape = Shape::lowShelf; b.frequencyHz = 30.0 * (1.0 + 0.05 * i); b.q = 40.0; b.gainDb = 6.0;
+                }
+
+                e.prepare (rate, 32, 2);
+                e.setSettings (s);
+
+                const auto x = pinkNoise ((size_t) (1.2 * rate), -12.0);
+                std::vector<double> l (32), r (32);
+                const auto flip = (size_t) rate;
+
+                for (size_t pos = 0; pos + 32 <= x.size(); pos += 32)
+                {
+                    if (pos == flip)
+                    {
+                        for (int i = 0; i < changing; ++i)
+                            s.bands[(size_t) i].shape = Shape::bell;
+
+                        e.setSettings (s);
+                    }
+
+                    for (size_t k = 0; k < 32; ++k) { l[k] = x[pos + k]; r[k] = 0.9 * x[pos + k]; }
+                    double* ch[2] { l.data(), r.data() };
+                    e.process (ch, 2, 32);
+                }
+            };
+
+            const auto at = " at " + std::to_string ((int) rate) + " Hz";
+
+            DspCore one;
+            changeShapes (1, one);
+            check (one.shapeLookBack (0) == record, "Shape warm-up: a band changing alone hears its whole record" + at
+                   + " (" + std::to_string (one.shapeLookBack (0)) + " of " + std::to_string (record) + " samples)");
+            check (one.peakWarmSteps() == 1 + one.shapeWarmBudget(), "Shape warm-up: a band changing alone takes the whole budget" + at
+                   + " (" + std::to_string (one.peakWarmSteps()) + " steps a sample)");
+
+            DspCore twelve;
+            changeShapes (12, twelve);
+            check (twelve.peakWarmSteps() <= 12 + twelve.shapeWarmBudget(), "Shape warm-up: twelve bands changing in one block keep to the budget" + at
+                   + " (" + std::to_string (twelve.peakWarmSteps()) + " steps a sample, budget 12 + " + std::to_string (twelve.shapeWarmBudget()) + ")");
+
+            int shortest = record;
+            for (int i = 0; i < 12; ++i)
+                shortest = std::min (shortest, twelve.shapeLookBack (i));
+
+            check (shortest > 0, "Shape warm-up: every band of twelve changing at once still looks back" + at);
+            std::cout << "  shape warm-up" << at << ": one band " << one.peakWarmSteps() << " steps a sample, looks back "
+                      << one.shapeLookBack (0) * 1000.0 / rate << " ms; twelve " << twelve.peakWarmSteps() << ", shortest look-back "
+                      << shortest * 1000.0 / rate << " ms\n";
+        }
+    }
 }
 
 int main()
@@ -2924,6 +2997,7 @@ int main()
     testShapeChangeNeverBursts();
     testShapeChangeGrid();
     testShapeTogglingNeverSteps();
+    testShapeWarmUpIsBudgeted();
 
     if (failures == 0)
         std::cout << "deq_dsp: all passed\n";

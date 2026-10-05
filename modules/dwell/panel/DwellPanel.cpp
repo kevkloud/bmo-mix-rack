@@ -1,6 +1,7 @@
 #include "DwellPanel.h"
 #include "core/ui/Fonts.h"
 #include "modules/dwell/Module.h"
+#include "modules/dwell/dsp/DelayEngine.h"
 #include "modules/dwell/dsp/GainLaws.h"
 #include "modules/dwell/params.h"
 
@@ -700,6 +701,21 @@ DwellPanel::DwellPanel (ui::ModuleContext ctx)
 
     refreshFxLinkFollowing();
 
+    // Whatever moves HOLD, the lane's FX gate, DEPTH or CHARACTER -- a click,
+    // a host's lane, a preset -- re-reads which controls are inert.
+    const auto watch = [this] (int index)
+    {
+        return std::make_unique<juce::ParameterAttachment> (context.params.param (index),
+                                                            [this] (float) { refreshInert(); });
+    };
+
+    holdWatch      = watch (Index::hold);
+    laneFxWatch    = watch (Index::laneFx);
+    modDepthWatch  = watch (Index::modDepth);
+    characterWatch = watch (Index::character);
+
+    refreshInert();
+
     startTimerHz (15);
 }
 
@@ -747,8 +763,9 @@ void DwellPanel::showNote (bool syncOn)
     live.setKnobEnabled (dwell::kSyncIsEnabled || ! syncOn);
 
     // The lane's pair follows the same switch. Both are page controls, so
-    // `resized` parents whichever is live; only its enablement is set here.
-    (syncOn ? laneNote : laneTime).setKnobEnabled (dwell::kSyncIsEnabled || ! syncOn);
+    // `resized` parents whichever is live; its enablement also hangs on HOLD,
+    // so `refreshInert` sets it.
+    refreshInert();
 }
 
 void DwellPanel::buildFxAmount (bool lane, int type)
@@ -796,9 +813,11 @@ void DwellPanel::buildFxAmount (bool lane, int type)
 void DwellPanel::refreshFxEnablement()
 {
     // With a stage's gate off its controls grey rather than vanishing. The DSP
-    // skips the stage regardless; this is the panel saying so.
+    // skips the stage regardless; this is the panel saying so. The lane's
+    // stage is off with HOLD off too: the lane is not running at all.
     const auto mainOn = context.params.getReal (Index::fx) > 0.5f;
-    const auto laneOn = context.params.getReal (Index::laneFx) > 0.5f;
+    const auto laneOn = context.params.getReal (Index::laneFx) > 0.5f
+                     && context.params.getReal (Index::hold) > 0.5f;
 
     fxType->setRowEnabled (mainOn);
     laneFxType->setRowEnabled (laneOn);
@@ -808,6 +827,43 @@ void DwellPanel::refreshFxEnablement()
 
     if (laneFxAmount != nullptr)
         laneFxAmount->setKnobEnabled (laneOn);
+}
+
+void DwellPanel::refreshInert()
+{
+    // **A control a mode makes inert is dimmed** (modules/AGENTS.md). Dim
+    // only: every value is kept and still automates, and the dim lifts the
+    // moment the control counts again.
+    //
+    // **HOLD off: the whole lane.** The lane is not circulating, so SEND's
+    // gate is held shut (`DspCore::applyParams`), nothing is read for CHOP to
+    // gate, and TAIL, TIME or NOTE, LEVEL, the lane's FX and LINK set a loop
+    // that is not running. HOLD itself stays live -- it is what brings the
+    // rest back.
+    const auto holdOn = context.params.getReal (Index::hold) > 0.5f;
+    const auto syncOn = context.params.getReal (Index::sync) > 0.5f;
+
+    for (auto* s : { &sendHeld, &chop, &laneFx, &fxLink })
+        s->setSwitchEnabled (holdOn);
+
+    for (auto* k : { &laneGain, &laneLevel })
+        k->setKnobEnabled (holdOn);
+
+    (syncOn ? laneNote : laneTime).setKnobEnabled (holdOn && (dwell::kSyncIsEnabled || ! syncOn));
+    (syncOn ? laneTime : laneNote).setKnobEnabled (holdOn);
+
+    refreshFxEnablement();
+
+    // **RATE at DEPTH 0, on clean and bucket-brigade.** Neither has a wow of
+    // its own -- clean takes the MOD sine alone and bucket-brigade's floor is
+    // zero by decision -- so with DEPTH at 0 nothing moves and RATE has
+    // nothing to set (`DelayEngine::advanceModulation`). Tape keeps it: its
+    // character floor rides the same oscillator, so RATE is tape's wow rate
+    // at every DEPTH, 0 included.
+    const auto depth = context.params.getReal (Index::modDepth);
+    const auto tape  = juce::roundToInt (context.params.getReal (Index::character)) == kTape;
+
+    modRate.setKnobEnabled (depth > 0.0f || tape);
 }
 
 void DwellPanel::refreshFxLinkFollowing()

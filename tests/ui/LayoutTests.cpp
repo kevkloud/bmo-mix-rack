@@ -1399,6 +1399,107 @@ void checkDwellPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
         panel.setUiState ("page", "tone");
     }
 
+    //== A control a mode makes inert is dimmed ===============================
+    //
+    // modules/AGENTS.md's house rule (2026-10-03 review). With HOLD off the
+    // lane is not running: DspCore holds SEND's gate shut, nothing is read for
+    // CHOP to gate, and TAIL, TIME, LEVEL, the lane's FX and LINK set a loop
+    // that is cleared. At DEPTH 0, clean and bucket-brigade have no
+    // modulation for RATE to pace; tape's character floor rides RATE at every
+    // depth, so there it stays live. Driven through the parameters, both
+    // ways, and the values the dimmed controls hold must survive.
+    {
+        // 1 live, 0 dimmed: a knob's rotary, a switch's button, a cell.
+        const auto liveOf = [&] (const juce::String& name) -> int
+        {
+            auto* c = findNamed (panel, name);
+
+            if (c == nullptr)
+            {
+                check (false, who + " has no " + name + " to dim");
+                return -1;
+            }
+
+            if (auto* knob = dynamic_cast<bmo::ui::PlainKnob*> (c))
+            {
+                const auto* face = knobFace (*knob);
+                return face != nullptr && face->isEnabled() ? 1 : 0;
+            }
+
+            for (auto* child : c->getChildren())
+                if (dynamic_cast<juce::Button*> (child) != nullptr)
+                    return child->isEnabled() ? 1 : 0;
+
+            return c->isEnabled() ? 1 : 0;
+        };
+
+        const char* const lane[] { "SEND", "CHOP", "LANE TAIL", "LANE TIME", "LANE LEVEL", "LANE FX", "FX LINK",
+                                   "LANE.DIFFUSE", "LANE.PAN", "LANE.CRUSH", "LANE AMOUNT SMEAR" };
+        const char* const laneStage[] { "LANE.DIFFUSE", "LANE.PAN", "LANE.CRUSH", "LANE AMOUNT SMEAR" };
+
+        const auto laneTimeWas = params.getReal (D::Index::laneTime);
+
+        panel.setUiState ("page", "lane");
+
+        params.setReal (D::Index::hold, 0.0f);
+        params.setReal (D::Index::laneFx, 1.0f);
+
+        for (const auto* name : lane)
+            checkEquals (liveOf (name), 0, who + " HOLD off: " + name + " does nothing and should dim");
+
+        checkEquals (liveOf ("HOLD"), 1, who + " HOLD itself never dims");
+
+        params.setReal (D::Index::hold, 1.0f);
+
+        for (const auto* name : lane)
+            checkEquals (liveOf (name), 1, who + " HOLD on, the lane's FX on: " + name + " should be live");
+
+        // The lane's own gate still decides its stage under HOLD.
+        params.setReal (D::Index::laneFx, 0.0f);
+
+        for (const auto* name : laneStage)
+            checkEquals (liveOf (name), 0, who + " HOLD on, the lane's FX off: " + name + " should dim");
+
+        // Under SYNC the lane's NOTE takes TIME's cell and dims with it.
+        params.setReal (D::Index::sync, 1.0f);
+        panel.setUiState ("page", "lane");
+        params.setReal (D::Index::hold, 0.0f);
+        checkEquals (liveOf ("LANE NOTE"), 0, who + " HOLD off under SYNC: LANE NOTE should dim");
+        params.setReal (D::Index::hold, 1.0f);
+        checkEquals (liveOf ("LANE NOTE"), 1, who + " HOLD on under SYNC: LANE NOTE should be live");
+        params.setReal (D::Index::sync, before[(size_t) D::Index::sync]);
+        panel.setUiState ("page", "lane");
+
+        check (params.getReal (D::Index::laneTime) == laneTimeWas,
+               who + " dimming the lane must not write LANE TIME");
+
+        // RATE, on the FX page.
+        panel.setUiState ("page", "fx");
+
+        struct RateCase { int character; float depth; int live; const char* what; };
+
+        const RateCase rates[] {
+            { 0,  0.0f, 0, "clean at DEPTH 0: RATE paces nothing and should dim" },
+            { 2,  0.0f, 0, "bucket-brigade at DEPTH 0: RATE paces nothing and should dim" },
+            { 1,  0.0f, 1, "tape at DEPTH 0: RATE is the character floor's wow rate and stays live" },
+            { 0, 50.0f, 1, "clean at DEPTH 50: RATE should be live" },
+            { 2, 50.0f, 1, "bucket-brigade at DEPTH 50: RATE should be live" },
+            { 0,  0.0f, 0, "back to clean at DEPTH 0: RATE should dim again" },
+        };
+
+        for (const auto& r : rates)
+        {
+            params.setReal (D::Index::character, (float) r.character);
+            params.setReal (D::Index::modDepth, r.depth);
+            checkEquals (liveOf ("RATE"), r.live, who + " " + r.what);
+        }
+
+        for (const auto index : { D::Index::hold, D::Index::laneFx, D::Index::character, D::Index::modDepth })
+            params.setReal (index, before[(size_t) index]);
+
+        panel.setUiState ("page", "tone");
+    }
+
     //== The picture is the engine's law ======================================
     //
     // Written out here, not called: 10 §3's FEEDBACK law at P_c = 1 is

@@ -1040,16 +1040,31 @@ public:
         for (auto& line : gainRing)
             line.assign ((size_t) size, 1.0f);
 
+        ringsClear = true;
+
         sinc.build (1.0, 8.0);
         probe.assign ((size_t) kProbeSize, 0.0f);
 
         gridOmega.assign ((size_t) kSweepPoints, 0.0);
         gridZ.assign ((size_t) kSweepPoints, std::complex<double> { 1.0, 0.0 });
         gridHz.assign ((size_t) kSweepPoints, 0.0);
-        filterMagnitude.assign ((size_t) kSweepPoints, 1.0);
         referenceMagnitude.assign ((size_t) kSweepPoints, 1.0);
-        kernelMagnitude.assign ((size_t) kSweepPoints, 1.0);
         referenceBuiltFor = { -1.0, -1.0, -1.0 };
+
+        // A new grid: every kept half was built on the old one.
+        for (auto& s : filterSweeps)
+        {
+            s.magnitude.assign ((size_t) kSweepPoints, 1.0);
+            s.builtFrom.fill (-1.0);
+        }
+
+        for (auto& s : kernelSweeps)
+        {
+            s.magnitude.assign ((size_t) kSweepPoints, 1.0);
+            s.builtFor = -1.0;
+        }
+
+        peakFilterSweep = peakKernelSweep = -1;
 
         const auto lo = 10.0;
         const auto hi = std::max (0.45 * sampleRate, lo * 2.0);
@@ -1093,20 +1108,60 @@ public:
         applyDrive (true);
         applyFx (true);
         applyTime (params.timeMs, true);
+        prepareSweeps();
         reset();
+    }
+
+    /** Builds every character's half of the sweep, and both interpolators',
+        at the TIME and phase this engine holds now, so that the snap after a
+        `reset` and a CHARACTER switch at a held TIME find theirs already built
+        (`refreshLoopPeak`). Five 1024-point builds at most, so it belongs where
+        slow work is allowed: `prepare`, and `DspCore::prepare` once the
+        session's parameters are in. It never rebuilds the halves `P_c` was
+        scanned from -- those are already at these inputs -- so `P_c` cannot
+        move here. */
+    void prepareSweeps() noexcept
+    {
+        buildFilterSweep (kCleanSweep, 0.0, 0.0, 0.0);
+        buildFilterSweep (kTapeSweep, filters[0].tapeLowPass.coeff(),
+                          filters[0].headBump.coeff(), headBumpGain);
+
+        TptSvfLowPass bbd;
+        bbd.set (bbdCutoffFor (params.timeMs), sampleRate, kButterworthQ);
+        buildFilterSweep (kBbdSweep, bbd.coeff(), bbd.damping(), 0.0);
+
+        // At the phase the kept kernel was built at, not at the target's: a
+        // TIME move under 1/256 of a sample leaves the two apart, and the
+        // kernel `P_c` was scanned from must not be rebuilt under it.
+        const auto phase = phaseOf (kernelDelay);
+        buildKernelSweep (kSincSweep, phase);
+        buildKernelSweep (kHermiteSweep, phase);
     }
 
     /** Clears audio state and leaves the coefficients, `P_c` and the targets
         alone: a reset is a silence, not a re-tune. */
     void reset() noexcept
     {
-        for (auto& line : ring)
-            std::fill (line.begin(), line.end(), 0.0f);
+        // **Rings nothing has written since they were last cleared are not
+        // cleared again** (2026-10-04). Four lines of the fixed maximum is up
+        // to 8 MB an engine at 192 kHz, and `DspCore` clears the lane -- this
+        // reset -- on the snap that the first parameter set after its own
+        // `reset` or `prepare` makes, which put 14 us at 48 kHz and 60 us at
+        // 192 kHz on the audio thread's first block, measured on ICE QUEEN,
+        // to write what was already there.
+        if (! ringsClear)
+        {
+            for (auto& line : ring)
+                std::fill (line.begin(), line.end(), 0.0f);
 
-        // 1.0, not 0: the expander divides by what it reads here, and a zeroed
-        // control ring would be a division by nothing.
-        for (auto& line : gainRing)
-            std::fill (line.begin(), line.end(), 1.0f);
+            // 1.0, not 0: the expander divides by what it reads here, and a
+            // zeroed control ring would be a division by nothing.
+            for (auto& line : gainRing)
+                std::fill (line.begin(), line.end(), 1.0f);
+
+            ringsClear = true;
+            ++ringClears;
+        }
 
         for (auto& f : filters)
         {
@@ -1242,6 +1297,15 @@ public:
         band neither grows nor decays"). */
     double referencePeakHz() const noexcept { return loopPeakHz; }
 
+    /** How many halves of the sweep this engine has built -- a 1024-point
+        reference-chain or interpolator magnitude, each -- since it was made.
+        For the test that holds the audio thread's first block to building
+        none (`testTheFirstBlockSweepsNothing`). */
+    int sweepCount() const noexcept { return sweepsTaken; }
+
+    /** How many times `reset` has cleared the rings, for the same test. */
+    int ringClearCount() const noexcept { return ringClears; }
+
     /** The ring's length in samples: a power of two, sized from the fixed
         maximum. */
     int ringSize() const noexcept { return mask + 1; }
@@ -1300,6 +1364,9 @@ public:
     {
         if (mask <= 0 || numSamples <= 0 || numChannels <= 0)
             return;
+
+        // Every call writes the rings, so from here `reset` has to clear them.
+        ringsClear = false;
 
         const auto nch = std::min (numChannels, channels);
         const auto glide = usesGlide();
@@ -2016,12 +2083,7 @@ private:
 
         if (params.character == kBucketBrigade)
         {
-            const auto seconds = std::max ((double) params.timeMs, 1.0) * 0.001;
-            const auto clockHz = kBbdStages / (2.0 * seconds);
-
-            bbdCutoffHz = std::clamp (kBbdCutoffFactor * clockHz * 0.5,
-                                      kBbdCutoffMinHz, kBbdCutoffMaxHz);
-            bbdCutoffHz = std::min (bbdCutoffHz, 0.45 * sampleRate);
+            bbdCutoffHz = bbdCutoffFor (params.timeMs);
 
             for (auto& f : filters)
             {
@@ -2033,6 +2095,18 @@ private:
         {
             bbdCutoffHz = 0.0;
         }
+    }
+
+    /** Bucket-brigade's corner at `timeMs`: the one formula both the mode
+        filters and `prepareSweeps` take it from. */
+    double bbdCutoffFor (float timeMs) const noexcept
+    {
+        const auto seconds = std::max ((double) timeMs, 1.0) * 0.001;
+        const auto clockHz = kBbdStages / (2.0 * seconds);
+
+        const auto cutoff = std::clamp (kBbdCutoffFactor * clockHz * 0.5,
+                                        kBbdCutoffMinHz, kBbdCutoffMaxHz);
+        return std::min (cutoff, 0.45 * sampleRate);
     }
 
     /** DRIVE, as a blend and a curve. The curve reuses `modules/sat`'s own
@@ -2274,14 +2348,33 @@ private:
         thread, so the two grids it reads are cached and only the part that
         actually moved is rebuilt. The interpolator's part is rebuilt only once
         the read phase has moved by more than the table's own 1/256-sample
-        quantisation, below which there is nothing new to measure. */
+        quantisation, below which there is nothing new to measure.
+
+        **Each half is kept against what it was built from** (2026-10-04),
+        one copy per character and one per interpolator, and is rebuilt only
+        when that has moved. The snap that the first parameter set after a
+        `prepare` or `reset` makes used to rebuild both halves in both engines
+        although nothing had moved -- 60 to 150 us of the audio thread's first
+        block, measured on ICE QUEEN, which in a rack is the block a chain edit
+        or a host reset brings the module in on. A half is a function of its
+        inputs and of the grid alone, so a kept one is bit for bit the one a
+        rebuild would make, and the peak scanned from the same two halves is
+        the same peak. */
     void refreshLoopPeak (bool filtersMoved) noexcept
     {
         if (filtersMoved)
-            buildFilterMagnitudes();
+            filterSweep = buildFilterMagnitudes();
 
         if (filtersMoved || std::abs (delayTarget - kernelDelay) > (1.0 / 256.0))
-            buildKernelMagnitudes (delayTarget);
+            kernelSweep = buildKernelMagnitudes (delayTarget);
+
+        // Neither half the peak was scanned from has moved, so a scan would
+        // land on the figure already held.
+        if (filterSweep == peakFilterSweep && kernelSweep == peakKernelSweep)
+            return;
+
+        const auto& filterMagnitude = filterSweeps[(size_t) filterSweep].magnitude;
+        const auto& kernelMagnitude = kernelSweeps[(size_t) kernelSweep].magnitude;
 
         auto peak = 0.0;
         auto peakHz = gridHz.empty() ? 0.0 : gridHz[0];
@@ -2299,14 +2392,45 @@ private:
 
         loopPeak   = std::max (peak, 1.0e-6);
         loopPeakHz = peakHz;
+        peakFilterSweep = filterSweep;
+        peakKernelSweep = kernelSweep;
     }
 
     /** The reference chain of §3: the cuts at their neutral limits, the
         blocker, and **the character's own mode filters**, which are not user
         stages and so appear at their working values. The compander is unity by
-        construction and so contributes exactly 1 and is not swept. */
-    void buildFilterMagnitudes() noexcept
+        construction and so contributes exactly 1 and is not swept. Returns
+        which of `filterSweeps` holds it. */
+    int buildFilterMagnitudes() noexcept
     {
+        if (params.character == kTape)
+            return buildFilterSweep (kTapeSweep, filters[0].tapeLowPass.coeff(),
+                                     filters[0].headBump.coeff(), headBumpGain);
+
+        if (params.character == kBucketBrigade)
+            return buildFilterSweep (kBbdSweep, filters[0].bbdAntiAlias.coeff(),
+                                     filters[0].bbdAntiAlias.damping(), 0.0);
+
+        return buildFilterSweep (kCleanSweep, 0.0, 0.0, 0.0);
+    }
+
+    /** One character's half, from the mode filters' coefficients `a`, `b`
+        and `c` -- tape's low-pass, head bump and bump gain; bucket-brigade's
+        `g` and damping; none on clean -- unless it already holds them. */
+    int buildFilterSweep (int slot, double a, double b, double c) noexcept
+    {
+        auto& sweep = filterSweeps[(size_t) slot];
+        const std::array<double, 6> builtFrom { referenceLowCut, referenceHighCut, referenceBlocker, a, b, c };
+
+        if (builtFrom == sweep.builtFrom)
+            return slot;
+
+        ++sweepsTaken;
+        sweep.builtFrom = builtFrom;
+
+        if (slot == peakFilterSweep)
+            peakFilterSweep = -1;
+
         // **The reference cuts and the blocker are cached** (2026-10-03).
         // They sit at fixed corners -- 20 Hz, the cap, 10 Hz -- so their
         // product moves only with the sample rate, yet it was rebuilt, three
@@ -2330,27 +2454,27 @@ private:
             referenceBuiltFor = reference;
         }
 
-        for (int i = 0; i < (int) filterMagnitude.size(); ++i)
+        for (int i = 0; i < (int) sweep.magnitude.size(); ++i)
         {
             const auto z = gridZ[(size_t) i];
 
             auto m = referenceMagnitude[(size_t) i];
 
-            if (params.character == kTape)
+            if (slot == kTapeSweep)
             {
-                m *= TptOnePole::lowPassMagnitude (filters[0].tapeLowPass.coeff(), z);
-                m *= TptOnePole::lowShelfMagnitude (filters[0].headBump.coeff(), headBumpGain, z);
+                m *= TptOnePole::lowPassMagnitude (a, z);
+                m *= TptOnePole::lowShelfMagnitude (b, c, z);
             }
-            else if (params.character == kBucketBrigade)
+            else if (slot == kBbdSweep)
             {
-                const auto g = filters[0].bbdAntiAlias.coeff();
-                const auto k = filters[0].bbdAntiAlias.damping();
-                const auto one = TptSvfLowPass::magnitude (g, k, z);
+                const auto one = TptSvfLowPass::magnitude (a, b, z);
                 m *= one * one;
             }
 
-            filterMagnitude[(size_t) i] = m;
+            sweep.magnitude[(size_t) i] = m;
         }
+
+        return slot;
     }
 
     /** |I(e^jw)| for the interpolator **as built**, not as specified.
@@ -2362,20 +2486,43 @@ private:
         sweeping a second copy of the formula that built it.
 
         Which interpolator is swept follows the character, because which one
-        the loop runs does (10 §1). */
-    void buildKernelMagnitudes (double delay) noexcept
+        the loop runs does (10 §1). Returns which of `kernelSweeps` holds it. */
+    int buildKernelMagnitudes (double delay) noexcept
     {
         kernelDelay = delay;
 
-        // The read position is `writeIdx - delay` and writeIdx is an integer,
-        // so the phase the table sees is the fraction of -delay.
+        return buildKernelSweep (usesSinc() && delay >= (double) kSincFloor ? kSincSweep : kHermiteSweep,
+                                 phaseOf (delay));
+    }
+
+    /** The read position is `writeIdx - delay` and writeIdx is an integer,
+        so the phase the table sees is the fraction of -delay. */
+    static double phaseOf (double delay) noexcept
+    {
         const auto negative = -delay;
-        const auto phase = negative - std::floor (negative);
+        return negative - std::floor (negative);
+    }
+
+    /** One interpolator's half at `phase`, unless it already holds it. The
+        kernel is a function of the phase alone, so the phase is the whole of
+        what it was built from. */
+    int buildKernelSweep (int slot, double phase) noexcept
+    {
+        auto& sweep = kernelSweeps[(size_t) slot];
+
+        if (phase == sweep.builtFor)
+            return slot;
+
+        ++sweepsTaken;
+        sweep.builtFor = phase;
+
+        if (slot == peakKernelSweep)
+            peakKernelSweep = -1;
 
         std::array<double, Sinc::kTaps> kernel {};
         int taps = 0;
 
-        if (usesSinc() && delay >= (double) kSincFloor)
+        if (slot == kSincSweep)
         {
             taps = Sinc::kTaps;
 
@@ -2396,7 +2543,7 @@ private:
         }
 
         // `step` is the cached `std::polar (1, -w)`; see `gridZ`.
-        for (int i = 0; i < (int) kernelMagnitude.size(); ++i)
+        for (int i = 0; i < (int) sweep.magnitude.size(); ++i)
         {
             const auto step = gridZ[(size_t) i];
             std::complex<double> power { 1.0, 0.0 };
@@ -2408,8 +2555,10 @@ private:
                 power *= step;
             }
 
-            kernelMagnitude[(size_t) i] = std::abs (acc);
+            sweep.magnitude[(size_t) i] = std::abs (acc);
         }
+
+        return slot;
     }
 
     //==========================================================================
@@ -2485,7 +2634,33 @@ private:
     double lastNoise = 0.0;   ///< the wear noise this sample, for `modulationFor`
     std::uint32_t noiseState = kNoiseSeed;
 
-    std::vector<double> gridOmega, gridHz, filterMagnitude, kernelMagnitude;
+    std::vector<double> gridOmega, gridHz;
+
+    /** The sweep's two halves, one copy per character and one per
+        interpolator, each beside what it was built from (`refreshLoopPeak`).
+        -1 is a key no coefficient or phase can take: built from nothing yet. */
+    static constexpr int kCleanSweep = 0, kTapeSweep = 1, kBbdSweep = 2;
+    static constexpr int kSincSweep = 0, kHermiteSweep = 1;
+
+    struct FilterSweep
+    {
+        std::vector<double> magnitude;
+        std::array<double, 6> builtFrom { -1.0, -1.0, -1.0, -1.0, -1.0, -1.0 };
+    };
+
+    struct KernelSweep
+    {
+        std::vector<double> magnitude;
+        double builtFor = -1.0;
+    };
+
+    std::array<FilterSweep, 3> filterSweeps;
+    std::array<KernelSweep, 2> kernelSweeps;
+
+    /** The halves the sweep reads now, and the two `loopPeak` was scanned
+        from (-1: not scanned, or the half has been rebuilt since). */
+    int filterSweep = kCleanSweep, kernelSweep = kSincSweep;
+    int peakFilterSweep = -1, peakKernelSweep = -1;
 
     /** `e^-jw` at every grid point, taken once at `prepare`, and the
         reference cuts' and blocker's magnitude product with the three
@@ -2497,6 +2672,12 @@ private:
     double referenceLowCut = 0.0, referenceHighCut = 0.0, referenceBlocker = 0.0;
     double kernelDelay = -1.0;
     double loopPeak = 1.0, loopPeakHz = 0.0;
+    int sweepsTaken = 0;
+
+    /** Whether `ring` and `gainRing` hold nothing but their cleared values:
+        set where they are filled, dropped by every `process`. */
+    bool ringsClear = false;
+    int ringClears = 0;
 };
 
 } // namespace bmo::dwell

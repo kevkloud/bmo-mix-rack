@@ -7198,6 +7198,111 @@ void testResetAndPrepareLandOnAFreshInstance()
     }
 }
 
+/** **The first block after `prepare()` or `reset()` builds no sweep and
+    clears no ring** (2026-10-04).
+
+    The snap that the first parameter set after a `prepare` or `reset` makes
+    took `P_c`'s sweep again in both engines -- 1024 points of the reference
+    chain and 1024 of the interpolator's kernel each -- although nothing it is
+    built from had moved, and cleared the lane's empty rings again through
+    HOLD's snap: 75 to 210 us of that block's `setParams`, against whole
+    steady blocks of 3.7 to 187 us, measured on ICE QUEEN. A chain edit or a host
+    reset brings the module into a rack on exactly that block. The halves are
+    now kept against what they are built from and taken in `prepare`, every
+    character's at the prepared TIME, and a ring nothing has written is not
+    cleared again, so neither count may move across the first block after
+    either, nor the sweeps across a CHARACTER switch at a held TIME. Counted,
+    not timed: a timing would pass or fail with the machine. */
+void testTheFirstBlockSweepsNothing()
+{
+    const std::pair<double, int> settings[] { { 48000.0, 512 }, { 192000.0, 32 } };
+
+    for (const auto& [rate, chunk] : settings)
+        for (int c = 0; c < 3; ++c)
+            for (int lane = 0; lane < 2; ++lane)
+                for (int fx = -1; fx < 3; ++fx)
+                {
+                    auto v = defaults();
+                    v[P::Index::character] = (float) c;
+                    v[P::Index::hold]      = (float) lane;
+                    v[P::Index::send]      = (float) lane;
+                    v[P::Index::fx]        = fx >= 0 ? 1.0f : 0.0f;
+                    v[P::Index::fxType]    = (float) std::max (fx, 0);
+                    v[P::Index::feedback]  = 60.0f;
+
+                    P::DwellDsp dsp;
+                    dsp.setParams (v.data(), (int) v.size());
+                    dsp.prepare (rate, chunk, 2);
+
+                    const auto sweeps = [&dsp]
+                    {
+                        return dsp.getCore().getMainEngine().sweepCount()
+                             + dsp.getCore().getLaneEngine().sweepCount();
+                    };
+
+                    Block block { chunk };
+
+                    const auto oneBlock = [&] (const std::vector<float>& values)
+                    {
+                        for (int i = 0; i < chunk; ++i)
+                        {
+                            block.left[(size_t) i]  = 0.25f * (float) std::sin (0.031 * i);
+                            block.right[(size_t) i] = 0.25f * (float) std::sin (0.017 * i);
+                        }
+
+                        dsp.setParams (values.data(), (int) values.size());
+                        dsp.setTempo (120.0, false, false);
+                        float* ch[] { block.left.data(), block.right.data() };
+                        dsp.process (ch, 2, chunk);
+                    };
+
+                    char where[120];
+                    std::snprintf (where, sizeof (where), "on %s, lane %s, FX %d, %.0f kHz / %d",
+                                   characterName (c), lane ? "held" : "off", fx, rate / 1000.0, chunk);
+
+                    const auto clears = [&dsp]
+                    {
+                        return dsp.getCore().getMainEngine().ringClearCount()
+                             + dsp.getCore().getLaneEngine().ringClearCount();
+                    };
+
+                    const auto firstBlock = [&] (const char* after)
+                    {
+                        const auto sweptBefore = sweeps();
+                        const auto clearedBefore = clears();
+                        oneBlock (v);
+                        check (sweeps() == sweptBefore && clears() == clearedBefore,
+                               "the first block after " + std::string (after) + " builds no sweep and "
+                                   "clears no ring " + where + " (" + std::to_string (sweeps() - sweptBefore)
+                                   + " built, " + std::to_string (clears() - clearedBefore) + " cleared)");
+                    };
+
+                    firstBlock ("prepare()");
+
+                    for (int b = 0; b < 8; ++b)
+                        oneBlock (v);
+
+                    dsp.reset();
+                    firstBlock ("reset()");
+
+                    auto before = sweeps();
+
+                    // Every other character and back, TIME held: `prepare`
+                    // took all three characters' halves.
+
+                    for (int k = 1; k <= 3; ++k)
+                    {
+                        auto w = v;
+                        w[P::Index::character] = (float) ((c + k) % 3);
+                        oneBlock (w);
+                        oneBlock (w);
+                    }
+
+                    check (sweeps() == before, "a CHARACTER switch at a held TIME builds no sweep "
+                               + std::string (where) + " (" + std::to_string (sweeps() - before) + " built)");
+                }
+}
+
 } // namespace
 
 //==============================================================================
@@ -7304,6 +7409,9 @@ int main (int argc, char** argv)
     testDiffuseComesBackSilent();
     testEverySwitchIsAFade();
     testResetAndPrepareLandOnAFreshInstance();
+
+    // 2026-10-04.
+    testTheFirstBlockSweepsNothing();
 
     std::printf ("%d checks, %d failures%s\n", checks, failures, longRun ? " (--long)" : "");
     return failures == 0 ? 0 : 1;

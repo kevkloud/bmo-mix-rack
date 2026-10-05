@@ -287,6 +287,15 @@ public:
         laneLive = false;
 
         applyParams (true);
+
+        // The session's own TIME is in now, so each engine builds every
+        // character's half of `P_c`'s sweep at it here, where slow work is
+        // allowed: the snap after a `reset` and a CHARACTER switch then find
+        // theirs built rather than taking them on the audio thread
+        // (`DelayEngine::refreshLoopPeak`, 2026-10-04).
+        mainEngine.prepareSweeps();
+        laneEngine.prepareSweeps();
+
         reset();
     }
 

@@ -119,6 +119,18 @@ rack/     SlotParameter (one generic host parameter, remapped live),
   deactivates the plugin. A block larger than prepare promised cuts instead
   of fading. `bus_tests` holds both directions, both products, for BMO EQ at
   2x and 8x, BMO Util at +6 dB, the FET compressor and the delay.
+- **A module this build does not have keeps its slot** (2026-10-04), so a
+  session saved by a later release with a new module survives being opened
+  and saved here. On restore its SLOT element is kept (`Slot::unknown`); the
+  slot has no def and no engine, passes audio through bit for bit, keeps its
+  lanes generic and inert, and so the modules after it keep their lanes and
+  automation. `captureState` writes the element back verbatim, its own
+  index attribute included; a chain edit around it carries it; removing it
+  is a normal remove; the editor shows a remove-only placeholder naming the
+  id. `getModuleAt` is null for it and `getNumModules` counts it, so any
+  code walking the chain must check. No tag, attribute or lane changed, and
+  a session without one saves byte-identical to before (`RackTests`, the
+  golden session).
 - `SlotParameter::assign` keeps a pointer into the module's static
   `specs()` vector. Never hand it a temporary.
 - A slot's `SlotOverflow` is an `AudioProcessor` only so that its

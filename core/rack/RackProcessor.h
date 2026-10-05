@@ -30,7 +30,9 @@ struct RackPreset
     through a fixed grid of generic host parameters.
 
     Slots are a list, not an array with holes: slot 0 is always the first
-    module in the chain. Adding a module appends; removing one closes the gap;
+    module in the chain. A slot whose saved module this build does not have
+    is not a hole either: it keeps its place with no engine, passes audio
+    through, keeps its lanes generic and saves its element back verbatim. Adding a module appends; removing one closes the gap;
     moving one shuffles the rest. Each shuffle re-assigns the slot parameters,
     which is why a host's automation lanes follow the slot, not the module --
     the plan calls this scheme A, and the rack tests pin the mapping.
@@ -90,6 +92,11 @@ public:
 
     int getNumModules() const noexcept;
     const ModuleDef* getModuleAt (int slot) const noexcept;
+
+    /** The module id saved in `slot` if this build does not have that module
+        -- the slot is kept, passes audio through and saves verbatim -- or an
+        empty string. getModuleAt is null for such a slot. */
+    juce::String getUnknownModuleIdAt (int slot) const;
     ModuleEngine* getEngineAt (int slot) noexcept;
 
     /** Appends. False if the rack is full. */
@@ -172,6 +179,13 @@ private:
         std::unique_ptr<ModuleEngine> engine;
 
         bool expanded = false;
+
+        // A module this build does not have: its saved SLOT element, kept to be
+        // written back verbatim, in a slot with no def and no engine. The slot
+        // passes audio through and its lanes stay generic.
+        std::unique_ptr<juce::XmlElement> unknown;
+
+        bool occupied() const noexcept { return def != nullptr || unknown != nullptr; }
     };
 
     /** The chain as the audio thread runs it: the engines in order, by
@@ -203,6 +217,11 @@ private:
         const ModuleDef* def = nullptr;
         int from = -1;
         std::unique_ptr<juce::XmlElement> state;
+
+        // For a restored slot naming a module this build does not have (def
+        // null, from -1): the SLOT element, kept verbatim. A carried unknown
+        // slot (from >= 0) brings its own along.
+        std::unique_ptr<juce::XmlElement> unknown;
     };
 
     void parameterValueChanged (int, float) override;

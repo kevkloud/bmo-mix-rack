@@ -119,7 +119,7 @@ namespace
     {
         std::vector<juce::String> out;
         for (int s = 0; s < rack.getNumModules(); ++s)
-            out.push_back (rack.getModuleAt (s)->id);
+            out.push_back (rack.getModuleAt (s) != nullptr ? juce::String (rack.getModuleAt (s)->id) : juce::String ("?"));
         return out;
     }
 
@@ -575,7 +575,8 @@ int main()
         check (rack->getSlotParameter (1, bmo::eq::Index::hpfFreq).getCurrentValueAsText() == "70 Hz",
                "the host lane reads the restored value");
 
-        // A module this build does not know is dropped and the chain closes.
+        // A module this build does not know keeps its slot, so the next
+        // module keeps its own (see "A module this build does not have" below).
         {
             juce::XmlElement future ("RACK");
             future.setAttribute ("stateVersion", 1);
@@ -590,7 +591,7 @@ int main()
 
             auto r = createRack();
             r->setStateInformation (block.getData(), (int) block.getSize());
-            check (chainIds (*r) == std::vector<juce::String> { "util" }, "an unknown module is dropped");
+            check (chainIds (*r) == std::vector<juce::String> { "?", "util" }, "an unknown module keeps its slot");
         }
     }
 
@@ -1626,6 +1627,161 @@ int main()
                        "standalone, " + what + ": the session saves gain " + savedGain (proc, false));
             }
         }
+    }
+
+    //== A module this build does not have keeps its place =====================
+    // A later release will add modules, and a session it saved has to survive
+    // being opened and saved again by this one. Until 2026-10-04 a SLOT naming
+    // a module this build lacks was dropped and the chain closed up: the next
+    // slot's module took over the missing one's lanes and automation, and the
+    // module was gone from the session on the next save. Now the slot keeps
+    // its position with no engine: it passes audio through, its lanes stay
+    // generic and inert, its saved element is written back verbatim, and the
+    // editor shows a remove-only placeholder naming it.
+    {
+        auto later = std::make_unique<juce::XmlElement> (RackProcessor::kSlotTag);
+        later->setAttribute ("index", 1);
+        later->setAttribute ("module", "later_module");
+        later->setAttribute ("schema", 4);
+        later->setAttribute ("flavour", "something this build has never heard of");
+        auto* laterParams = later->createNewChildElement (bmo::ParamSet::kRootTag);
+        laterParams->setAttribute ("stateVersion", 4);
+        auto* lp = laterParams->createNewChildElement (bmo::ParamSet::kParamTag);
+        lp->setAttribute ("id", "tilt");
+        lp->setAttribute ("value", "0.3");
+        later->createNewChildElement ("FUTURE")->setAttribute ("thing", "1");
+        const auto laterText = later->toString (juce::XmlElement::TextFormat().withoutHeader().singleLine());
+
+        const auto slotWith = [] (int index, const char* module, const char* param, double value)
+        {
+            auto e = std::make_unique<juce::XmlElement> (RackProcessor::kSlotTag);
+            e->setAttribute ("index", index);
+            e->setAttribute ("module", module);
+            e->setAttribute ("schema", 1);
+            auto* p = e->createNewChildElement (bmo::ParamSet::kRootTag);
+            p->setAttribute ("stateVersion", 1);
+            auto* q = p->createNewChildElement (bmo::ParamSet::kParamTag);
+            q->setAttribute ("id", param);
+            q->setAttribute ("value", value);
+            return e;
+        };
+
+        juce::XmlElement session (RackProcessor::kRootTag);
+        session.setAttribute ("stateVersion", 1);
+        session.addChildElement (slotWith (0, "eq", bmo::eq::kHfGain, 3.0).release());
+        session.addChildElement (new juce::XmlElement (*later));
+        session.addChildElement (slotWith (2, "util", bmo::util::kGain, -6.0).release());
+
+        juce::MemoryBlock block;
+        juce::AudioProcessor::copyXmlToBinary (session, block);
+
+        auto rack = createRack();
+        rack->setStateInformation (block.getData(), (int) block.getSize());
+
+        const auto unknownSaved = [] (RackProcessor& r)
+        {
+            juce::MemoryBlock saved;
+            r.getStateInformation (saved);
+            auto xml = juce::AudioProcessor::getXmlFromBinary (saved.getData(), (int) saved.getSize());
+            juce::StringArray out;
+
+            if (xml != nullptr)
+                for (auto* e : xml->getChildWithTagNameIterator (RackProcessor::kSlotTag))
+                    out.add (e->getStringAttribute ("module") == "later_module"
+                                 ? e->toString (juce::XmlElement::TextFormat().withoutHeader().singleLine())
+                                 : e->getStringAttribute ("module"));
+
+            return out;
+        };
+
+        check (chainIds (*rack) == std::vector<juce::String> { "eq", "?", "util" },
+               "the unknown module keeps slot 2, between the two this build has");
+        check (rack->getSlotParameter (1, 0).getName (64) == "Slot 2 P01",
+               "its lanes stay generic, got '" + rack->getSlotParameter (1, 0).getName (64) + "'");
+        check (rack->getSlotParameter (2, 0).getName (64) == "3: Gain",
+               "and the module after it keeps its own lanes, got '" + rack->getSlotParameter (2, 0).getName (64) + "'");
+        check (rack->getSlotParameter (2, 0).getCurrentValueAsText() == "-6.0 dB",
+               "with its saved value, got '" + rack->getSlotParameter (2, 0).getCurrentValueAsText() + "'");
+
+        const auto saved = unknownSaved (*rack);
+        check (saved.size() == 3 && saved[0] == "eq" && saved[1] == laterText && saved[2] == "util",
+               "saving writes the unknown slot back in place, verbatim");
+
+        // Audio passes through it untouched: the rack is the same rack
+        // without it, to the bit.
+        {
+            auto without = createRack();
+            juce::XmlElement two (RackProcessor::kRootTag);
+            two.setAttribute ("stateVersion", 1);
+            two.addChildElement (slotWith (0, "eq", bmo::eq::kHfGain, 3.0).release());
+            two.addChildElement (slotWith (1, "util", bmo::util::kGain, -6.0).release());
+            juce::MemoryBlock twoBlock;
+            juce::AudioProcessor::copyXmlToBinary (two, twoBlock);
+            without->setStateInformation (twoBlock.getData(), (int) twoBlock.getSize());
+
+            float worst = 0.0f;
+
+            for (auto* r : { rack.get(), without.get() })
+            {
+                r->setPlayConfigDetails (2, 2, 48000.0, 512);
+                r->prepareToPlay (48000.0, 512);
+            }
+
+            juce::AudioBuffer<float> a (2, 512), b (2, 512);
+            juce::MidiBuffer midi;
+
+            for (int k = 0; k < 20; ++k)
+            {
+                for (int i = 0; i < 512; ++i)
+                    for (int ch = 0; ch < 2; ++ch)
+                    {
+                        const auto v = 0.125f * (float) std::sin (2.0 * juce::MathConstants<double>::pi * 220.0 * (k * 512 + i) / 48000.0);
+                        a.setSample (ch, i, v);
+                        b.setSample (ch, i, v);
+                    }
+
+                rack->processBlock (a, midi);
+                without->processBlock (b, midi);
+
+                for (int ch = 0; ch < 2; ++ch)
+                    for (int i = 0; i < 512; ++i)
+                        worst = juce::jmax (worst, std::abs (a.getSample (ch, i) - b.getSample (ch, i)));
+            }
+
+            check (worst == 0.0f, "audio passes through the unknown slot bit for bit, worst " + juce::String (worst));
+        }
+
+        // The editor shows it, by name, with nothing to do but remove it.
+        {
+            std::unique_ptr<juce::AudioProcessorEditor> editor (rack->createEditor());
+            int naming = 0;
+            std::function<void (juce::Component&)> walk = [&] (juce::Component& c)
+            {
+                if (auto* b = dynamic_cast<juce::Button*> (&c))
+                    if (b->getButtonText().contains ("later_module"))
+                        naming += b->isEnabled() ? 100 : 1;
+
+                for (auto* child : c.getChildren())
+                    walk (*child);
+            };
+            walk (*editor);
+            check (naming == 1, "the editor names the unknown module on a placeholder that offers nothing but remove");
+        }
+
+        // A chain edit around it keeps it.
+        rack->moveModule (2, 0);
+        check (chainIds (*rack) == std::vector<juce::String> { "util", "eq", "?" },
+               "moving another module past it keeps it, now in slot 3");
+        const auto afterMove = unknownSaved (*rack);
+        check (afterMove.size() == 3 && afterMove[2] == laterText, "and still saves it verbatim");
+        rack->addModule (*rack->findModule ("sat"));
+        check (chainIds (*rack) == std::vector<juce::String> { "util", "eq", "?", "sat" }, "adding after it keeps it");
+
+        // Removing it is a normal remove.
+        rack->removeModule (2);
+        check (chainIds (*rack) == std::vector<juce::String> { "util", "eq", "sat" }, "removing the placeholder closes the chain");
+        check (rack->getSlotParameter (2, 0).getName (64) == "3: Input",
+               "and the module after it takes its lanes, as any remove does, got '" + rack->getSlotParameter (2, 0).getName (64) + "'");
     }
 
     return finish ("BMO Mix Rack");

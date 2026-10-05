@@ -62,8 +62,10 @@ int RackProcessor::getNumModules() const noexcept
 {
     int n = 0;
 
+    // A slot holding a module this build does not have counts: it keeps its
+    // place in the chain, and the slots after it keep theirs.
     for (const auto& s : slots)
-        if (s.def != nullptr)
+        if (s.occupied())
             ++n;
 
     return n;
@@ -72,6 +74,14 @@ int RackProcessor::getNumModules() const noexcept
 const ModuleDef* RackProcessor::getModuleAt (int slot) const noexcept
 {
     return slot >= 0 && slot < kSlots ? slots[(size_t) slot].def : nullptr;
+}
+
+juce::String RackProcessor::getUnknownModuleIdAt (int slot) const
+{
+    if (slot < 0 || slot >= kSlots || slots[(size_t) slot].unknown == nullptr)
+        return {};
+
+    return slots[(size_t) slot].unknown->getStringAttribute ("module");
 }
 
 ModuleEngine* RackProcessor::getEngineAt (int slot) noexcept
@@ -127,8 +137,8 @@ std::vector<RackProcessor::Entry> RackProcessor::currentChain() const
     std::vector<Entry> chain;
 
     for (int s = 0; s < kSlots; ++s)
-        if (slots[(size_t) s].def != nullptr && slots[(size_t) s].engine != nullptr)
-            chain.push_back ({ slots[(size_t) s].def, s, nullptr });
+        if (slots[(size_t) s].occupied())
+            chain.push_back ({ slots[(size_t) s].def, s, nullptr, nullptr });
 
     return chain;
 }
@@ -254,7 +264,7 @@ void RackProcessor::rebuild (std::vector<Entry> chain, Origin origin)
         for (int j = 0; j < (int) chain.size(); ++j)
         {
             const auto from = chain[(size_t) j].from;
-            jassert (from < 0 || (old[(size_t) from].engine != nullptr && old[(size_t) from].def == chain[(size_t) j].def));
+            jassert (from < 0 || (old[(size_t) from].occupied() && old[(size_t) from].def == chain[(size_t) j].def));
 
             if (from >= 0)
                 to[(size_t) from] = j;
@@ -343,6 +353,15 @@ void RackProcessor::rebuild (std::vector<Entry> chain, Origin origin)
 
                 for (auto* param : slot.overflow->parameters())
                     assigned.push_back (param);
+            }
+
+            // A module this build does not have: no engine, generic lanes (just
+            // assigned above), and its saved element, carried or restored.
+            if (entry != nullptr && entry->def == nullptr)
+            {
+                slot.unknown = entry->from >= 0 ? std::move (old[(size_t) entry->from].unknown)
+                                                : std::move (entry->unknown);
+                continue;
             }
 
             if (slot.def == nullptr)
@@ -486,6 +505,17 @@ std::unique_ptr<juce::XmlElement> RackProcessor::captureState()
 
     for (auto& s : slots)
     {
+        // A module this build does not have goes back exactly as it came,
+        // its own index attribute included, so a session from a later release
+        // survives being opened and saved here. It still takes its place in
+        // the count, so the slots after it are numbered where they are.
+        if (s.unknown != nullptr)
+        {
+            xml->addChildElement (new juce::XmlElement (*s.unknown));
+            ++index;
+            continue;
+        }
+
         if (s.def == nullptr || s.engine == nullptr)
             continue;
 
@@ -508,12 +538,21 @@ bool RackProcessor::restoreState (const juce::XmlElement& xml)
 
     for (auto* e : xml.getChildWithTagNameIterator (kSlotTag))
     {
-        // A module this build does not have is dropped, and the chain closes
-        // up. Future schema versions migrate here, keyed off "schema".
+        if ((int) chain.size() >= kSlots)
+            break;
+
+        // A module this build does not have keeps its slot, with its element
+        // to save back verbatim, so the modules after it keep their lanes and
+        // their automation. Until 2026-10-04 it was dropped and the chain
+        // closed up under it. Future schema versions migrate here, keyed off
+        // "schema".
         auto* def = findModule (e->getStringAttribute ("module"));
 
-        if (def == nullptr || (int) chain.size() >= kSlots)
+        if (def == nullptr)
+        {
+            chain.push_back ({ nullptr, -1, nullptr, std::make_unique<juce::XmlElement> (*e) });
             continue;
+        }
 
         std::unique_ptr<juce::XmlElement> state;
 
@@ -546,7 +585,7 @@ void RackProcessor::getStateInformation (juce::MemoryBlock& destData)
 
         for (auto* e : xml->getChildWithTagNameIterator (kSlotTag))
         {
-            while (s < kSlots && (slots[(size_t) s].def == nullptr || slots[(size_t) s].engine == nullptr))
+            while (s < kSlots && ! slots[(size_t) s].occupied())
                 ++s;
 
             if (s < kSlots && slots[(size_t) s].expanded)

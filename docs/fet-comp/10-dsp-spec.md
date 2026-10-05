@@ -153,11 +153,17 @@ three of its four documented traits directly:
 3. the **plateau** does not fall out of the law — `(1 + 2u + β)/(1 + u)` is
    monotone and never below 2 — so it is a fitted collapse of sidechain gain
    above a breakpoint: `G_ab(L)` falls there, flattening the curve and letting
-   it go non-monotonic. `G_ab` reads the previous sample's `v`, so the
-   quadratic still holds;
+   it go non-monotonic. `G_ab` is frozen before the solve, so the quadratic
+   still holds; it reads this sample's `v` as it stands before this sample's
+   demand moves the control (read from the previous sample's `v`, the first
+   sample of every transient saw the uncollapsed network for a whole sample,
+   which made the mode's timing depend on the rate — fixed 2026-10-03);
 4. a one-pole **lag** `τ_lag` in the control path (not the rectifier) — the
    documented transient lag — plus release scaled 1.5–3× and reduced
-   even-harmonic cancellation (§7).
+   even-harmonic cancellation (§7). The lag is in series *after* the attack
+   one-pole, each with its own state, and is the control's rise: the release
+   branches hold what has come through it. Sharing one state multiplies the
+   two per-sample steps, which is no time constant at any rate.
 
 All all-buttons numbers are CALIBRATE; A2 pins none of them.
 

@@ -10,9 +10,17 @@ bmo_add_dsp_tool(eq_dsp_tests dsp/EqDspTests.cpp)
 target_link_libraries(eq_dsp_tests PRIVATE bmo_eq_dsp)
 add_test(NAME eq_dsp COMMAND eq_dsp_tests)
 
+bmo_add_dsp_tool(eq_switch_tests dsp/EqSwitchTests.cpp)
+target_link_libraries(eq_switch_tests PRIVATE bmo_eq_dsp)
+add_test(NAME eq_switch COMMAND eq_switch_tests)
+
 bmo_add_dsp_tool(sat_dsp_tests dsp/SatDspTests.cpp)
 target_link_libraries(sat_dsp_tests PRIVATE bmo_sat_dsp)
 add_test(NAME sat_dsp COMMAND sat_dsp_tests)
+
+bmo_add_dsp_tool(sat_switch_tests dsp/SatSwitchTests.cpp)
+target_link_libraries(sat_switch_tests PRIVATE bmo_sat_dsp)
+add_test(NAME sat_switch COMMAND sat_switch_tests)
 
 bmo_add_dsp_tool(util_dsp_tests dsp/UtilDspTests.cpp)
 target_link_libraries(util_dsp_tests PRIVATE bmo_util_dsp)

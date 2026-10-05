@@ -23,7 +23,7 @@ namespace
         { P::kPhase,        "Phase",          0.0f,   1.0f,   0.0f, 2 },
         { P::kAutoGain,     "Auto Gain",      0.0f,   1.0f,   0.0f, 2 },
         { P::kOversampling, "Oversampling",   0.0f,   3.0f,   0.0f, 4 },
-        { P::kTone,         "Tone",           0.0f, 100.0f, 100.0f, 0 },
+        { P::kTone,         "Tone",           0.0f, 100.0f,  55.0f, 0 },   // default 100 until 2026-10-03
     };
 }
 
@@ -108,8 +108,11 @@ int main()
         check (xml != nullptr && xml->hasTagName ("PARAMS") && xml->hasAttribute ("stateVersion"),
                "saved state is <PARAMS stateVersion=..>");
 
-        // A 0.1 state has no "tone": it must come back at the default so old
-        // sessions sound as they did.
+        // A 0.1 state has no "tone": it comes back at the default. Until
+        // 2026-10-03 that was 100, the voicing at full; the owner lowered it
+        // to 55 that day, before the 0.2.6 schema freeze, so a session saved
+        // by 0.1 now opens with less of the voicing than 0.2.0-0.2.5 gave it.
+        // Every later session carries its own TONE and is unaffected.
         {
             juce::XmlElement legacy ("PARAMS");
             legacy.setAttribute ("stateVersion", 1);
@@ -124,7 +127,7 @@ int main()
             setValue (*proc, P::kTone, 10.0f);
             proc->setStateInformation (block.getData(), (int) block.getSize());
             checkClose (getValue (*proc, P::kDrive), 61.0, 0.01, "an old state loads");
-            checkClose (getValue (*proc, P::kTone), 100.0, 0.01, "a missing parameter comes back at its default");
+            checkClose (getValue (*proc, P::kTone), 55.0, 0.01, "a missing parameter comes back at its default");
         }
     }
 
@@ -151,6 +154,19 @@ int main()
             for (const auto& s : preset.settings)
                 checkClose (getValue (*proc, s.id), s.value, 0.01,
                             juce::String ("preset \"") + preset.name + "\" sets " + s.id);
+
+            // Every preset but Init names its Tone. One that left it to the
+            // default changed sound when the default moved from 100 to 55
+            // (2026-10-03), so each states the value it always had, and Init
+            // alone follows the default.
+            if (i > 0)
+            {
+                bool namesTone = false;
+                for (const auto& s : preset.settings)
+                    namesTone = namesTone || juce::String (s.id) == P::kTone;
+
+                check (namesTone, juce::String ("preset \"") + preset.name + "\" names its Tone");
+            }
         }
 
         presets.loadFactory (0);

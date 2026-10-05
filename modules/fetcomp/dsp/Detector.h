@@ -112,8 +112,16 @@ inline Sidechain blend (const Sidechain& a, const Sidechain& b, double t) noexce
     the published investigation describes -- "a plateau rather than the gentler
     slope of, e.g., 4:1", near-flat-topped, with reduction that can fall away
     again -- cannot come out of the divider law. 10 section 5 therefore
-    specifies a fitted collapse of sidechain gain above a breakpoint, reading
-    the previous sample's rectified output so the quadratic is unchanged.
+    specifies a fitted collapse of sidechain gain above a breakpoint, frozen
+    before the solve so the quadratic is unchanged.
+
+    Under all-buttons the level it is keyed on is **this** sample's cell
+    output as it stands before this sample's demand moves the control
+    (DspCore's processFrame), not the previous sample's rectifier. Read one
+    sample late, the first sample of every transient met the uncollapsed
+    network for a whole sample, however long a sample was, which made the
+    mode's timing depend on the rate. The previous-sample form survives only
+    in the ratio path, for the 5 ms crossfade out of all-buttons.
 
     Written against the demand the uncollapsed network would make rather than
     against a level in volts, because that is the quantity with a readable
@@ -135,7 +143,7 @@ inline double collapsedGain (const Sidechain& s, double envelopeDemand) noexcept
     if (s.plateau <= 0.0 || ! (envelopeDemand > 0.0))
         return s.gain;
 
-    const auto excess = std::pow (envelopeDemand / allButtonsPlateauDemand(),
+    const auto excess = std::pow (envelopeDemand / kAllButtonsPlateauDemand,
                                   kAllButtonsPlateauExponent);
 
     return s.gain / (1.0 + s.plateau * excess);
@@ -280,7 +288,17 @@ private:
     loop from arguing with itself sample to sample. A rectifier pole would do
     neither: it would only blur what the detector hears.
 
-    A coefficient of zero is a wire, which is what the four ratios get. */
+    A coefficient of zero is a wire, which is what the four ratios get.
+
+    **Its state is the control itself, and it acts on the rise.** It sits
+    after the attack one-pole, which keeps a state of its own (DspCore's
+    `attackStage`), and it is the time the control takes to *engage*: the
+    release branches own the fall, as they do for every ratio. Two one-poles
+    in series each need their own state; sharing one multiplies their
+    per-sample steps, and a product of two steps is a time constant at no
+    sample rate. Placed after the release's hold instead, one sample's peak
+    would be held at full value and the lag would only delay its arrival, so
+    a single sample could set the reduction for a whole release time. */
 class ControlLag
 {
 public:
@@ -289,26 +307,36 @@ public:
         pole = tauSeconds > 0.0 ? poleFor (tauSeconds, rate) : 0.0;
     }
 
-    void reset() noexcept { state = 0.0; }
+    bool engaged() const noexcept { return pole > 0.0; }
 
-    double process (double v) noexcept
+    /** The fraction of the control that survives a sample of rising, which
+        the implicit solve needs to predict what the divider will apply. */
+    double survivor() const noexcept { return pole; }
+
+    /** Where the control goes this sample if it is rising toward `target`. */
+    double rise (double control, double target) const noexcept
     {
-        if (! (pole > 0.0))
-        {
-            state = v;
-            return v;
-        }
-
-        state = pole * state + (1.0 - pole) * v;
-
-        if (state < kControlFloor)
-            state = 0.0;
-
-        return state;
+        return pole * control + (1.0 - pole) * target;
     }
 
 private:
-    double pole = 0.0, state = 0.0;
+    double pole = 0.0;
 };
+
+/** Whether ATTACK does anything audible in this ratio state -- the one
+    function the panel's dim and the DSP test both read, so they cannot
+    disagree (modules/AGENTS.md, "A control a mode makes inert is dimmed").
+
+    Under all-buttons it does not. The 2.5 ms lag follows the attack one-pole
+    in series, and the slowest attack is a 160 us time constant, so the lag
+    owns the whole rise: a DC step reads 6.79 / 6.81 / 6.80 dB at 1 ms at
+    attack 1 / 4 / 7 (48 kHz, Off). The owner accepted that for 0.2.6 and the
+    knob is dimmed rather than given a new meaning.
+    `testAttackIsInertUnderAllButtons` measures it; if ATTACK is ever made
+    live here, that test fails and this has to say true. */
+inline constexpr bool attackIsLive (int ratioChoice) noexcept
+{
+    return ratioChoice != ratioAll;
+}
 
 } // namespace bmo::fetcomp

@@ -728,6 +728,21 @@ int main()
                 for (const auto& setting : preset.chain[s].settings)
                     checkClose (rack->getEngineAt ((int) s)->params().getReal (setting.id), setting.value, 0.01,
                                 juce::String ("preset '") + preset.name + "' sets " + setting.id);
+
+            // A BMO Saturator in a chain names its Tone. One left to the
+            // default changed sound when the default moved from 100 to 55
+            // (2026-10-03), so each states the value it always had.
+            for (const auto& e : preset.chain)
+            {
+                if (juce::String (e.moduleId) != bmo::sat::kModuleId)
+                    continue;
+
+                bool namesTone = false;
+                for (const auto& setting : e.settings)
+                    namesTone = namesTone || juce::String (setting.id) == bmo::sat::kTone;
+
+                check (namesTone, juce::String ("preset '") + preset.name + "' names the Saturator's Tone");
+            }
         }
 
         presets.loadFactory (0);

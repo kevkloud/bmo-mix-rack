@@ -1,4 +1,5 @@
 #include "FetcompPanel.h"
+#include "modules/fetcomp/dsp/Detector.h"
 #include "modules/fetcomp/params.h"
 
 namespace bmo::fetcomp
@@ -374,9 +375,16 @@ FetcompPanel::FetcompPanel (ui::ModuleContext ctx)
     // flow either side of it, the order BMO Opto's row already uses.
     selectMeterMode (ui::DynamicsMeter::Mode::reduction);
 
+    // Any change to the ratio -- a click, a host's automation lane, a preset
+    // recall -- arrives here, so ATTACK's dim follows the parameter rather
+    // than the click.
     ratioAttachment = std::make_unique<juce::ParameterAttachment> (
         context.params.param (Index::ratio),
-        [this] (float value) { showRatio (juce::roundToInt (value)); });
+        [this] (float value)
+        {
+            showRatio (juce::roundToInt (value));
+            refreshAttack (juce::roundToInt (value));
+        });
 
     voicingAttachment = std::make_unique<juce::ParameterAttachment> (
         context.params.param (Index::voicing),
@@ -447,6 +455,17 @@ void FetcompPanel::showRatio (int choice)
     ratio12Button .setToggleState (choice == ratio12,  juce::dontSendNotification);
     ratio20Button .setToggleState (choice == ratio20,  juce::dontSendNotification);
     ratioAllButton.setToggleState (choice == ratioAll, juce::dontSendNotification);
+}
+
+void FetcompPanel::refreshAttack (int ratioChoice)
+{
+    // **A control a mode makes inert is dimmed** (modules/AGENTS.md). Under
+    // all-buttons the 2.5 ms lag owns the whole rise and every ATTACK position
+    // gives the same reduction; the owner accepted that for 0.2.6 and the knob
+    // dims rather than taking a new meaning. Dim only: the value is kept and
+    // still automates, and leaving all-buttons gives it back. The DSP's own
+    // `attackIsLive` decides, and testAttackIsInertUnderAllButtons measures it.
+    attackKnob.setKnobEnabled (attackIsLive (ratioChoice));
 }
 
 juce::Colour FetcompPanel::bezelFor (int voicingChoice) const

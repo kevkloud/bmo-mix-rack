@@ -4,8 +4,8 @@ Shared code. Four layers, each depending only on the ones above it:
 
 ```
 dsp/      JUCE-free. ModuleDsp (the interface every module's DSP implements),
-          Oversampler, Meter, SwitchFade (a hard switch made a short fade).
-          Nothing here includes <juce_*>.
+          Oversampler, Meter, FiniteGuard, SwitchFade (a hard switch made a
+          short fade). Nothing here includes <juce_*>.
 state/    ParamSpec (a parameter described without JUCE), ParamSet (a spec
           list bound to live juce parameters), Parameters.h (APVTS layout
           from specs), PresetManager (files, factory lists, migration).
@@ -30,8 +30,11 @@ rack/     SlotParameter (one generic host parameter, remapped live),
   largest sample-to-sample step after a switch stays under 1.5x the steady
   signal's own. `Ramp` + `crossfade` blend an old path into a new one;
   `Dip` fades to zero around a change no blend can cross, such as a latency
-  change. All three are bit-exact while idle, so adopting them leaves a
-  module's steady output untouched; `switch_fade_tests` holds the contract.
+  change. All three are bit-exact while idle -- `crossfade` at 0 or 1
+  returns the selected path's sample itself, -0.0 and a NaN on the other
+  path included, and a `Dip` rests at exactly 1 from construction -- so
+  adopting them leaves a module's steady output untouched;
+  `switch_fade_tests` holds the contract.
 - `ParamSpec::toNormalised/fromNormalised` must agree with
   `juce::NormalisableRange` for the same range: standalone products use
   JUCE's, the rack uses ours, and `RackTests` checks they match. Do not add
@@ -112,6 +115,24 @@ rack/     SlotParameter (one generic host parameter, remapped live),
 - `processBlock` in the rack takes a `ScopedTryLock` and passes audio
   through if the message thread is mid-rebuild. Never block the audio
   thread on the chain lock.
+- **No processor hands a host, and no module's DSP is ever handed, a NaN,
+  an infinity or a sample at or over +192.7 dBFS** (2026-10-03;
+  `finite::kCeiling`, whose comment has the measurements: one finite
+  +200 dBFS sample held BMO Opto 40 dB down for a minute).
+  `ModuleEngine::process`, which every standalone product, every rack slot
+  and BMO Tune RT go through, replaces each such input sample with zero,
+  and resets a module that produces one and silences that block, so it
+  runs again from the next. The processors scrub the paths
+  that skip an engine: the rack at its input, which covers an empty chain
+  and a block the try-lock skips, and both processors'
+  `processBlockBypassed`. On audio under the ceiling all of it only reads,
+  so the output is bit-identical (about 90 ns a stereo 512 block per
+  engine). **So a module needs no guard of its own and must not add one**:
+  a second policy inside a module can only disagree with this one. BMO
+  Dwell, BMO Tune RT, BMO FET (`FetCell.h`) and BMO DEQ (`Dynamics.h`)
+  carry checks from before it; they are redundant, not a pattern.
+  `finite_tests` walks the registry, Tune included, and the processors'
+  bypass and skip paths, and holds all of this.
 - **Every module is handed the host's tempo, once per block**
   (`ModuleDsp::setTempo`), so a module can sync to it without either
   processor knowing which modules care. Both processors read the playhead at

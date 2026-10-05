@@ -2,6 +2,7 @@
 
 #include "Filters.h"
 #include "core/dsp/Oversampler.h"
+#include "core/dsp/SwitchFade.h"
 #include "Shaper.h"
 #include <array>
 #include <vector>
@@ -104,13 +105,27 @@ public:
     void reset() noexcept;
 
     /** Round-trip delay of the oversampling filters, in samples at the host's
-        rate. Reported to the host so plugin delay compensation can undo it. */
+        rate. Reported to the host so plugin delay compensation can undo it.
+        After a change of oversampling it is the new factor's from the first
+        process() on, while the audio dips through the change. */
     int getLatencySamples() const noexcept { return latencySamples; }
+
+    /** How long each side of a switch's fade takes. Ten milliseconds, as the
+        EQ's: long enough that a 1 kHz tone crosses any of these switches
+        well under the 1.5x step bound, short enough to read as immediate. */
+    static constexpr double kSwitchFadeMs = 10.0;
 
     /** Called once per block, before process(). Cheap: stores targets only. */
     void setParams (const Params&) noexcept;
 
     void process (float* const* channels, int numChannels, int numSamples) noexcept;
+
+    /** How many samples, at the oversampled rate and summed over channels and
+        paths, the oversampled region has processed since construction. A
+        count of the work rather than a clock: the switch tests bound what a
+        single callback may do with it, deterministically. Not used by the
+        audio. */
+    unsigned long long oversampledSamplesProcessed() const noexcept { return wetSamplesProcessed; }
 
     //== The character, in one place ==========================================
 
@@ -263,7 +278,13 @@ public:
 
 private:
     void applyOversampling (int factor);
+    void beginWarming (int factor) noexcept;
+    void switchOversampling() noexcept;
     void updateAutoGain (double blockInput, double blockProcessed, int samples) noexcept;
+
+    /** Auto Gain's figure from the detector's reading, or unity if it has
+        never had one. */
+    float currentAutoGain() const noexcept;
 
     struct Channel
     {
@@ -278,11 +299,24 @@ private:
 
         void prepare (double rate, const Character&) noexcept;
         void reset() noexcept;
+
+        /** Everything but the oversampler: the stage itself, which stops
+            while Sat In is out and starts from rest when it comes back. */
+        void resetStage() noexcept;
+
         void setDrive (float drive) noexcept;
         void setTone (float amountPercent, double rate) noexcept;
         float toneAmount = 1.0f;
         const Character* character = nullptr;
         float process (float x) noexcept;
+
+        /** One host-rate sample through the oversampled region: up, the
+            stage at each oversampled sample (or a wire with Sat In off),
+            down. The live path and, during an oversampling change, the
+            standby one both go through here. While Sat In fades, the stage
+            and the wire are blended at `amount`, 1 being the stage. */
+        float runWet (float driven, int factor, bool saturate,
+                      bool fading = false, float amount = 1.0f) noexcept;
 
         /** One harmonic generator: shape the band below the corner, keep what
             appears above it. */
@@ -292,15 +326,55 @@ private:
     double sampleRate = 44100.0;
     double effectiveRate = 44100.0;
     int    latencySamples = 0;
+    unsigned long long wetSamplesProcessed = 0;
 
-    std::array<Channel, 2> channels;
+    // The oversampled region, both channels, twice over. One path is live;
+    // the other runs only while the oversampling changes, at the new factor
+    // on the same live input, so that when the dip turns the new path is
+    // already mid-stream. pathFactor is each path's factor.
+    std::array<std::array<Channel, 2>, 2> paths;
+    std::array<int, 2> pathFactor { 1, 1 };
+    int live = 0;
+
+    std::array<Channel, 2>& livePath() noexcept     { return paths[(size_t) live]; }
+    std::array<Channel, 2>& standbyPath() noexcept  { return paths[(size_t) (1 - live)]; }
+    void preparePath (std::array<Channel, 2>&, int factor) noexcept;
+
+    // While true the standby path runs at pendingFactor alongside the live
+    // one, and warmedSamples counts the host-rate samples it has heard.
+    bool warming = false;
+    int  warmedSamples = 0;
 
     // The dry path of the Mix control has to be delayed to match, or a partial
-    // blend combs and a full bypass fails to null.
+    // blend combs and a full bypass fails to null. The ring is one length for
+    // every factor, long enough for the longest latency, and read at the live
+    // path's latency, so a change of factor moves the read point rather than
+    // resizing anything.
+    static constexpr int kDryRing = Oversampler::kMaxLatency + 2;
     std::vector<float> dryDelay;
-    int dryWrite = 0, dryLength = 1, dryStride = 0;
+    int dryWrite = 0, dryStride = 0, dryLatency = 0;
+
+    // A change of oversampling waits at the bottom of this dip while the
+    // standby path warms up alongside; see process().
+    bmo::dsp::Dip oversamplingDip;
+    int pendingFactor = 1;
+    bool running = false;   // false until the first process() after prepare() or reset()
+
+    // Sat In and Phase cross over rather than stepping; see setParams().
+    bmo::dsp::Ramp satMix, polaritySwitch;
 
     Smoother inputGainSm, driveSm, mixSm, outputLevelSm, makeupSm, toneSm;
+
+    // The control period in progress: the smoothed values read at its start,
+    // how far into it the stream is, and what Auto Gain's detector has heard
+    // of it so far. It runs across process() calls; see process().
+    struct Held
+    {
+        float inGain = 1.0f, outGain = 1.0f, makeup = 1.0f, wet = 1.0f, drive = 1.0f, tone = 100.0f;
+    } held;
+
+    int    periodPos = 0, periodSamples = 0;
+    double periodInput = 0.0, periodProcessed = 0.0;
 
     /** Auto Gain's detector: the energy going into the saturation and the
         energy coming out of it, each averaged over about a second and a half.

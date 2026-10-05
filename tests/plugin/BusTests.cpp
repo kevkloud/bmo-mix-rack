@@ -363,10 +363,18 @@ const Golden kDefaults[]
       -18.1085793005, 0.246073037386,
       -18.1085793005, 0.246073037386, -18.0554981077, 0.247819900513,
       -18.1085793005, 0.246073037386, -18.1085793005, 0.246073037386 },
+    // BMO Saturator, recaptured on ICE QUEEN on 2026-10-03 with --print when
+    // TONE's default went from 100 to 55, the owner's decision before the
+    // 0.2.6 schema freeze. Against the row captured at 8fed835 the RMS
+    // figures fell by 1.557 dB (mono, both stereo-in duplicate sides, stereo
+    // L) and 1.319 dB (stereo R), and the peaks from 0.4176 to 0.2734 (0.4421
+    // to 0.3055 on stereo R). Nothing else in the module moved; the rack's
+    // defaults row below moved with it, and every other row printed within
+    // tolerance.
     { "sat",
-      -16.8591902532, 0.417550802231,
-      -16.8591902532, 0.417550802231, -16.3599694613, 0.442101210356,
-      -16.8591902532, 0.417550802231, -16.8591902532, 0.417550802231 },
+      -18.4162417982, 0.273352533579,
+      -18.4162417982, 0.273352533579, -17.6791165191, 0.305534929037,
+      -18.4162417982, 0.273352533579, -18.4162417982, 0.273352533579 },
     { "opto",
       -18.1622967448, 0.240351647139,
       -18.1782648998, 0.240072011948, -18.0459775451, 0.246936917305,
@@ -443,10 +451,19 @@ const Golden kDefaults[]
       -18.2163922222, 0.241076186299,
       -17.9521665021, 0.248789131641, -18.2492466603, 0.243136674166,
       -17.8128481771, 0.259217143059, -18.6147132938, 0.237479582429 },
+    // Recaptured with the BMO Saturator row above, for the same reason: the
+    // Saturator is the third slot of this chain. RMS fell by 1.281 dB (mono,
+    // stereo-in duplicate, mono -> stereo), 1.152 dB (stereo L) and 0.882 dB
+    // (stereo R); peaks from 0.3620 to 0.2635, 0.3618 to 0.2670 and 0.3819
+    // to 0.2934. Recaptured again on ICE QUEEN, 2026-10-03, when this work
+    // was brought onto a main that already carried BMO Opto's new cell: the
+    // Saturator's TONE is still the only cause (the row is unchanged through
+    // every EQ commit), and the figures against main's row are -1.2808 dB
+    // (mono, duplicate, mono -> stereo), -1.1536 (L) and -0.8833 (R).
     { "rack",
-      -17.4712492142, 0.361955910921,
-      -17.5526169502, 0.361831098795, -16.9697582674, 0.381935656071,
-      -17.4712492142, 0.361955910921, -17.4712492142, 0.361955910921 },
+      -18.752053514, 0.263523042202,
+      -18.7062172701, 0.267028808594, -17.8530324334, 0.293390482664,
+      -18.752053514, 0.263523042202, -18.752053514, 0.263523042202 },
 };
 
 // BMO DEQ's swept row is loud on purpose and is not a fault: 0.63 turns all 24
@@ -459,20 +476,29 @@ const Golden kSwept[]
       -11.7600009264, 0.487929016352,
       -17.4087591686, 0.290588617325, -14.7933936813, 0.392687320709,
       -14.3753664302, 0.361067473888, -11.7600009264, 0.487929016352 },
+    // Regenerated on ICE QUEEN, 2026-10-03, for this row and the rack row
+    // alone. 0.63 turns Auto Gain on, and its compensation for this setting is
+    // +2.28 dB (the cuts at 160 Hz and 10 kHz take more of the band than the
+    // boosts add). Auto Gain used to start from unity after prepare() and
+    // glide there over about 60 ms of this 85 ms render; it now starts at its
+    // figure (bdd8c37), so the render is louder: mono and L RMS -15.594 ->
+    // -15.122 dB (+0.472), peak 0.45324 -> 0.46397; stereo R RMS -7.209 ->
+    // -6.818 dB (+0.392), peak 0.90254 -> 0.94871. No other commit on the
+    // branch moved this row, and the defaults rows are byte-identical.
     { "eq",
-      -15.5938930361, 0.453235358,
-      -15.5938930361, 0.453235358, -7.20944735724, 0.902541100979,
-      -15.5938930361, 0.453235358, -15.5938930361, 0.453235358 },
+      -15.1218135793, 0.463965445757,
+      -15.1218135793, 0.463965445757, -6.81764535567, 0.948705196381,
+      -15.1218135793, 0.463965445757, -15.1218135793, 0.463965445757 },
     { "sat",
       -7.60426052625, 1.1754732132,
       -8.30132334629, 1.07108569145, -6.68785712242, 1.168405056,
       -7.60426052625, 1.1754732132, -7.60426052625, 1.1754732132 },
-    // BMO Opto's row and the rack's were regenerated on 2026-10-04, when the
+    // BMO Opto's row and the rack's were regenerated on 2026-10-03, when the
     // cells changed on purpose: the charge counts only a level the signal has
     // kept up, which let 0.15 dB more through on this noisy stimulus, and
     // Stressed (where 0.63 puts Mode) gained a quick attack stage that rides
     // the noise's crests and takes 1.77 dB off. Net 1.61 dB lower, peak 0.428
-    // to 0.337. testing-notes/opto-spike-and-dip-2026-10-04.md has the work.
+    // to 0.337. testing-notes/opto-spike-and-dip-2026-10-03.md has the work.
     { "opto",
       -20.0948769542, 0.336609631777,
       -21.2901275396, 0.277803987265, -21.1450327082, 0.417769670486,
@@ -522,10 +548,25 @@ const Golden kSwept[]
       -29.3107797472, 0.0665621832013,
       -29.3036605172, 0.065762847662, -29.6342359134, 0.064994379878,
       -29.0903900723, 0.0687288194895, -29.5277643484, 0.0643955394626 },
+    // Regenerated with the eq row above, for the same reason: BMO EQ is a slot
+    // in this chain with Auto Gain on, so its first 60 ms now carry the +2.28
+    // dB from the start, and the compressing slots after it turn that into
+    // these moves: RMS -0.028 to -0.041 dB, peaks +0.0023 to +0.0183 (and
+    // -0.0034 / -0.0027 on the duplicated pair). Before, from 6f6b8c3 on ICE
+    // QUEEN:
+    //   -12.3127826311, 1.16622364521,
+    //   -12.0186861044, 1.15730381012, -11.9707005038, 1.15666902065,
+    //   -12.5248895603, 1.1564694643, -12.4650833707, 1.15827429295
+    // Recaptured on ICE QUEEN, 2026-10-03, when this work was brought onto a
+    // main whose BMO Opto (slot four) had gained its quick attack stage. The
+    // same Auto Gain commit is the only one that moves it, but the new cell
+    // answers the louder start more strongly: against main's row, RMS -0.040
+    // (mono), -0.077 / -0.074 (stereo L / R), -0.044 / -0.041 (duplicate and
+    // mono -> stereo L / R) dB, and every peak up by 0.0028 to 0.0075.
     { "rack",
-      -11.6794488945, 1.15918135643,
-      -11.2405694634, 1.15107154846, -11.1992268857, 1.15140509605,
-      -11.8107135636, 1.1467539072, -11.771661916, 1.14582884312 },
+      -11.7195631752, 1.16198933125,
+      -11.317069677, 1.15757536888, -11.2731589041, 1.15886342525,
+      -11.854487306, 1.15360951424, -11.8121786505, 1.15331184864 },
 };
 
 const Golden* goldenFor (const Golden* table, size_t n, const char* id)

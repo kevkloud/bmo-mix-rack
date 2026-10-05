@@ -175,11 +175,11 @@ public:
         }
 
         release.reset();
-        lag.reset();
         plateauLevel.reset();
 
         cell = {};
         cell.bias = currentSidechain.standingControl;
+        attackStage = 0.0;
 
         clearDryLine();
         reportedReductionDb = 0.0f;
@@ -456,29 +456,107 @@ private:
             m = std::max (m, (double) std::abs (shaped));
         }
 
-        // The sidechain gain is frozen for this sample. For the four ratios it
-        // is simply G_R; under all-buttons it is the fitted collapse, read
-        // from an envelope of the previous samples' demand so the quadratic
-        // below is unchanged and the collapse is keyed on a level rather than
-        // on one sample of a rectified waveform.
-        const auto rawDemand = activeSidechain.gain
-                                 * std::max (0.0, cell.rectifier - activeSidechain.threshold);
+        double control;
 
-        sidechain.gain = collapsedGain (activeSidechain, plateauLevel.process (rawDemand));
+        if (! lag.engaged())
+        {
+            // The sidechain gain is frozen for this sample. For the four
+            // ratios it is simply G_R; while a crossfade out of all-buttons is
+            // still running it is the fitted collapse, read from an envelope
+            // of the previous samples' demand so the quadratic below is
+            // unchanged and the collapse is keyed on a level rather than on
+            // one sample of a rectified waveform.
+            const auto rawDemand = activeSidechain.gain
+                                     * std::max (0.0, cell.rectifier - activeSidechain.threshold);
 
-        const auto v = solveCellOutput (m, cell, sidechain);
+            sidechain.gain = collapsedGain (activeSidechain, plateauLevel.process (rawDemand));
 
-        const auto predicted = (1.0 - sidechain.rectPole) * cell.rectifier
-                             + sidechain.rectPole * v;
-        const auto demand = sidechain.gain * std::max (0.0, predicted - sidechain.threshold);
+            const auto v = solveCellOutput (m, cell, sidechain);
 
-        // Attack lives in the solve; the release branches sit outside it, so
-        // the programme-dependent shape stays the one recorded in vcomp.
-        const auto attacked = (1.0 - sidechain.attack) * cell.control
-                            + sidechain.attack * demand;
+            const auto predicted = (1.0 - sidechain.rectPole) * cell.rectifier
+                                 + sidechain.rectPole * v;
+            const auto demand = sidechain.gain * std::max (0.0, predicted - sidechain.threshold);
 
-        auto control = release.tick (demand, attacked, cell.control);
-        control = lag.process (control);
+            // Attack lives in the solve; the release branches sit outside it,
+            // so the programme-dependent shape stays the one recorded in vcomp.
+            const auto attacked = (1.0 - sidechain.attack) * cell.control
+                                + sidechain.attack * demand;
+
+            control = release.tick (demand, attacked, cell.control);
+
+            // Kept in step so a switch into all-buttons starts its attack
+            // stage where the control already is.
+            attackStage = control;
+        }
+        else
+        {
+            // All-buttons. **Every piece of it is a time constant, so the
+            // reduction is a function of time and not of the rate or the
+            // OVERSAMPLING choice** (10 section 10; 10 section 12, "about the
+            // alias floor, not timing"). Three things were not, each measured
+            // on ICE QUEEN at 6f6b8c3 and each now pinned by
+            // testAllButtonsTimingIsRateFree:
+            //
+            // - The attack one-pole stepped from the control the lag had
+            //   already smoothed, so the two multiplied into one step of
+            //   `alpha*(1 - L)` per sample -- a product of two per-sample
+            //   steps, which is no time constant and shrinks with the square
+            //   of the rate. A DC step at attack 1 held 6.92 dB after 10 ms at
+            //   48 kHz and 4.42 at 192. They are now two one-poles in series,
+            //   each with its own state: the attack stage follows the demand,
+            //   and the control rises toward it through the lag.
+            // - The release held the demand's one-sample peak *ahead* of the
+            //   lag, so the lag only delayed its arrival and one sample could
+            //   set the control for a whole release time: a one-sample spike
+            //   on a settled tone took 17.3 dB to 26.6 at Off and to 17.3 at
+            //   2x. The lag is now the rise itself (ControlLag), so what the
+            //   release branches hold is a level that has been through it.
+            //   They are otherwise the ratios' branches, fed the attack stage
+            //   rather than the raw demand.
+            // - The collapse was keyed on the previous sample's rectifier, so
+            //   the first sample of every transient saw the uncollapsed
+            //   network for one whole sample, however long a sample was. It is
+            //   now keyed on this sample's cell output as it stands before
+            //   this sample's demand moves the control. The quadratic is
+            //   unchanged -- the gain is still frozen before the solve -- and
+            //   with the lag in the way the estimate misses only this sample's
+            //   step through it, `(1 - L)*alpha` of the demand, which shrinks
+            //   as the rate rises.
+            //
+            // Together they had steady noise at 17.90 / 16.62 / 15.93 dB of
+            // reduction at Off / 2x / 4x; now 15.30 / 15.34 / 15.37.
+            //
+            // The solve is told what the divider will apply if the control
+            // rises this sample: the lag's survivor of the control, plus the
+            // rest of the attack stage's step.
+            const auto alpha = sidechain.attack;
+            const auto survivor = lag.survivor();
+            const auto held = survivor * cell.control
+                            + (1.0 - survivor) * (1.0 - alpha) * attackStage;
+            const auto step = (1.0 - survivor) * alpha;
+
+            const auto open = m / (1.0 + kCellConductance * cell.factor * (cell.bias + held));
+            const auto level = (1.0 - sidechain.rectPole) * cell.rectifier
+                             + sidechain.rectPole * open;
+            const auto rawDemand = activeSidechain.gain
+                                     * std::max (0.0, level - activeSidechain.threshold);
+
+            sidechain.gain = collapsedGain (activeSidechain, plateauLevel.process (rawDemand));
+
+            const auto v = solveCellOutputThrough (m, cell, sidechain, held, step);
+
+            const auto predicted = (1.0 - sidechain.rectPole) * cell.rectifier
+                                 + sidechain.rectPole * v;
+            const auto demand = sidechain.gain * std::max (0.0, predicted - sidechain.threshold);
+
+            attackStage = (1.0 - alpha) * attackStage + alpha * demand;
+
+            if (attackStage < kControlFloor)
+                attackStage = 0.0;
+
+            control = release.tick (attackStage, lag.rise (cell.control, attackStage), cell.control);
+        }
+
         control = std::clamp (control, 0.0, std::max (0.0, kControlCeiling - cell.bias));
 
         if (control < kControlFloor)
@@ -547,6 +625,12 @@ private:
     std::array<Channel, kMaxChannels> channels;
 
     CellState cell;
+
+    /** All-buttons' attack one-pole, which has its own state because the lag
+        stands between it and the control. Under the four ratios it is simply
+        the control. */
+    double attackStage = 0.0;
+
     SidechainState sidechain;
     ReleaseStage release;
     ControlLag lag;

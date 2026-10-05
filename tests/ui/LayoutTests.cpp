@@ -30,6 +30,7 @@
 #include "modules/dwell/panel/DwellPanel.h"
 #include "products/eq/Product.h"
 #include "products/fetcomp/Product.h"
+#include "modules/fetcomp/dsp/Detector.h"
 #include "modules/fetcomp/params.h"
 #include "products/opto/Product.h"
 #include "products/reverb/Product.h"
@@ -463,6 +464,60 @@ void checkFetcompSwitches (bmo::ui::ModulePanel& panel, const juce::String& who)
 
         params.setReal (bmo::fetcomp::Index::ratio, 0.0f);
         checkEquals (lit(), 0, who + " the parameter lights the ratio buttons, not the click");
+    }
+
+    //== ATTACK dims under all-buttons and is live under every ratio ==========
+    //
+    // A control a mode makes inert is dimmed (modules/AGENTS.md). Under
+    // all-buttons the lag owns the rise and every ATTACK position measures the
+    // same (testAttackIsInertUnderAllButtons), and the panel must say so on the
+    // same `attackIsLive` that test reads. Driven through the parameter, not a
+    // click, because a host's automation lane moves the ratio the same way;
+    // both directions, and the value must survive the round trip, because a
+    // mode that reset the knob to make the dim "true" would pass a check on
+    // the dim alone.
+    {
+        namespace F = bmo::fetcomp;
+
+        const auto attackLive = [&]() -> int
+        {
+            auto* found = dynamic_cast<bmo::ui::PlainKnob*> (findNamed (panel, "ATTACK"));
+            const auto* face = found != nullptr ? knobFace (*found) : nullptr;
+
+            if (face == nullptr)
+            {
+                check (false, who + " has no ATTACK knob with a rotary under it");
+                return -1;
+            }
+
+            return face->isEnabled() ? 1 : 0;
+        };
+
+        params.setReal (F::Index::attack, 2.0f);
+
+        for (const auto r : { F::ratio4, F::ratio8, F::ratio12, F::ratio20 })
+        {
+            params.setReal (F::Index::ratio, (float) r);
+            check (attackLive() == 1, who + " ATTACK should be live under ratio " + juce::String ((int) r));
+            check (F::attackIsLive ((int) r), who + " the engine should agree ATTACK is live there");
+        }
+
+        params.setReal (F::Index::ratio, (float) F::ratioAll);
+        check (attackLive() == 0, who + " ATTACK should dim under all-buttons, where it is inert");
+        check (! F::attackIsLive ((int) F::ratioAll), who + " the engine should agree all-buttons ignores ATTACK");
+
+        params.setReal (F::Index::ratio, (float) F::ratio20);
+        check (attackLive() == 1, who + " leaving all-buttons should give ATTACK back");
+
+        params.setReal (F::Index::ratio, (float) F::ratioAll);
+        check (attackLive() == 0, who + " ATTACK should dim again on the way back to all-buttons");
+
+        checkNear (params.getReal (F::Index::attack), 2.0, 1.0e-3,
+                   who + " the ratio must not write the ATTACK it is ignoring");
+
+        params.setReal (F::Index::ratio, (float) F::ratio4);
+        params.setReal (F::Index::attack, F::kPositionDefault);
+        check (attackLive() == 1, who + " ATTACK is live again at Init");
     }
 
     //== The voicing pair: both states named, both reachable ==================

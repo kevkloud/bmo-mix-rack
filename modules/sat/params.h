@@ -59,7 +59,16 @@ inline const ParamSpecs& specs()
         S::choiceParam (kOversampling, "Oversampling", { "Off", "2x", "4x", "8x" }, 0),
 
         // Appended last: the voicing arrived after the first release.
-        S::floatParam (kTone, "Tone", 0.0f, 100.0f, 0.1f, 100.0f, F::Percent),
+        //
+        // Default 55, not the 100 it shipped with: lowered by the owner on
+        // 2026-10-03, before the 0.2.6 schema freeze, so that the default
+        // state is a safe starting point. At 100 the voicing is a +13.5 dB
+        // bell near 7 kHz, and -18 dBFS RMS white noise came out 7.2 dB
+        // hotter. 55 is where white noise comes out nearest unity without
+        // pink noise falling more than 0.5 dB below it (+2.6 and -0.4 dB);
+        // the table is in the commit that moved it. Every factory preset but
+        // Init names its own TONE, so none of them moved with it.
+        S::floatParam (kTone, "Tone", 0.0f, 100.0f, 0.1f, 55.0f, F::Percent),
     };
 
     return s;

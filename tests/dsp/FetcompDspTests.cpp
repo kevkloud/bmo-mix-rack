@@ -718,6 +718,372 @@ void testAllButtonsShape()
 }
 
 //==============================================================================
+/** Mono noise, white through two one-pole lowpasses at `cornerHz`, scaled to
+    `rmsDb`, optionally cut into bursts: an instant onset and a 40 ms decay
+    every 250 ms. A fixed generator, so every run of it is the same signal at
+    a given rate. */
+std::vector<float> filteredNoise (double cornerHz, double rmsDb, double seconds,
+                                  double rate, bool bursts)
+{
+    const auto a = std::exp (-2.0 * kPi * cornerHz / rate);
+    const auto n = (size_t) (seconds * rate);
+    std::vector<double> raw (n);
+    unsigned seed = 12345u;
+    double z1 = 0.0, z2 = 0.0, energy = 0.0;
+
+    for (size_t i = 0; i < n; ++i)
+    {
+        seed = seed * 1664525u + 1013904223u;
+        const auto white = ((double) (seed >> 8) / 16777216.0) * 2.0 - 1.0;
+        z1 = white + a * (z1 - white);
+        z2 = z1 + a * (z2 - z1);
+        raw[i] = z2;
+        energy += z2 * z2;
+    }
+
+    const auto scale = std::pow (10.0, rmsDb / 20.0) / std::sqrt (energy / (double) n);
+    std::vector<float> out (n);
+
+    for (size_t i = 0; i < n; ++i)
+    {
+        const auto phase = (double) (i % (size_t) (0.25 * rate)) / rate;
+        out[i] = (float) (raw[i] * scale * (bursts ? std::exp (-phase / 0.04) : 1.0));
+    }
+
+    return out;
+}
+
+/** A buffer through a prepared core one sample at a time, with the reduction
+    the core reports after each sample. Hands back the output. */
+std::vector<float> runTracing (DspCore& core, const std::vector<float>& source,
+                               std::vector<double>& gr)
+{
+    auto left = source, right = source;
+    gr.assign (source.size(), 0.0);
+
+    for (size_t n = 0; n < source.size(); ++n)
+    {
+        float* channels[2] { left.data() + n, right.data() + n };
+        core.process (channels, 2, 1);
+        gr[n] = (double) core.currentGainReductionDb();
+    }
+
+    return left;
+}
+
+double meanOver (const std::vector<double>& v, size_t from)
+{
+    double sum = 0.0;
+
+    for (size_t i = from; i < v.size(); ++i)
+        sum += v[i];
+
+    return sum / (double) std::max<size_t> (1, v.size() - from);
+}
+
+double rmsDbOver (const std::vector<float>& v, size_t from, size_t to)
+{
+    double sum = 0.0;
+
+    for (size_t i = from; i < to && i < v.size(); ++i)
+        sum += (double) v[i] * v[i];
+
+    return 10.0 * std::log10 (std::max (sum / (double) std::max<size_t> (1, to - from), 1.0e-30));
+}
+
+/** **All-buttons' gain reduction is a function of time, not of the sample
+    rate or the OVERSAMPLING choice** -- 10 section 10's sample-rate
+    independence and 10 section 12's "oversampling is about the alias floor,
+    not timing", held to the tolerance the four ratios already meet.
+
+    It did not hold until the fix this test arrived with. The attack one-pole
+    stepped from the control the lag had already smoothed, so the two
+    multiplied into a single per-sample step of `alpha*(1 - L)`, which is no
+    time constant at any rate; the release held one sample's demand ahead of
+    the lag; and the plateau's collapse was read one sample late, so the first
+    sample of every transient saw the uncollapsed network for a whole sample,
+    however long a sample was. Measured on ICE QUEEN at 6f6b8c3, 48 kHz:
+
+        DC step at attack 1, GR at 10 ms   6.92 dB at 48 kHz, 4.42 at 192
+        steady 1 kHz-lowpassed noise       17.90 / 16.62 / 15.93 dB, Off / 2x / 4x
+        one-sample spike, GR at 10 ms      26.64 / 17.24 / 17.34 dB, Off / 2x / 4x
+
+    Three stimuli, because each failed differently: the step is the attack and
+    the lag in series, the noise is the release holding peaks, and the spike
+    is one sample being able to set the control for a release time. */
+void testAllButtonsTimingIsRateFree()
+{
+    constexpr double kTolerance = 0.2;
+
+    // A DC step from -30 to -10 dBFS, the trace compared at 1, 10 and 100 ms
+    // across 48 and 192 kHz at Off. Attack 1 is where the product of steps
+    // was furthest from a time constant; attack 7 is where it was nearest.
+    for (const auto position : { 1.0f, 7.0f })
+    {
+        double at48[3] {};
+        int index = 0;
+
+        for (const auto rate : { 48000.0, 192000.0 })
+        {
+            DspCore::Params p;
+            p.ratio = Ratio::allButtons;
+            p.attackPosition = position;
+            p.releasePosition = 4.0f;
+
+            const auto before = (size_t) (0.3 * rate);
+            std::vector<float> source (before + (size_t) (0.11 * rate));
+
+            for (size_t n = 0; n < source.size(); ++n)
+                source[n] = (float) std::pow (10.0, (n < before ? -30.0 : -10.0) / 20.0);
+
+            auto core = prepared (p, rate);
+            std::vector<double> gr;
+            runTracing (core, source, gr);
+
+            int t = 0;
+
+            for (const auto ms : { 1.0, 10.0, 100.0 })
+            {
+                const auto value = gr[before + (size_t) (ms * 1.0e-3 * rate)];
+
+                if (index == 0)
+                    at48[t] = value;
+                else
+                    checkNear (value, at48[t], kTolerance,
+                               "all-buttons: a DC step at attack "
+                                   + std::to_string ((int) position) + " reads the same at "
+                                   + std::to_string ((int) ms) + " ms at 192 kHz as at 48");
+                ++t;
+            }
+
+            ++index;
+        }
+    }
+
+    // Steady and bursting 1 kHz-lowpassed noise, -18 dBFS RMS, input +12,
+    // attack 7, release 4: mean reduction and output RMS over the last second,
+    // across Off / 2x / 4x at 48 kHz.
+    for (const auto bursts : { false, true })
+    {
+        double grOff = 0.0, rmsOff = 0.0;
+
+        for (const auto factor : { 1, 2, 4 })
+        {
+            DspCore::Params p;
+            p.ratio = Ratio::allButtons;
+            p.attackPosition = 7.0f;
+            p.releasePosition = 4.0f;
+            p.inputDb = 12.0f;
+            p.oversampling = factor;
+
+            const auto source = filteredNoise (1000.0, -18.0, 2.0, kSampleRate, bursts);
+            auto core = prepared (p);
+            std::vector<double> gr;
+            const auto out = runTracing (core, source, gr);
+
+            const auto from = (size_t) (1.0 * kSampleRate);
+            const auto meanGr = meanOver (gr, from);
+            const auto rms = rmsDbOver (out, from, out.size());
+            const std::string who { std::string (bursts ? "bursting" : "steady")
+                                      + " noise at " + std::to_string (factor) + "x" };
+
+            if (factor == 1)
+            {
+                grOff = meanGr;
+                rmsOff = rms;
+                check (meanGr > 5.0, "all-buttons is compressing the " + who
+                                         + ", got " + std::to_string (meanGr) + " dB");
+                continue;
+            }
+
+            checkNear (meanGr, grOff, kTolerance, "all-buttons: mean reduction on " + who
+                                                      + " matches Off");
+            checkNear (rms, rmsOff, kTolerance, "all-buttons: output RMS on " + who
+                                                    + " matches Off");
+        }
+    }
+
+    // Steady noise across the base rates at Off. Generated at each rate, so
+    // it is the same signal statistically rather than sample for sample, which
+    // is why only the steady case is compared -- the ratios themselves spread
+    // by about 0.4 dB on the bursts across rates, from the stimulus alone --
+    // and why the output RMS is read against the input's over the same
+    // window, so the realisation's own level drops out.
+    {
+        double grAt48 = 0.0, rmsAt48 = 0.0;
+
+        for (const auto rate : { 48000.0, 44100.0, 96000.0, 192000.0 })
+        {
+            DspCore::Params p;
+            p.ratio = Ratio::allButtons;
+            p.attackPosition = 7.0f;
+            p.releasePosition = 4.0f;
+            p.inputDb = 12.0f;
+
+            const auto source = filteredNoise (1000.0, -18.0, 4.0, rate, false);
+            auto core = prepared (p, rate);
+            std::vector<double> gr;
+            const auto out = runTracing (core, source, gr);
+
+            const auto from = (size_t) (1.0 * rate);
+            const auto meanGr = meanOver (gr, from);
+            const auto rms = rmsDbOver (out, from, out.size())
+                           - rmsDbOver (source, from, source.size());
+
+            if (rate == 48000.0)
+            {
+                grAt48 = meanGr;
+                rmsAt48 = rms;
+                continue;
+            }
+
+            const auto who = "steady noise at " + std::to_string ((int) rate) + " Hz";
+            checkNear (meanGr, grAt48, kTolerance, "all-buttons: mean reduction on " + who
+                                                       + " matches 48 kHz");
+            checkNear (rms, rmsAt48, kTolerance, "all-buttons: output RMS on " + who
+                                                     + " matches 48 kHz");
+        }
+    }
+
+    // One +1.0 sample on a settled 1 kHz tone at -18 dBFS, input +20, attack
+    // 7, release 4, across Off / 2x / 4x at 48 kHz: the reduction at 1, 10 and
+    // 100 ms after it (the worst over the millisecond before each, so the
+    // tone's ripple cannot alias the read) and the output RMS from 2 to
+    // 200 ms. A one-sample spike is only the same signal at one base rate, so
+    // this is compared across the factors and not across rates.
+    {
+        double offGr[3] {}, offRms = 0.0;
+
+        for (const auto factor : { 1, 2, 4 })
+        {
+            DspCore::Params p;
+            p.ratio = Ratio::allButtons;
+            p.attackPosition = 7.0f;
+            p.releasePosition = 4.0f;
+            p.inputDb = 20.0f;
+            p.oversampling = factor;
+
+            const auto at = (size_t) (1.0 * kSampleRate);
+            auto source = sine (1000.0, 1.25, std::pow (10.0, -18.0 / 20.0));
+            source[at] = 1.0f;
+
+            auto core = prepared (p);
+            std::vector<double> gr;
+            const auto out = runTracing (core, source, gr);
+
+            // The upsampler's half of the round trip is where the spike
+            // reaches the cell.
+            const auto origin = at + (size_t) (DspCore::latencyFor (factor) / 2);
+            const auto settled = gr[at - 1];
+            const auto rms = rmsDbOver (out, origin + (size_t) (0.002 * kSampleRate),
+                                        origin + (size_t) (0.2 * kSampleRate));
+
+            int t = 0;
+
+            for (const auto ms : { 1.0, 10.0, 100.0 })
+            {
+                const auto end = origin + (size_t) (ms * 1.0e-3 * kSampleRate);
+                auto worst = 0.0;
+
+                for (auto n = end - (size_t) (0.001 * kSampleRate); n <= end; ++n)
+                    worst = std::max (worst, gr[n]);
+
+                if (factor == 1)
+                {
+                    offGr[t] = worst;
+
+                    check (worst < settled + 3.0,
+                           "all-buttons: one sample does not take the reduction 3 dB past "
+                           "where it had settled, at " + std::to_string ((int) ms) + " ms got "
+                               + std::to_string (worst) + " from " + std::to_string (settled));
+                }
+                else
+                {
+                    checkNear (worst, offGr[t], kTolerance,
+                               "all-buttons: after a one-sample spike, the reduction at "
+                                   + std::to_string ((int) ms) + " ms at "
+                                   + std::to_string (factor) + "x matches Off");
+                }
+
+                ++t;
+            }
+
+            if (factor == 1)
+                offRms = rms;
+            else
+                checkNear (rms, offRms, kTolerance,
+                           "all-buttons: output RMS after a one-sample spike at "
+                               + std::to_string (factor) + "x matches Off");
+        }
+    }
+}
+
+/** **Why the panel dims ATTACK under all-buttons**, measured rather than
+    asserted. The 2.5 ms lag follows the attack one-pole in series and owns
+    the whole rise, so every attack position gives the same reduction after a
+    step (the owner accepted that for 0.2.6; modules/AGENTS.md dims a control
+    a mode makes inert). `attackIsLive` is what the panel reads.
+
+    Both halves, so the test cannot pass by measuring nothing: under 20:1 the
+    same comparison has to show the knob working. If ATTACK is ever made live
+    under all-buttons, the first half fails, and `attackIsLive` and the panel's
+    dim have to change with it. */
+void testAttackIsInertUnderAllButtons()
+{
+    const auto trace = [] (int ratioChoice, float position, size_t& before)
+    {
+        DspCore::Params p;
+        p.ratio = ratioChoice == ratioAll ? Ratio::allButtons : Ratio::twenty;
+        p.attackPosition = position;
+        p.releasePosition = 4.0f;
+
+        before = (size_t) (0.3 * kSampleRate);
+        std::vector<float> source (before + (size_t) (0.01 * kSampleRate));
+
+        for (size_t n = 0; n < source.size(); ++n)
+            source[n] = (float) std::pow (10.0, (n < before ? -30.0 : -10.0) / 20.0);
+
+        auto core = prepared (p);
+        std::vector<double> gr;
+        runTracing (core, source, gr);
+        return gr;
+    };
+
+    size_t before = 0;
+
+    check (! attackIsLive (ratioAll), "attackIsLive says ATTACK is inert under all-buttons");
+
+    {
+        const auto slow = trace (ratioAll, 1.0f, before);
+        const auto fast = trace (ratioAll, 7.0f, before);
+
+        for (const auto ms : { 1.0, 5.0 })
+        {
+            const auto at = before + (size_t) (ms * 1.0e-3 * kSampleRate);
+
+            check (std::abs (slow[at] - fast[at]) < 0.1,
+                   "all-buttons: ATTACK 1 and 7 give the same reduction "
+                       + std::to_string ((int) ms) + " ms after a step, got "
+                       + std::to_string (slow[at]) + " and " + std::to_string (fast[at])
+                       + " -- if ATTACK is live here now, undim it (attackIsLive)");
+        }
+    }
+
+    check (attackIsLive (ratio20), "attackIsLive says ATTACK is live under 20:1");
+
+    {
+        const auto slow = trace (ratio20, 1.0f, before);
+        const auto fast = trace (ratio20, 7.0f, before);
+
+        // The first sample of the step, where 10 section 12's overshoot table
+        // lives: the slowest detent lets several dB more through.
+        check (fast[before] - slow[before] > 1.0,
+               "20:1: ATTACK 1 and 7 differ on the first sample of a step, got "
+                   + std::to_string (slow[before]) + " and " + std::to_string (fast[before]));
+    }
+}
+
+//==============================================================================
 /** One step into a settled level, sample by sample, with the reduction the
     core reports after each. Block size 1, so the reported figure is that
     sample's rather than a block maximum. */
@@ -2149,6 +2515,8 @@ int main()
     testGainReductionCurve();
     testCurveAboveTwentyDb();
     testAllButtonsShape();
+    testAllButtonsTimingIsRateFree();
+    testAttackIsInertUnderAllButtons();
     testFirstSampleOvershoot();
     testReleaseDetents();
     testProgrammeDependentRelease();

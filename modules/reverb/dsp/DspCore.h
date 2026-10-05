@@ -267,6 +267,8 @@ public:
 
         smoothCoef = 1.0f - std::exp (-1.0f / (kSmoothingMs * 0.001f * (float) sampleRate));
         snapGains();
+        started = false;
+        freshStart = true;
 
         // The design grid the real EQ will build its three nodes on, built
         // once per rate change because 48 pow() and sin() calls is most of a
@@ -281,11 +283,24 @@ public:
         eqTap.prepare (1 << 13);
     }
 
+    /** **reset() empties the module's memory; it does not stop the input.**
+        Everything with memory -- the two generators, and the gains that act
+        only on what they return -- lands on its request, because what it
+        acts on starts from silence. The dry path has no memory to empty:
+        the input is still passing through dry and OUTPUT, so those two keep
+        their smoothed value and glide to a changed request as they would
+        have without the reset. Snapped instead, OUTPUT moved to 0.3
+        normalised across a reset() made a sample step 8.47 times the
+        input's own on a -18 dBFS 1 kHz sine at 48 kHz, MIX to 100 % 9.57
+        times, where the reset alone makes 1.94 (QA, 2026-10-05). With the
+        settings unchanged the two are at their targets anyway, so reset()
+        still plays exactly what a fresh prepare() does. */
     void reset()
     {
         er.reset();
         late.reset();
-        snapGains();
+        snapWetGains();
+        started = false;
     }
 
     void setParams (const Params& p)
@@ -366,6 +381,23 @@ public:
         if (numChannels < 1 || numSamples < 1 || feed.empty())
             return;
 
+        // Values sent between prepare() and the first block are where the
+        // gains start, not where they glide to: the glide would be over
+        // silence, from figures no one asked for. Without this, a host that
+        // sends its values after prepare() heard every level, MIX and OUTPUT
+        // move over the first 100 ms, +8.0 dB re the output peak at 1.25 ms
+        // with every parameter at 0.63 normalised (2026-10-05). After a
+        // reset() only the gains on the emptied generators land; see reset().
+        if (! started)
+        {
+            if (freshStart)
+                snapGains();
+            else
+                snapWetGains();
+            started = true;
+            freshStart = false;
+        }
+
         float* const left  = channelData[0];
         float* const right = numChannels > 1 ? channelData[1] : channelData[0];
 
@@ -389,7 +421,7 @@ public:
             // its mid stands in, which is what a mono tail input hears anyway.
             for (int i = 0; i < n; ++i)
             {
-                gFeed += (tFeed - gFeed) * smoothCoef;
+                glide (gFeed, tFeed);
                 tailIn[(size_t) i] = (1.0f - gFeed) * feed[(size_t) i]
                                    + gFeed * 0.5f * (erL[(size_t) i] + erR[(size_t) i]);
             }
@@ -398,12 +430,12 @@ public:
 
             for (int i = 0; i < n; ++i)
             {
-                gEr    += (tEr    - gEr)    * smoothCoef;
-                gVerb  += (tVerb  - gVerb)  * smoothCoef;
-                gWidth += (tWidth - gWidth) * smoothCoef;
-                gDry   += (tDry   - gDry)   * smoothCoef;
-                gWet   += (tWet   - gWet)   * smoothCoef;
-                gOut   += (tOut   - gOut)   * smoothCoef;
+                glide (gEr, tEr);
+                glide (gVerb, tVerb);
+                glide (gWidth, tWidth);
+                glide (gDry, tDry);
+                glide (gWet, tWet);
+                glide (gOut, tOut);
 
                 // WIDTH: M/S gain on the tail only (10 section 2); ER width is
                 // VARIATION's.
@@ -518,8 +550,29 @@ private:
         history to smooth from. */
     void snapGains() noexcept
     {
-        gEr = tEr; gVerb = tVerb; gFeed = tFeed; gWidth = tWidth;
-        gDry = tDry; gWet = tWet; gOut = tOut;
+        snapWetGains();
+        gDry = tDry; gOut = tOut;
+    }
+
+    /** The five gains that act only on what the generators return, or on
+        what goes into the tail: ER, REVERB, WIDTH, the wet half of MIX, and
+        SOURCE. After reset() those signals start from silence, so a gain on
+        them can land without a step. Dry and OUTPUT are not here: the input
+        passes through them. */
+    void snapWetGains() noexcept
+    {
+        gEr = tEr; gVerb = tVerb; gFeed = tFeed; gWidth = tWidth; gWet = tWet;
+    }
+
+    /** One sample of a gain's 20 ms one-pole, **landing exactly**. In float
+        the step (t - g) * c falls under half an ulp of g some hundreds of
+        ulps short of t, and a gain left there never arrives: then reset(),
+        which keeps the dry path's gains, would not land where a fresh
+        instance does. A step that no longer moves the gain has arrived. */
+    void glide (float& g, float t) const noexcept
+    {
+        const auto next = g + (t - g) * smoothCoef;
+        g = next == g ? t : next;
     }
 
     ErGenerator er;
@@ -529,6 +582,8 @@ private:
     float smoothCoef = 0.0f;
     float tEr = 0.0f, tVerb = 0.0f, tFeed = 0.7f, tWidth = 1.0f, tDry = 1.0f, tWet = 1.0f, tOut = 1.0f;
     float gEr = 0.0f, gVerb = 0.0f, gFeed = 0.7f, gWidth = 1.0f, gDry = 1.0f, gWet = 1.0f, gOut = 1.0f;
+    bool  started = false;      ///< a block has played since prepare() or reset(); until one has, the wet gains snap
+    bool  freshStart = false;   ///< nothing has played since prepare(): the dry gains snap as well
 
     /** The grid the three EQ nodes are designed on, at the running rate.
         Unused by the placeholder; rebuilt in `prepare` so the engine has it.

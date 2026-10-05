@@ -267,6 +267,7 @@ public:
 
         smoothCoef = 1.0f - std::exp (-1.0f / (kSmoothingMs * 0.001f * (float) sampleRate));
         snapGains();
+        started = false;
 
         // The design grid the real EQ will build its three nodes on, built
         // once per rate change because 48 pow() and sin() calls is most of a
@@ -286,6 +287,7 @@ public:
         er.reset();
         late.reset();
         snapGains();
+        started = false;
     }
 
     void setParams (const Params& p)
@@ -365,6 +367,18 @@ public:
 
         if (numChannels < 1 || numSamples < 1 || feed.empty())
             return;
+
+        // Values sent between prepare() or reset() and the first block are
+        // where the gains start, not where they glide to: the glide would
+        // be over silence, from figures no one asked for. Without this, a
+        // host that sends its values after prepare() heard every level, MIX
+        // and OUTPUT move over the first 100 ms, +8.0 dB re the output peak
+        // at 1.25 ms with every parameter at 0.63 normalised (2026-10-05).
+        if (! started)
+        {
+            snapGains();
+            started = true;
+        }
 
         float* const left  = channelData[0];
         float* const right = numChannels > 1 ? channelData[1] : channelData[0];
@@ -529,6 +543,7 @@ private:
     float smoothCoef = 0.0f;
     float tEr = 0.0f, tVerb = 0.0f, tFeed = 0.7f, tWidth = 1.0f, tDry = 1.0f, tWet = 1.0f, tOut = 1.0f;
     float gEr = 0.0f, gVerb = 0.0f, gFeed = 0.7f, gWidth = 1.0f, gDry = 1.0f, gWet = 1.0f, gOut = 1.0f;
+    bool  started = false;   ///< a block has played since prepare() or reset(); until one has, the gains snap
 
     /** The grid the three EQ nodes are designed on, at the running rate.
         Unused by the placeholder; rebuilt in `prepare` so the engine has it.

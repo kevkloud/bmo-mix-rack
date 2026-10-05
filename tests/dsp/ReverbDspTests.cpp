@@ -1911,6 +1911,53 @@ int main (int argc, char** argv)
         check (landed, "reset() during a crossfade or a TYPE dip lands on the new setting, not the old one (residual under -80 dB)");
     }
 
+    //== The ER hi-cut is designed at the rate the generator runs at =============
+    //
+    // ER HI-CUT is held as a coefficient, and until 2026-10-05 it was designed
+    // at whatever rate the generator had when the value was sent: sent before
+    // the first prepare(), that is the 48 kHz it is constructed with, and
+    // prepare() did not design it again. At 96 kHz the corner of a 7 kHz
+    // setting was +2.11 dB out (+2.77 dB at 192 kHz), for a fresh plug-in
+    // instance until its first blocks re-sent the value and the coefficient
+    // glided over (about 120 ms to within 0.01 dB), and for a caller driving
+    // the generator directly until it next sent one. A generator told before
+    // prepare() and one told after it (and reset, so neither glides) must
+    // play the same samples.
+    {
+        bool same = true;
+
+        for (const auto rate : { 96000.0, 192000.0 })
+        {
+            ErGenerator before, after;
+            before.setHiCut (7000.0f);
+            before.prepare (rate, 512);
+            after.prepare (rate, 512);
+            after.setHiCut (7000.0f);
+            after.reset();
+
+            std::vector<float> x (512), bl (512), br (512), al (512), ar (512);
+            double worst = 0.0;
+            for (int at = 0; at < (int) (0.25 * rate); at += 512)
+            {
+                for (int i = 0; i < 512; ++i)
+                    x[(size_t) i] = 0.5f * noiseAt (at + i);
+                before.process (x.data(), bl.data(), br.data(), 512);
+                after.process (x.data(), al.data(), ar.data(), 512);
+                for (int i = 0; i < 512; ++i)
+                    worst = std::max ({ worst, (double) std::abs (bl[(size_t) i] - al[(size_t) i]),
+                                               (double) std::abs (br[(size_t) i] - ar[(size_t) i]) });
+            }
+
+            if (worst != 0.0)
+            {
+                same = false;
+                std::cerr << "  ER HI-CUT 7 kHz sent before prepare() at " << rate << " Hz: largest difference " << worst << "\n";
+            }
+        }
+
+        check (same, "ER HI-CUT sent before prepare() is designed at the prepared rate, 96 and 192 kHz");
+    }
+
     //== ER SPREAD is not a table change in Taps =================================
     //
     // Taps never reads SPREAD, so moving it there must not rebuild the table

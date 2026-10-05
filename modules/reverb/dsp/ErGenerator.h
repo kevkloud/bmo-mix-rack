@@ -147,6 +147,19 @@ public:
 
         lastNormDensity = -1.0f;
 
+        // **The hi-cut is designed at the rate it will run at.** Its target
+        // is a coefficient, and it was computed at whatever rate the
+        // generator had when ER HI-CUT was last sent -- for a host that sends
+        // the values before the first prepare(), the 48 kHz it was
+        // constructed with. reset() below snaps the coefficient to that
+        // target, so at 96 kHz a fresh instance started +2.11 dB high at a
+        // 7 kHz corner (+2.77 dB at 192 kHz) and glided to the right figure
+        // over about 120 ms once DspCore re-sent the value; a caller that
+        // drives the generator directly kept the wrong corner until it next
+        // sent one (2026-10-05).
+        if (hiCutHz > 0.0f)
+            setHiCut (hiCutHz);
+
         reset();
         rebuild (current, sets[active]);
         sizeAtBuild = current.sizeM;
@@ -212,6 +225,7 @@ public:
 
     void setHiCut (float hz) noexcept
     {
+        hiCutHz = hz;
         const auto f = std::clamp (hz, 20.0f, (float) sampleRate * 0.45f);
         hiCutTarget = hiCutCoefFor (f, sampleRate);
     }
@@ -1289,6 +1303,7 @@ private:
 
     OnePole hiCutL, hiCutL2, hiCutR, hiCutR2;   ///< two poles a side: 12 dB/octave
     float   hiCutCoef = 1.0f, hiCutTarget = 1.0f;
+    float   hiCutHz = -1.0f;   ///< the last ER HI-CUT sent, so prepare() can design it at its own rate; negative until one is
 };
 
 } // namespace bmo::reverb

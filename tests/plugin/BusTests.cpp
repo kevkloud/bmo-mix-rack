@@ -595,10 +595,20 @@ const Golden kSwept[]
     // `main` carried, the peaks moved by up to 6.1e-5 on 0.069 (0.008 dB) and
     // the RMS figures by up to 0.0014 dB. Every other row printed within
     // tolerance.
+    //
+    // Regenerated on ICE QUEEN, 2026-10-05, for this row alone, when the
+    // module began to start AT its settings: this suite renders 85 ms from a
+    // fresh instance, and until then those 85 ms held the start-up move --
+    // the early reflections crossfading from the reference SIZE and DENSITY
+    // gliding from 50 %, the same glide the paragraph above describes. The
+    // RMS figures moved by 0.026 to 0.108 dB (mono -29.3108 -> -29.2429 dB)
+    // and the peaks by 4.1e-5 to 1.1e-4 on 0.066. The defaults row did not
+    // move, and should not have: at defaults an instance already started at
+    // its targets. No other row moved; no tolerance was touched.
     { "reverb",
-      -29.3107797472, 0.0665621832013,
-      -29.3036605172, 0.065762847662, -29.6342359134, 0.064994379878,
-      -29.0903900723, 0.0687288194895, -29.5277643484, 0.0643955394626 },
+      -29.2428976613, 0.0666297152638,
+      -29.2489375559, 0.0658715516329, -29.6764939059, 0.0650616884232,
+      -28.9822617403, 0.0688233077526, -29.501805594, 0.0644361227751 },
     // Regenerated with the eq row above, for the same reason: BMO EQ is a slot
     // in this chain with Auto Gain on, so its first 60 ms now carry the +2.28
     // dB from the start, and the compressing slots after it turn that into

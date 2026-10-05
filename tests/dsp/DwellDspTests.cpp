@@ -7518,6 +7518,112 @@ void testTheFirstBlockSweepsNothing()
                 }
 }
 
+/** **One toggle of Diffuse costs a held loop what is pinned here, and no
+    more** (2026-10-04).
+
+    FX off fades Diffuse out at its output over 20 ms and stops running it,
+    so whatever its six allpass lines hold -- up to 126 ms of the loop's
+    audio at AMOUNT 100 -- leaves the loop; FX on fades a cleared stage in
+    at its input. Each toggle is a loss, which a switch may take, but a held
+    loop has nothing to make it back from. The review's probe, on ICE QUEEN
+    (48 kHz / 512, a 2 s noise burst): the frozen lane with Diffuse toggled
+    once every 16 blocks on average fell from -17.7 dBFS held to -133.7 at
+    52-62 s, and to exact silence toggled every block.
+
+    Measured as a toggle and back 1 s later, so the toggled render ends in
+    the state it began in and is set against the render never toggled
+    (the 1 s RMS 5 s after the first toggle, the louder channel), on ICE
+    QUEEN on clean: off and on again -1.60 dB in the frozen lane and -1.55
+    at FEEDBACK 95, on and off again -1.38 and -0.90 dB; across the three
+    characters the review's noise gives -1.4 to -2.2 dB in the lane and -0.7
+    to -1.8 at FEEDBACK 95. A single toggle, against the render held in the
+    new state, costs -0.2 to -2.4 dB. Pan/Tremolo and Crush are not in this
+    test: a loop with either in it does not hold -- the frozen lane at
+    AMOUNT 100 is 190 dB down at 11-12 s with Pan/Tremolo, and silent
+    with Crush, never toggled.
+
+    **Keeping the loop's energy instead was tried and is not here.** The
+    stage going out fed a falling share and its output kept in the loop until
+    it rang out, the stage coming in as now: the pair cost fell to -0.5 to
+    +0.9 dB, but the returned tail summed with the loop as a burst -- 112 of
+    576 FX on/off Diffuse grid cells over 1 dB, +1.31 dB on noise at
+    FEEDBACK 95 -- and FX TYPE Diffuse -> Crush stepped 1.63x. So the cost is
+    pinned, here and in `modules/dwell/AGENTS.md`, to within 0.5 dB: a change
+    that keeps the energy moves it toward 0 and must say so. */
+void testOneDiffuseToggleCostsAHeldLoopItsPinnedFigure()
+{
+    constexpr auto rate = 48000.0;
+    constexpr int chunk = 512;
+    const auto n = (int) (12.0 * rate);
+    const auto toggleAt = (int) (6.0 * rate), backAt = (int) (7.0 * rate);
+    const auto noiseScale = (float) (std::pow (10.0, -18.0 / 20.0) * std::sqrt (3.0));
+
+    struct Row { bool lane; bool startsOn; double pinnedDb; };
+    const Row rows[] { { true, true, -1.60 }, { true, false, -1.38 }, { false, true, -1.55 }, { false, false, -0.90 } };
+
+    for (const auto& row : rows)
+    {
+        const auto render = [&] (bool toggled)
+        {
+            P::DwellDsp dsp;
+            dsp.prepare (rate, chunk, 2);
+
+            auto v = defaults();
+            v[P::Index::mix] = 100.0f;
+            const auto gate = row.lane ? P::Index::laneFx : P::Index::fx;
+
+            if (row.lane)
+            {
+                v[P::Index::feedback]     = 0.0f;
+                v[P::Index::hold]         = 1.0f;
+                v[P::Index::laneGain]     = 0.0f;   // the detent: the lane frozen
+                v[P::Index::fxLink]       = 0.0f;
+                v[P::Index::laneFxType]   = 0.0f;   // Diffuse
+                v[P::Index::laneFxAmount] = 100.0f;
+            }
+            else
+            {
+                v[P::Index::feedback] = 95.0f;
+                v[P::Index::fxType]   = 0.0f;
+                v[P::Index::fxAmount] = 100.0f;
+            }
+
+            Block block { n };
+            Noise left, right;
+            right.state = 987654321u;
+
+            for (int i = 0; i < (int) (2.0 * rate); ++i)
+            {
+                block.left[(size_t) i]  = noiseScale * left.next();
+                block.right[(size_t) i] = noiseScale * right.next();
+            }
+
+            renderAsHost (dsp, v, block, n, chunk, [&] (int offset)
+            {
+                const auto flipped = toggled && offset >= toggleAt && offset < backAt;
+                v[(size_t) gate] = row.startsOn != flipped ? 1.0f : 0.0f;
+
+                if (row.lane)
+                    v[P::Index::send] = offset < (int) (2.0 * rate) ? 1.0f : 0.0f;
+            });
+
+            const auto from = toggleAt + (int) (5.0 * rate);
+            return dbOf (std::max (rms (block.left, from, (int) rate), rms (block.right, from, (int) rate)));
+        };
+
+        const auto held = render (false), toggled = render (true);
+        const auto cost = toggled - held;
+
+        char buf[260];
+        std::snprintf (buf, sizeof (buf), "Diffuse %s and back 1 s later, %s on clean: %+.2f dB of the held "
+                       "loop 5 s on (%.1f dBFS held); pinned at %+.2f dB, within 0.5",
+                       row.startsOn ? "off" : "on", row.lane ? "in the frozen lane" : "at FEEDBACK 95",
+                       cost, held, row.pinnedDb);
+        std::printf ("      %s\n", buf);
+        check (std::abs (cost - row.pinnedDb) <= 0.5, buf);
+    }
+}
+
 } // namespace
 
 //==============================================================================
@@ -7628,6 +7734,7 @@ int main (int argc, char** argv)
 
     // 2026-10-04.
     testTheFirstBlockSweepsNothing();
+    testOneDiffuseToggleCostsAHeldLoopItsPinnedFigure();
 
     std::printf ("%d checks, %d failures%s\n", checks, failures, longRun ? " (--long)" : "");
     return failures == 0 ? 0 : 1;

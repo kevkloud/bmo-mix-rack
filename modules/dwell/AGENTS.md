@@ -221,6 +221,25 @@ hold after it.
   +3.80 / +7.15 / +0.32 dB (+1.33 at 30 ms). The options are a longer
   STEREO fade (100-200 ms), which settles the STEREO cells and not the FX
   ones, or accepting the loop's own transient as the FX TYPE one is.
+- **A toggle of Diffuse costs a held loop about 1 to 2 dB, every time**
+  (2026-10-04). FX off fades the stage out at its output and stops running
+  it, so what its allpass lines hold (up to 126 ms at AMOUNT 100) leaves the
+  loop; FX on fades a cleared stage in at its input. A frozen lane has
+  nothing to make that back from, so toggles compound: the review's probe
+  took a frozen lane from -17.7 to -133.7 dBFS in a minute of random
+  toggling. Measured on ICE QUEEN, 48 kHz / 512, a 2 s noise burst, a toggle
+  and back 1 s later against the render never toggled, 5 s on: on clean
+  -1.60 dB off-and-on and -1.38 on-and-off in the frozen lane, -1.55 and
+  -0.90 at FEEDBACK 95; -1.4 to -2.2 and -0.7 to -1.8 dB across the
+  characters. `testOneDiffuseToggleCostsAHeldLoopItsPinnedFigure` pins the
+  clean figures to 0.5 dB. Pan/Tremolo and Crush have no such figure: a
+  loop with either in it does not hold at all (the frozen lane at AMOUNT
+  100 is 190 dB down, or silent, 10 s after the burst, never toggled).
+  **Keeping the energy was tried and is not in**: the stage going out fed
+  a falling share and left ringing in the loop brought a toggle pair to
+  -0.5 to +0.9 dB, but the returned tail summed with the loop into bursts
+  over 1 dB in 112 of 576 FX on/off Diffuse grid cells (+1.31 dB on noise
+  at FEEDBACK 95) and FX TYPE Diffuse -> Crush stepped 1.63x.
 - **Never compare a host's value with `==` at the centre of a range that
   crosses zero** (2026-10-02, macOS CI). The snap `start + interval . n` is a
   fused multiply-add on macOS arm64, so LANE GAIN's 0 comes back as 1.5e-6

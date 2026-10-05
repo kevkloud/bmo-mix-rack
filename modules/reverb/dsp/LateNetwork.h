@@ -193,17 +193,15 @@ public:
         // with DECAY 0.5 s queued by 0.000704, and mid-dip with SIZE queued
         // by 0.0318 (QA's probe, 2026-10-03). prepare() already did this
         // before calling here, which is why it was exact and reset() was not.
-        current = requested;
-        primeLengths (current, lengths);
-        sizeAtBuild = current.sizeM;
-        levelNow = levelTo = levelFor (current);
-        fourWeight = fourTarget = fourFor (current.type);
-        fading = dipping = preFading = false;
-        movePos = moveEnd = dipPos = prePos = 0;
-        preDelaySamples = preDelayFor (current.preDelayMs);
+        land();
 
-        smoothed = { current.decaySeconds, current.dampLo, current.dampHi };
-        designAll();
+        // **And a request sent before the first block lands as well.** A
+        // host often sends its values between prepare() and audio; taken as
+        // a move, a TYPE there dipped, a SIZE crossfaded, a PRE-DELAY faded
+        // and DECAY and both multipliers glided, all over silence that had
+        // nothing to protect (2026-10-05). Until a block has played, a
+        // request is built, not moved to.
+        started = false;
     }
 
     void setConfig (const LateConfig& c) noexcept { requested = c; }
@@ -218,6 +216,12 @@ public:
             std::fill (outLeft, outLeft + numSamples, 0.0f);
             std::fill (outRight, outRight + numSamples, 0.0f);
             return;
+        }
+
+        if (! started)
+        {
+            land();
+            started = true;
         }
 
         applyPendingConfig();
@@ -498,6 +502,25 @@ private:
     static constexpr float kMaxSizeForLines = 80.0f;
 
     //==========================================================================
+    /** Everything built from the request as it stands, with no move in
+        flight: the lengths, the level, the diffuser tap, the pre-delay read
+        point and the smoothed DECAY and multipliers. Only where nothing is
+        sounding -- reset(), and the first block after it. */
+    void land() noexcept
+    {
+        current = requested;
+        primeLengths (current, lengths);
+        sizeAtBuild = current.sizeM;
+        levelNow = levelTo = levelFor (current);
+        fourWeight = fourTarget = fourFor (current.type);
+        fading = dipping = preFading = false;
+        movePos = moveEnd = dipPos = prePos = 0;
+        preDelaySamples = preDelayFor (current.preDelayMs);
+
+        smoothed = { current.decaySeconds, current.dampLo, current.dampHi };
+        designAll();
+    }
+
     void applyPendingConfig() noexcept
     {
         const auto& r = requested;
@@ -844,6 +867,7 @@ private:
     int lineLength = 0, writeIdx = 0;
     std::array<int, N> lengths {}, fadeTo {};
     bool fading = false, dipping = false;
+    bool started = false;   ///< a block has played since prepare() or reset(); until one has, a request lands
     int movePos = 0, moveEnd = 0, dipPos = 0;   ///< a length move, in samples since it began
     std::vector<float> moveRamp;                ///< `writtenBefore`, built in prepare()
 

@@ -147,32 +147,67 @@ public:
 
         lastNormDensity = -1.0f;
 
+        // **The hi-cut is designed at the rate it will run at.** Its target
+        // is a coefficient, and it was computed at whatever rate the
+        // generator had when ER HI-CUT was last sent -- for a host that sends
+        // the values before the first prepare(), the 48 kHz it was
+        // constructed with. reset() below snaps the coefficient to that
+        // target, so at 96 kHz a fresh instance started +2.11 dB high at a
+        // 7 kHz corner (+2.77 dB at 192 kHz) and glided to the right figure
+        // over about 120 ms once DspCore re-sent the value; a caller that
+        // drives the generator directly kept the wrong corner until it next
+        // sent one (2026-10-05).
+        if (hiCutHz > 0.0f)
+            setHiCut (hiCutHz);
+
         reset();
-        rebuild (current, sets[active]);
-        sizeAtBuild = current.sizeM;
     }
 
+    /** **After prepare() and reset() the generator is at its requested
+        settings from the first sample**, and a setting sent before the first
+        block lands there too.
+
+        Until 2026-10-05 a fresh instance started from the construction
+        defaults -- Room's table at the reference SIZE, DENSITY 0.5 -- and
+        moved to what it was asked for on its first block: a TYPE dip, a
+        SIZE crossfade, a DENSITY glide. Nothing is sounding then, so there
+        was nothing for a move to protect, and the move itself was the
+        defect: Hall at 40 m and DENSITY 100 % differed from an instance
+        already settled there by -37.9 dB re the output peak at 13.7 ms
+        (48 kHz, sine plus noise), carried into the tail for 1.4 s. And
+        reset(), which kept what it had applied, did not land where a fresh
+        instance did. Now both build the requested table directly, start
+        DENSITY and the hi-cut at their targets and run the normaliser at
+        once; `started` holds that open until the first block, so values
+        sent between prepare() or reset() and audio land rather than move.
+        After the first block a move behaves as it always has.
+
+        That also covers a move in flight, which the 2026-09-30 review asked
+        to be finished rather than dropped: nothing of it is kept. */
     void reset()
     {
-        // **A move in flight is finished, not dropped.** `current` already
-        // names the new table when a crossfade or a TYPE dip is running, so
-        // nothing would ever ask for it again: a fade cut short has to land
-        // on the set it was fading to, and a dip cut short before its
-        // midpoint has to build the table it was going to swap in. Until the
-        // 2026-09-30 review, reset() cleared the flags and left the old table
-        // playing until some other control moved.
-        if (fading)
-        {
-            active = 1 - active;
-            weigh (sets[active]);
-        }
-        else if (dipping && dipPos < fadeLength)
-        {
-            rebuild (current, sets[active]);
-            sizeAtBuild = current.sizeM;
-        }
+        // The normaliser's bookkeeping goes back to where construction left
+        // it, so its first run is the forced one a fresh instance makes.
+        lastWeightedDensity    = -1.0f;
+        lastNormDensity        = -1.0f;
+        lastNormHiCut          = -1.0f;
+        lastBlockHiCut         = -1.0f;
+        lastBlockDensityTarget = -1.0f;
+        samplesSinceNormRun    = 0;
+        normRampLeft           = 0;
 
-        lastNormDensity = -1.0f;   // the diffuser's normaliser is rebuilt for whichever set now plays
+        for (int b = 0; b < kNumBands; ++b)
+        {
+            bandCoef[b] = 1.0f;
+            lastNormBandCoef[b] = -1.0f;
+
+            for (int s = 0; s < kNumStages; ++s)
+            {
+                stageNorm[b][s]    = 1.0f;
+                stageNormNow[b][s] = 1.0f;
+                stageNormInc[b][s] = 0.0f;
+            }
+        }
 
         std::fill (line.begin(), line.end(), 0.0f);
         std::fill (combLine.begin(), combLine.end(), 0.0f);
@@ -195,7 +230,9 @@ public:
 
         hiCutL.reset();  hiCutL2.reset();
         hiCutR.reset();  hiCutR2.reset();
-        hiCutCoef = hiCutTarget;
+
+        land();
+        started = false;
     }
 
     //== Parameters ============================================================
@@ -212,6 +249,7 @@ public:
 
     void setHiCut (float hz) noexcept
     {
+        hiCutHz = hz;
         const auto f = std::clamp (hz, 20.0f, (float) sampleRate * 0.45f);
         hiCutTarget = hiCutCoefFor (f, sampleRate);
     }
@@ -222,6 +260,14 @@ public:
         level, before the ER fader. Sizes are `numSamples`. */
     void process (const float* in, float* outL, float* outR, int numSamples)
     {
+        // Nothing has played since prepare() or reset(): whatever was sent
+        // since lands, rather than starting a move from what was there.
+        if (! started)
+        {
+            land();
+            started = true;
+        }
+
         applyPendingConfig();
         updateDensity();
         updateBandCoefs();
@@ -531,6 +577,28 @@ private:
     int stageLength() const noexcept
     {
         return (int) std::ceil (2.0f * 0.001f * sampleRate) + 8;   // the longest stage read is 84/48 ms
+    }
+
+    /** The requested settings, taken as they are: the table built from
+        them, DENSITY and the hi-cut at their targets, and the normaliser
+        due to run at once on the next block. Only where nothing is sounding
+        -- reset(), and the first block after it. */
+    void land() noexcept
+    {
+        current = requested;
+        active  = 0;
+        density = densityTarget;
+        lastWeightedDensity = density;   // rebuild() weighs the set at it
+
+        // Never prepared, there is no line for a table to index: its delay
+        // ceiling is negative and the build's clamps would be handed
+        // inverted bounds (a host may reset() before it prepares). The
+        // first prepare() lands again and builds it.
+        if (lineLength > 0)
+            rebuild (current, sets[active]);
+        sizeAtBuild = current.sizeM;
+        hiCutCoef = hiCutTarget;
+        lastNormDensity = -1.0f;
     }
 
     void applyPendingConfig()
@@ -1270,6 +1338,8 @@ private:
     bool dipping = false;
     int  dipPos = 0;
 
+    bool started = false;   ///< a block has played since prepare() or reset(); until one has, a request lands
+
     float density = 0.5f, densityTarget = 0.5f, lastWeightedDensity = -1.0f;
 
     OnePole band[kNumBands][2];
@@ -1289,6 +1359,7 @@ private:
 
     OnePole hiCutL, hiCutL2, hiCutR, hiCutR2;   ///< two poles a side: 12 dB/octave
     float   hiCutCoef = 1.0f, hiCutTarget = 1.0f;
+    float   hiCutHz = -1.0f;   ///< the last ER HI-CUT sent, so prepare() can design it at its own rate; negative until one is
 };
 
 } // namespace bmo::reverb

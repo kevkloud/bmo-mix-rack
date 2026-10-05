@@ -59,7 +59,7 @@ values, not DSP state). No block-size ceiling beyond what the host passes.
   case that was wrong for. **Shipped 2026-09-21 on AURORA:**
   `ModuleDsp::tailSecondsForParams` defaults to 0.0 on every module's vtable,
   the single processor returns it, and the rack **sums** over occupied slots
-  and clamps the total at `bmo::kMaxTailSeconds` — the same 30 s a module
+  and clamps the total at `bmo::kMaxTailSeconds` — the same 40 s a module (30 s until 2026-10-02)
   clamps itself at. Do not write 30.0 anywhere else.
 - **Bypass**: no per-slot enable/bypass flag in `RackProcessor.cpp/.h` —
   modules are present/absent from the chain, not toggled; verify before

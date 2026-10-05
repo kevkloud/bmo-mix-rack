@@ -13,26 +13,30 @@ namespace bmo
     A module clamps its own figure at this (`reverb::DspCore::tailSecondsFor`)
     and the rack clamps the sum over its occupied slots at the same ceiling
     (`RackProcessor::totalTail`), so there is one rule rather than two: no BMO
-    Mix Rack instance ever tells a host it rings for more than thirty seconds.
+    Mix Rack instance ever tells a host it rings for more than forty seconds.
 
     **The rack needs its own clamp and the per-module one is not enough.**
     `RackProcessor::addModule` checks the slot count and not for duplicates, so
-    eight BMO Lingers is a legal chain and eight honest 30 s figures summed is a
-    four-minute tail. Over-reporting costs a host some idle pulling at transport
+    eight BMO Lingers is a legal chain and eight honest 40 s figures summed is a
+    five-minute tail. Over-reporting costs a host some idle pulling at transport
     stop, which is why the sum is the right answer there; it is not free for an
     offline bounce, where the reported tail is rendered onto the end of every
     export. Frosty approved the rack clamp on 2026-09-21.
 
     It lives here rather than in a module because the two clampers have to
     agree and only one of them can see the other: `core` cannot include
-    `modules/reverb`, and a second 30.0 written out in `RackProcessor.cpp` is
+    `modules/reverb`, and a second 40.0 written out in `RackProcessor.cpp` is
     exactly the drift a shared constant exists to prevent.
 
-    Thirty rather than a round larger number: 20 s of decay at a 2.0 damping
-    multiplier is an effective T60 of 40 s, and handing a host 40 s of idle
-    pulling per instance is worse than truncating the last few dB of something
-    already inaudible. */
-inline constexpr double kMaxTailSeconds = 30.0;
+    **Forty, raised from thirty on 2026-10-02** (Frosty, "raise it"). 20 s of
+    decay at a 2.0 damping multiplier is an effective T60 of 40 s, and at
+    thirty BMO Linger could not keep its own rule that the reported tail is at
+    least the measured one: its stability test drives exactly that corner.
+    Thirty had argued that 40 s of idle pulling was worse than truncating the
+    last inaudible decibels; the owner weighed it the other way. The very
+    corner still clamps -- pre-delay and the early window on top of 40 s make
+    40.8 s of arithmetic -- and BMO Linger's tests measure what that costs. */
+inline constexpr double kMaxTailSeconds = 40.0;
 
 /** The audio side of a module, with no dependency on JUCE or on a host.
 

@@ -17,17 +17,24 @@ and the schema says thirty, and they are not the same thirty** — the
 control-set trim below cut six and the Reverb EQ added six others, neither
 edited `docs/`, so read this file for what the schema is.
 
-**The early reflections are real; the tail is not yet.** Milestone M2 landed
-on ICE QUEEN on 2026-09-24: `dsp/ErGenerator.h` plays the six image-source
-tables in `dsp/TapTables.h` through the Size law, four order-banded poles, the
-DENSITY bridge and its feed-forward diffuser, seven VARIATION positions and the
-ER hi-cut, and `dsp/DspCore.h` applies the faders, the MIX law (Frosty's, 2026-09-24: 50 % is input unchanged with the verb heard, 100 % is verb only for a send)
-and OUTPUT. `dsp/ImageSource.h` is the offline generator the tables were
-printed from. The late network (M3) and the type blocks (M4) are still to come,
-so REVERB's fader moves a silent bus and the Reverb EQ is not in the path.
-Latency is zero, which is the *shipped* figure and not a stand-in. **Nothing
-has been heard** — every figure in `testing-notes/linger-m2-er-2026-09-24.md`
-is rendered or measured. The DSP pass owns `dsp/` and nothing outside it, with
+**The early reflections and the tail are real; the Reverb EQ, modulation and
+the type voicings are not yet.** Milestone M2 landed on ICE QUEEN on
+2026-09-24: `dsp/ErGenerator.h` plays the six image-source tables in
+`dsp/TapTables.h` through the Size law, four order-banded poles, the DENSITY
+bridge and its feed-forward diffuser, seven VARIATION positions and the ER
+hi-cut, and `dsp/DspCore.h` applies the faders, the MIX law (Frosty's,
+2026-09-24: 50 % is input unchanged with the verb heard, 100 % is verb only for
+a send) and OUTPUT. `dsp/ImageSource.h` is the offline generator the tables
+were printed from. **M3a landed on 2026-10-02** (heard and passed):
+`dsp/LateNetwork.h` is the tail -- pre-delay, input diffusers, eight prime
+lines with Hadamard mixing, absorbent filters in double -- fed by SOURCE and
+returned through WIDTH and REVERB; `10` §4's "As built in M3a" lists where it
+departs from the spec. Still to come: M3b (the Reverb EQ and DARKEN in the
+path, modulation, the onset and truncation contours) and M4 (the type blocks).
+Latency is zero, which is the *shipped* figure and not a stand-in. **Both
+have been heard**: the early reflections at the M2 checkpoint
+(`testing-notes/linger-listening-set-2026-09-24.md`) and the tail at M3a's
+(`testing-notes/linger-listening-set-2026-10-02-m3a.md`). The DSP pass owns `dsp/` and nothing outside it, with
 one exception named below.
 
 **How the ER generator is put together**, in the order the signal meets it:
@@ -1077,6 +1084,47 @@ reprint, paste. **The panel draws Room's table for every type** — it always
 did, and the engine now plays the type's own — which is the panel's to close
 and is on the open list.
 
+## The late network while SIZE moves
+
+**SIZE is a set-and-leave control.** A length move is weighted by when a
+sample was written, so it cannot add energy to the loop -- and the price is
+that every move takes some away. On held noise that passes: the network
+refills and settles at the new SIZE's own level. On a decaying tail it does
+not: one move at 48 kHz, DECAY 5 s, leaves the tail 1.2 dB under SIZE held
+for 12 -> 30 m or 12 -> 80 m, 10.8 dB for 80 -> 12 m and 19.5 dB for
+80 -> 0.5 m, for good -- shrinking costs more than growing. Under
+automation the losses add up: at DECAY 20 s, both multipliers 2.0, the
+tail's T60 is 39.45 s held, 21.58 s with SIZE on a 12..13 m LFO with a
+10 s period, 6.65 s on 12..30 m every 4 s, 1.91 s toggled 12 <-> 30 m every
+64 blocks of 32; held noise comes out 3.22 to 12.68 dB under its held
+level. **Frosty, 2026-10-03: "a held SIZE is untouched; automating SIZE
+thins the tail" is the behaviour for 0.2.6**, with gliding the line lengths
+as the fallback if the listening pass disagrees. The figures and the
+mechanism are in `10` §4's as-built list; "What automating SIZE costs the
+tail" in `reverb_dsp_tests` pins three of them in both directions, and the
+kept-moving test counts the rows it judged on a tail the moves had already
+taken under -120 dBFS.
+
+**DECAY, LOW x and HIGH x wait for a length move to end.** A SIZE move or a
+TYPE dip takes no new request until it is over (`applyPendingConfig`'s early
+return), and the three coefficients are requests like any other. With SIZE
+held they reach the network in the next block, 0.7 ms at 48 kHz / 32; under
+SIZE automation they reach it once a move, which at 48 kHz is every 111 ms
+(Room 12 <-> 30 m) to 247 ms (Room up to 80 m), 273 ms on Ambience
+automated 0.5..80 m and 289 ms for one Ambience 0.5 -> 80 m move (QA's probe,
+2026-10-03, on ICE QUEEN). A request made 10 ms into Room 12 -> 80 m arrives
+236.7 ms later, in the first block after the move ends.
+
+That is left as it is, on purpose. Letting the three through mid-move would
+not touch either filter bank's own gain -- each is designed from DECAY and
+the multipliers with the same ceiling, moving or not -- but the sum of the
+two paths during a move is held by measurement and not by proof (see
+`LateNetwork::process`), and every row of that measurement ran with the
+coefficients standing still through each move. **Changing this needs that
+measurement redone first.** "DECAY and the multipliers wait for a length move
+to end" in `reverb_dsp_tests` pins the behaviour: it fails if a request
+arrives before the move ends, or later than the first block after it.
+
 ## What is not here yet, and where it goes
 
 - **Tail reporting is done** (`11` section 2a, milestone M5).
@@ -1087,14 +1135,14 @@ and is on the open list.
 
   The rack **sums** it over occupied slots rather than taking the maximum —
   slots are in series, so 4 s feeding 2 s rings for 6 — and **then clamps the
-  total at `bmo::kMaxTailSeconds`, the same thirty seconds a module clamps
+  total at `bmo::kMaxTailSeconds`, the same forty seconds a module clamps
   itself at.** The clamp arrived 2026-09-21 with Frosty's approval, and the
   case it exists for is the one the slot limit does not stop: `addModule`
   counts slots and never looks for duplicates, so eight BMO Lingers is a legal
   chain and eight honest thirties is a four-minute tail — free at transport
   stop, where over-reporting only idles the host, and not free for an offline
   bounce, where the figure is rendered onto the end of every export. Both
-  clamps read the one constant in `core/dsp/ModuleDsp.h`; do not write 30.0
+  clamps read the one constant in `core/dsp/ModuleDsp.h`; do not write 40.0
   anywhere else.
 - **The engine.** `11` section 1 names the headers it grows —
   `ErGenerator.h`, `TapTables.h`, `Fdn.h`, `Absorbent.h`. Milestones M2–M4.
@@ -1104,7 +1152,10 @@ and is on the open list.
   and expect it red** — `10` section 4 records eight lines covering Plate to
   barely 1 s, and the fix is 16 lines, a larger mean delay, or accepting
   sparsity.
-- **Nothing has been heard.** Not one setting.
+- **Heard, but not voiced.** The early reflections (M2) and the tail (M3a)
+  have both been through a listening pass. Only Room's constants are worked
+  out, and Room is the one Frosty heard as wrong: M4 is where every type is
+  fitted by ear.
 
 ## The build rules, which are not optional
 

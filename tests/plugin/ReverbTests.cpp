@@ -811,7 +811,7 @@ int main()
         worst.preDelayMs = 250.0f;
         worst.sizeM = 80.0f;
         checkClose (Core::tailSecondsFor (worst), (double) Core::kMaxTailSeconds, 1.0e-4,
-                    "the reported tail is clamped to 30 s");
+                    "the reported tail is clamped to 40 s");
 
         // And what the host is handed is that same arithmetic, at the defaults
         // and at the ceiling -- not a second copy of the formula living in the
@@ -829,7 +829,7 @@ int main()
         setValue (*proc, P::kSize,     worst.sizeM);
         proc->prepareToPlay (48000.0, 512);
         checkClose (proc->getTailLengthSeconds(), (double) Core::kMaxTailSeconds, 1.0e-4,
-                    "and the 30 s ceiling reaches the host as 30 s");
+                    "and the 40 s ceiling reaches the host as 40 s");
     }
 
     //== State round-trip ======================================================

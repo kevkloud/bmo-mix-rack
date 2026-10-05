@@ -98,11 +98,11 @@ bundle id, preset extension, state tags and accent freeze too.
 Add `virtual double tailSecondsForParams(const float*, int) const` to
 `bmo::ModuleDsp` **defaulting to 0.0**, mirroring `latencyForParams` — from
 parameter values, not DSP state. Formula per 10 §5:
-`preDelay + T_mid·max(1, r_lo, r_hi) + t_ER,max + 0.05 s`, clamped to 30 s. The
+`preDelay + T_mid·max(1, r_lo, r_hi) + t_ER,max + 0.05 s`, clamped to 40 s (30 s until 2026-10-02). The
 rack **sums** across occupied slots, never maxes: slots are in series, so 4 s
 feeding 2 s rings longer than either, and under-reporting truncates tails while
 over-reporting only costs idle pulling. **The rack clamps its summed total at
-the same 30 s a module clamps itself at** — added 2026-09-21 with Frosty's
+the same 40 s a module clamps itself at** — added 2026-09-21 with Frosty's
 approval, for the case the slot limit does not stop: `addModule` counts slots
 and never looks for duplicates, so eight BMO Lingers is a legal chain and eight
 honest thirties is a four-minute tail. That is free at transport stop, where
@@ -724,7 +724,7 @@ reflection stops fusing with the direct sound. **The right-hand end ran to 30 s
 at all times until 2026-09-22** — `bmo::kMaxTailSeconds`, the clamp rather than
 a setting anybody uses — and at the 1.8 s default the curve finished about 60 %
 across with the remaining 40 % a flat line. It follows the tail now, far enough
-past it to leave 8 % of the *width* clear, clamped at the same 30 s. What that
+past it to leave 8 % of the *width* clear, clamped at the same 40 s. What that
 costs is comparability, and the readout pays it back: the decades are labelled
 inside the box and the bezel line prints absolute seconds.
 
@@ -805,16 +805,16 @@ The rest, one line each:
 | Ringing | Late tail (2× mixing time to −30 dB): spectral flatness **≥0.3**, no 1/3-octave band **>6 dB** over the smoothed mean, envelope autocorrelation **no peak >0.2 at lags 2–200 ms**, every type |
 | Modulation | 1 kHz sine, wet, tail only; instantaneous frequency from the phase derivative in 50 ms windows. Peak deviation **≤3 cents** at the top of depth and rate (10 §4). Report its spectrum — a visible rate means chorused, not randomised |
 | Pre-delay | First tail sample above −60 dB within **±1 sample**, every rate; **ER taps untouched, full stop** — `kPreLinkFixed` is `false` for every type since the trim (§4a), so the peak lag over the first 100 ms is 0 unconditionally and there is no second case to test; **range cannot go negative** and `latencyForParams` returns 0 throughout (10 §2) |
-| Parameter changes | TYPE: 30 ms dip, tables swapped at the minimum — no click, **no allocation**, no second engine. SIZE/PRE-DELAY: 30 ms crossfade, retriggered at 1% accumulated \|ΔS\|, windows summing to one, **ER and late sharing the scheme** (10 §3), no pitch shift on a held sine. Coefficients: no 1 ms energy jump above 3 dB |
+| Parameter changes | TYPE: 30 ms dip, tables swapped at the minimum — no click, **no allocation**, no second engine. SIZE/PRE-DELAY: 30 ms crossfade, retriggered at 1% accumulated \|ΔS\|, windows summing to one, **ER and late sharing the scheme** (10 §3), no pitch shift on a held sine. *Since 2026-10-03 the late network does not share it: its length moves are weighted by when a sample was written, so a move cannot add energy to the loop (10 §4, "As built"); the ER generator keeps the 30 ms crossfade.* Coefficients: no 1 ms energy jump above 3 dB |
 | Stability | Matrix orthogonal to 1e−6, `max\|Hᵢ(ω)\| ≤ 1 − 1e−4`. At `damphi` 2.0 / `decay` 20 s (effective T60 40 s): ten minutes then silence, never above +6 dBFS, RMS never growing over any 10 s window |
 | Denormals | 60 s of silence after a loud burst with FTZ/DAZ **disabled** — block time must not rise (the ~100× trap), tail reaching exactly 0.0f; this is what 10 §4's ±1e−20 injection is for |
 | NaN / silence | ±1.0 square, DC step, denormal input, fuzzed over schema corners at every type — every sample finite; after `reset()`, zeros in gives exactly zeros out |
-| Tail report | `tailSecondsForParams` **≥ measured −60 dB time** and **≤30 s**, every type, 44.1/48/96/192 kHz — what makes §2(a) mean anything |
+| Tail report | `tailSecondsForParams` **≥ measured −60 dB time** and **≤40 s** (30 s until 2026-10-02), every type, 44.1/48/96/192 kHz — what makes §2(a) mean anything |
 | Bypass | No per-slot enable flag exists (`00` §2, 10 §5), so a removed reverb truncates: assert the wet bus fades over **150 ms** in `reset()` on the envelope slope, and no click into the remaining chain |
 | Sample rate | 44.1–192 kHz. *Must not differ:* per-band T60 ±5%, tap times *in ms* ±0.1 ms, pre-delay ±0.1 ms, density crossing ±10%, latency **exactly 0**. *May differ:* sample values (lines re-primed per rate), modal detail above ~15 kHz, memory (linear in rate) |
 | Block size | 1/16/32/64/**127**/512/2048 **bit-identical** for fixed parameters; if not, something smooths per block instead of per sample — a bug, not a tolerance |
 | Buses | `numChannels` 1 and 2: mono finite and ≤3 dB down by the γ ≥ 0 rule. **Mono→stereo ships in v1** — landed 2026-09-21 on AURORA, `core/product/BusLayouts.h`, covered by `bus_tests`; the reverb sees the mono input duplicated into both channels and is free to decorrelate its tail from it |
-| CPU / memory | 10 §6's budget: `measure_reverb bench`, 60 s noise, 48 kHz/128, **Release**, median of five, on AURORA — **≤1.5% of a core at 48 kHz/128, ≤5% at 192 kHz**, eight slots under 12% and 40%. Memory ≈300 kB / ≈1.2 MB, allocated in `prepare()`, **zero allocation in `process()`**. Measure 10 §8's worst case first (DENSITY 48 taps, 3 diffuser stages, 192 kHz) |
+| CPU / memory | 10 §6's budget: `measure_reverb bench`, 60 s noise, 48 kHz/128, **Release**, median of five, on AURORA — **≤1.5% of a core at 48 kHz/128, ≤5% at 192 kHz** (the measured 4.77–5.18 % at 192 kHz / 32 was accepted by Frosty on 2026-10-03; 10 §6), eight slots under 12% and 40%. Memory ≈300 kB / ≈1.2 MB, allocated in `prepare()`, **zero allocation in `process()`**. Measure 10 §8's worst case first (DENSITY 48 taps, 3 diffuser stages, 192 kHz) |
 | Golden STATE | `checkSchema` pins ids, order, ranges, steps, defaults, formats and both choice lists with their index order; pin the **derived** per-type tap tables too, since 10 §8's "failing table is re-seeded, not patched" only works if it is pinned. For a fingerprint, a **hash of a fixed-seed IR** plus scalars — never audio |
 
 **Where they live.** *JUCE-free DSP* (`tests/dsp/ReverbDspTests.cpp`,
@@ -854,7 +854,7 @@ all of the above summed, at VARIATION 0 and 6.
 | **M2** ER generator | Image-source tables, Size law and crossfade, order-banded filters, diffuser, VARIATION, hi-cut, the Density bridge — tail silent | The whole ER block of §6 plus the ER-only listening items. **This milestone decides the module** |
 | **M3** late network | FDN, absorbent filters, damping over the per-type knees, EQ, pre-delay, SOURCE, modulation — plus the tail-onset and decay-truncation contours, which are now `TypeConstants::attack` and `decayShape` rather than knobs (§4a), and which the engine reads in `ReverbDsp::paramsFrom` | Modal density (incl. the Plate failure), T60, damping, echo density, ringing, modulation, pre-delay, level laws, phasing nulls, clicks |
 | **M4** types | Six v1 types and their constant blocks incl. reserved era fields | Every §6 test at every type; order frozen; Plate's line count resolved |
-| **M5** shared code | §2(a) as its own reviewed commit; (b)/(c) only if taken, byte-identical with BMO Dwell | Tail report ≥ measured and ≤30 s; existing modules proven unchanged by hash and schema test |
+| **M5** shared code | §2(a) as its own reviewed commit; (b)/(c) only if taken, byte-identical with BMO Dwell | Tail report ≥ measured and ≤ the ceiling (30 s then, 40 s since 2026-10-02); existing modules proven unchanged by hash and schema test |
 | **M6** acceptance | Invariance, stability, CPU/memory, CALIBRATE, listening | Those §6 blocks, recorded naming AURORA |
 
 **Done** = every milestone's exit test green in all three CI jobs on both
@@ -892,7 +892,8 @@ date given:
   in the trim (§4a).*
 - **The MIX law and its default** (2026-09-24): dry = min(1, 2(1 − mix)), wet =
   min(1, 2 mix), default 50 %, 100 % is verb only for a send.
-- **The tail ceiling rises to 40 s** (2026-09-26). `decay` 20 s × `damphi` or
+- **The tail ceiling rises to 40 s** (decided 2026-09-26, done 2026-10-02 in
+  M3a). `decay` 20 s × `damphi` or
   `damplo` 2.0 rings for 40 s, and §6 asked the report to be both ≥ measured
   and ≤ 30 s there. `kMaxTailSeconds` in `core/dsp/ModuleDsp.h` goes to 40 in
   M3, with the tests that prove the corner; §6's "≤30 s" becomes "≤40 s" in

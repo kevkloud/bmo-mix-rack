@@ -442,10 +442,15 @@ const Golden kDefaults[]
       // Recaptured 2026-09-26, also on ICE QUEEN, when VARIATION's default
       // went from 2 to 4 and ER MODE lost Blend on Frosty's listening pass,
       // and again the same day when ER HI-CUT went to 12 dB/octave.
-      // They move again when the tail lands (M3).
-      -18.2410459358, 0.241076186299,
-      -17.9906437489, 0.248789131641, -18.2275212722, 0.244729071856,
-      -17.8824750839, 0.258103877306, -18.5916796098, 0.236923843622 },
+      // Recaptured on ICE QUEEN, 2026-10-02, when the tail landed (M3a): at
+      // REVERB -6 dB the late network now plays under the ER, which moved
+      // the RMS figures by up to 0.07 dB and the peaks by up to 0.0016 against
+      // the M2 row. The swept row did not move, and should not have: its
+      // PRE-DELAY is 157 ms, past the end of this suite's 85 ms of signal, so
+      // its tail never starts.
+      -18.2163922222, 0.241076186299,
+      -17.9521665021, 0.248789131641, -18.2492466603, 0.243136674166,
+      -17.8128481771, 0.259217143059, -18.6147132938, 0.237479582429 },
     // Recaptured with the BMO Saturator row above, for the same reason: the
     // Saturator is the third slot of this chain. RMS fell by 1.281 dB (mono,
     // stereo-in duplicate, mono -> stereo), 1.152 dB (stereo L) and 0.882 dB

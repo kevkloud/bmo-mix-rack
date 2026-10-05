@@ -30,6 +30,107 @@ inline juce::NormalisableRange<float> rangeFor (const ParamSpec& s)
     return range;
 }
 
+/** A host value that is not a number is not a value (2026-10-04).
+
+    The standalone products' parameters are the framework's own classes, which
+    store what they are given: a NaN from a host sat in the parameter until
+    something put it back, read "nan dB", and a state saved in that window
+    left the parameter out. These subclasses refuse it where it arrives, on
+    whatever thread that is: the framework calls `valueChanged` from inside
+    `setValue`, after the store, so the hook puts back the value set
+    immediately before, before `setValue` returns. An infinity is clamped to
+    the rail it points at -- the framework already does that for a float and
+    a choice, and the hook does it for a switch, which stores its argument as
+    it is -- which is also what a rack lane does (`SlotParameter::setValue`).
+
+    **What cannot be refused is the notification.** `setValueNotifyingHost`
+    and `sendValueChangedMessageToListeners` are not virtual and hand every
+    listener the argument, not the stored value, so a listener is still sent
+    the NaN once. The owner is told (`takeRefused`) and sends the value that
+    stands to every listener on the message thread straight after
+    (`SingleModuleProcessor::handleAsyncUpdate`), so the last value each one
+    holds is the right one. */
+class HostValueGuard
+{
+public:
+    virtual ~HostValueGuard() = default;
+
+    /** True once since the last call if a NaN was refused. Any thread. */
+    bool takeRefused() noexcept { return refused.exchange (false, std::memory_order_acq_rel); }
+
+protected:
+    void startGuarding (juce::AudioProcessorParameter& self) { kept.store (self.getValue(), std::memory_order_relaxed); }
+
+    /** From the class's `valueChanged`, inside `setValue`. `isNaN` is read
+        from the stored value; `normalised` is the stored value in 0..1. The
+        nested `setValue` comes back through here with a finite value. */
+    void guard (juce::AudioProcessorParameter& self, bool isNaN, float normalised)
+    {
+        if (isNaN)
+        {
+            refused.store (true, std::memory_order_release);
+            self.setValue (kept.load (std::memory_order_relaxed));
+            return;
+        }
+
+        if (normalised < 0.0f || normalised > 1.0f)
+        {
+            self.setValue (juce::jlimit (0.0f, 1.0f, normalised));
+            return;
+        }
+
+        kept.store (normalised, std::memory_order_relaxed);
+    }
+
+private:
+    std::atomic<float> kept { 0.0f };
+    std::atomic<bool> refused { false };
+};
+
+class GuardedFloat final : public juce::AudioParameterFloat, public HostValueGuard
+{
+public:
+    template <typename... Args>
+    explicit GuardedFloat (Args&&... args) : juce::AudioParameterFloat (std::forward<Args> (args)...) { startGuarding (*this); }
+
+private:
+    void valueChanged (float real) override
+    {
+        juce::AudioProcessorParameter& self = *this;
+        guard (self, std::isnan (real), std::isnan (real) ? 0.0f : self.getValue());
+    }
+};
+
+class GuardedBool final : public juce::AudioParameterBool, public HostValueGuard
+{
+public:
+    template <typename... Args>
+    explicit GuardedBool (Args&&... args) : juce::AudioParameterBool (std::forward<Args> (args)...) { startGuarding (*this); }
+
+private:
+    void valueChanged (bool) override
+    {
+        juce::AudioProcessorParameter& self = *this;
+        const auto stored = self.getValue();
+        guard (self, std::isnan (stored), stored);
+    }
+};
+
+class GuardedChoice final : public juce::AudioParameterChoice, public HostValueGuard
+{
+public:
+    template <typename... Args>
+    explicit GuardedChoice (Args&&... args) : juce::AudioParameterChoice (std::forward<Args> (args)...) { startGuarding (*this); }
+
+private:
+    void valueChanged (int) override
+    {
+        juce::AudioProcessorParameter& self = *this;
+        const auto stored = self.getValue();
+        guard (self, std::isnan (stored), stored);
+    }
+};
+
 /** JUCE parameter objects from a spec list, for a standalone product.
 
     Types, names, ranges, steps and text functions have to come out exactly as
@@ -48,7 +149,7 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout makeLayout (const Par
         switch (s.kind)
         {
             case ParamKind::Bool:
-                layout.add (std::make_unique<juce::AudioParameterBool> (id, s.name, s.def >= 0.5f));
+                layout.add (std::make_unique<GuardedBool> (id, s.name, s.def >= 0.5f));
                 break;
 
             case ParamKind::Choice:
@@ -57,7 +158,7 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout makeLayout (const Par
                 for (auto* c : s.choices)
                     choices.add (c);
 
-                layout.add (std::make_unique<juce::AudioParameterChoice> (id, s.name, choices, (int) s.def));
+                layout.add (std::make_unique<GuardedChoice> (id, s.name, choices, (int) s.def));
                 break;
             }
 
@@ -86,7 +187,7 @@ inline juce::AudioProcessorValueTreeState::ParameterLayout makeLayout (const Par
                         return spec.valueFromText (text.toStdString());
                     });
 
-                layout.add (std::make_unique<juce::AudioParameterFloat> (
+                layout.add (std::make_unique<GuardedFloat> (
                     id, s.name, rangeFor (s), s.def, attr));
                 break;
             }

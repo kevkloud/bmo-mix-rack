@@ -1532,11 +1532,13 @@ int main()
     // The review of 2026-10-03: a host's setValue (NaN) on a rack lane was
     // stored -- the lane read "nan dB", the slot's output was 0 for as long as
     // it stayed, and the saved state then carried value="nan". The same on a
-    // standalone parameter. A value that is not finite is now ignored where
-    // it comes in and the previous value stands: on a rack lane at once, on a
-    // standalone parameter (the framework's own class, which stores what it
-    // is given) by the engine holding its last finite value from the next
-    // block and the parameter being put back on the message thread.
+    // standalone parameter. A NaN is now ignored where it comes in, on
+    // whatever thread, and the value set immediately before stands: on a rack
+    // lane, and on a standalone parameter (the framework's own class, through
+    // HostValueGuard) before setValue returns -- until 2026-10-04 that one
+    // was put back only after the next block and the message loop, so it came
+    // back as the last value a block had read, and a session saved in between
+    // left it out. An infinity goes to the rail it points at, in both.
     {
         const float notValues[] { std::numeric_limits<float>::quiet_NaN(),
                                   std::numeric_limits<float>::infinity(),
@@ -1596,37 +1598,131 @@ int main()
                 peak (*rack, 4);
                 lane.setValue (bad);
 
-                checkClose (lane.getValue(), 0.25, 1.0e-6, "rack, " + what + ": the lane keeps its value");
+                // Since 2026-10-04 an infinity goes to the rail it points at
+                // in both products; a NaN keeps the value.
+                const auto expected = std::isnan (bad) ? 0.25f : (bad > 0.0f ? 1.0f : 0.0f);
+                checkClose (lane.getValue(), expected, 1.0e-6, "rack, " + what + ": the lane holds " + juce::String (expected));
                 check (! lane.getCurrentValueAsText().containsIgnoreCase ("nan"),
                        "rack, " + what + ": the lane reads '" + lane.getCurrentValueAsText() + "'");
-                checkClose (peak (*rack, 50), 0.125 * juce::Decibels::decibelsToGain (-12.0), 0.002,
-                            "rack, " + what + ": the slot still plays at -12 dB");
-                check (savedGain (*rack, true).getFloatValue() == -12.0f,
+                check (savedGain (*rack, true).getFloatValue() == lane.convertFrom0to1 (expected),
                        "rack, " + what + ": the session saves gain " + savedGain (*rack, true));
+
+                if (std::isnan (bad))
+                    checkClose (peak (*rack, 50), 0.125 * juce::Decibels::decibelsToGain (-12.0), 0.002,
+                                "rack, " + what + ": the slot still plays at -12 dB");
             }
 
-            // Standalone. Only a NaN: the framework's parameter clamps an
-            // infinity to the rail it points at before any code here sees it,
-            // which is a value, if not the previous one.
-            if (std::isnan (bad))
+            // Standalone, at the moment it arrives: no block, no message loop.
             {
                 bmo::SingleModuleProcessor proc (bmo::util::module(), bmo::products::rackInfo());
                 proc.setPlayConfigDetails (2, 2, 48000.0, 512);
                 proc.prepareToPlay (48000.0, 512);
 
+                // QA's case: a block reads +6 dB, the host sets +12 dB, then
+                // the NaN arrives before the next block. +12 dB stands.
                 auto& param = proc.getEngine().params().param (bmo::util::Index::gain);
-                param.setValue (0.25f);
-                peak (proc, 4);
+                param.setValue (param.convertTo0to1 (6.0f));
+                peak (proc, 1);
+                param.setValue (param.convertTo0to1 (12.0f));
+                const auto twelve = param.getValue();
                 param.setValue (bad);
 
-                checkClose (peak (proc, 50), 0.125 * juce::Decibels::decibelsToGain (-12.0), 0.002,
-                            "standalone, " + what + ": the module still plays at -12 dB");
-                juce::MessageManager::getInstance()->runDispatchLoopUntil (20);
-                checkClose (param.getValue(), 0.25, 1.0e-6, "standalone, " + what + ": the parameter is back at its value");
-                check (savedGain (proc, false).getFloatValue() == -12.0f,
-                       "standalone, " + what + ": the session saves gain " + savedGain (proc, false));
+                const auto expected = std::isnan (bad) ? twelve : (bad > 0.0f ? 1.0f : 0.0f);
+                checkClose (param.getValue(), expected, 1.0e-6,
+                            "standalone, " + what + ": the parameter holds " + juce::String (param.convertFrom0to1 (expected)) + " dB at once");
+                check (! param.getCurrentValueAsText().containsIgnoreCase ("nan"),
+                       "standalone, " + what + ": the parameter reads '" + param.getCurrentValueAsText() + "'");
+                check (savedGain (proc, false).getFloatValue() == param.convertFrom0to1 (expected),
+                       "standalone, " + what + ": a session saved now has gain " + savedGain (proc, false));
+
+                juce::MemoryBlock block;
+                proc.getStateInformation (block);
+                auto xml = juce::AudioProcessor::getXmlFromBinary (block.getData(), (int) block.getSize());
+                check (xml != nullptr && xml->getNumChildElements() == (int) bmo::util::module().specs.size(),
+                       "standalone, " + what + ": the session carries every parameter");
+            }
+
+            // A switch and a choice, standalone: the framework stores a
+            // switch's argument as it is, so an infinity is clamped here.
+            {
+                auto registryRack = createRack();
+                bmo::SingleModuleProcessor proc (*registryRack->findModule ("deq"), bmo::products::rackInfo());
+                auto& set = proc.getEngine().params();
+
+                for (const auto kind : { bmo::ParamKind::Bool, bmo::ParamKind::Choice })
+                    for (int i = 0; i < set.size(); ++i)
+                        if (set.spec (i).kind == kind)
+                        {
+                            auto& p = set.param (i);
+                            p.setValue (1.0f);
+                            p.setValue (bad);
+
+                            // Except a choice and a NaN: the framework's choice
+                            // rounds it to an index before storing anything, and
+                            // the round gives the first choice -- a finite value
+                            // no hook can tell from a host choosing it.
+                            // Measured 2026-10-04 on ICE QUEEN; the same before
+                            // this change. A rack lane keeps its value.
+                            const auto choiceNaN = kind == bmo::ParamKind::Choice && std::isnan (bad);
+                            const auto expected = choiceNaN ? 0.0f : (std::isnan (bad) || bad > 0.0f ? 1.0f : 0.0f);
+                            checkClose (p.getValue(), expected, 1.0e-6,
+                                        "standalone " + juce::String (set.spec (i).id) + ", " + what + ": holds " + juce::String (expected));
+                            break;
+                        }
             }
         }
+    }
+
+    //== A listener is sent the NaN once, and then the value that stands =======
+    // The framework's notifying setter is not virtual and hands every listener
+    // its argument, so a parameter that refuses a NaN cannot stop the NaN
+    // reaching its listeners -- an editor's attachments, the host's callback.
+    // Each product then sends them the value that stands, on the message
+    // thread, so the last value every listener holds is right. A host's
+    // NaN from the message thread and from another thread.
+    {
+        struct Recorder final : juce::AudioProcessorParameter::Listener
+        {
+            void parameterValueChanged (int, float v) override
+            {
+                const juce::ScopedLock sl (lock);
+                values.push_back (v);
+            }
+
+            void parameterGestureChanged (int, bool) override {}
+
+            juce::CriticalSection lock;
+            std::vector<float> values;
+        };
+
+        const auto exercise = [] (juce::RangedAudioParameter& p, const juce::String& who)
+        {
+            Recorder recorder;
+            p.addListener (&recorder);
+            p.setValueNotifyingHost (0.25f);
+            p.setValueNotifyingHost (std::numeric_limits<float>::quiet_NaN());
+            std::thread host ([&p] { p.setValueNotifyingHost (std::numeric_limits<float>::quiet_NaN()); });
+            host.join();
+            juce::MessageManager::getInstance()->runDispatchLoopUntil (50);
+            p.removeListener (&recorder);
+
+            int nonFinite = 0;
+            for (auto v : recorder.values)
+                nonFinite += std::isfinite (v) ? 0 : 1;
+
+            check (! recorder.values.empty() && recorder.values.back() == 0.25f,
+                   who + ": the last value a listener is sent is the one that stands, got "
+                       + juce::String (recorder.values.empty() ? -1.0f : recorder.values.back()));
+            check (nonFinite <= 2, who + ": a listener is sent each NaN at most once, sent " + juce::String (nonFinite));
+            checkClose (p.getValue(), 0.25, 1.0e-6, who + ": the parameter never took it");
+        };
+
+        auto rack = createRack();
+        rack->addModule (*rack->findModule ("util"));
+        exercise (rack->getSlotParameter (0, bmo::util::Index::gain), "rack lane");
+
+        bmo::SingleModuleProcessor proc (bmo::util::module(), bmo::products::rackInfo());
+        exercise (proc.getEngine().params().param (bmo::util::Index::gain), "standalone parameter");
     }
 
     //== A module this build does not have keeps its place =====================

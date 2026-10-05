@@ -17,6 +17,12 @@ SingleModuleProcessor::SingleModuleProcessor (const ModuleDef& d, ProductInfo i)
     for (const auto& s : def.specs)
         apvts.addParameterListener (s.id, this);
 
+    // Added before any editor's attachments, so the framework calls this
+    // after them for the same notification, and the value sent back below is
+    // queued after what they queued.
+    for (int i = 0; i < engine.params().size(); ++i)
+        engine.params().param (i).addListener (this);
+
     // Answer honestly before the first prepareToPlay: a host is entitled to
     // ask an instance it has only just constructed, and for BMO Linger the
     // default schema is already several seconds of tail.
@@ -32,6 +38,9 @@ SingleModuleProcessor::~SingleModuleProcessor()
 {
     for (const auto& s : def.specs)
         apvts.removeParameterListener (s.id, this);
+
+    for (int i = 0; i < engine.params().size(); ++i)
+        engine.params().param (i).removeListener (this);
 
     cancelPendingUpdate();
 }
@@ -67,10 +76,31 @@ void SingleModuleProcessor::runEngine (float* const* channels, int numChannels, 
         triggerAsyncUpdate();
 }
 
+void SingleModuleProcessor::parameterValueChanged (int, float value)
+{
+    // The parameter has already refused it (HostValueGuard); the listeners
+    // the framework handed it to are put right on the message thread.
+    if (std::isnan (value))
+    {
+        nonFiniteSent.store (true, std::memory_order_release);
+        triggerAsyncUpdate();
+    }
+}
+
 void SingleModuleProcessor::handleAsyncUpdate()
 {
     auto& params = engine.params();
 
+    // Every listener that was sent a NaN is sent the value that stands.
+    if (nonFiniteSent.exchange (false, std::memory_order_acq_rel))
+        for (int i = 0; i < params.size(); ++i)
+            if (auto* guarded = dynamic_cast<HostValueGuard*> (&params.param (i)))
+                if (guarded->takeRefused())
+                    params.param (i).sendValueChangedMessageToListeners (params.param (i).getValue());
+
+    // A parameter refuses a NaN as it arrives, so this finds one only if a
+    // block read it in the moment between the store and the refusal; kept as
+    // the backstop it was.
     for (int i = 0; i < params.size(); ++i)
     {
         auto& p = params.param (i);

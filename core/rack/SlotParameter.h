@@ -80,13 +80,26 @@ public:
         // A host that sends something that is not a number has not sent a
         // value, so the lane keeps the one it had. Stored, a NaN read "nan dB",
         // silenced the slot for as long as it stayed and was saved with the
-        // session (the review of 2026-10-03); an infinity, clamped, would have
-        // jumped to a rail the host never asked for.
-        if (! std::isfinite (newValue))
+        // session (the review of 2026-10-03). An infinity is clamped to the
+        // rail it points at (2026-10-04), which is what a standalone product's
+        // parameter does too (HostValueGuard in state/Parameters.h); until
+        // then a lane ignored it and the two products disagreed.
+        //
+        // The framework still sends the lane's listeners the NaN itself
+        // afterwards -- its notifying setter is not virtual -- so the flag
+        // lets the rack send them the value that stands
+        // (RackProcessor::handleAsyncUpdate).
+        if (std::isnan (newValue))
+        {
+            refused.store (true, std::memory_order_release);
             return;
+        }
 
         value.store (juce::jlimit (0.0f, 1.0f, newValue), std::memory_order_relaxed);
     }
+
+    /** True once since the last call if a NaN was refused. Any thread. */
+    bool takeRefused() noexcept { return refused.exchange (false, std::memory_order_acq_rel); }
 
     float getDefaultValue() const override
     {
@@ -189,6 +202,7 @@ private:
     const juce::String defaultName;
 
     std::atomic<float> value { 0.0f };
+    std::atomic<bool> refused { false };
     std::atomic<const ParamSpec*> spec { nullptr };
     juce::NormalisableRange<float> range { 0.0f, 1.0f };
 

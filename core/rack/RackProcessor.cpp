@@ -656,8 +656,14 @@ void RackProcessor::applyPreset (const RackPreset& preset)
 }
 
 //==============================================================================
-void RackProcessor::parameterValueChanged (int, float)
+void RackProcessor::parameterValueChanged (int, float value)
 {
+    // The rack is the first listener every lane has, so the framework calls
+    // it after an editor's attachments for the same notification: the value
+    // sent back below is queued after what they queued.
+    if (std::isnan (value))
+        nonFiniteSent.store (true, std::memory_order_release);
+
     presets.noteChange();
     triggerAsyncUpdate();
 }
@@ -698,6 +704,26 @@ void RackProcessor::handleAsyncUpdate()
     {
         const juce::ScopedLock edit (editLock);
         collectRetired();
+
+        // A lane refused a NaN, and the framework sent it to the lane's
+        // listeners anyway: they are sent the value that stands.
+        if (nonFiniteSent.exchange (false, std::memory_order_acq_rel))
+        {
+            const auto putRight = [] (SlotParameter& p)
+            {
+                if (p.takeRefused())
+                    p.sendValueChangedMessageToListeners (p.getValue());
+            };
+
+            for (auto& lanes : params)
+                for (auto* p : lanes)
+                    putRight (*p);
+
+            for (auto& s : slots)
+                if (s.overflow != nullptr)
+                    for (auto* p : s.overflow->parameters())
+                        putRight (*p);
+        }
     }
 
     const auto latency = totalLatency();

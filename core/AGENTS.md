@@ -227,13 +227,25 @@ rack/     SlotParameter (one generic host parameter, remapped live),
   carry checks from before it; they are redundant, not a pattern.
   `finite_tests` walks the registry, Tune included, and the processors'
   bypass and skip paths, and holds all of this. **The same for a parameter
-  value a host sends**: a rack lane ignores one that is not finite
-  (`SlotParameter::setValue`) and keeps its value; a standalone parameter is
-  the framework's class, which stores a NaN (an infinity it clamps to a rail
-  itself), so `ModuleEngine` holds the last finite value from the next block,
-  `SingleModuleProcessor` puts the parameter back on the message thread, and
-  `ParamSet::toXml` never writes value="nan" in between. `RackTests` holds
-  both products.
+  value a host sends** (2026-10-04): a NaN is refused where it arrives, on
+  whatever thread, and the value set immediately before stands -- by a rack
+  lane (`SlotParameter::setValue`) and by a standalone parameter, which is
+  the framework's class made to refuse it (`HostValueGuard` in
+  `state/Parameters.h`, from inside `setValue` through `valueChanged`). An
+  infinity goes to the rail it points at in both products; until 2026-10-04
+  a lane ignored one and a standalone parameter clamped it. One exception: a
+  standalone **choice** rounds a NaN to an index inside the framework before
+  anything is stored, and that gives its first choice, a finite value no
+  hook can tell from a host choosing it (as before; a rack lane keeps its
+  value). `ParamSet::toXml`
+  always writes every parameter. **A listener is still sent the NaN once**:
+  the framework's notifying setter is not virtual and hands listeners its
+  argument, not the stored value, so each processor then sends every
+  listener of a parameter that refused one the value that stands, on the
+  message thread, queued after what an editor's attachments queued.
+  `ModuleEngine`'s hold on the last finite value and the standalone put-back
+  stay as a backstop for the instant between a store and its refusal.
+  `RackTests` holds both products, a switch and a choice included.
 - **Every module is handed the host's tempo, once per block**
   (`ModuleDsp::setTempo`), so a module can sync to it without either
   processor knowing which modules care. Both processors read the playhead at

@@ -114,13 +114,16 @@ public:
 
         for (int i = 0; i < size(); ++i)
         {
-            // A parameter a host has just set to NaN, before its owner puts it
-            // back (SingleModuleProcessor), is left out rather than written as
-            // value="nan": a restore then gives it its default.
-            const auto real = getReal (i);
+            // Every parameter, always. Neither product's parameters keep a NaN
+            // a host sends (SlotParameter::setValue, HostValueGuard), so one
+            // can be read here only in the instant between a standalone
+            // parameter's store and its refusal; it is written as its default
+            // then, never as value="nan" and never left out -- left out, a
+            // restore gave the default anyway, silently (QA, 2026-10-04).
+            auto real = getReal (i);
 
             if (std::isnan (real))
-                continue;
+                real = spec (i).def;
 
             auto* e = xml->createNewChildElement (kParamTag);
             e->setAttribute ("id", spec (i).id);

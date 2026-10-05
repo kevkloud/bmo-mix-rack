@@ -384,6 +384,12 @@ private:
     // reaches both through the triggerAsyncUpdate() at the end of rebuild().
     std::atomic<double> reportedTail { 0.0 };
 
+    // Set when a lane's listeners were sent a NaN, which the lane itself
+    // refused (SlotParameter::setValue); the message thread then sends them
+    // the value that stands. Only this flag consumes the lanes' own, so a
+    // refusal is never collected before its notification has gone out.
+    std::atomic<bool> nonFiniteSent { false };
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (RackProcessor)
 };
 

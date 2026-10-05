@@ -350,7 +350,16 @@ public:
                 }
             }
 
-            hiCutCoef += (hiCutTarget - hiCutCoef) * smooth;
+            // **Landing exactly.** In float the step falls under half an ulp
+            // of the coefficient some way short of the target, and until
+            // 2026-10-05 it stopped there for good: 1.3e-5 to 5.7e-5 short
+            // after a move, which held every later render -111 to -117 dB
+            // from one that never moved. A step that no longer moves the
+            // coefficient has arrived.
+            {
+                const auto next = hiCutCoef + (hiCutTarget - hiCutCoef) * smooth;
+                hiCutCoef = next == hiCutCoef ? hiCutTarget : next;
+            }
             l = hiCutL2.process (hiCutL.process (l, hiCutCoef), hiCutCoef);
             r = hiCutR2.process (hiCutR.process (r, hiCutCoef), hiCutCoef);
 
@@ -394,6 +403,10 @@ public:
     //== For the tests and the measurement tool ================================
 
     float spanMs() const noexcept { return sets[active].spanMs; }
+
+    /** The ER hi-cut's coefficient in use, and the one it is gliding to. */
+    float hiCutCoefficient() const noexcept { return hiCutCoef; }
+    float hiCutTargetCoefficient() const noexcept { return hiCutTarget; }
     int   tapCount() const noexcept { return sets[active].count; }
     bool  isFading() const noexcept { return fading || dipping; }
 

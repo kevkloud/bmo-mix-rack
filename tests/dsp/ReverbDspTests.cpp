@@ -1875,9 +1875,11 @@ int main (int argc, char** argv)
     // instance glides there from its construction defaults and, in float,
     // stalls a few hundred ulps short. (Holding the hi-cut's glide alone
     // moved the floor to -91 dB.) The old table playing on measured +0.18 dB.
-    // Since 2026-10-05 a fresh instance starts at its settings too, and the
-    // two are identical: the residual prints about -3018 dB, the floor of
-    // `residualDb`, so the -80 dB bar is loose now but still right.
+    //
+    // **Since 2026-10-05 the bar is exact equality, over the whole 0.5 s.** A
+    // fresh instance starts at its settings and reset() lands on them, so the
+    // two play the same samples; the residual had been printing about
+    // -3018 dB, the floor of `residualDb`, against the -80 dB bar.
     {
         struct Move { const char* what; int index; float value; };
         bool landed = true;
@@ -1906,12 +1908,14 @@ int main (int argc, char** argv)
             Stereo h;
             runNoise (ref, h, 0, 24000, 512);
 
-            const auto r = residualDb (h, s, 14400, 24000);
-            std::cout << "  reset() in " << m.what << ": " << r << " dB residual against a fresh instance at the new setting\n";
-            landed = landed && r <= -80.0;
+            double worst = 0.0;
+            for (size_t i = 0; i < h.l.size(); ++i)
+                worst = std::max ({ worst, (double) std::abs (h.l[i] - s.l[i]), (double) std::abs (h.r[i] - s.r[i]) });
+            std::cout << "  reset() in " << m.what << ": largest difference from a fresh instance at the new setting " << worst << "\n";
+            landed = landed && worst == 0.0;
         }
 
-        check (landed, "reset() during a crossfade or a TYPE dip lands on the new setting, not the old one (residual under -80 dB)");
+        check (landed, "reset() during a crossfade or a TYPE dip lands on the new setting: a fresh instance's samples, exactly");
     }
 
     //== The ER hi-cut is designed at the rate the generator runs at =============
@@ -1959,6 +1963,50 @@ int main (int argc, char** argv)
         }
 
         check (same, "ER HI-CUT sent before prepare() is designed at the prepared rate, 96 and 192 kHz");
+    }
+
+    //== The ER hi-cut's glide lands exactly ======================================
+    //
+    // After a move the coefficient's 20 ms glide stopped 1.3e-5 to 5.7e-5
+    // short of its target for good (QA's review, 2026-10-05): in float the
+    // step fell under half an ulp. Every later render then sat -111 to
+    // -117 dB from one that had never moved. 3 kHz, 0.1 s of noise, then
+    // 7 kHz and 1 s more -- 50 time constants -- must leave the coefficient
+    // exactly on its target, at 44.1, 48, 96 and 192 kHz.
+    {
+        bool arrived = true;
+
+        for (const auto rate : { 44100.0, 48000.0, 96000.0, 192000.0 })
+        {
+            ErGenerator g;
+            g.setHiCut (3000.0f);
+            g.prepare (rate, 512);
+
+            std::vector<float> x (512), l (512), r (512);
+            int n = 0;
+            const auto run = [&] (double seconds)
+            {
+                for (int at = 0; at < (int) (seconds * rate); at += 512)
+                {
+                    for (int i = 0; i < 512; ++i)
+                        x[(size_t) i] = 0.5f * noiseAt (n++);
+                    g.process (x.data(), l.data(), r.data(), 512);
+                }
+            };
+
+            run (0.1);
+            g.setHiCut (7000.0f);
+            run (1.0);
+
+            const auto gap = (double) g.hiCutTargetCoefficient() - (double) g.hiCutCoefficient();
+            if (gap != 0.0)
+            {
+                arrived = false;
+                std::cerr << "  ER HI-CUT 3 -> 7 kHz at " << rate << " Hz: the coefficient stops " << gap << " short\n";
+            }
+        }
+
+        check (arrived, "the ER hi-cut's glide lands exactly on its target after a move, 44.1 to 192 kHz");
     }
 
     //== The module is at its settings from its first sample =====================
@@ -2178,6 +2226,149 @@ int main (int argc, char** argv)
                   << (longRun ? "" : " (the default four; --long runs 36)") << "\n";
         check (freshAtSettings, "a fresh instance is at its settings from sample 0: it plays what one settled on 10 s of silence plays");
         check (sentAtSettings, "settings sent between prepare() and the first block land at once: it plays what a settled instance plays");
+
+        //-- (d) a value CHANGED between reset() and the first block ---------------
+        //
+        // reset() empties the module's memory, so whatever acts on that memory
+        // lands on a changed request: the instance must play what a fresh one
+        // prepared with the new values plays. One row per stage, so a reset()
+        // that forgot to let its stage land fails that stage's row: the early
+        // reflections alone, the late network alone, both (TYPE and SIZE), and
+        // the gains on the wet side. The last row moves the dry path's gains
+        // BEFORE reset() and holds them a second: they keep their value across
+        // reset() (see (e)), so this asks that their glide has landed exactly.
+        {
+            struct Change { const char* stage; std::vector<std::pair<int, float>> to; bool beforeReset; };
+            const Change changes[]
+            {
+                { "early reflections", { { Index::ermode, 1.0f }, { Index::ervariation, 1.0f }, { Index::erdensity, 90.0f },
+                                         { Index::erhicut, 3000.0f }, { Index::erspread, 120.0f } }, false },
+                { "late network",      { { Index::decay, 6.0f }, { Index::predelay, 40.0f }, { Index::damplo, 1.8f }, { Index::damphi, 0.2f } }, false },
+                { "TYPE and SIZE",     { { Index::type, (float) hall }, { Index::size, 40.0f } }, false },
+                { "wet-side gains",    { { Index::erlevel, -3.0f }, { Index::verblevel, -3.0f }, { Index::width, 180.0f }, { Index::feed, 20.0f } }, false },
+                { "dry-path gains moved before reset()", { { Index::mix, 80.0f }, { Index::output, -6.0f } }, true },
+            };
+
+            bool landed = true;
+            for (const auto rate : { 48000.0, 96000.0 })
+                for (const auto& ch : changes)
+                {
+                    const auto from = defaults();
+                    auto to = from;
+                    for (const auto& [index, value] : ch.to)
+                        to[(size_t) index] = value;
+
+                    auto d = fresh (from, rate);
+                    play (*d, from, (int) (0.5 * rate), false);
+                    if (ch.beforeReset)
+                        play (*d, to, (int) rate, false);
+                    d->reset();
+                    d->setParams (to.data(), (int) to.size());
+
+                    auto ref = fresh (to, rate);
+                    const auto diff = largestDifference (play (*d, to, (int) rate, false), play (*ref, to, (int) rate, false));
+                    if (diff != 0.0)
+                    {
+                        landed = false;
+                        std::cerr << "  (d) " << ch.stage << " changed " << (ch.beforeReset ? "before" : "after")
+                                  << " reset() at " << rate << " Hz: largest difference from a fresh instance " << diff << "\n";
+                    }
+                }
+
+            check (landed, "a value changed across reset() lands where a fresh instance prepared with it starts, at every stage, 48 and 96 kHz");
+        }
+
+        //-- (e) reset() does not step the dry path -------------------------------
+        //
+        // The input still passes through dry and OUTPUT when a host resets, so
+        // those two keep their smoothed value across reset() and glide to a
+        // changed request. Snapped, as they were on the first pass of this
+        // fix, OUTPUT moved to 0.3 normalised stepped 8.47 times the input's
+        // own largest step, MIX to 100 % 9.57 times (QA, 2026-10-05). The
+        // stimulus: 1 s of a 1 kHz sine at 0.12589 peak (-18 dBFS) through
+        // the defaults, reset() on a peak, then the sine on with the new
+        // values; the largest sample-to-sample step from the last sample
+        // before reset() to 0.5 ms after it -- ahead of the earliest
+        // reflection, so the wet path building up again is not counted -- over
+        // the input's own.
+        //
+        // The bar is the step reset() makes with nothing changed -- the wet
+        // path emptying, 1.00 times the input's at 48 kHz and 2.49 at 96 kHz
+        // on this stimulus -- plus 5 %. On the first pass of this fix the
+        // snapped rows measured up to 7.88 (48 kHz) and 17.8 (96 kHz), MIX to
+        // 100 % the worst at both. A 20 ms glide moves a gain by
+        // 0.1 % of its change in a sample at 48 kHz, so a glide adds well
+        // under that; a snap adds the whole change.
+        {
+            const auto stepRatio = [&] (const std::vector<float>& to, double rate)
+            {
+                const auto from = defaults();
+                auto d = fresh (from, rate);
+                std::vector<float> l ((size_t) block), r ((size_t) block);
+                double inStep = 0.0, outStep = 0.0;
+                float lastIn = 0.0f, lastOut = 0.0f;
+                bool have = false;
+                const int before = ((int) rate / block) * block, after = (int) (0.0005 * rate);
+
+                for (int at = 0; at < before + after; at += block)
+                {
+                    if (at == before)
+                        d->reset();
+                    const auto& v = at < before ? from : to;
+                    for (int i = 0; i < block; ++i)
+                        l[(size_t) i] = r[(size_t) i] = 0.12589f * (float) std::cos (2.0 * 3.14159265358979 * 1000.0 * (at + i - before) / rate);
+                    const auto in = l;
+                    float* chans[] { l.data(), r.data() };
+                    d->setParams (v.data(), (int) v.size());
+                    d->process (chans, 2, block);
+
+                    for (int i = 0; i < block; ++i)
+                    {
+                        if (have)
+                        {
+                            inStep = std::max (inStep, (double) std::abs (in[(size_t) i] - lastIn));
+                            if (at + i >= before && at + i < before + after)
+                                outStep = std::max (outStep, (double) std::abs (l[(size_t) i] - lastOut));
+                        }
+                        lastIn = in[(size_t) i];
+                        lastOut = l[(size_t) i];
+                        have = true;
+                    }
+                }
+                return outStep / inStep;
+            };
+
+            const auto normalisedAlone = [] (int index, float n)
+            {
+                auto v = defaults();
+                v[(size_t) index] = specs()[(size_t) index].fromNormalised (n);
+                return v;
+            };
+
+            bool smooth = true;
+            for (const auto rate : { 48000.0, 96000.0 })
+            {
+                const auto alone = stepRatio (defaults(), rate);
+
+                struct Row { std::string what; std::vector<float> to; };
+                std::vector<Row> rows;
+                for (const auto index : { Index::erlevel, Index::verblevel, Index::feed, Index::width, Index::mix, Index::output })
+                    rows.push_back ({ std::string (specs()[(size_t) index].id) + " at 0.63", normalisedAlone (index, 0.63f) });
+                rows.push_back ({ "output at 0.3", normalisedAlone (Index::output, 0.3f) });
+                rows.push_back ({ "mix at 100 %", normalisedAlone (Index::mix, 1.0f) });
+                rows.push_back ({ "every parameter at 0.63", valuesAt (0.63f, -1) });
+
+                std::cout << "  (e) reset() at " << rate << " Hz, nothing changed: step " << alone << " x the input's\n";
+                for (const auto& row : rows)
+                {
+                    const auto ratio = stepRatio (row.to, rate);
+                    std::cout << "  (e) reset() at " << rate << " Hz, " << row.what << ": step " << ratio << " x the input's\n";
+                    smooth = smooth && ratio <= 1.05 * alone;
+                }
+            }
+
+            check (smooth, "a gain changed across reset() glides on the dry path: no step beyond reset()'s own, 48 and 96 kHz");
+        }
     }
 
     //== ER SPREAD is not a table change in Taps =================================

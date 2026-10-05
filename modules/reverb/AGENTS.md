@@ -80,6 +80,14 @@ one exception named below.
   cluster 8.7 ms late, and it bypasses the diffuser; its mono sum is exactly
   flat and *not* empty — see the open points.
 - **ER HI-CUT** is one exact-corner pole per channel after everything.
+  Its coefficient is designed at the prepared rate (f81a153, 2026-10-05).
+  Before that, a value sent before the first prepare() was designed at
+  48 kHz, and the corner was off by +2.11 dB at 96 kHz and +2.77 dB at
+  192 kHz at 7 kHz, which that commit says, and also **-0.42 dB at
+  44.1 kHz** (-0.46 dB at a 1 kHz corner), which it does not: through
+  the plug-in for the first 50-150 ms, and for a caller driving the
+  generator directly until it next sent a value. Its glide also lands
+  exactly now; it used to stop 1.3e-5 to 5.7e-5 short after a move.
 
 Every constant above is CALIBRATE and marked so in the header. The listening
 checkpoint decides all of it.

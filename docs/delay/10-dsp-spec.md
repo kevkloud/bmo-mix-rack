@@ -56,9 +56,15 @@ is the expensive option). Read position `w − D`, real-valued.
   samples/sample. Read rate `ρ = 1 − dD/dn`, so the cap bounds pitch to
   ρ ∈ [0.75, 1.25] (+3.9 / −5.0 semitones) — 01's glide without runaway transposition.
 - **clean — crossfade.** Two taps: the old freezes, a new one starts at `Dtgt`,
-  equal-power raised-cosine crossfade over 20 ms, reusing the shape in
-  `modules/dim/dsp/DspCore.h` (00 §1). No pitch bend; cost is momentary doubling
-  (02). §5's modulation follows this law, never limited by it.
+  equal-gain crossfade `(1 − u, u)` over 20 ms, the law of
+  `core/dsp/SwitchFade.h`. No pitch bend; cost is momentary doubling
+  (02). §5's modulation follows this law, never limited by it. **It was
+  equal-power until 2026-10-03, and that was wrong for a fade inside the
+  loop**: `cos + sin` reaches √2 at the midpoint, two reads of one correlated
+  signal summed up to 3 dB hot, and a TIME automated every block chained the
+  fades into a loop gain over 1 (measured on ICE QUEEN: a ramp 375 → 380 ms
+  over 60 s held −4.0 dBFS 50 s after a burst at FEEDBACK 85, against −257
+  held). Equal gain is a convex blend, so the loop can only lose by it.
 
 ## 3. Feedback loop and stability
 

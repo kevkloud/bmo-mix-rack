@@ -127,6 +127,26 @@ hold after it.
   bucket-brigade "impulse exception" once written at `tailSecondsFor` was the
   expander's spike, below. `tests/plugin/TailTests.cpp` lists Dwell beside
   Linger as the two modules that ring.
+- **The reported tail stops at 30 s; the loop does not** (2026-10-03).
+  `kTailCeilingSeconds` caps the figure, and somewhere between FEEDBACK 90
+  and 95 the real decay outruns it. Measured on ICE QUEEN, 48 kHz, a 3 s
+  220 Hz sine at -18 dBFS RMS, MIX 50, to 60 dB under the held output peak:
+  at FEEDBACK 90 the figure holds (reported 28.5-30 s, rang 15.8-23.2 s on
+  the three characters, Diffuse on or off); at FEEDBACK 95 it reports 30 s and the
+  loop rings **65.3 s on clean, 43.3 on tape, 78.1 on bucket-brigade**
+  (70.6, 38.6 and 76.2 with Diffuse). A host that stops processing or ends a
+  bounce at the reported tail cuts the repeats off before they reach the
+  floor. The ceiling is §9's and is left as it is; raising it is a decision,
+  not a fix.
+- **One hot sample stays in the loop as long as the loop rings** -- what a
+  delay with feedback does with it, not a defect. One sample at +60 to
+  +96 dBFS in a 220 Hz sine at -18 dBFS RMS, 48 kHz: the output is back
+  within -60 dBFS of the clean render **1.88 s** later at the defaults
+  (FEEDBACK 35, the one figure pinned until now), 7.9 s at FEEDBACK 80,
+  **18.4 s at 90 and 50.3 s at 95** on clean; bucket-brigade 17.6-18.0 and
+  50.7 s, tape 13.9-15.8 and 38.8-45.5 s (measured on ICE QUEEN with the
+  review's probe). The first repeat carries the sample as it was written
+  (+59 dBFS out for +60 in); the in-loop clip bounds every lap after it.
 - **Bucket-brigade's expander divides each tap by its own gain, then
   interpolates** (`DelayEngine::readExpanded`, 2026-10-01, fourth round). The
   gain ring holds 1.0 wherever nothing was companded -- after `prepare`, a
@@ -158,6 +178,68 @@ hold after it.
   (`docs/delay/10` §11a); the tail charges the two.
 - **Every smoother lands** (`Smoother::tickLanding`): FEEDBACK, DRIVE, LANE
   LEVEL and FX AMOUNT. A plain float one-pole stalls short of its target.
+- **Clean's TIME crossfade is equal gain, `(1 - u, u)`, never equal power**
+  (2026-10-03). It sits inside the loop, so its weights are a gain on every
+  lap: `cos + sin` reaches 1.41 at the midpoint, and a TIME, NOTE, LANE TIME
+  or tempo moved every block chained the fades into a loop gain over 1 --
+  a ramp 375 -> 380 ms over 60 s held -4.0 dBFS fifty seconds after a burst
+  at FEEDBACK 85, and +1.3 at 95, measured on ICE QUEEN. A convex blend can
+  only lose: up to 3 dB mid-fade between reads that do not correlate, which
+  is why steady noise sits 2.75 dB down with a fade started every block.
+  `testMovingATimeNeverFeedsTheLoop` holds every mover, schedule, character,
+  FEEDBACK and rate to it; the default run is a subset, and
+  `dwell_dsp_tests --long` runs all 360 rows (26 min in Release on ICE
+  QUEEN). **Any second read blended into the loop takes the same law.**
+- **Every discrete switch is a fade, and is judged off the beat**
+  (2026-10-04). The probe's own conditions -- TIME 375 ms, a whole number of
+  cycles of its 440 Hz tone, the switch on a round block edge -- hid steps up
+  to 13.4x. `testEverySwitchIsAFade` judges every switch at TIME 375.013 and
+  13.7 ms, eight moments a cycle, 48 and 96 kHz, blocks 512 and 441,
+  FEEDBACK 60 and 95, tone and noise, with both echoes (`--grid` runs it
+  alone; 12 288 cells, 1 848 failing on a265b41, none now). The mechanisms,
+  all 20 ms and all the shared equal-gain law: CHARACTER fades the chain's
+  mode filters **and the read** (each character's modulation law and
+  interpolator); STEREO fades the read (dual offset's 2/3 D on the right
+  line) and the ping-pong matrix's writes; FX fades the stage, the
+  incoming one weighted at its input. Pan/Tremolo's stepped position now
+  moves in 5 ms, which changes its held output. **Open**: an FX TYPE change
+  on a tone at FEEDBACK 95 overshoots the louder held level by up to
+  3.5 dB, the same with the switch taken in one sample, so it is the
+  loop's transient and not the fade; it is printed, not bounded.
+  **The grid now reaches further** (2026-10-04, 19 200 cells under
+  `--long`): the third echo, MOD 50 and 100 (judged against the held renders
+  over a whole MOD cycle, not one instant), a second switch 5 ms into the
+  fade and every block, and FX switches on tape and bucket-brigade at
+  FEEDBACK 95. Every cell keeps the step bound (worst 1.44x). **Open, and
+  the owner's call**: their level overruns the burst and linger bounds on a
+  tone at FEEDBACK 95, and no fade of 30 ms or less fixes it. Measured on
+  ICE QUEEN (20 ms fade / one sample / 200 ms): STEREO ping-pong <-> stereo
+  on bucket-brigade at 375.013 ms, third echo, +1.50 / +1.50 / +0.28 dB
+  and a 43.8 / 58.8 / 0 ms dip; FX on, Diffuse on bucket-brigade +5.57 /
+  +5.42 / +5.52 dB; STEREO stereo -> ping-pong on bucket-brigade at MOD 50
+  +1.85 / +1.89 / +1.15 dB; stereo <-> ping-pong every block at 7.3 ms
+  +3.80 / +7.15 / +0.32 dB (+1.33 at 30 ms). The options are a longer
+  STEREO fade (100-200 ms), which settles the STEREO cells and not the FX
+  ones, or accepting the loop's own transient as the FX TYPE one is.
+- **A toggle of Diffuse costs a held loop about 1 to 2 dB, every time**
+  (2026-10-04). FX off fades the stage out at its output and stops running
+  it, so what its allpass lines hold (up to 126 ms at AMOUNT 100) leaves the
+  loop; FX on fades a cleared stage in at its input. A frozen lane has
+  nothing to make that back from, so toggles compound: the review's probe
+  took a frozen lane from -17.7 to -133.7 dBFS in a minute of random
+  toggling. Measured on ICE QUEEN, 48 kHz / 512, a 2 s noise burst, a toggle
+  and back 1 s later against the render never toggled, 5 s on: on clean
+  -1.60 dB off-and-on and -1.38 on-and-off in the frozen lane, -1.55 and
+  -0.90 at FEEDBACK 95; -1.4 to -2.2 and -0.7 to -1.8 dB across the
+  characters. `testOneDiffuseToggleCostsAHeldLoopItsPinnedFigure` pins the
+  clean figures to 0.5 dB. Pan/Tremolo and Crush have no such figure: a
+  loop with either in it does not hold at all (the frozen lane at AMOUNT
+  100 is 190 dB down, or silent, 10 s after the burst, never toggled).
+  **Keeping the energy was tried and is not in**: the stage going out fed
+  a falling share and left ringing in the loop brought a toggle pair to
+  -0.5 to +0.9 dB, but the returned tail summed with the loop into bursts
+  over 1 dB in 112 of 576 FX on/off Diffuse grid cells (+1.31 dB on noise
+  at FEEDBACK 95) and FX TYPE Diffuse -> Crush stepped 1.63x.
 - **Never compare a host's value with `==` at the centre of a range that
   crosses zero** (2026-10-02, macOS CI). The snap `start + interval . n` is a
   fused multiply-add on macOS arm64, so LANE GAIN's 0 comes back as 1.5e-6

@@ -50,6 +50,12 @@ namespace
 
 int failures = 0, checks = 0;
 
+/** `--long` on the command line: the exhaustive rows of the tests that carry a
+    matrix (every character, mover, schedule, FEEDBACK and rate). The default
+    run keeps a subset of each that fails on the defect it was written for, so
+    CI stays short and still catches a regression. */
+bool longRun = false;
+
 /** Armed only around a `setParams` + `process` pair. `11` §4k: both rings come
     from `prepare()` and **nothing** is allocated on the audio thread. */
 bool allocationGuardArmed = false;
@@ -4528,9 +4534,11 @@ void testTheReportedTailIsNeverShorterThanTheDecay()
     // it comes within 3-11 % of; its FEEDBACK 80 %, TIME 100 ms row stays at
     // 48 kHz only (sixth round, for CI time: a 22 s figure the decay reaches
     // 28 % of, rendered nine times more at the two other rates).
+    // Under `--long` from 2026-10-03, with the fractional-sample rows and the
+    // sustained rows at 44.1 and 96 kHz below: the Debug run had passed 300 s.
     std::vector<TailRow> rates;
 
-    for (const auto rate : { 44100.0, 96000.0 })
+    for (const auto rate : longRun ? std::vector<double> { 44100.0, 96000.0 } : std::vector<double> {})
         for (int c = 0; c < 3; ++c)
         {
             for (const auto& [fb, t] : std::initializer_list<std::pair<float, float>> {
@@ -4558,21 +4566,26 @@ void testTheReportedTailIsNeverShorterThanTheDecay()
              { false, 0.0f, 35.0f, 375.0f }, { false, 0.0f, 60.0f, 375.0f } })
         fractional.push_back ({ 2, fb, t, fx, 0, amount, 44100.0 });
 
-    for (const auto amount : { 60.0f, 100.0f })
-        for (const auto& [fb, t] : std::initializer_list<std::pair<float, float>> {
-                 { 35.0f, 1.0f }, { 35.0f, 2.0f }, { 35.0f, 5.0f }, { 35.0f, 375.0f },
-                 { 60.0f, 1.0f }, { 60.0f, 2.0f }, { 60.0f, 5.0f } })
-            fractional.push_back ({ 2, fb, t, true, 0, amount, 44100.0 });
+    // The fourteen with Diffuse in the loop run under `--long` (2026-10-03);
+    // the boundary itself is held by `testABucketBrigadeBoundaryNeverSpikes`.
+    if (longRun)
+        for (const auto amount : { 60.0f, 100.0f })
+            for (const auto& [fb, t] : std::initializer_list<std::pair<float, float>> {
+                     { 35.0f, 1.0f }, { 35.0f, 2.0f }, { 35.0f, 5.0f }, { 35.0f, 375.0f },
+                     { 60.0f, 1.0f }, { 60.0f, 2.0f }, { 60.0f, 5.0f } })
+                fractional.push_back ({ 2, fb, t, true, 0, amount, 44100.0 });
 
     checkTailRows (fractional, "the tail is never short on bucket-brigade at a fractional-sample delay");
 
     // **A sustained input** (2026-10-01): one second of a tone in phase with
     // the loop, which builds it to 1/(1 - g) of its input before it stops.
     // The review measured clean at 48 kHz ringing 11 % past the old figure at
-    // TIME 375 ms and FEEDBACK 60 %. Every character, three rates.
+    // TIME 375 ms and FEEDBACK 60 %. Every character; 44.1 and 96 kHz under
+    // `--long`.
     std::vector<TailRow> sustained;
 
-    for (const auto rate : { 44100.0, 48000.0, 96000.0 })
+    for (const auto rate : longRun ? std::vector<double> { 44100.0, 48000.0, 96000.0 }
+                                   : std::vector<double> { 48000.0 })
         for (int c = 0; c < 3; ++c)
             for (const auto& [fb, t] : std::initializer_list<std::pair<float, float>> {
                      { 60.0f, 375.0f }, { 80.0f, 250.0f }, { 90.0f, 100.0f } })
@@ -5206,9 +5219,12 @@ void testCrushHoldsWithinItsEnergyFromTheFirstBlock()
     FX off skips the stage, so its running sum and its hold were left as they
     were, and FX back on picked them up: the first hold then counted samples
     from before the stage went out. Two engines run the same history, one fed a
-    tone and one silence -- Crush on, FX off for a block, FX on again -- and
-    the moment FX is back on, before a sample is processed, their FX state must
-    agree: everything Crush held from before is gone. */
+    tone and one silence -- Crush on, FX off for two blocks, FX on again --
+    and the moment Crush is back in, their FX state must agree: everything
+    Crush held from before is gone. From 2026-10-03 a switch fades over 20 ms
+    and the stage comes back in on the first sample processed after FX is on
+    (`DelayEngine::beginSwitches`), so the off spell outlasts the fade out and
+    the state is read after that one sample, whose input weight is 0. */
 void testCrushIsClearedWhenItComesBackIn()
 {
     constexpr auto rate = 48000.0;
@@ -5223,21 +5239,31 @@ void testCrushIsClearedWhenItComesBackIn()
         v[P::Index::fxType]   = 2.0f;
         v[P::Index::fxAmount] = 100.0f;
 
-        Block block { 512 * 4 };
+        Block block { 512 * 5 };
 
         if (tone)
-            for (int i = 0; i < 512 * 4; ++i)
+            for (int i = 0; i < 512 * 5; ++i)
                 block.left[(size_t) i] = block.right[(size_t) i]
                     = (float) (0.5 * std::sin (2.0 * P::kPiD * 300.0 * (double) i / rate));
 
-        // 2.5 blocks on, so the hold is part-way through a block; one off; on.
+        // 2.5 blocks on, so the hold is part-way through a block; two off --
+        // past the 20 ms fade out, so the stage is out of the loop; on, and
+        // the first sample of the fade in.
         renderAsHost (dsp, v, block, 512 * 2 + 300, 512, [] (int) {});
         v[P::Index::fx] = 0.0f;
         dsp.setParams (v.data(), (int) v.size());
-        float* ch[] { block.left.data() + 1324, block.right.data() + 1324 };
-        dsp.process (ch, 2, 512);
+
+        for (const auto offset : { 1324, 1836 })
+        {
+            float* ch[] { block.left.data() + offset, block.right.data() + offset };
+            dsp.process (ch, 2, 512);
+        }
+
         v[P::Index::fx] = 1.0f;
         dsp.setParams (v.data(), (int) v.size());
+
+        float* ch[] { block.left.data() + 2348, block.right.data() + 2348 };
+        dsp.process (ch, 2, 1);
 
         return dsp.getCore().getMainEngine().fxStateSignature();
     };
@@ -5319,7 +5345,10 @@ void testEveryInLoopEffectLosesEnergyUnderUnity()
 
     int rows = 0;
 
-    for (const auto rate : { 44100.0, 48000.0, 96000.0 })
+    // Crush at 44.1 and 96 kHz runs under `--long` (2026-10-03, for the Debug
+    // run's time); 48 kHz, every type, character and AMOUNT, runs always.
+    for (const auto rate : longRun ? std::vector<double> { 44100.0, 48000.0, 96000.0 }
+                                   : std::vector<double> { 48000.0 })
         for (int type = 0; type < 3; ++type)
             for (int c = 0; c < 3; ++c)
                 for (const auto amount : { 0.0f, 35.0f, 60.0f, 100.0f })
@@ -5533,10 +5562,12 @@ void testTwoEnginesRingingTogetherCountDownFurther()
 
     Every character, MOD 0, 30 and 100 at 0.6 and 8 Hz, TIME 600 and 1900 ms,
     impulses on four phases of the wow at 48 kHz and two at 44.1 and 96 kHz;
-    and the lane at LANE GAIN -100 and 1000 ms with MOD 100. */
+    and the lane at LANE GAIN -100 and 1000 ms with MOD 100. The 44.1 and
+    96 kHz rows run under `--long` (2026-10-03, for the Debug run's time). */
 void testANoFeedbackRepeatIsChargedItsSwing()
 {
-    for (const auto rate : { 44100.0, 48000.0, 96000.0 })
+    for (const auto rate : longRun ? std::vector<double> { 44100.0, 48000.0, 96000.0 }
+                                   : std::vector<double> { 48000.0 })
         for (int c = 0; c < 3; ++c)
             for (const auto depth : { 0.0f, 30.0f, 100.0f })
                 for (const auto rateHz : { 0.6f, 8.0f })
@@ -5564,7 +5595,8 @@ void testANoFeedbackRepeatIsChargedItsSwing()
 
     // The lane: HOLD and SEND on, no tail (LANE GAIN -100), main FEEDBACK 0.
     // The impulse comes after the send's 5 ms opening ramp.
-    for (const auto rate : { 44100.0, 48000.0, 96000.0 })
+    for (const auto rate : longRun ? std::vector<double> { 44100.0, 48000.0, 96000.0 }
+                                   : std::vector<double> { 48000.0 })
         for (int c = 0; c < 3; ++c)
             for (const auto eighth : { 1, 5 })
             {
@@ -5976,8 +6008,20 @@ void testNoEventSpikesTheOutputOnAnyCharacter()
 
                             const auto result = peakAroundAnEvent (rate, timeMs, a, b, event, before,
                                                                    [] (std::vector<float>&, int, int) {}, feedback);
-                            const auto bound = readKernelBound (b, rate, timeMs, false)
-                                                 * ((double) result.inputPeak + result.mainGain) * (1.0 + 1.0e-6) + 1.0e-6;
+                            // A move reads with both characters' kernels for the switch's
+                            // 20 ms (2026-10-04, `DelayEngine::beginSwitches`), blended by
+                            // weights that sum to 1, so it is held to the larger of the two.
+                            const auto kernel = event == Event::move
+                                              ? std::max (readKernelBound (a, rate, timeMs, false),
+                                                          readKernelBound (b, rate, timeMs, false))
+                                              : readKernelBound (b, rate, timeMs, false);
+                            // The worst row reaches its bound exactly (1.000 of it on ICE
+                            // QUEEN), so the slack is 1e-4 of it, not 1e-6 (2026-10-04): a
+                            // float output and a double bound taken on another compiler or
+                            // maths library can part by more than 1e-6; the spike it was
+                            // written for was 6.3e5.
+                            const auto bound = kernel
+                                                 * ((double) result.inputPeak + result.mainGain) * (1.0 + 1.0e-4) + 1.0e-6;
                             ++rows;
                             worst = std::max (worst, (double) result.peak / bound);
 
@@ -6006,11 +6050,1601 @@ void testNoEventSpikesTheOutputOnAnyCharacter()
                  std::chrono::duration<double> (std::chrono::steady_clock::now() - started).count());
 }
 
+//==============================================================================
+// The 2026-10-03 review. **A time kept moving pumped the clean loop past
+// unity**: §2's crossfade was equal power, and it sits inside the loop.
+//==============================================================================
+
+/** What moves, and how. The four movers are every way the clean crossfade is
+    started: the TIME knob, NOTE and the host tempo under SYNC, and the lane's
+    own time. */
+enum class Mover { time, note, laneTime, tempo };
+enum class Schedule { everyBlock, every64, every2048, ramp, random };
+
+const char* moverName (Mover m)
+{
+    switch (m)
+    {
+        case Mover::time:     return "TIME";
+        case Mover::note:     return "NOTE";
+        case Mover::laneTime: return "LANE TIME";
+        case Mover::tempo:    break;
+    }
+
+    return "the host tempo";
+}
+
+const char* scheduleName (Schedule s)
+{
+    switch (s)
+    {
+        case Schedule::everyBlock: return "every block";
+        case Schedule::every64:    return "every 64 blocks";
+        case Schedule::every2048:  return "every 2048 blocks";
+        case Schedule::ramp:       return "on a slow ramp";
+        case Schedule::random:     break;
+    }
+
+    return "at random";
+}
+
+/** FEEDBACK's loop gain written as LANE GAIN, so a lane row runs its loop at
+    the gain the main rows run at: `(1 + L)^1.6 = 1.05 fb^1.6`. FEEDBACK's
+    maximum, 1.05 over `P_c`, is past FREEZE, so the lane's own top -- BUILD at
+    +100, 1.10 -- stands in for it. */
+float laneGainMatching (float feedbackPct)
+{
+    if (feedbackPct >= 100.0f)
+        return 100.0f;
+
+    const auto onePlus = std::pow (1.05, 1.0 / 1.6) * (double) feedbackPct * 0.01;
+    return (float) std::clamp (100.0 * (onePlus - 1.0), -100.0, 0.0);
+}
+
+struct MoveRow { int character; Mover mover; Schedule schedule; float feedback; double rate; };
+
+/** What a 32 s render leaves: the peaks of the three 10 s windows after a 2 s
+    burst, or the RMS of the last 10 s under a steady input. */
+struct MoveMeasure { double windowDb[3] {}; double steadyDb = 0.0; };
+
+double dbOf (double x) { return 20.0 * std::log10 (std::max (x, 1.0e-30)); }
+
+/** One row of the movement matrix, rendered as a host does, block by block
+    at 512 samples, MIX 100 so the loop is all that is measured.
+
+    `at` places a held render: -1 moves the value by the row's schedule,
+    0 or 1 holds it at one end of the schedule's travel. The input is white
+    noise at -18 dBFS RMS -- for 2 s then silence, or throughout when `steady`
+    -- because noise has the same level at every TIME: a tone's steady level
+    depends on where the loop's comb teeth land against its harmonics, and
+    would measure the TIME rather than the movement. */
+MoveMeasure renderMoving (const MoveRow& row, int at, bool steady)
+{
+    constexpr int chunk = 512;
+    const auto rate = row.rate;
+    const auto total = (int) (32.0 * rate);
+    const auto burstEnd = (int) (2.0 * rate);
+    const auto window = (int) (10.0 * rate);
+    const auto blocks = (total + chunk - 1) / chunk;
+    const auto lane = row.mover == Mover::laneTime;
+    const auto sync = row.mover == Mover::note || row.mover == Mover::tempo;
+
+    auto v = defaults();
+    v[P::Index::character] = (float) row.character;
+    v[P::Index::mix]       = 100.0f;
+    v[P::Index::sync]      = sync ? 1.0f : 0.0f;
+
+    if (lane)
+    {
+        // The lane alone: HOLD on, SEND open while the input plays, and the
+        // main loop at FEEDBACK 0 so it adds one repeat and nothing more.
+        v[P::Index::feedback] = 0.0f;
+        v[P::Index::hold]     = 1.0f;
+        v[P::Index::laneGain] = laneGainMatching (row.feedback);
+    }
+    else
+        v[P::Index::feedback] = row.feedback;
+
+    P::DwellDsp dsp;
+    dsp.setParams (v.data(), (int) v.size());
+    dsp.prepare (rate, chunk, 2);
+
+    Noise noise, coin;
+    coin.state = 1234567u;
+    auto flipped = false;
+    const auto scale = (float) (std::pow (10.0, -18.0 / 20.0) * std::sqrt (3.0));
+
+    std::vector<float> left ((size_t) chunk), right ((size_t) chunk);
+    double peaks[3] { 0.0, 0.0, 0.0 };
+    auto sumSq = 0.0;
+    long long counted = 0;
+
+    for (int b = 0; b < blocks; ++b)
+    {
+        const auto offset = b * chunk;
+        const auto count = std::min (chunk, total - offset);
+
+        // Where the value sits, from 0 (one end) to 1 (the other).
+        auto x = (double) std::max (at, 0);
+
+        if (at < 0)
+        {
+            switch (row.schedule)
+            {
+                case Schedule::everyBlock: x = (double) (b & 1); break;
+                case Schedule::every64:    x = (double) ((b / 64) & 1); break;
+                case Schedule::every2048:  x = (double) ((b / 2048) & 1); break;
+                case Schedule::ramp:       x = (double) b / (double) (blocks - 1); break;
+                case Schedule::random:
+                    // One chance in sixteen a block, from a seeded source.
+                    if ((coin.next() + 1.0f) * 8.0f < 1.0f)
+                        flipped = ! flipped;
+                    x = flipped ? 1.0 : 0.0;
+                    break;
+            }
+        }
+
+        // TIME 375 <-> 400 ms, the review's triangle; NOTE 1/8D <-> 1/4 (375
+        // and 500 ms at 120 bpm); LANE TIME 250 <-> 275 ms; tempo 120 <-> 121.
+        // The ramps are the review's slow one, 5 ms over the render (TIME
+        // 375 -> 380, LANE TIME 250 -> 255; tempo 120 -> 121 is 3.1 ms),
+        // and NOTE, which has no values between, walks 1/8 -> 1/4 a step a
+        // quarter of the way.
+        auto bpm = 120.0;
+        const auto ramp = row.schedule == Schedule::ramp;
+        const auto travel = ramp ? 5.0 : 25.0;
+
+        switch (row.mover)
+        {
+            case Mover::time:     v[P::Index::time] = (float) (375.0 + travel * x); break;
+            case Mover::laneTime: v[P::Index::laneTime] = (float) (250.0 + travel * x); break;
+            case Mover::tempo:    bpm = 120.0 + x; break;
+            case Mover::note:
+                v[P::Index::note] = (float) (ramp ? 6.0 + std::min (3.0, std::floor (4.0 * x)) : 8.0 + x);
+                break;
+        }
+
+        const auto feeding = steady || offset < burstEnd;
+
+        if (lane)
+            v[P::Index::send] = feeding ? 1.0f : 0.0f;
+
+        for (int i = 0; i < count; ++i)
+        {
+            const auto s = scale * noise.next();
+            left[(size_t) i] = right[(size_t) i] = (steady || offset + i < burstEnd) ? s : 0.0f;
+        }
+
+        dsp.setParams (v.data(), (int) v.size());
+        dsp.setTempo (bpm, sync, sync);
+
+        float* channels[] { left.data(), right.data() };
+        dsp.process (channels, 2, count);
+
+        for (int i = 0; i < count; ++i)
+        {
+            const auto n = offset + i;
+            const auto l = (double) left[(size_t) i], r = (double) right[(size_t) i];
+
+            if (n >= burstEnd)
+            {
+                const auto w = std::min (2, (n - burstEnd) / window);
+                peaks[w] = std::max (peaks[w], std::max (std::abs (l), std::abs (r)));
+            }
+
+            if (n >= total - window)
+            {
+                sumSq += 0.5 * (l * l + r * r);
+                ++counted;
+            }
+        }
+    }
+
+    MoveMeasure m;
+
+    for (int w = 0; w < 3; ++w)
+        m.windowDb[w] = dbOf (peaks[w]);
+
+    m.steadyDb = dbOf (std::sqrt (sumSq / (double) std::max (counted, 1LL)));
+    return m;
+}
+
+/** **No TIME, NOTE, LANE TIME or tempo movement, on any schedule, lifts the
+    loop** (the house rule: a loop under 100 % never rings indefinitely and
+    never gains from a parameter being moved).
+
+    The clean crossfade blended its two reads with `(cos, sin)`, which sum to
+    sqrt(2) at the midpoint, and it is inside the loop. Measured on ICE QUEEN
+    at 48 kHz on the starting code, TIME drawn as a ramp 375 -> 380 ms over
+    60 s after a 2 s noise burst: the 52-62 s window peaked at -4.0 dBFS at
+    FEEDBACK 85, where the held render was at -257.0; TIME every 64 blocks in
+    this test's own render held -15.7 dBFS in its last window at FEEDBACK 85
+    against -107.1 held; and a steady input stood up to +8 dB over its held
+    level.
+
+    Each row is a 2 s burst then silence, read as three 10 s windows, beside
+    the same render held at each end of the row's travel. **The reference is
+    the louder of the two held renders**: a longer time decays more slowly per
+    second, and a loop moved between two times may ring as long as the slower
+    one does, never longer. So:
+
+    - **no window may be louder than the one before**, by 0.1 dB, where the
+      held reference is decaying -- at the maximum, where the held loop
+      self-oscillates at its clip, the windows are bounded by the next rule
+      instead;
+    - **the last window is no more than 6 dB over the reference's**, or under
+      -120 dBFS. Quieter is allowed: a crossfade between reads that do not
+      correlate loses level, which is the direction the rule permits.
+
+    And under steady noise, at FEEDBACK under 100 %, **the level never stands
+    more than 0.5 dB over the louder held level** -- the rule is that a move
+    never gains. Below is allowed, and it is where the fades go: on ICE QUEEN,
+    clean loses up to 2.75 dB with a fade started every block (20 ms fades
+    back to back between reads that do not correlate), 1.7 dB at random and
+    0.6 dB every 64 blocks at 192 kHz, and bucket-brigade's glide 0.9 dB.
+
+    **One class of rows is not held to the steady bound**, because it is not
+    the crossfade: a gliding character moved every block is a read
+    rate swung 0.75 <-> 1.25 at the block rate -- a 47 Hz frequency
+    modulation, the glide's rate limit by design -- and tape there stood
+    +0.65 dB at FEEDBACK 95 (NOTE 1/8D <-> 1/4, 48 kHz) on the starting code
+    and this one alike. Its decay is still held to the rules above. */
+void testMovingATimeNeverFeedsTheLoop()
+{
+    const auto started = std::chrono::steady_clock::now();
+
+    std::vector<MoveRow> rows;
+
+    if (longRun)
+    {
+        for (const auto rate : { 48000.0, 192000.0 })
+            for (int c = 0; c < 3; ++c)
+                for (const auto mover : { Mover::time, Mover::note, Mover::laneTime, Mover::tempo })
+                    for (const auto schedule : { Schedule::everyBlock, Schedule::every64, Schedule::every2048,
+                                                 Schedule::ramp, Schedule::random })
+                        for (const auto feedback : { 85.0f, 95.0f, 100.0f })
+                            rows.push_back ({ c, mover, schedule, feedback, rate });
+    }
+    else
+    {
+        // A subset that fails on the equal-power fade: each mover on clean,
+        // on four schedules, at both high FEEDBACKs. The gliding characters,
+        // the maximum and 192 kHz are under `--long`.
+        rows = {
+            { 0, Mover::time,     Schedule::every64,    85.0f, 48000.0 },
+            { 0, Mover::time,     Schedule::ramp,       95.0f, 48000.0 },
+            { 0, Mover::note,     Schedule::everyBlock, 85.0f, 48000.0 },
+            { 0, Mover::laneTime, Schedule::ramp,       85.0f, 48000.0 },
+            { 0, Mover::tempo,    Schedule::random,     95.0f, 48000.0 },
+        };
+    }
+
+    for (const auto& row : rows)
+    {
+        char name[160];
+        std::snprintf (name, sizeof (name), "%s moved %s on %s at FEEDBACK %.0f, %.0f kHz",
+                       moverName (row.mover), scheduleName (row.schedule), characterName (row.character),
+                       (double) row.feedback, row.rate * 0.001);
+
+        // Decay: the burst, then silence.
+        {
+            const auto moved = renderMoving (row, -1, false);
+            const auto heldA = renderMoving (row, 0, false);
+            const auto heldB = renderMoving (row, 1, false);
+
+            double reference[3];
+            for (int w = 0; w < 3; ++w)
+                reference[w] = std::max (heldA.windowDb[w], heldB.windowDb[w]);
+
+            auto rose = false;
+
+            for (int w = 1; w < 3; ++w)
+            {
+                const auto referenceDecays = reference[w] < reference[w - 1] - 1.0;
+                rose = rose || (referenceDecays && moved.windowDb[w] > moved.windowDb[w - 1] + 0.1
+                                    && moved.windowDb[w] > -150.0);
+            }
+
+            const auto last = moved.windowDb[2];
+            const auto lastOk = last <= reference[2] + 6.0 || last < -120.0;
+
+            char buf[400];
+            std::snprintf (buf, sizeof (buf),
+                           "%s: after a 2 s burst the 10 s windows peak at %.1f, %.1f, %.1f dBFS against "
+                           "%.1f, %.1f, %.1f held -- none louder than the one before, the last no more "
+                           "than 6 dB over held",
+                           name, moved.windowDb[0], moved.windowDb[1], moved.windowDb[2],
+                           reference[0], reference[1], reference[2]);
+
+            check (! rose && lastOk, buf);
+        }
+
+        // Steady: the same row under continuous noise, under 100 % only --
+        // the rule is about a loop under unity, and at the top of FEEDBACK
+        // the level is wherever the clip holds the self-oscillation.
+        const auto glideFm = row.character != P::kClean && row.schedule == Schedule::everyBlock;
+
+        if (row.feedback < 100.0f && ! glideFm)
+        {
+            const auto moved = renderMoving (row, -1, true).steadyDb;
+            const auto heldA = renderMoving (row, 0, true).steadyDb;
+            const auto heldB = renderMoving (row, 1, true).steadyDb;
+
+            const auto over  = moved - std::max (heldA, heldB);
+            const auto under = moved - std::min (heldA, heldB);
+
+            char buf[300];
+            std::snprintf (buf, sizeof (buf),
+                           "%s: under steady noise the last 10 s stand %+.2f dB against the louder held "
+                           "level (%+.2f against the quieter; held %.2f / %.2f dBFS RMS)",
+                           name, over, under, heldA, heldB);
+
+            check (over <= 0.5, buf);
+        }
+    }
+
+    std::printf ("      the movement matrix ran %d rows in %.1f s\n", (int) rows.size(),
+                 std::chrono::duration<double> (std::chrono::steady_clock::now() - started).count());
+}
+
+/** The largest 5 ms RMS of `x` over [from, to), stepped a quarter window. */
+double loudest5ms (const std::vector<float>& x, int from, int to, double rate)
+{
+    const auto w = (int) (0.005 * rate);
+    auto hi = 0.0;
+
+    for (int s = from; s + w <= to; s += w / 4)
+        hi = std::max (hi, rms (x, s, w));
+
+    return hi;
+}
+
+/** **One SYNC, NOTE, tempo or TIME switch does not burst** -- under 0.5 dB
+    over the loudest steady level the delay passes through.
+
+    The review's probe: a 440 Hz sine at -18 dBFS RMS throughout, FEEDBACK 60,
+    MIX 50, the switch at 4.000 s on a block edge. With the equal-power fade a
+    single SYNC on, NOTE 1/8D -> 1/4 or tempo change on clean burst +1.83 dB --
+    two reads of one tone summed at sqrt(2). Measured as the largest 5 ms RMS in
+    the 1.2 s after the switch, which takes in the repeat one TIME later.
+
+    **What it is measured against depends on the law.** Clean's crossfade goes
+    from one time to the other and through none between, so the reference is
+    the larger of the steady levels in the half second before and 2.5-3.0 s
+    after. Tape and bucket-brigade glide through every time between, and a
+    tone's steady level moves with the time, by where the loop's comb teeth
+    fall against it: on bucket-brigade, whose clock filters turn the loop's
+    phase at 440 Hz, a TIME held at 393 ms stands at -9.06 dB where 375 ms
+    stands at -10.36 (measured on ICE QUEEN). A glide crossing that tooth is
+    the delay passing a louder time, not the loop gaining, so a gliding
+    character is held to the loudest held time on its path, on a 0.25 ms grid
+    -- which can read that tooth up to 0.15 dB low. Those rows cost a few
+    hundred renders each and run under `--long`; the default run takes clean,
+    the law the defect was in. */
+void testOneTimeSwitchDoesNotBurst()
+{
+    constexpr auto rate = 48000.0;
+    constexpr int chunk = 512;
+    const auto at = (int) std::lround (4.0 * rate / chunk) * chunk;
+
+    struct Switch
+    {
+        const char* name;
+        int index;
+        float from, to;
+        double bpmFrom, bpmTo;
+        bool sync, lane;
+        double msFrom, msTo;   ///< the engine's time either side, for the path
+    };
+
+    const Switch switches[]
+    {
+        { "SYNC on at 100 bpm (375 -> 450 ms)", P::Index::sync, 0.0f, 1.0f, 100.0, 100.0, false, false, 375.0, 450.0 },
+        { "SYNC off at 100 bpm",                P::Index::sync, 1.0f, 0.0f, 100.0, 100.0, true,  false, 450.0, 375.0 },
+        { "NOTE 1/8D -> 1/4 under SYNC",        P::Index::note, 8.0f, 9.0f, 100.0, 100.0, true,  false, 450.0, 600.0 },
+        { "the tempo 120 -> 90 under SYNC",     -1,             0.0f, 0.0f, 120.0,  90.0, true,  false, 375.0, 500.0 },
+        { "TIME 375 -> 376 ms",                 P::Index::time, 375.0f, 376.0f, 100.0, 100.0, false, false, 375.0, 376.0 },
+        { "LANE TIME 250 -> 300 ms",            P::Index::laneTime, 250.0f, 300.0f, 100.0, 100.0, false, true, 250.0, 300.0 },
+    };
+
+    // One render: the switch at `at`, or (heldMs > 0) the engine held at
+    // that time with SYNC off, for the path's reference.
+    const auto render = [&] (int c, const Switch& sw, double heldMs, int n)
+    {
+        P::DwellDsp dsp;
+        dsp.prepare (rate, chunk, 2);
+
+        auto v = defaults();
+        v[P::Index::character] = (float) c;
+        v[P::Index::feedback]  = 60.0f;
+        v[P::Index::mix]       = 50.0f;
+        v[P::Index::sync]      = sw.sync && heldMs <= 0.0 ? 1.0f : 0.0f;
+
+        if (sw.lane)
+        {
+            v[P::Index::hold]     = 1.0f;
+            v[P::Index::send]     = 1.0f;
+            v[P::Index::laneGain] = laneGainMatching (60.0f);
+        }
+
+        if (heldMs > 0.0)
+            v[(size_t) (sw.lane ? P::Index::laneTime : P::Index::time)] = (float) heldMs;
+
+        Block block { n };
+
+        for (int i = 0; i < n; ++i)
+            block.left[(size_t) i] = block.right[(size_t) i]
+                = (float) (std::pow (10.0, -18.0 / 20.0) * std::sqrt (2.0)
+                           * std::sin (2.0 * P::kPiD * 440.0 * (double) i / rate));
+
+        for (int offset = 0; offset < n; offset += chunk)
+        {
+            const auto after = offset >= at;
+
+            if (heldMs <= 0.0 && sw.index >= 0)
+                v[(size_t) sw.index] = after ? sw.to : sw.from;
+
+            dsp.setParams (v.data(), (int) v.size());
+            dsp.setTempo (after && heldMs <= 0.0 ? sw.bpmTo : sw.bpmFrom, true, true);
+
+            float* channels[] { block.left.data() + offset, block.right.data() + offset };
+            dsp.process (channels, 2, std::min (chunk, n - offset));
+        }
+
+        return block;
+    };
+
+    std::vector<int> characters { 0 };
+
+    if (longRun)
+        characters = { 0, 1, 2 };
+
+    for (const auto c : characters)
+    {
+        for (const auto& sw : switches)
+        {
+            const auto block = render (c, sw, 0.0, (int) (7.5 * rate));
+
+            auto burst = 0.0, reference = 0.0;
+
+            for (const auto* x : { &block.left, &block.right })
+            {
+                burst = std::max (burst, loudest5ms (*x, at, at + (int) (1.2 * rate), rate));
+                reference = std::max ({ reference,
+                                        loudest5ms (*x, at - (int) (0.5 * rate), at, rate),
+                                        loudest5ms (*x, at + (int) (2.5 * rate), at + (int) (3.0 * rate), rate) });
+            }
+
+            // A glide passes every time between: the loudest of them, held.
+            if (c != P::kClean)
+            {
+                const auto lo = std::min (sw.msFrom, sw.msTo), hi = std::max (sw.msFrom, sw.msTo);
+
+                for (auto ms = lo; ms <= hi + 1.0e-9; ms += 0.25)
+                {
+                    const auto held = render (c, sw, ms, (int) (5.0 * rate));
+                    reference = std::max (reference, loudest5ms (held.left, (int) (4.0 * rate), (int) (5.0 * rate), rate));
+                }
+            }
+
+            char buf[220];
+            std::snprintf (buf, sizeof (buf), "%s on %s bursts %+.2f dB over the loudest steady level %s",
+                           sw.name, characterName (c), dbOf (burst) - dbOf (reference),
+                           c == P::kClean ? "either side" : "on its glide");
+
+            check (dbOf (burst) - dbOf (reference) < 0.5, buf);
+        }
+    }
+}
+
+/** **Diffuse switched back on in silence comes back silent** (2026-10-03).
+
+    The allpass lines are skipped while FX is off, so they kept what they held
+    when it went off, and FX on replayed it into the loop however long after:
+    the review's probe put out -23.5 dBFS 28 s after the switch, in silence
+    (AMOUNT 100, FEEDBACK 35). Here, shorter and on every character and in
+    the lane: TIME 50 ms so the loop has decayed far below anything a replay
+    could hide in well before FX comes back, a 1 s noise burst with FX on, FX
+    off at 1 s, back on at 5 s. The second before and the second after must
+    both peak under -200 dBFS, 176 dB under the replay.
+
+    **Not exact zeros** (2026-10-04). Three seconds at FEEDBACK 35 and 50 ms
+    is about -870 dB, a denormal, so exact zeros held only where flush to
+    zero is in force -- on ICE QUEEN, not on every compiler, maths library
+    and target CI builds this suite with. What the fix is about is that the
+    stage's old content is not replayed, and -200 dBFS says that anywhere. */
+void testDiffuseComesBackSilent()
+{
+    constexpr auto rate = 48000.0;
+    constexpr int chunk = 512;
+    const auto n = (int) (6.0 * rate);
+    const auto offAt = (int) (1.0 * rate) / chunk * chunk;
+    const auto onAt  = (int) (5.0 * rate) / chunk * chunk;
+    const auto second = (int) rate;
+
+    for (const auto lane : { false, true })
+    {
+        for (int c = 0; c < 3; ++c)
+        {
+            P::DwellDsp dsp;
+            dsp.prepare (rate, chunk, 2);
+
+            auto v = defaults();
+            v[P::Index::character] = (float) c;
+            v[P::Index::fxType]    = 0.0f;     // Diffuse
+            v[P::Index::fxAmount]  = 100.0f;
+            v[P::Index::mix]       = 100.0f;
+
+            if (lane)
+            {
+                v[P::Index::feedback] = 0.0f;
+                v[P::Index::time]     = 50.0f;
+                v[P::Index::hold]     = 1.0f;
+                v[P::Index::laneTime] = 50.0f;
+                v[P::Index::laneGain] = laneGainMatching (35.0f);
+            }
+            else
+            {
+                v[P::Index::feedback] = 35.0f;
+                v[P::Index::time]     = 50.0f;
+            }
+
+            Block block { n };
+            Noise noise;
+
+            for (int i = 0; i < offAt; ++i)
+                block.left[(size_t) i] = block.right[(size_t) i] = 0.2f * noise.next();
+
+            renderAsHost (dsp, v, block, n, chunk, [&] (int offset)
+            {
+                v[P::Index::fx] = (offset >= offAt && offset < onAt) ? 0.0f : 1.0f;
+
+                if (lane)
+                    v[P::Index::send] = offset < offAt ? 1.0f : 0.0f;
+            });
+
+            const auto before = std::max (peakOf (block.left, onAt - second, second),
+                                          peakOf (block.right, onAt - second, second));
+            const auto after  = std::max (peakOf (block.left, onAt, second),
+                                          peakOf (block.right, onAt, second));
+
+            // -200 dBFS: far under the -23.5 dBFS a replay put out, and far over
+            // anything a denormal or a flushed one leaves.
+            constexpr auto bound = 1.0e-10;
+
+            char buf[260];
+            std::snprintf (buf, sizeof (buf),
+                           "Diffuse back on in silence, %s on %s: the second before peaks at %.1f dBFS and the "
+                           "second after at %.1f dBFS; both must be under -200 dBFS (a replay was -23.5)",
+                           lane ? "in the lane" : "in the main loop", characterName (c),
+                           dbOf (before), dbOf (after));
+
+            check ((double) before < bound && (double) after < bound, buf);
+        }
+    }
+}
+
+/** **Every discrete switch is a fade, wherever it lands** (2026-10-04).
+
+    The owner's rule for a switch: it may dip briefly; it may not click (a
+    sample step over 1.5 times the signal's own largest), burst (over 1 dB
+    above the louder steady level) or linger (a dip held past about 30 ms).
+    A switch that changes what is inside the loop changes what the ring
+    holds, so its echo returns a TIME later, two TIMEs later and three, and
+    those are judged as well as the switch (the third from 2026-10-04).
+
+    **The grid is built not to be blind.** The 2026-10-03 test took the
+    review's probe as it was -- TIME 375 ms, a whole 165 cycles of its
+    440 Hz tone, the switch on a round block edge at 4.000 s -- and those
+    conditions hid three steps that a fraction of a sample and another
+    moment showed: at TIME 375.013 ms and 4.3 s, CHARACTER clean <-> tape
+    3.4x, tape -> bucket-brigade 3.6x and STEREO stereo -> ping-pong 3.2x.
+    So every switch is judged at TIME 375.013 ms and 13.7 ms (neither a whole
+    number of cycles), at eight moments an eighth of the tone's cycle apart
+    and off the block grid -- a short first block puts a block edge on each
+    moment, as a host's own block grid would -- at 48 and 96 kHz, in blocks
+    of 512 and 441, at FEEDBACK 60 and 95, on the tone and on noise.
+
+    **The reference is the same render without the switch**, held in the
+    old state (A) and in the new (B), on the same input: the loop at a
+    high FEEDBACK takes seconds to settle, so a steady level before and after
+    would be measuring the settling. Over the window from 30 ms before the
+    switch to 60 ms past its third echo (the levels to 60 ms past the
+    second, as below):
+
+    - **step**: in each 5 ms window (20 ms on noise, whose 5 ms level
+      wanders by itself) the largest sample step over the window's level,
+      the loudest of the three -- a loop moved to a louder state steps more in
+      proportion, and that is level -- is under 1.5 times the signal's own:
+      the same quantity for A, for B, and for the switched render itself
+      before the switch and past the third echo's 30 ms, so that a stage
+      that steps by design (Crush's hold) is measured against its own steps;
+    - **burst**: no window more than 1 dB above the louder of A and B;
+    - **linger**: no run of windows more than 1 dB under the quieter of A and
+      B lasting longer than 30 ms.
+
+    **Not every bound fits every switch, and where one does not, the figure
+    is still printed in `--grid`.** A switch that moves a delay time -- SYNC,
+    NOTE, and STEREO into or out of dual offset, which moves the right
+    line's -- is held to the step bound only: a loop whose time has moved
+    rebuilds its comb against a steady tone for as long as it rings, louder
+    or quieter than either held time, which is the delay and not the switch
+    (`testOneTimeSwitchDoesNotBurst` holds those against the loudest time on
+    the path). An FX TYPE change is not held to the burst bound, and no FX
+    switch to the linger bound: the burst is the loop's own transient on a
+    tone at FEEDBACK 95 -- the same with the switch taken in 20 us as in
+    20 ms (Pan/Tremolo -> Crush +2.34 dB both ways, on ICE QUEEN) -- and a
+    stage coming in reshapes the loop for longer than 30 ms by what it is
+    (Diffuse's first pass delays up to 126 ms; Pan/Tremolo's positions start
+    where it starts). Those are open and in the 2026-10-04 notes, not closed
+    by this test.
+
+    **What the grid did not reach, added 2026-10-04**: the third echo; MOD 50
+    and 100 on every CHARACTER and STEREO switch, against the held renders
+    over a whole cycle of MOD RATE (see `judgeGridCell`); a second switch
+    5 ms into the fade, and the switch thrown every block for 250 ms, on
+    every CHARACTER, STEREO and FX switch; and the FX switches on tape and
+    bucket-brigade at FEEDBACK 95. **Every one of them is held to the step
+    bound, and every one keeps it** (worst 1.44x, FX TYPE Diffuse -> Crush
+    thrown every block). **Their level is printed, not bounded, and open**:
+    it is the loop's own transient on a tone at FEEDBACK 95 -- the same with
+    the switch taken in one sample, so no fade of 30 ms or less reaches it.
+    Measured on ICE QUEEN, burst and dip with a 20 ms fade -> one sample ->
+    200 ms: STEREO ping-pong <-> stereo on bucket-brigade at 375.013 ms,
+    third echo, +1.50 -> +1.50 -> +0.28 dB and 43.8 -> 58.8 -> 0 ms; FX on,
+    Diffuse on bucket-brigade +5.57 -> +5.42 -> +5.52 dB; STEREO stereo ->
+    ping-pong on bucket-brigade at MOD 50 +1.85 -> +1.89 -> +1.15 dB; the
+    same thrown every block, a 191 ms dip at every length. The level through
+    the first two echoes of the cells judged before is judged as it was.
+
+    The default run is the worst cells and one of each added dimension;
+    `--long` is the whole grid (19 200 cells); `--grid` runs the grid alone
+    and prints each family's worst, `--grid <text>` the cells named. */
+enum class GridFamily { character, stereo, sync, note, fxOnOff, fxType, hold, chop, send, fxLink };
+
+struct GridSwitch
+{
+    GridFamily family;
+    std::string name;
+    std::vector<std::tuple<int, float, float>> moves;   ///< index, before, after
+    std::vector<std::pair<int, float>> base;            ///< what the switch needs set
+    bool lane = false;
+    bool movesTime = false;
+};
+
+/** What happens after the first switch (2026-10-04). */
+enum class GridAfter
+{
+    once,        ///< the switch, then held
+    backAt5ms,   ///< back to the old state 5 ms into the fade
+    everyBlock   ///< back and forth every block for 250 ms, ending in the new state
+};
+
+struct GridCell
+{
+    int which;            ///< into `gridSwitches (shortTime)`
+    bool shortTime;
+    int moment;           ///< 0-7, eighths of the tone's cycle
+    double rate;
+    int block;
+    float feedback;
+    bool noise;
+    float mod = 0.0f;                    ///< MOD DEPTH, at MOD RATE's default
+    GridAfter after = GridAfter::once;
+    int character = -1;                  ///< for the FX rows: the character they run on (-1: clean)
+    float timeMs = 0.0f;                 ///< 0: 13.7 or 375.013 ms by `shortTime`
+};
+
+constexpr double kGridTempo = 117.0;   // 1/8D is 384.6 ms: not a whole number of cycles either
+
+const char* familyName (GridFamily f)
+{
+    switch (f)
+    {
+        case GridFamily::character: return "CHARACTER";
+        case GridFamily::stereo:    return "STEREO";
+        case GridFamily::sync:      return "SYNC";
+        case GridFamily::note:      return "NOTE";
+        case GridFamily::fxOnOff:   return "FX on/off";
+        case GridFamily::fxType:    return "FX TYPE";
+        case GridFamily::hold:      return "HOLD";
+        case GridFamily::chop:      return "CHOP";
+        case GridFamily::send:      return "SEND";
+        case GridFamily::fxLink:    break;
+    }
+
+    return "FX LINK";
+}
+
+std::vector<GridSwitch> gridSwitches (bool shortTime)
+{
+    using I = P::Index;
+    const char* const characters[] { "clean", "tape", "bucket-brigade" };
+    const char* const stereos[] { "stereo", "ping-pong", "dual offset" };
+    const char* const types[] { "Diffuse", "Pan/Tremolo", "Crush" };
+
+    std::vector<GridSwitch> s;
+
+    for (int a = 0; a < 3; ++a)
+        for (int b = 0; b < 3; ++b)
+            if (a != b)
+                s.push_back ({ GridFamily::character, std::string ("CHARACTER ") + characters[a] + " -> " + characters[b],
+                               { { I::character, (float) a, (float) b } }, {} });
+
+    for (int c = 0; c < 3; ++c)
+        for (int a = 0; a < 3; ++a)
+            for (int b = 0; b < 3; ++b)
+                if (a != b)
+                    s.push_back ({ GridFamily::stereo,
+                                   std::string ("STEREO ") + stereos[a] + " -> " + stereos[b] + " on " + characters[c],
+                                   { { I::stereo, (float) a, (float) b } }, { { I::character, (float) c } },
+                                   false, a == 2 || b == 2 });
+
+    // At 117 bpm: 1/8D 384.6 ms and 1/4 512.8 ms; for the short rows 1/32
+    // 64.1 ms and 1/16T 85.5 ms.
+    const auto noteA = shortTime ? 0.0f : 8.0f, noteB = shortTime ? 1.0f : 9.0f;
+
+    s.push_back ({ GridFamily::sync, "SYNC on", { { I::sync, 0.0f, 1.0f } }, { { I::note, noteA } }, false, true });
+    s.push_back ({ GridFamily::sync, "SYNC off", { { I::sync, 1.0f, 0.0f } }, { { I::note, noteA } }, false, true });
+    s.push_back ({ GridFamily::note, "NOTE up", { { I::note, noteA, noteB } }, { { I::sync, 1.0f } }, false, true });
+    s.push_back ({ GridFamily::note, "NOTE down", { { I::note, noteB, noteA } }, { { I::sync, 1.0f } }, false, true });
+
+    for (int t = 0; t < 3; ++t)
+    {
+        s.push_back ({ GridFamily::fxOnOff, std::string ("FX on, ") + types[t], { { I::fx, 0.0f, 1.0f } },
+                       { { I::fxType, (float) t }, { I::fxAmount, t == 2 ? 60.0f : 100.0f } } });
+        s.push_back ({ GridFamily::fxOnOff, std::string ("FX off, ") + types[t], { { I::fx, 1.0f, 0.0f } },
+                       { { I::fxType, (float) t }, { I::fxAmount, t == 2 ? 60.0f : 100.0f } } });
+    }
+
+    for (int a = 0; a < 3; ++a)
+        for (int b = 0; b < 3; ++b)
+            if (a != b)
+                s.push_back ({ GridFamily::fxType, std::string ("FX TYPE ") + types[a] + " -> " + types[b],
+                               { { I::fxType, (float) a, (float) b } }, { { I::fx, 1.0f }, { I::fxAmount, 60.0f } } });
+
+    // The lane rows: HOLD and SEND on unless they are what switches, the
+    // lane at the main loop's gain and its time.
+    s.push_back ({ GridFamily::hold, "HOLD off", { { I::hold, 1.0f, 0.0f } }, { { I::send, 1.0f } }, true });
+    s.push_back ({ GridFamily::hold, "HOLD on",  { { I::hold, 0.0f, 1.0f } }, { { I::send, 1.0f } }, true });
+    s.push_back ({ GridFamily::chop, "CHOP on",  { { I::chop, 0.0f, 1.0f } }, { { I::hold, 1.0f }, { I::send, 1.0f } }, true });
+    s.push_back ({ GridFamily::chop, "CHOP off", { { I::chop, 1.0f, 0.0f } }, { { I::hold, 1.0f }, { I::send, 1.0f } }, true });
+    s.push_back ({ GridFamily::send, "SEND off", { { I::send, 1.0f, 0.0f } }, { { I::hold, 1.0f } }, true });
+    s.push_back ({ GridFamily::send, "SEND on",  { { I::send, 0.0f, 1.0f } }, { { I::hold, 1.0f } }, true });
+
+    // FX LINK: the main stage off, the lane's own Crush on.
+    const std::vector<std::pair<int, float>> linkBase { { I::hold, 1.0f }, { I::send, 1.0f }, { I::laneFx, 1.0f },
+                                                        { I::laneFxType, 2.0f }, { I::laneFxAmount, 60.0f } };
+    s.push_back ({ GridFamily::fxLink, "FX LINK off", { { I::fxLink, 1.0f, 0.0f } }, linkBase, true });
+    s.push_back ({ GridFamily::fxLink, "FX LINK on",  { { I::fxLink, 0.0f, 1.0f } }, linkBase, true });
+
+    return s;
+}
+
+struct GridJudgement
+{
+    double step = 0.0, burstDb = -99.0, dipMs = 0.0;   ///< the level through the second echo
+    double burstThrough3Db = -99.0, dipThrough3Ms = 0.0;
+};
+
+/** Renders one switch three ways -- switched at `at`, held before, held
+    after -- and judges the window. `first` is the length of the first
+    block, which is what puts a block edge on `at`; a second switch 5 ms in
+    gets a block edge of its own, as a host's sample-accurate automation
+    gives it. */
+GridJudgement judgeGridCell (const GridSwitch& sw, const GridCell& cell)
+{
+    const auto rate = cell.rate;
+    const auto timeMs = cell.timeMs > 0.0f ? cell.timeMs : (cell.shortTime ? 13.7f : 375.013f);
+
+    auto base = defaults();
+    base[P::Index::feedback] = cell.feedback;
+    base[P::Index::mix]      = 50.0f;
+    base[P::Index::time]     = timeMs;
+    base[P::Index::laneTime] = timeMs;
+    base[P::Index::modDepth] = cell.mod;
+
+    if (cell.character >= 0)
+        base[P::Index::character] = (float) cell.character;
+
+    for (const auto& [index, value] : sw.base)
+        base[(size_t) index] = value;
+
+    if (sw.lane)
+        base[P::Index::laneGain] = laneGainMatching (cell.feedback);
+
+    auto before = base, after = base;
+
+    for (const auto& [index, a, b] : sw.moves)
+    {
+        before[(size_t) index] = a;
+        after[(size_t) index]  = b;
+    }
+
+    // The longest delay either state runs, for where the echoes land.
+    auto longestMs = (double) timeMs;
+
+    for (const auto* v : { &before, &after })
+        if ((*v)[P::Index::sync] > 0.5f)
+            longestMs = std::max ({ longestMs, P::syncedMs ((int) (*v)[P::Index::note], kGridTempo),
+                                    P::syncedMs ((int) (*v)[P::Index::laneNote], kGridTempo) });
+
+    const auto period = rate / 440.0;
+    const auto t0 = cell.shortTime ? 0.25 : 1.0;
+    const auto at = (int) std::lround (t0 * rate + cell.moment * period / 8.0) + 37;
+
+    // The last switch: the first, the one back 5 ms into its fade, or the
+    // end of 250 ms of switching every block (ending in the new state).
+    const auto backAt = at + (int) std::lround (0.005 * rate);
+    const auto everyEnd = at + (int) std::ceil (0.25 * rate / cell.block) * cell.block;
+    const auto last = cell.after == GridAfter::once ? at
+                    : cell.after == GridAfter::backAt5ms ? backAt : everyEnd;
+
+    // The switch and its first three echoes (the third from 2026-10-04: a
+    // STEREO switch at FEEDBACK 95 stepped 1.76x there and not before).
+    const auto echoes = 3.0;
+    const auto from = at - (int) (0.03 * rate);
+    const auto to = last + (int) ((echoes * longestMs * 0.001 + 0.06) * rate);
+    const auto settled = last + (int) ((echoes * longestMs * 0.001 + 0.035) * rate);   // past the third echo's 30 ms
+
+    // The level bounds are judged where they were on 2026-10-04's first
+    // grid, through the second echo; the third echo's level is printed (see
+    // the comment above `GridFamily`).
+    const auto levelTo = last + (int) ((2.0 * longestMs * 0.001 + 0.06) * rate);
+
+    // Under modulation the held renders are read over a whole cycle of it.
+    const auto cycle = cell.mod > 0.0f ? (int) std::ceil (rate / (double) base[P::Index::modRate]) : 0;
+    const auto referenceTo = std::max (to, from + cycle);
+    const auto n = referenceTo + (int) (0.01 * rate);
+
+    // The input: the tone in both channels, or independent noise in each.
+    Block input { n };
+    Noise left, right;
+    right.state = 987654321u;
+    const auto noiseScale = (float) (std::pow (10.0, -18.0 / 20.0) * std::sqrt (3.0));
+
+    for (int i = 0; i < n; ++i)
+    {
+        if (cell.noise)
+        {
+            input.left[(size_t) i]  = noiseScale * left.next();
+            input.right[(size_t) i] = noiseScale * right.next();
+        }
+        else
+        {
+            input.left[(size_t) i] = input.right[(size_t) i]
+                = (float) (std::pow (10.0, -18.0 / 20.0) * std::sqrt (2.0)
+                           * std::sin (2.0 * P::kPiD * 440.0 * (double) i / rate));
+        }
+    }
+
+    // The state the switched render is in at `offset`.
+    const auto switchedState = [&] (int offset) -> const std::vector<float>&
+    {
+        if (offset < at)
+            return before;
+
+        if (cell.after == GridAfter::backAt5ms)
+            return offset < backAt ? after : before;
+
+        if (cell.after == GridAfter::everyBlock && offset < everyEnd)
+            return ((offset - at) / cell.block) % 2 == 0 ? after : before;
+
+        return after;
+    };
+
+    const auto render = [&] (bool switched, int firstBlock)
+    {
+        P::DwellDsp dsp;
+        dsp.setParams (before.data(), (int) before.size());
+        dsp.prepare (rate, cell.block, 2);
+
+        auto out = input;
+
+        for (int offset = 0; offset < n; )
+        {
+            auto count = std::min (offset == 0 ? firstBlock : cell.block, n - offset);
+
+            if (switched && cell.after == GridAfter::backAt5ms && offset < backAt && offset + count > backAt)
+                count = backAt - offset;
+
+            const auto& v = switched ? switchedState (offset) : before;
+
+            dsp.setParams (v.data(), (int) v.size());
+            dsp.setTempo (kGridTempo, true, true);
+
+            float* ch[] { out.left.data() + offset, out.right.data() + offset };
+            dsp.process (ch, 2, count);
+            offset += count;
+        }
+
+        return out;
+    };
+
+    auto firstBlock = at % cell.block;
+    if (firstBlock == 0)
+        firstBlock = cell.block;
+
+    const auto switched = render (true, firstBlock);
+    const auto heldA = render (false, cell.block);
+
+    // B is held in the new state from the start.
+    std::swap (before, after);
+    const auto heldB = render (false, cell.block);
+    std::swap (before, after);
+
+    const auto largestStep = [] (const std::vector<float>& x, int a, int b)
+    {
+        auto m = 0.0;
+
+        for (int i = std::max (a, 1); i < b; ++i)
+            m = std::max (m, (double) std::abs (x[(size_t) i] - x[(size_t) (i - 1)]));
+
+        return m;
+    };
+
+    GridJudgement j;
+    const auto w = (int) ((cell.noise ? 0.020 : 0.005) * rate);
+    const auto hop = w / 4;
+
+    for (int c = 0; c < 2; ++c)
+    {
+        const auto& s = c == 0 ? switched.left : switched.right;
+        const auto& a = c == 0 ? heldA.left : heldA.right;
+        const auto& b = c == 0 ? heldB.left : heldB.right;
+
+        // Steps are read against the level they sit in, window by window:
+        // a loop moved to a louder state steps more in proportion, and that
+        // is level, not a click. The held renders give the signal's own
+        // largest step for its level; the switched one is read against the
+        // loudest of the three in the same window, so a dip cannot make a
+        // step look large.
+        auto own = 0.0, worstStep = 0.0;
+        auto run = 0, longest = 0, longestThrough3 = 0;
+
+        // **Under modulation the reference is a whole cycle, not an
+        // instant** (2026-10-04). A modulated loop's comb moves against a
+        // steady tone, so its level swings by several dB and its steps with
+        // its pitch; the switched render moves through the same states at
+        // other moments, and set against the held level of that one instant
+        // it read as a burst and a click that the held render makes itself a
+        // moment earlier or later. So with MOD on, the step, the louder and
+        // the quieter level are the held renders' largest, loudest and
+        // quietest over one whole cycle of MOD RATE.
+        auto loudest = 0.0, quietest = 1.0e30;
+
+        for (int k = from; cycle > 0 && k + w <= referenceTo; k += hop)
+        {
+            const auto ra = rms (a, k, w), rb = rms (b, k, w);
+            own = std::max ({ own, largestStep (a, k, k + w) / std::max (ra, 1.0e-12),
+                              largestStep (b, k, k + w) / std::max (rb, 1.0e-12) });
+            loudest = std::max ({ loudest, ra, rb });
+            quietest = std::min ({ quietest, ra, rb });
+        }
+
+        for (int k = from; k + w <= to; k += hop)
+        {
+            const auto rs = rms (s, k, w), ra = rms (a, k, w), rb = rms (b, k, w);
+
+            own = std::max ({ own, largestStep (a, k, k + w) / std::max (ra, 1.0e-12),
+                              largestStep (b, k, k + w) / std::max (rb, 1.0e-12) });
+
+            // The switched signal's own steps count too, before the switch and
+            // past the third echo: a stage that steps by design -- Crush's
+            // hold -- steps as it does on whatever it is handed, and the held
+            // render in the new state may hand it less.
+            if (k + w <= at || k >= settled)
+                own = std::max (own, largestStep (s, k, k + w) / std::max (rs, 1.0e-12));
+            worstStep = std::max (worstStep, largestStep (s, k, k + w) / std::max ({ rs, ra, rb, 1.0e-12 }));
+
+            const auto louder  = cycle > 0 ? loudest : std::max (ra, rb);
+            const auto quieter = cycle > 0 ? quietest : std::min (ra, rb);
+            j.burstThrough3Db = std::max (j.burstThrough3Db, dbOf (rs) - dbOf (louder));
+
+            if (k + w <= levelTo)
+                j.burstDb = std::max (j.burstDb, dbOf (rs) - dbOf (louder));
+
+            // A dip while the switch is still being thrown every block is the
+            // gesture, not a dip that lingers after it: that one is timed
+            // from the last switch.
+            const auto timed = cell.after != GridAfter::everyBlock || k >= last;
+            run = timed && dbOf (rs) < dbOf (quieter) - 1.0 ? run + 1 : 0;
+            longestThrough3 = std::max (longestThrough3, run);
+
+            if (k + w <= levelTo)
+                longest = std::max (longest, run);
+        }
+
+        const auto spanMs = [&] (int windows) { return windows > 0 ? 1000.0 * (w + (windows - 1) * hop) / rate : 0.0; };
+        j.dipMs = std::max (j.dipMs, spanMs (longest));
+        j.dipThrough3Ms = std::max (j.dipThrough3Ms, spanMs (longestThrough3));
+        j.step = std::max (j.step, worstStep / std::max (own, 1.0e-12));
+    }
+
+    return j;
+}
+
+std::string gridCellName (const GridSwitch& sw, const GridCell& cell)
+{
+    const auto timeMs = cell.timeMs > 0.0f ? cell.timeMs : (cell.shortTime ? 13.7f : 375.013f);
+    const char* const afters[] { "", ", back 5 ms into the fade", ", back and forth every block for 250 ms" };
+
+    char extra[64] = "";
+    if (cell.mod > 0.0f)
+        std::snprintf (extra, sizeof (extra), ", MOD %.0f", (double) cell.mod);
+
+    char buf[320];
+    std::snprintf (buf, sizeof (buf), "%s%s%s, TIME %.6g ms, moment %d/8, %.0f kHz / %d, FEEDBACK %.0f, %s%s%s",
+                   sw.name.c_str(), cell.character >= 0 ? " on " : "",
+                   cell.character >= 0 ? characterName (cell.character) : "", (double) timeMs, cell.moment,
+                   cell.rate * 0.001, cell.block, (double) cell.feedback, cell.noise ? "noise" : "440 Hz",
+                   extra, afters[(int) cell.after]);
+    return buf;
+}
+
+/** The default run's cells, by switch name. */
+std::vector<GridCell> gridDefaultCells()
+{
+    struct Named
+    {
+        const char* name; bool shortTime; int moment; double rate; int block; float feedback; bool noise;
+        float mod = 0.0f; GridAfter after = GridAfter::once; int character = -1; float timeMs = 0.0f;
+    };
+
+    const Named named[]
+    {
+        // Each family's worst on a265b41 (step), the three the 2026-10-03
+        // report named among them, and two that were already clean as
+        // controls. Blocks of 441 and 512 give the same figure on each cell.
+        { "CHARACTER bucket-brigade -> tape", false, 7, 96000.0, 512, 60.0f, false },   //  9.94x
+        { "CHARACTER clean -> tape", false, 5, 48000.0, 512, 60.0f, false },            //  7.36x
+        { "CHARACTER tape -> bucket-brigade", false, 6, 96000.0, 512, 95.0f, false },   //  8.65x
+        { "STEREO dual offset -> ping-pong on tape", false, 5, 96000.0, 512, 60.0f, false },  // 13.40x
+        { "STEREO stereo -> ping-pong on clean", false, 1, 96000.0, 441, 60.0f, false },      // 11.10x
+        { "FX on, Pan/Tremolo", false, 1, 96000.0, 512, 95.0f, false },                //  9.88x
+        { "FX TYPE Diffuse -> Pan/Tremolo", false, 2, 96000.0, 512, 95.0f, false },    //  1.59x
+        { "HOLD off", true, 0, 48000.0, 441, 60.0f, false },
+        { "SYNC off", false, 5, 96000.0, 512, 60.0f, true },
+
+        // The only witnesses of the 2026-10-03 defects (2026-10-04): the
+        // review's conditions -- 48 kHz / 512, FEEDBACK 60, the tone --
+        // at the moment each was worst on c07af6d, before the chain fade.
+        { "FX off, Diffuse", false, 4, 48000.0, 512, 60.0f, false },                   //  2.92x
+        { "CHARACTER bucket-brigade -> clean", false, 6, 48000.0, 512, 60.0f, false }, //  3.09x
+        { "FX on, Diffuse", false, 0, 48000.0, 512, 60.0f, false },                    //  2.75x
+
+        // One cell of each dimension added on 2026-10-04, the review's own
+        // where it named one: the third echo (STEREO on bucket-brigade at
+        // FEEDBACK 95), MOD 100 against the whole-cycle reference, a switch
+        // thrown every block for 250 ms, and an FX switch on bucket-brigade
+        // at FEEDBACK 95.
+        { "STEREO ping-pong -> stereo on bucket-brigade", false, 0, 48000.0, 512, 95.0f, false },
+        { "CHARACTER bucket-brigade -> clean", true, 0, 48000.0, 512, 60.0f, false, 100.0f, GridAfter::once, -1, 7.3f },
+        { "STEREO stereo -> ping-pong on clean", true, 0, 48000.0, 512, 95.0f, false, 0.0f, GridAfter::everyBlock, -1, 7.3f },
+        { "FX on, Diffuse", false, 0, 48000.0, 512, 95.0f, false, 0.0f, GridAfter::once, (int) P::kBucketBrigade },
+    };
+
+    std::vector<GridCell> cells;
+
+    for (const auto& c : named)
+    {
+        const auto switches = gridSwitches (c.shortTime);
+
+        for (int i = 0; i < (int) switches.size(); ++i)
+            if (switches[(size_t) i].name == c.name)
+                cells.push_back ({ i, c.shortTime, c.moment, c.rate, c.block, c.feedback, c.noise,
+                                   c.mod, c.after, c.character, c.timeMs });
+    }
+
+    return cells;
+}
+
+/** The whole grid, for `--long` and `--grid`. */
+std::vector<GridCell> gridAllCells()
+{
+    std::vector<GridCell> cells;
+
+    for (const auto shortTime : { false, true })
+    {
+        const auto switches = gridSwitches (shortTime);
+
+        for (int which = 0; which < (int) switches.size(); ++which)
+            for (int moment = 0; moment < 8; ++moment)
+                for (const auto rate : { 48000.0, 96000.0 })
+                    for (const auto block : { 512, 441 })
+                        for (const auto feedback : { 60.0f, 95.0f })
+                            for (const auto noise : { false, true })
+                                cells.push_back ({ which, shortTime, moment, rate, block, feedback, noise });
+
+        // 2026-10-04: what the grid did not reach. MOD 50 and 100 on every
+        // CHARACTER and STEREO switch, which change the read's modulation
+        // law; a second switch 5 ms into the fade and every block for the
+        // switches that fade a path; and the FX switches on tape and
+        // bucket-brigade at FEEDBACK 95, not on clean alone. The short time
+        // is 7.3 ms there, the review's. A quarter cycle apart, on the tone.
+        const auto shortMs = shortTime ? 7.3f : 0.0f;
+
+        for (int which = 0; which < (int) switches.size(); ++which)
+        {
+            const auto f = switches[(size_t) which].family;
+            const auto readLaw = f == GridFamily::character || f == GridFamily::stereo;
+            const auto fx = f == GridFamily::fxOnOff || f == GridFamily::fxType;
+
+            for (int moment = 0; moment < 8; moment += 2)
+                for (const auto rate : { 48000.0, 96000.0 })
+                    for (const auto feedback : { 60.0f, 95.0f })
+                    {
+                        if (readLaw)
+                            for (const auto mod : { 50.0f, 100.0f })
+                                cells.push_back ({ which, shortTime, moment, rate, 512, feedback, false,
+                                                   mod, GridAfter::once, -1, shortMs });
+
+                        if (readLaw || fx)
+                            for (const auto after : { GridAfter::backAt5ms, GridAfter::everyBlock })
+                                cells.push_back ({ which, shortTime, moment, rate, 512, feedback, false,
+                                                   0.0f, after, -1, shortMs });
+                    }
+
+            if (fx)
+                for (const auto character : { (int) P::kTape, (int) P::kBucketBrigade })
+                    for (int moment = 0; moment < 8; ++moment)
+                        for (const auto rate : { 48000.0, 96000.0 })
+                            for (const auto block : { 512, 441 })
+                                for (const auto noise : { false, true })
+                                    cells.push_back ({ which, shortTime, moment, rate, block, 95.0f, noise,
+                                                       0.0f, GridAfter::once, character });
+        }
+    }
+
+    return cells;
+}
+
+/** `--grid` runs this alone, at full size, and prints each family's worst
+    cell: what a fix is iterated against. `--grid <text>` runs only the
+    cells whose name carries that text, printing each. */
+void testEverySwitchIsAFade (bool printWorst = false, const std::string& only = {})
+{
+    const auto started = std::chrono::steady_clock::now();
+
+    // The default run: the worst cells the full grid found on a265b41, one
+    // a family that failed, the families that did not at their worst, the
+    // cells that were the only witness of a defect fixed since, and one of
+    // each dimension added on 2026-10-04.
+    const auto cells = longRun ? gridAllCells() : gridDefaultCells();
+
+    struct Worst { double step = 0.0, burst = -99.0, dip = 0.0; std::string stepAt, burstAt, dipAt; };
+    std::vector<Worst> worst (10);
+    int judged = 0;
+
+    for (const auto& cell : cells)
+    {
+        const auto switches = gridSwitches (cell.shortTime);
+        const auto& sw = switches[(size_t) cell.which];
+        const auto name = gridCellName (sw, cell);
+
+        if (! only.empty() && name.find (only) == std::string::npos)
+            continue;
+
+        const auto j = judgeGridCell (sw, cell);
+        ++judged;
+
+        auto& wf = worst[(size_t) sw.family];
+
+        if (j.step > wf.step)             { wf.step = j.step;                 wf.stepAt = name; }
+        if (j.burstThrough3Db > wf.burst) { wf.burst = j.burstThrough3Db;   wf.burstAt = name; }
+        if (j.dipThrough3Ms > wf.dip)     { wf.dip = j.dipThrough3Ms;         wf.dipAt = name; }
+
+        // See the comment above for what is judged where. The cells added on
+        // 2026-10-04 -- MOD, a second switch, FX on tape and bucket-brigade --
+        // are held to the step bound; their level is the loop's own
+        // transient and is printed.
+        const auto added = cell.mod > 0.0f || cell.after != GridAfter::once || cell.character >= 0;
+        const auto reshapes = sw.family == GridFamily::fxOnOff || sw.family == GridFamily::fxType
+                           || sw.family == GridFamily::fxLink;
+        const auto burstJudged = ! added && ! sw.movesTime && sw.family != GridFamily::fxType;
+        const auto dipJudged = ! added && ! sw.movesTime && ! reshapes;
+
+        char buf[600];
+        std::snprintf (buf, sizeof (buf), "%s: step %.2fx, burst %+.2f dB%s (%+.2f through the third echo), "
+                       "longest dip %.1f ms%s (%.1f)",
+                       name.c_str(), j.step, j.burstDb, burstJudged ? "" : " (not judged)", j.burstThrough3Db,
+                       j.dipMs, dipJudged ? "" : " (not judged)", j.dipThrough3Ms);
+
+        if (! only.empty())
+            std::printf ("      %s\n", buf);
+
+        check (j.step <= 1.5 && (! burstJudged || j.burstDb <= 1.0) && (! dipJudged || j.dipMs <= 30.0), buf);
+    }
+
+    if (printWorst)
+        for (int f = 0; f < 10; ++f)
+            if (! worst[(size_t) f].stepAt.empty())
+                std::printf ("      worst %-9s step %.2fx at %s\n                burst %+.2f dB at %s\n"
+                             "                dip %.1f ms at %s\n",
+                             familyName ((GridFamily) f), worst[(size_t) f].step, worst[(size_t) f].stepAt.c_str(),
+                             worst[(size_t) f].burst, worst[(size_t) f].burstAt.c_str(),
+                             worst[(size_t) f].dip, worst[(size_t) f].dipAt.c_str());
+
+    std::printf ("      the switch grid judged %d cells in %.1f s\n", judged,
+                 std::chrono::duration<double> (std::chrono::steady_clock::now() - started).count());
+}
+
+/** **`reset()` and `prepare()` land on a fresh instance, sample for sample**
+    (2026-10-03).
+
+    The review's probe: TIME 5 ms, FEEDBACK 60, then -- one block before the
+    reset -- TIME 7 ms, FEEDBACK 95, DRIVE 80, FX on at AMOUNT 90, so the
+    crossfade and the FEEDBACK, DRIVE and FX AMOUNT smoothers are all mid-way.
+    From the reset on, the instance must render exactly what a fresh instance
+    set to the new values renders on the same input. On the starting code it
+    differed by up to 0.036 for 2.9 s: the reset cleared the rings and left
+    the loop's own gains gliding. `prepare` is held to the same, from 48 kHz
+    and 512 to 96 kHz and 32 mid-fade, with Crush, HOLD and SEND on. Every
+    character. */
+void testResetAndPrepareLandOnAFreshInstance()
+{
+    constexpr auto rate = 48000.0;
+    constexpr int chunk = 512;
+
+    const auto noiseBlock = [] (int n, unsigned int seed)
+    {
+        Block b { n };
+        Noise noise;
+        noise.state = seed;
+
+        for (int i = 0; i < n; ++i)
+        {
+            b.left[(size_t) i]  = 0.25f * noise.next();
+            b.right[(size_t) i] = 0.25f * noise.next();
+        }
+
+        return b;
+    };
+
+    const auto worstApart = [] (const Block& a, int fromA, const Block& b, int n)
+    {
+        auto worst = 0.0f;
+
+        for (int i = 0; i < n; ++i)
+            worst = std::max ({ worst, std::abs (a.left[(size_t) (fromA + i)] - b.left[(size_t) i]),
+                                std::abs (a.right[(size_t) (fromA + i)] - b.right[(size_t) i]) });
+
+        return worst;
+    };
+
+    for (int c = 0; c < 3; ++c)
+    {
+        auto p = defaults();
+        p[P::Index::character] = (float) c;
+        p[P::Index::feedback]  = 60.0f;
+        p[P::Index::time]      = 5.0f;
+
+        auto q = p;
+        q[P::Index::time]     = 7.0f;
+        q[P::Index::feedback] = 95.0f;
+        q[P::Index::drive]    = 80.0f;
+        q[P::Index::fx]       = 1.0f;
+        q[P::Index::fxAmount] = 90.0f;
+
+        // reset() at block 100, the move to q at block 99.
+        {
+            const auto n = (int) (3.0 * rate) / chunk * chunk;
+            const auto resetBlock = 100;
+            auto input = noiseBlock (n, 4u);
+
+            P::DwellDsp moved;
+            moved.prepare (rate, chunk, 2);
+            auto v = p;
+            auto block = input;
+
+            for (int b = 0; b * chunk < n; ++b)
+            {
+                if (b == resetBlock)
+                    moved.reset();
+
+                v = b < resetBlock - 1 ? p : q;
+                moved.setParams (v.data(), (int) v.size());
+                moved.setTempo (120.0, false, false);
+
+                float* ch[] { block.left.data() + b * chunk, block.right.data() + b * chunk };
+                moved.process (ch, 2, chunk);
+            }
+
+            const auto tail = n - resetBlock * chunk;
+            Block fresh { tail };
+            std::copy (input.left.begin() + resetBlock * chunk, input.left.end(), fresh.left.begin());
+            std::copy (input.right.begin() + resetBlock * chunk, input.right.end(), fresh.right.begin());
+
+            P::DwellDsp freshDsp;
+            freshDsp.setParams (q.data(), (int) q.size());
+            freshDsp.prepare (rate, chunk, 2);
+            renderAsHost (freshDsp, q, fresh, tail, chunk, [] (int) {});
+
+            char buf[200];
+            const auto apart = worstApart (block, resetBlock * chunk, fresh, tail);
+            std::snprintf (buf, sizeof (buf),
+                           "reset() mid-crossfade and mid-ramp on %s renders as a fresh instance "
+                           "(worst difference %.3g)", characterName (c), (double) apart);
+            check (apart == 0.0f, buf);
+        }
+
+        // prepare() mid-fade: 48 kHz / 512 to 96 kHz / 32.
+        {
+            auto r = q;
+            r[P::Index::fxType] = 2.0f;
+            r[P::Index::hold]   = 1.0f;
+            r[P::Index::send]   = 1.0f;
+            r[P::Index::time]   = 900.0f;
+
+            P::DwellDsp moved;
+            moved.setParams (r.data(), (int) r.size());
+            moved.prepare (rate, chunk, 2);
+
+            auto warm = noiseBlock ((int) rate, 7u);
+            auto v = q;
+            renderAsHost (moved, v, warm, (int) rate, chunk, [&] (int offset)
+            {
+                v = offset < 90 * chunk ? q : r;
+                v[P::Index::fxType] = 2.0f;
+                v[P::Index::hold]   = 1.0f;
+                v[P::Index::send]   = 1.0f;
+            });
+
+            moved.setParams (r.data(), (int) r.size());
+            moved.prepare (96000.0, 32, 2);
+
+            const auto n = 96000 * 2;
+            auto a = noiseBlock (n, 9u);
+            auto b = a;
+            renderAsHost (moved, r, a, n, 32, [] (int) {});
+
+            P::DwellDsp freshDsp;
+            freshDsp.setParams (r.data(), (int) r.size());
+            freshDsp.prepare (96000.0, 32, 2);
+            renderAsHost (freshDsp, r, b, n, 32, [] (int) {});
+
+            char buf[200];
+            const auto apart = worstApart (a, 0, b, n);
+            std::snprintf (buf, sizeof (buf),
+                           "prepare() mid-crossfade on %s, 48 kHz / 512 to 96 kHz / 32, renders as a fresh "
+                           "instance (worst difference %.3g)", characterName (c), (double) apart);
+            check (apart == 0.0f, buf);
+        }
+    }
+}
+
+/** **The first block after `prepare()` or `reset()` builds no sweep and
+    clears no ring** (2026-10-04).
+
+    The snap that the first parameter set after a `prepare` or `reset` makes
+    took `P_c`'s sweep again in both engines -- 1024 points of the reference
+    chain and 1024 of the interpolator's kernel each -- although nothing it is
+    built from had moved, and cleared the lane's empty rings again through
+    HOLD's snap: 75 to 210 us of that block's `setParams`, against whole
+    steady blocks of 3.7 to 187 us, measured on ICE QUEEN. A chain edit or a host
+    reset brings the module into a rack on exactly that block. The halves are
+    now kept against what they are built from and taken in `prepare`, every
+    character's at the prepared TIME, and a ring nothing has written is not
+    cleared again, so neither count may move across the first block after
+    either, nor the sweeps across a CHARACTER switch at a held TIME. Counted,
+    not timed: a timing would pass or fail with the machine. */
+void testTheFirstBlockSweepsNothing()
+{
+    const std::pair<double, int> settings[] { { 48000.0, 512 }, { 192000.0, 32 } };
+
+    for (const auto& [rate, chunk] : settings)
+        for (int c = 0; c < 3; ++c)
+            for (int lane = 0; lane < 2; ++lane)
+                for (int fx = -1; fx < 3; ++fx)
+                {
+                    auto v = defaults();
+                    v[P::Index::character] = (float) c;
+                    v[P::Index::hold]      = (float) lane;
+                    v[P::Index::send]      = (float) lane;
+                    v[P::Index::fx]        = fx >= 0 ? 1.0f : 0.0f;
+                    v[P::Index::fxType]    = (float) std::max (fx, 0);
+                    v[P::Index::feedback]  = 60.0f;
+
+                    P::DwellDsp dsp;
+                    dsp.setParams (v.data(), (int) v.size());
+                    dsp.prepare (rate, chunk, 2);
+
+                    const auto sweeps = [&dsp]
+                    {
+                        return dsp.getCore().getMainEngine().sweepCount()
+                             + dsp.getCore().getLaneEngine().sweepCount();
+                    };
+
+                    Block block { chunk };
+
+                    const auto oneBlock = [&] (const std::vector<float>& values)
+                    {
+                        for (int i = 0; i < chunk; ++i)
+                        {
+                            block.left[(size_t) i]  = 0.25f * (float) std::sin (0.031 * i);
+                            block.right[(size_t) i] = 0.25f * (float) std::sin (0.017 * i);
+                        }
+
+                        dsp.setParams (values.data(), (int) values.size());
+                        dsp.setTempo (120.0, false, false);
+                        float* ch[] { block.left.data(), block.right.data() };
+                        dsp.process (ch, 2, chunk);
+                    };
+
+                    char where[120];
+                    std::snprintf (where, sizeof (where), "on %s, lane %s, FX %d, %.0f kHz / %d",
+                                   characterName (c), lane ? "held" : "off", fx, rate / 1000.0, chunk);
+
+                    const auto clears = [&dsp]
+                    {
+                        return dsp.getCore().getMainEngine().ringClearCount()
+                             + dsp.getCore().getLaneEngine().ringClearCount();
+                    };
+
+                    const auto firstBlock = [&] (const char* after)
+                    {
+                        const auto sweptBefore = sweeps();
+                        const auto clearedBefore = clears();
+                        oneBlock (v);
+                        check (sweeps() == sweptBefore && clears() == clearedBefore,
+                               "the first block after " + std::string (after) + " builds no sweep and "
+                                   "clears no ring " + where + " (" + std::to_string (sweeps() - sweptBefore)
+                                   + " built, " + std::to_string (clears() - clearedBefore) + " cleared)");
+                    };
+
+                    firstBlock ("prepare()");
+
+                    for (int b = 0; b < 8; ++b)
+                        oneBlock (v);
+
+                    dsp.reset();
+                    firstBlock ("reset()");
+
+                    auto before = sweeps();
+
+                    // Every other character and back, TIME held: `prepare`
+                    // took all three characters' halves.
+
+                    for (int k = 1; k <= 3; ++k)
+                    {
+                        auto w = v;
+                        w[P::Index::character] = (float) ((c + k) % 3);
+                        oneBlock (w);
+                        oneBlock (w);
+                    }
+
+                    check (sweeps() == before, "a CHARACTER switch at a held TIME builds no sweep "
+                               + std::string (where) + " (" + std::to_string (sweeps() - before) + " built)");
+                }
+}
+
+/** **One toggle of Diffuse costs a held loop what is pinned here, and no
+    more** (2026-10-04).
+
+    FX off fades Diffuse out at its output over 20 ms and stops running it,
+    so whatever its six allpass lines hold -- up to 126 ms of the loop's
+    audio at AMOUNT 100 -- leaves the loop; FX on fades a cleared stage in
+    at its input. Each toggle is a loss, which a switch may take, but a held
+    loop has nothing to make it back from. The review's probe, on ICE QUEEN
+    (48 kHz / 512, a 2 s noise burst): the frozen lane with Diffuse toggled
+    once every 16 blocks on average fell from -17.7 dBFS held to -133.7 at
+    52-62 s, and to exact silence toggled every block.
+
+    Measured as a toggle and back 1 s later, so the toggled render ends in
+    the state it began in and is set against the render never toggled
+    (the 1 s RMS 5 s after the first toggle, the louder channel), on ICE
+    QUEEN on clean: off and on again -1.60 dB in the frozen lane and -1.55
+    at FEEDBACK 95, on and off again -1.38 and -0.90 dB; across the three
+    characters the review's noise gives -1.4 to -2.2 dB in the lane and -0.7
+    to -1.8 at FEEDBACK 95. A single toggle, against the render held in the
+    new state, costs -0.2 to -2.4 dB. Pan/Tremolo and Crush are not in this
+    test: a loop with either in it does not hold -- the frozen lane at
+    AMOUNT 100 is 190 dB down at 11-12 s with Pan/Tremolo, and silent
+    with Crush, never toggled.
+
+    **Keeping the loop's energy instead was tried and is not here.** The
+    stage going out fed a falling share and its output kept in the loop until
+    it rang out, the stage coming in as now: the pair cost fell to -0.5 to
+    +0.9 dB, but the returned tail summed with the loop as a burst -- 112 of
+    576 FX on/off Diffuse grid cells over 1 dB, +1.31 dB on noise at
+    FEEDBACK 95 -- and FX TYPE Diffuse -> Crush stepped 1.63x. So the cost is
+    pinned, here and in `modules/dwell/AGENTS.md`, to within 0.5 dB: a change
+    that keeps the energy moves it toward 0 and must say so. */
+void testOneDiffuseToggleCostsAHeldLoopItsPinnedFigure()
+{
+    constexpr auto rate = 48000.0;
+    constexpr int chunk = 512;
+    const auto n = (int) (12.0 * rate);
+    const auto toggleAt = (int) (6.0 * rate), backAt = (int) (7.0 * rate);
+    const auto noiseScale = (float) (std::pow (10.0, -18.0 / 20.0) * std::sqrt (3.0));
+
+    struct Row { bool lane; bool startsOn; double pinnedDb; };
+    const Row rows[] { { true, true, -1.60 }, { true, false, -1.38 }, { false, true, -1.55 }, { false, false, -0.90 } };
+
+    for (const auto& row : rows)
+    {
+        const auto render = [&] (bool toggled)
+        {
+            P::DwellDsp dsp;
+            dsp.prepare (rate, chunk, 2);
+
+            auto v = defaults();
+            v[P::Index::mix] = 100.0f;
+            const auto gate = row.lane ? P::Index::laneFx : P::Index::fx;
+
+            if (row.lane)
+            {
+                v[P::Index::feedback]     = 0.0f;
+                v[P::Index::hold]         = 1.0f;
+                v[P::Index::laneGain]     = 0.0f;   // the detent: the lane frozen
+                v[P::Index::fxLink]       = 0.0f;
+                v[P::Index::laneFxType]   = 0.0f;   // Diffuse
+                v[P::Index::laneFxAmount] = 100.0f;
+            }
+            else
+            {
+                v[P::Index::feedback] = 95.0f;
+                v[P::Index::fxType]   = 0.0f;
+                v[P::Index::fxAmount] = 100.0f;
+            }
+
+            Block block { n };
+            Noise left, right;
+            right.state = 987654321u;
+
+            for (int i = 0; i < (int) (2.0 * rate); ++i)
+            {
+                block.left[(size_t) i]  = noiseScale * left.next();
+                block.right[(size_t) i] = noiseScale * right.next();
+            }
+
+            renderAsHost (dsp, v, block, n, chunk, [&] (int offset)
+            {
+                const auto flipped = toggled && offset >= toggleAt && offset < backAt;
+                v[(size_t) gate] = row.startsOn != flipped ? 1.0f : 0.0f;
+
+                if (row.lane)
+                    v[P::Index::send] = offset < (int) (2.0 * rate) ? 1.0f : 0.0f;
+            });
+
+            const auto from = toggleAt + (int) (5.0 * rate);
+            return dbOf (std::max (rms (block.left, from, (int) rate), rms (block.right, from, (int) rate)));
+        };
+
+        const auto held = render (false), toggled = render (true);
+        const auto cost = toggled - held;
+
+        char buf[260];
+        std::snprintf (buf, sizeof (buf), "Diffuse %s and back 1 s later, %s on clean: %+.2f dB of the held "
+                       "loop 5 s on (%.1f dBFS held); pinned at %+.2f dB, within 0.5",
+                       row.startsOn ? "off" : "on", row.lane ? "in the frozen lane" : "at FEEDBACK 95",
+                       cost, held, row.pinnedDb);
+        std::printf ("      %s\n", buf);
+        check (std::abs (cost - row.pinnedDb) <= 0.5, buf);
+    }
+}
+
 } // namespace
 
 //==============================================================================
-int main()
+int main (int argc, char** argv)
 {
+    for (int i = 1; i < argc; ++i)
+        if (std::string (argv[i]) == "--long")
+            longRun = true;
+
+    // `--grid`: the switch grid alone, at full size, with each family's worst
+    // cell printed -- what a switch fix is iterated against. `--grid <text>`
+    // runs the cells whose name carries the text, and prints every one.
+    for (int i = 1; i < argc; ++i)
+        if (std::string (argv[i]) == "--grid")
+        {
+            longRun = true;
+            testEverySwitchIsAFade (true, i + 1 < argc ? std::string (argv[i + 1]) : std::string());
+            std::printf ("%d checks, %d failures (--grid)\n", checks, failures);
+            return failures == 0 ? 0 : 1;
+        }
+
     testSchemaIsWhatItWillAlwaysBe();
     testChoiceListsKeepTheirOrder();
     testEveryParameterIsWiredToItsOwnValue();
@@ -6091,6 +7725,17 @@ int main()
     testABucketBrigadeBoundaryNeverSpikes();
     testNoEventSpikesTheOutputOnAnyCharacter();
 
-    std::printf ("%d checks, %d failures\n", checks, failures);
+    // The 2026-10-03 review.
+    testMovingATimeNeverFeedsTheLoop();
+    testOneTimeSwitchDoesNotBurst();
+    testDiffuseComesBackSilent();
+    testEverySwitchIsAFade();
+    testResetAndPrepareLandOnAFreshInstance();
+
+    // 2026-10-04.
+    testTheFirstBlockSweepsNothing();
+    testOneDiffuseToggleCostsAHeldLoopItsPinnedFigure();
+
+    std::printf ("%d checks, %d failures%s\n", checks, failures, longRun ? " (--long)" : "");
     return failures == 0 ? 0 : 1;
 }

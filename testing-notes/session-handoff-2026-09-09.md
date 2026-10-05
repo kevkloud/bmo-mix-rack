@@ -23,7 +23,7 @@ waiting on Kevin.
 5. **Open the meter pass** (`dim-meter-pass.md`, or the artifact linked in it)
    and work it top to bottom. Sections 01 and 02 before anything subjective.
 6. **Verify the DSP decision.** The throb is the one question that gates the
-   PR: on a mono vocal at CENTS 10, does it read as MicroPitch-style shimmer or
+   PR: on a mono vocal at CENTS 10, does it read as Pitch widener A-style shimmer or
    as an audible tremolo of the width? Record what you *heard*, with settings,
    before proposing any fix.
 7. **Take PR #4 out of draft** if the throb reads acceptably. If it does not,
@@ -76,10 +76,10 @@ Build Tools 2022 (MSVC 19.44), Windows SDK 10.0.26100, GitHub CLI 2.100
     bash scripts/build.sh            # builds and runs ctest — 12/12 on the dim branch
     ./build/tools/Debug/snapshot.exe dim snapshots/dim.png
 
-Fonts resolve from `.bmo-fontdir` → `%USERPROFILE%/OneDrive/Documents/FONTS`.
+Fonts resolve from `.bmo-fontdir` → the owner's font folder, outside the repository.
 A correct configure prints:
 
-    -- BMO fonts: %USERPROFILE%/OneDrive/Documents/FONTS (.bmo-fontdir)
+    -- BMO fonts: <the owner's font folder> (.bmo-fontdir)
 
 **Installing a tester build:** take the **BMO-Windows** artifact from the
 Actions run, unzip, copy the `.vst3` bundles into
@@ -90,12 +90,12 @@ the shell's PATH — the shell inherits the app process's environment.
 
 ## 5. Missing for the listening pass
 
-- **MicroPitch is not installed.** CLA Vocals was being installed at the end of
+- **Pitch widener A is not installed.** Vocal doubler A was being installed at the end of
   the session — confirm it is there.
-- **No "Fuji" test render on this machine.** Re-bounce it or fetch it from the
+- **No "Song B" test render on this machine.** Re-bounce it or fetch it from the
   old machine. Use the same vocal the 0.2.1 Opto work used; continuity of
   source is most of why those figures were comparable.
-- **SSL Meter Pro is installed** and is standing in for the goniometer
+- **Meter plug A is installed** and is standing in for the goniometer
   Dimension does not have.
 
 ## 6. Open, and not for this session to settle alone

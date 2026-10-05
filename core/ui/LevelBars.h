@@ -26,7 +26,7 @@ namespace bmo::ui
     **Why this and not DynamicsMeter.** BMO Opto's needle VU is a period
     instrument: it reads average level with VU ballistics on a scale borrowed
     from a 1940s volume indicator, which is right for a module modelling an
-    LA-2A and wrong for this one. A modern compressor is judged on peaks in
+    Opto unit A and wrong for this one. A modern compressor is judged on peaks in
     dBFS, and the three readings a compressor user actually wants -- what went
     in, what it took off, what came out -- are wanted *at the same time*, which
     a single needle behind a three-way switch cannot do. Three bars show all

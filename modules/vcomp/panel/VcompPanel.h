@@ -25,7 +25,7 @@ namespace bmo::vcomp
 
     **Three bars, not a needle.** BMO Opto's DynamicsMeter is a period
     instrument: VU ballistics on a 1940s scale, right for a module modelling an
-    LA-2A and wrong for this one. It also shows one reading at a time behind a
+    Opto unit A and wrong for this one. It also shows one reading at a time behind a
     three-way switch, and the three readings a compressor user wants -- what
     went in, what came off, what came out -- are wanted together. IN and OUT
     read left to right in dBFS; GR reads right to left from zero, the way every

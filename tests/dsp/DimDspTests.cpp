@@ -237,7 +237,7 @@ int main()
     // + moving the image LEFT -- the opposite of every pan control -- before
     // an ear found it on 2026-09-09.
     //
-    // The S1 manual fixes the rotation law and says nothing about the knob's
+    // Imager A's manual fixes the rotation law and says nothing about the knob's
     // direction, so the sign is a free choice rather than something derivable.
     // A free choice is exactly what needs pinning down: there is no formula to
     // re-derive it from, only this.
@@ -295,7 +295,7 @@ int main()
     }
 
     //== Asymmetry keeps the centre where it is ================================
-    // The S1's manual is explicit that this is what separates the control from
+    // Imager A's manual is explicit that this is what separates the control from
     // a balance: it "does not affect central mono in-phase sounds in any way",
     // and "differs from conventional balance control in that it keeps center
     // sounds in the center". A source with no side content has to come through

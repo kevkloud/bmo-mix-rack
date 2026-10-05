@@ -40,7 +40,7 @@ struct DesignGrid
 
     Why not the bilinear transform: it warps the frequency axis, so a bell or
     shelf near Nyquist is squeezed ("cramped") toward it. The usual fix is to
-    oversample, which is what costs TDR Nova its latency. Mapping the poles
+    oversample, which is what costs EQ plug B its latency. Mapping the poles
     exactly and fitting the zeros to the analogue magnitude gets most of the
     accuracy back at zero samples. The cookbook bilinear designs are kept only
     as a reference in modules/deq/reference, never on this path.

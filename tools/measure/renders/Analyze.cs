@@ -411,13 +411,13 @@ static class Program
 
     class Cell
     {
-        public bool Feedback;                       // La2a is feedback, Stressed feedforward
+        public bool Feedback;                       // Tele is feedback, Stressed feedforward
         public double Rate = 48000.0;
         public float FastTau = 0.06f;
-        public float SlowMin = 1.0f, SlowMax = 15.0f;   // La2a: dosage slides between these
+        public float SlowMin = 1.0f, SlowMax = 15.0f;   // Tele: dosage slides between these
         public float SlowFixed = 20.0f;                 // Stressed: one ceiling
         public float ChargeAttack = 0.3f;
-        public float ChargeForget = 1.0f;               // La2a used SlowMin; Stressed used 4.0
+        public float ChargeForget = 1.0f;               // Tele used SlowMin; Stressed used 4.0
         public float DosageEngage = 1.0f, DosageGrowth = 3.0f, DosageForget = 4.0f;
         public float DepthOnsetDb = 0.0f, DepthFullDb = 20.0f;
 

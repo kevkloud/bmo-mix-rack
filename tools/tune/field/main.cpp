@@ -49,23 +49,23 @@
                   take looks like. Landing error is normalised by the reads'
                   own RMS, so it says how big the step is *relative to the
                   waveform it sits in* and nothing about whether that waveform
-                  is audible. On Failure one splice at -54 dB lands at 1.26 and
+                  is audible. On Song A one splice at -54 dB lands at 1.26 and
                   was the worst figure on the whole take; with it in its own
-                  column, Failure's audible splices are 0 of 18 over 0.5, worst
-                  0.49 -- and Fuji, which had looked comparable, is 5 of 11
+                  column, Song A's audible splices are 0 of 18 over 0.5, worst
+                  0.49 -- and Song B, which had looked comparable, is 5 of 11
                   over 0.5 with a worst of 1.52 and nothing in a gap at all.
-                  Several rounds were spent driving down a Failure number that
+                  Several rounds were spent driving down a Song A number that
                   was mostly one inaudible splice, while the take with the real
                   problem sat next to it (testing-notes/tune-field-levels-2026-09-14.md).
 
-                  Count and landing error are different questions: on Failure
+                  Count and landing error are different questions: on Song A
                   the median jump lands at 0.10 and is inaudible, which is why
                   driving the count from 120 to 38 did not drive the pops down
                   (testing-notes/tune-blind-2026-09-12.md).
 
     The ruler must be kept to the voice's range: a voice whose fundamental
     sits under its second harmonic fools an unbounded ruler as it fooled the
-    detector (Failure at 1.00 s reads 606 Hz full-range, 303 Hz bounded).
+    detector (Song A at 1.00 s reads 606 Hz full-range, 303 Hz bounded).
     Field audio never enters the repository; see HANDOFF.md.
 */
 
@@ -337,7 +337,7 @@ int main (int argc, char** argv)
         // Landing error is normalised by the reads' own RMS, so it measures
         // the step relative to the waveform it is in and not relative to the
         // take. A splice in a phrase gap can therefore land at 1.26 -- the
-        // worst figure on the whole of Failure -- while sitting at -54 dB,
+        // worst figure on the whole of Song A -- while sitting at -54 dB,
         // where nothing is audible at all. Round nine turned on a "worst
         // landing 1.95 -> 0.76" that was partly this: a quiet-gap splice
         // setting the headline number for a take whose voice sits 30 dB above
@@ -404,7 +404,7 @@ int main (int argc, char** argv)
         // is the one thing so far that separates the splices Frosty hears
         // from the ones he does not.
         //
-        // Measured on Failure, 2026-09-13, against six timestamps he read
+        // Measured on Song A, 2026-09-13, against six timestamps he read
         // cold: in the 40 ms before each of the five audible splices the
         // detector's own f0 spans a ratio of 1.76 to 3.94 -- it is losing the
         // period and reading a harmonic. Before the quiet ones, 1.00 to 1.02.

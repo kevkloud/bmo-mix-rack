@@ -9,7 +9,7 @@ It is not part of the build and CI never compiles it. Two reasons:
 
 - The machine this gets run on has no C++ toolchain, so a C++ tool here
   could only ever run in CI -- and CI cannot see the renders, which live in
-  the Ableton session on `D:`, not in the repository.
+  the Ableton session in the owner's reference folder, not in the repository.
 - Adding it to the build would mean a broken analysis script could fail a
   plugin build. Nothing here should ever be able to do that.
 

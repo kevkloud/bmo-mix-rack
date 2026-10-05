@@ -6,7 +6,7 @@ Derived from *Zero-Latency Dynamic EQ — Competitive DSP Teardown* (Sept 10, 20
 This document defines **what to build, what "correct" means numerically, and how to prove it**. It contains no implementation code by design — topology, targets, math and test method only. Implementation choices below the contract line are the dev team's.
 
 - **Module codename:** `BMO-DEQ` *(placeholder — rename before repo merge)*
-- **Target:** feature/latency parity with Slate Infinity EQ; filter accuracy parity with TDR Nova **without** Nova's 187-sample PDC
+- **Target:** feature/latency parity with EQ plug A; filter accuracy parity with EQ plug B **without** EQ plug B's 187-sample PDC
 - **Status:** spec for review, not yet accepted
 
 ---
@@ -42,7 +42,7 @@ These decisions come from the brief and are **locked** — changing one requires
 
 **C1 — Every band is a recursive minimum-phase filter.** Direct-Form-I biquad or TPT/SVF. Output sample *n* depends only on inputs and outputs up to *n*. No delay lines anywhere in the audio path. This is the entire reason the module can be zero-latency.
 
-**C2 — Coefficients are derived by matched Z-transform (Vicanek), not by the bilinear transform.** This is the decision that separates us from Nova. Bilinear + oversampling-decramping buys Nyquist accuracy at 187 samples of latency; matched-Z buys the same accuracy at zero. The cookbook bilinear formulas are retained **only as a reference implementation inside the test harness**, never as the shipping path.
+**C2 — Coefficients are derived by matched Z-transform (Vicanek), not by the bilinear transform.** This is the decision that separates us from EQ plug B. Bilinear + oversampling-decramping buys Nyquist accuracy at 187 samples of latency; matched-Z buys the same accuracy at zero. The cookbook bilinear formulas are retained **only as a reference implementation inside the test harness**, never as the shipping path.
 
 **C3 — The dynamics detector is a causal one-pole envelope follower with no lookahead.** The known cost (Giannoulis/Massberg/Reiss) is transient overshoot before the envelope catches up. That overshoot is accepted, and it is measured, budgeted and regression-tested (§7 T5) rather than hidden. Do not "fix" it with lookahead.
 
@@ -175,7 +175,7 @@ so `|H(e^{jω})|² = |N|²/|D|²`. The design step is: pick the target `|H|²` a
 
 **Per-filter-type target sets, and the sign/branch choices when inverting `B → b`, are given in Vicanek's *Matched Second Order Digital Filters* (§ Sources). Read the paper; do not reconstruct them from this summary.** The formulas above are the framework and are provided so the harness can verify any candidate implementation independently. Every derived coefficient set must pass the §4 analytic-vs-empirical agreement test before it is trusted.
 
-### 5.3 TPT / SVF core (Cytomic) — alternative to DF-I
+### 5.3 TPT / SVF core (Simper) — alternative to DF-I
 
 Preferred if fast per-sample coefficient modulation causes numerical trouble in DF-I. With `g = tan(π·f₀/Fs)`:
 
@@ -204,7 +204,7 @@ Mix and damping constants per type (`A = 10^(dBgain/40)`):
 | Highpass | `tan(πf₀/Fs)` | `1/Q` | `1` | `-k` | `-1` |
 | Bandpass (SC tap) | `tan(πf₀/Fs)` | `1/Q` | `0` | `1` | `0` |
 
-Treat this table as **to be verified against the Cytomic paper**, then locked by a unit test asserting the SVF magnitude response matches the matched-Z biquad response within 0.01 dB below 0.2·Fs.
+Treat this table as **to be verified against the Simper paper**, then locked by a unit test asserting the SVF magnitude response matches the matched-Z biquad response within 0.01 dB below 0.2·Fs.
 
 Note the bandpass row: the detector sidechain tap costs nothing extra when the core is an SVF. That is a strong argument for SVF over DF-I in this module.
 
@@ -259,7 +259,7 @@ Work in dB. With threshold `T`, ratio `R`, knee width `W` (dB), and `x_dB = 20·
 
 Dynamic offset `g_dB = y_dB - x_dB`, clamped to the band's range parameter. Effective band gain = static gain + `g_dB`. `ε` must be small enough not to bias the knee (`1e-12` or smaller) and denormal-safe.
 
-For **upward** dynamic EQ (below-threshold expansion), mirror the comparison. Both directions must be supported — Infinity EQ has both.
+For **upward** dynamic EQ (below-threshold expansion), mirror the comparison. Both directions must be supported — EQ plug A has both.
 
 ---
 
@@ -300,7 +300,7 @@ Three tiers. Tiers 1 and 2 run headless in CI and are the gate; tier 3 is manual
 - **Also assert:** processing the same input as one 4096-sample block vs 4096 single-sample blocks gives bit-identical output. Any difference implies hidden block-level state.
 - **Note for testers:** a minimum-phase filter has non-zero *group delay* at some frequencies. That is not latency and is not a failure. The metric is first-non-zero-sample and host-reported PDC, nothing else.
 
-### T2 — Filter accuracy vs analog prototype (the Nova-parity test)
+### T2 — Filter accuracy vs analog prototype (the EQ plug B parity test)
 
 - **Method:** per §4. Max `|ΔdB|` over 20 Hz → 0.45·Fs, at Fs = 44.1 kHz (worst case).
 - **Test grid:** f₀ ∈ {50, 200, 1k, 5k, 10k, 14k, 16k, 18k} Hz × Q ∈ {0.5, 0.707, 2, 4, 8, 16} × gain ∈ {±3, ±6, ±12, ±18, ±24} dB, all filter types.
@@ -391,9 +391,9 @@ Three tiers. Tiers 1 and 2 run headless in CI and are the gate; tier 3 is manual
 
 Documented so these don't get re-litigated in review:
 
-- **No oversampling in the EQ path.** It is Nova's fix and it costs 187 samples at 44.1 kHz. Matched-Z gets the accuracy for free. (§C2, §C6)
+- **No oversampling in the EQ path.** It is EQ plug B's fix and it costs 187 samples at 44.1 kHz. Matched-Z gets the accuracy for free. (§C2, §C6)
 - **No lookahead in the detector.** Lookahead *is* latency, one-for-one. The overshoot it would prevent is instead budgeted and measured. (§C3, T5)
-- **No linear-phase mode in v1.** Deferred to Phase 4 as an explicit opt-in with published latency, following the FabFilter Pro-Q pattern — never in the default path.
+- **No linear-phase mode in v1.** Deferred to Phase 4 as an explicit opt-in with published latency, following the EQ plug C pattern — never in the default path.
 - **No FIR crossover network.** Parallel band summing has no crossover, so no N/2-sample crossover latency. (§C4)
 - **No block-buffered anything.** T1's single-sample-block equivalence test enforces this structurally.
 
@@ -447,7 +447,7 @@ Phase 1 before Phase 2 is deliberate. **Build the ruler before the thing being m
 
 1. **DF-I or SVF as the shipping core?** Spec leans SVF (free sidechain bandpass tap, better under modulation, better low-frequency precision). Decide in Phase 2 with T2/T4/T7 numbers, not by preference.
 2. **Detector time-constant convention** — τ (63%) or 10–90%? Must be fixed before T5 is written (§5.5).
-3. **Gain range per band.** Nova is ±12 dB; Infinity markets unrestricted. What do we ship, and does the T2 accuracy target hold at the rails? Test grid currently goes to ±24 dB.
+3. **Gain range per band.** EQ plug B is ±12 dB; EQ plug A markets unrestricted. What do we ship, and does the T2 accuracy target hold at the rails? Test grid currently goes to ±24 dB.
 4. **Detector channel linking** in M/S mode — linked, unlinked, or a continuous link parameter? §5.4(b) means this determines whether M/S does anything at all for a static band.
 5. **Band budget.** 24 is parity. Is there a reason to publish a higher number, given C4 makes it a pure CPU question?
 6. **Sidechain routing depth** — per-band external sidechain, or one global external bus? Affects the parameter model, not the DSP.
@@ -459,8 +459,8 @@ Phase 1 before Phase 2 is deliberate. **Build the ruler before the thing being m
 The parent brief carries the full annotated source list. The four to read in full before writing any Phase-2 code:
 
 - **Martin Vicanek, *Matched Second Order Digital Filters*** — https://vicanek.de/articles/BiquadFits.pdf — the matched-Z fits. This is the core of C2.
-- **Andrew Simper / Cytomic, technical papers** — https://cytomic.com/technical-papers/ — TPT/SVF derivation and Dynamic Smoothing.
-- **Vadim Zavalishin, *The Art of VA Filter Design*** — https://www.native-instruments.com/fileadmin/ni_media/downloads/pdf/VAFilterDesign_1.1.1.pdf — the TPT theory underneath Cytomic.
+- **Andrew Simper, technical papers** — TPT/SVF derivation and Dynamic Smoothing.
+- **Vadim Zavalishin, *The Art of VA Filter Design*** — the TPT theory underneath Simper's papers.
 - **Giannoulis, Massberg & Reiss, *Digital Dynamic Range Compressor Design*** (JAES 2012) — detector topologies, ballistics, and the lookahead tradeoff C3 accepts.
 
 Plus **Robert Bristow-Johnson's Audio EQ Cookbook** (https://www.w3.org/TR/audio-eq-cookbook/) — used for the test-only bilinear reference path, not for shipping coefficients.

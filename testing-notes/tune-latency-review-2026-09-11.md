@@ -5,7 +5,7 @@ Written on **AURORA**, 2026-09-11, reviewing `bmo-tune-work` at `9b18577`
 re-measured on AURORA against that commit; nothing is quoted from the earlier
 notes without checking it.
 
-Two findings. The first explains why Antares and Waves still clear BMO on
+Two findings. The first explains why Tuner A and Tuner B still clear BMO on
 every group but one. The second is a live violation of the latency rule that
 both gates were blind to.
 
@@ -61,17 +61,17 @@ It is pure alignment; no splice, window or "room to move" term appears.
 
 A3 gets 3.3x worse. A constant rest picks which octave to sacrifice. It pays
 the debt in full at about 290 Hz and nowhere else — which is why the lag
-tracks the period, and why Fuji cleared while Failure did not.
+tracks the period, and why Song B cleared while Song A did not.
 
 **How the others solve it.** Same table, same renders:
 
-- **Waves' in-tune delay is T + 1.26 ms** (1.41, 0.88, 1.38, 1.38 above the
+- **Tuner B's in-tune delay is T + 1.26 ms** (1.41, 0.88, 1.38, 1.38 above the
   period at the four notes). It rests one period back — period-proportional —
   and lands at 0.92–2.13 ms of residual lag. That is what its large ceiling
   buys.
-- **Antares' analysis lag is a flat 4.42 ms** (lag + delay = 4.66, 3.82, 4.53,
-  4.65; spread 0.84). A constant delay aligns Antares at every pitch because
-  its detector's lag is constant. Copying a constant from Antares cannot work
+- **Tuner A's analysis lag is a flat 4.42 ms** (lag + delay = 4.66, 3.82, 4.53,
+  4.65; spread 0.84). A constant delay aligns Tuner A at every pitch because
+  its detector's lag is constant. Copying a constant from Tuner A cannot work
   for a detector whose lag is a period.
 
 ## 2. The splice curve was the wrong thing to tune against
@@ -85,7 +85,7 @@ drifts `|1 - rho|` per sample and each splice moves it exactly `T`, so
 splices per second = |1 - rho| x fs / T
 ```
 
-Widening the window removes *transient* excursions only. On Failure the singer
+Widening the window removes *transient* excursions only. On Song A the singer
 sits on D# in D major — permanently ~50 cents from either allowed note — so
 `|1 - rho| ~ 0.029` is sustained; at T ~ 284 samples that is ~4.5 splices/s
 whenever that note is held. 35 → 31 is the count asymptoting to that floor,
@@ -93,7 +93,7 @@ not a benefit running out.
 
 So 4 ms was set by a metric that had stopped responding, while the metric that
 was still falling steeply — the lag, 3.19 → 1.20 from 4 to 6 ms — was read as
-a side benefit. **The remaining 38 pops on Failure will not yield to more
+a side benefit. **The remaining 38 pops on Song A will not yield to more
 window.**
 
 The fix was already written down and then not taken: `modules/tune/AGENTS.md`
@@ -108,24 +108,24 @@ Two gates were meant to hold this rule, and neither did:
 
 - **`bmo-tune-latency` tested the wrong column.** It compared `row.restMs` —
   the *in-tune* delay, 4.00 ms in every cell — against
-  `kWaves.trueLatencyMs`, which `References.h` documents as "worst delay, in
+  `kTunerB.trueLatencyMs`, which `References.h` documents as "worst delay, in
   tune **or** correcting". It computed `worstMs` and never tested it, so it
   printed `every cell's rest delay is under the ceiling` and exited 0.
 - **The stimulus held a correction only on A3 and D3.** `HardTuneTests` read
   6.53 ms for a 2.3-octave plugin through a five-semitone window.
 
 **A correction to the first version of this note.** Fixing the first gate
-alone, and holding every cell to Waves' 10.62 ms, reported 54 cells over at
+alone, and holding every cell to Tuner B's 10.62 ms, reported 54 cells over at
 the *bottom* of the range — worst 15.33 ms at E2. That was wrong, and wrong
 for the reason this note had already given two paragraphs earlier: 10.62 ms
 is a scalar, and what it bounds is pitch-dependent for every tuner in the
-comparison. It is Waves' figure **at A2**. Comparing BMO's low notes against
+comparison. It is Tuner B's figure **at A2**. Comparing BMO's low notes against
 it is not the rule.
 
 Measured properly — marked segments at E2, A2, D3, A3, A4, A5, all three
 tuners through the same stimulus, same code, delay while correcting:
 
-| note | T (ms) | **BMO** | Antares | **Waves** |
+| note | T (ms) | **BMO** | Tuner A | **Tuner B** |
 |---|---:|---:|---:|---:|
 | E2 | 12.13 | 9.18 | 10.74 | **19.22** |
 | A2 | 9.09 | 8.03 | 8.06 | 13.80 |
@@ -134,33 +134,33 @@ tuners through the same stimulus, same code, delay while correcting:
 | A4 | 2.27 | **5.01** | 3.59 | **3.82** |
 | A5 | 1.14 | **4.61** | 2.96 | **0.71** |
 
-**Waves' delay is 1.68 ms per ms of period**, intercept −1.2 — almost purely
+**Tuner B's delay is 1.68 ms per ms of period**, intercept −1.2 — almost purely
 proportional, with essentially no fixed floor (0.71 ms at A5). BMO's is a
 constant 4 ms plus its excursion. So the two cross, at about **C3**: BMO is
-comfortably under Waves below it, and over it above, by **3.90 ms at A5**.
+comfortably under Tuner B below it, and over it above, by **3.90 ms at A5**.
 186 cells of the sweep, all at the top of the range — the exact inverse of
 what the scalar said. The crossover is soft: the lowest failing cell, C3,
 misses by 0.04 ms. It is hard by A3, which misses by 1.1 ms.
 
-Against Antares the same shape: BMO is under at E2, A2 and D3, over at A3,
+Against Tuner A the same shape: BMO is under at E2, A2 and D3, over at A3,
 A4 and A5.
 
 Worst against worst, BMO is still the least late of the three (9.18 against
-Antares' 10.74 and Waves' 19.22) — but that comparison is dominated by the
+Tuner A's 10.74 and Tuner B's 19.22) — but that comparison is dominated by the
 lowest note in the stimulus and says nothing about the rest of the range. It
 is kept as a check because it is the rule as written; the per-note check is
 the one that means anything, and it fails.
 
 **The cause is the same constant, plus `hi = rest + T`** in
 `ClassicEngine::process`: an absolute delay of rest plus a whole period, on a
-rest that is already 4 ms. At A5 that is 4 ms of rest where Waves spends 0.7.
+rest that is already 4 ms. At A5 that is 4 ms of rest where Tuner B spends 0.7.
 
 ## What this means for the fix
 
 **The delay route is not simply "spend the headroom".** Aligning by delay
 alone needs rest ~ 1.07 x T: 9.7 ms at A2, 13.0 ms at E2, but only 1.2 ms at
-A5. That is a rest proportional to the period — which is what Waves does, and
-under Waves' curve there is room for it at the bottom of the range. What there
+A5. That is a rest proportional to the period — which is what Tuner B does, and
+under Tuner B's curve there is room for it at the bottom of the range. What there
 is no room for is the *constant*: at A5 the rule allows 0.71 ms and the rest
 alone is 4 ms. So the same change has to make the rest track the period in
 both directions, down at the top of the range as well as up at the bottom.
@@ -174,8 +174,8 @@ read pointer; nothing drives it to a target delay. Homing exists but is gated
 on `settled` — unvoiced **and** correction faded (`TuneCore.cpp`) — so inside
 a continuous phrase the delay is a free-running consequence of correction
 history. In that run the in-tune delay at D3, E3 and A3 never moved off
-4.4 ms at all. This is also the likeliest reason Failure and Fuji differ:
-Failure is denser, so the pointer rarely re-homes and sits at an arbitrary
+4.4 ms at all. This is also the likeliest reason Song A and Song B differ:
+Song A is denser, so the pointer rarely re-homes and sits at an arbitrary
 offset for whole phrases.
 
 **Prediction is the cheapest route, and it is the only one that helps at the
@@ -186,10 +186,10 @@ all — which is the only kind of fix available at A5, where the rule allows
 as everything here does.
 
 A period-proportional rest is still worth doing alongside it, for the bottom
-of the range and for the window: it is what Waves does, and `hi = rest + T`
+of the range and for the window: it is what Tuner B does, and `hi = rest + T`
 has to go whatever else happens.
 
-**The rule is now a curve** (`references::ceilingMsAt`), read off Waves'
+**The rule is now a curve** (`references::ceilingMsAt`), read off Tuner B's
 measured delay at each note and interpolated in the period. Both judgements
 that were open here are Frosty's and were answered on 2026-09-11:
 
@@ -198,7 +198,7 @@ that were open here are Frosty's and were answered on 2026-09-11:
 - **The curve stops at E2** -- "it's a vocal tuner so no need to drop below
   E2" -- so it is held flat below rather than extrapolated, and nothing below
   E2 is judged.
-- **Waves is the proxy, live monitoring is the point**: per note is preferred
+- **Tuner B is the proxy, live monitoring is the point**: per note is preferred
   "so long as it remains fast enough for live monitor we can adjust". No
   budget figure is encoded, deliberately -- the only thing a number would do
   today is turn a red test green without changing the plugin. It is written
@@ -239,7 +239,7 @@ Corrected claims, all of which had gone stale when `31b30ef` landed:
 | `modules/tune/AGENTS.md` | true latency 3.82 ms; lag 6.22 ms mean | 9.18 ms; 3.19 ms mean |
 | `modules/tune/AGENTS.md` | `bmo-tune-latency` "checks it per semitone" | it checked the rest, not the rule |
 | root `AGENTS.md` | (cited by three files as holding the latency rule) | did not mention it at all; now does |
-| `References.h` | Antares 6.49 ms, Waves 10.62 ms true latency | 10.74 and 19.22, on a stimulus that reaches the low notes |
+| `References.h` | Tuner A 6.49 ms, Tuner B 10.62 ms true latency | 10.74 and 19.22, on a stimulus that reaches the low notes |
 
 Minor, also corrected: `LatencyContract.h` said 35 splices at 4 ms where the
 handoff says 38, for the same configuration; and "every voice cell resting at
@@ -251,7 +251,7 @@ takes are, `liveRestSamples` gives 176 samples = 3.991 ms.
 Built, measured, **not yet heard**. `CorrectionLaw` carries the estimate
 forward over (analysis lag − read delay), which costs no latency.
 
-| at retune 0 | before | after | Antares |
+| at retune 0 | before | after | Tuner A |
 |---|---:|---:|---:|
 | correction lag, mean | 3.19 ms | **0.71 ms** | −0.24 ms |
 | correction lag, worst | 6.07 ms (A2) | **1.97 ms** (A2) | 1.66 ms |
@@ -263,7 +263,7 @@ check is the only thing left in that suite, and it is A2 alone — D3 reads
 
 On the shoot-out takes it costs nothing measurable:
 
-| | Failure 0 / 20 ms | Fuji 0 / 20 ms |
+| | Song A 0 / 20 ms | Song B 0 / 20 ms |
 |---|---|---|
 | splices | 44 → **41** / 38 → 38 | 23 → **22** / 15 → 16 |
 | flips back under 80 ms | 107 → 108 | 39 → **31** |
@@ -293,12 +293,12 @@ of which someone could undo without noticing:
 
 1. **Hear it.** The prediction is in and measured (above) and has never been
    listened to. That is the next thing, ahead of any more building: a round
-   five against Antares on both takes, at 0 and 20 ms.
-2. **The worst-case lag at A2**, 1.97 ms against Antares' 1.66 -- the last
+   five against Tuner A on both takes, at 0 and 20 ms.
+2. **The worst-case lag at A2**, 1.97 ms against Tuner A's 1.66 -- the last
    check in `hardtune_target`. A2 is where the hop is longest, so the slope
    is coarsest exactly where the most is being predicted.
 3. **Bound the window.** `hi = rest + T` is an absolute delay of rest plus a
-   period; Waves' correcting delay barely exceeds its own in-tune delay. This
+   period; Tuner B's correcting delay barely exceeds its own in-tune delay. This
    is separable from the alignment work and can go first.
 4. **Bass and Instrument against the E2 floor** -- they declare 55 Hz and the
    rule now stops at E2. One of the two has to move; and the sweep's figures
@@ -306,5 +306,5 @@ of which someone could undo without noticing:
    they mean anything.
 5. **The 4 ms rest has still never been felt.** Unchanged from the handoff:
    the blind sets align it away and the installed VST3 on AURORA is 0.1.
-6. **Waves across block sizes** is still open from the handoff — measured at
+6. **Tuner B across block sizes** is still open from the handoff — measured at
    128 and 2048 only, and the whole ceiling curve is built on it.

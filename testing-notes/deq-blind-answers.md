@@ -53,7 +53,7 @@ inaudible" are there for completeness: one line each is plenty.
 
 ---
 
-## Source 1 — Failure, dry vocal
+## Source 1 — Song A, dry vocal
 
 Both dynamic cases engaged fully here (10.0 / 10.1 dB of gain reduction), so
 this source and the drum loop are where cases 7 and 8 mean anything.
@@ -92,7 +92,7 @@ this source and the drum loop are where cases 7 and 8 mean anything.
 
 ---
 
-## Source 2 — PHRYGIAN D 808
+## Source 2 — Source set E 808
 
 The low-end case. Cases 7 and 8 never engaged on this material (0.9 and
 0.0 dB of gain reduction), so they are two static filters here and say nothing
@@ -126,7 +126,7 @@ This is the case the whole argument is about, on the source that shows it.
 
 ---
 
-## Source 3 — PHRYGIAN D drum loop
+## Source 3 — Source set E drum loop
 
 The most useful source in the set: every static case is live, and both dynamic
 cases engaged on transients (7.5 / 8.7 dB), which is where a topology
@@ -166,7 +166,7 @@ difference would show as pumping or smearing rather than as tone.
 
 ---
 
-## Source 4 — PHRYGIAN D synth
+## Source 4 — Source set E synth
 
 Mid-dense and sustained: where stacked curves that do not add should show as
 tone. The dynamic cases barely engaged (0.9 / 1.9 dB) — skip unless curious.
@@ -272,7 +272,7 @@ the front of each sound. The dynamic cases only half-engaged (3.8 / 4.7 dB).
 
 ---
 
-## Source 7 — LOCKED IN, full mix  ⚠ LEVEL
+## Source 7 — Mix C, full mix  ⚠ LEVEL
 
 **Every case here renders above 0 dBFS, up to +5.0.** The mix arrives at
 −0.1 dBFS peak, so any boost puts it over. The files are 32-bit float and

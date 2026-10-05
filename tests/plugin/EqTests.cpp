@@ -80,8 +80,8 @@ int main()
     //== Panel legends must agree with what the DSP actually does =============
     // The frequencies live in two places: the display strings the selector
     // shows, and the tables EqNetwork tunes its filters from. Nothing in the
-    // type system ties them together. Every figure below is from the Neve
-    // 1073 & 1084 user manual, issue 5.
+    // type system ties them together. Every figure below is from the
+    // Console EQ unit A and B user manual, issue 5.
     {
         auto proc = createEq();
 

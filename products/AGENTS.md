@@ -71,7 +71,7 @@ notes at the top of `modules/opto/dsp/DspCore.h` for the model.
 
 BMO Dimension is a stereo imager in three stages, all of which process the
 **side signal only**: a detune stage that manufactures side content from a
-mono source, a modulated all-pass that decorrelates it, and an S1-style
+mono source, a modulated all-pass that decorrelates it, and a width-and-rotation
 imager that scales and steers it. Because `L + R = 2M`, a side-only chain
 cancels in the mono sum by construction rather than by testing -- which is
 the reason the topology is arranged that way. The detune stage is
@@ -95,8 +95,8 @@ not BMO Opto's replacement or its successor -- the two are opposite products tha
 Opto models two pieces of hardware and wears their behaviour, feedback topology
 and all; Vcomp is modern, feedforward and predictable, and its whole claim is
 that a vocal needs one knob for how hard and one for how loud. Frosty named the
-reference points, 2026-09-13: the sound of Waves RVox and RComp, the simplicity
-of RVox and Klanghelm DC1A.
+reference points, 2026-09-13: the sound of two established
+plugin compressors, one made for vocals, and the simplicity of one-knob ones.
 
 AMOUNT sweeps threshold, knee and ratio together and pays for its own makeup,
 so the knob buys density rather than level, and a gate ahead of it -- dragged
@@ -312,7 +312,7 @@ This section was written while BMO DEQ was still "BMO Parametric", and the
 argument below is that one's. The new names make the fix clearer, not
 different.
 
-**The two do not fight over function.** BMO EQ is a Neve 1084 model:
+**The two do not fight over function.** BMO EQ models a classic console equaliser:
 frequency selectors are *stepped* choice parameters, the curve shapes come
 out of the LC network in `modules/eq/dsp/EqNetwork.h` rather than from
 coefficients, there is no continuous Q anywhere -- only a Hi-Q toggle on the

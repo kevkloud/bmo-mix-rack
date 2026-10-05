@@ -25,12 +25,12 @@ namespace bmo::tune
     rest + T]. At rest the engine sits contract::kLiveRestMs behind the newest
     sample -- 4 ms since 2026-09-11, 192 samples at 48 kHz -- and is reported
     to the host as 0; while correcting it wanders up to a period later still.
-    This is the Waves contract (spec §2, §0.1).
+    This is the Tuner B contract (spec §2, §0.1).
 
     KNOWN BROKEN (2026-09-11 review): a flat rest plus `hi = rest + T` is an
-    absolute delay that does not track the note, where Waves Tune Real-Time's
+    absolute delay that does not track the note, where Tuner B's
     is nearly proportional to it (1.68 ms per ms of period, and only 0.71 ms
-    at A5). So the two cross at about C3 and BMO is later than Waves above
+    at A5). So the two cross at about C3 and BMO is later than Tuner B above
     it -- by 3.90 ms at A5 -- which the latency rule forbids.
     HardTuneTests' per-note check fails on it. The upper bound wants to be an
     excursion about a rest that tracks the period, not a whole period on top
@@ -91,7 +91,7 @@ public:
         Near 0 means the jump landed in phase and the crossfade hid it;
         of order 1.4 means it landed somewhere unrelated and stepped the
         waveform. This is what the splice COUNT was standing in for: on
-        Failure only 7 of 38 splices were audible to Frosty, so a count
+        Song A only 7 of 38 splices were audible to Frosty, so a count
         cannot separate a bad one from a silent one
         (testing-notes/tune-blind-2026-09-12.md). */
     double spliceMismatch() const noexcept { return mismatch; }

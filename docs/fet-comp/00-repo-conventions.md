@@ -116,7 +116,7 @@ module/directory needs its own `AGENTS.md` (why + context) and `README.md`
 (human-facing), linked from its parent (AGENTS.md:236-244); root is the
 include root (`#include "core/..."`), namespaces `bmo::`/`bmo::<module>`/`bmo::ui`
 (AGENTS.md:248-251); licensed fonts in `assets/fonts` are gitignored, never
-looked up by name at runtime; do not use UA/Urei branding — refer to the new
+looked up by name at runtime; do not use Vendor 4 / Vendor 13 branding — refer to the new
 module only as "FET-style"/FET compressor per this task's own instruction,
 consistent with how LTV Comp avoids naming its hardware references directly
 in code/schema (it uses reference points in prose only, `products/AGENTS.md`

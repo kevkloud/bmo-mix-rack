@@ -8,7 +8,7 @@ CLI, then the JUCE wrapper.
 
 ## 1. Where it is
 
-- Repository: `%USERPROFILE%\OneDrive\Documents\REPO\bmo-tune-rt`, a
+- Repository: a local `bmo-tune-rt` folder outside this one, a
   repository of its own. Local git only -- **no remote, nothing pushed**, by
   Frosty's decision on 2026-09-10. Pushes wait for Frosty's approval.
 - Branch `main`, each commit a coherent stage with its evidence in the
@@ -34,8 +34,8 @@ CLI, then the JUCE wrapper.
 | Flex (§4.3a) | an ordinary parameter, default 0; not the plugin's focus -- hard tuning and retune speed are |
 | Licence | follow Kevin's main |
 
-The two patents the spec flagged for Flex are Smule's karaoke patents, not
-Antares' -- checked at Google Patents. The research digest itself is not on
+The two patents the spec flagged for Flex are Patent holder 1's karaoke patents, not
+Tuner A's -- checked at Google Patents. The research digest itself is not on
 AURORA, so the spec's citation could not be traced back to it.
 
 ## 3. Build and check

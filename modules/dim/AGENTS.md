@@ -145,7 +145,7 @@ table written out by hand, standalone and in a rack.
 
 ## Asymmetry is a shear, and the fallback is named
 
-Gerzon's control, from the S1 manual, which constrains it in three sentences
+Gerzon's control, from Imager A's manual, which constrains it in three sentences
 quoted at the point of use in `dsp/DspCore.h`. Centre untouched forbids the
 mid→side term; a balance that moves in mono requires the side→mid term. That
 leaves exactly one linear answer:

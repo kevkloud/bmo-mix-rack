@@ -270,7 +270,7 @@ items stay open, so it is listed here for completeness rather than as a gate.
 
 - [ ] BMO DEQ's four §B items closed, or re-recorded as decided.
 - [ ] **LTV Comp walked**, with `ui-pass-ltvcomp-<date>.md`. Its names and
-      accent need Frosty, and the product needs Leteveon's approval before any
+      accent need Frosty, and the product needs Collaborator 3's approval before any
       of it is settled.
 - [ ] **The rack walked**, with `ui-pass-rack-<date>.md`.
 - [ ] The three items in §C above, which are still unticked for the pass as a

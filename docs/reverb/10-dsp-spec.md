@@ -716,7 +716,7 @@ is permanent.
 | Echo density / mixing | 1000/s (not 10 000); √V ms, R² 78.6 % | `05` §8, §11 | High |
 | Modulation | ≤3 cents ⇒ *D* ≤ 0.28 ms at 1 Hz; 0.1–0.8 ms, 0.1–1.2 Hz | derived; `04` §3 | High / **CAL** |
 | Crossfade window | 30 ms raised-cosine | `modules/dim` | High |
-| HW-2 Shape/Spread end-stops | — | unconfirmed | **CALIBRATE** |
+| HW-2 envelope contour and duration end-stops | — | unconfirmed | **CALIBRATE** |
 
 ## 8. Open questions and risks
 
@@ -755,7 +755,7 @@ and Griesinger's 10–100 ms prescription is contested by Pätynen/Lokki. The ac
 hue must land in **298.4°–309.2°** (`00` §5), the only window left once FET,
 Defang and Dwell are counted.
 
-**Blocking unknown:** none. HW-2's Shape/Spread/Size end-stops stayed unconfirmed
+**Blocking unknown:** none. HW-2's envelope and size end-stops stayed unconfirmed
 — searches confirmed the *behaviour* (Shape 0 builds explosively and decays
 quickly, higher Shape builds slowly and sustains for Spread; Size guidance
 ~0.15 m to ~38 m) — but they gate only the Energy-mode envelope calibration, not

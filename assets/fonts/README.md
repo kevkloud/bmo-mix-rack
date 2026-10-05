@@ -1,6 +1,6 @@
 # Display faces
 
-Two faces from Tom Gordon Design, licensed to Frosty and Kevin. Every product
+Two faces from Typeface vendor 1, licensed to Frosty and Kevin. Every product
 in the suite embeds the same two, so the whole rack reads as one panel:
 
     TG - Minerva Black Black    labels: legends, switches, headers, presets

@@ -17,7 +17,7 @@ namespace bmo::vcomp
 // self-noise and the singer breathing between lines all come up by the same
 // 26 dB, so a heavily compressed vocal sounds like the room got louder every
 // time the singer stops. Cleaning that up is not a separate feature bolted on;
-// it is the other half of making a one-knob compressor usable. RVox ships the
+// it is the other half of making a one-knob compressor usable. Vocal comp A ships the
 // same pairing for the same reason.
 //
 // **Ahead of the compressor, and keyed off the raw input.** Ahead, because
@@ -30,7 +30,7 @@ namespace bmo::vcomp
 // the gain falls on a slope with a soft knee and a floor on how far it can
 // fall; it does not slam shut. A hard gate chatters on breaths and bites the
 // tails off words, and every one of those faults is audible on a vocal in a
-// way it is not on a tom. Nothing here is on the panel: RVox has one control
+// way it is not on a tom. Nothing here is on the panel: Vocal comp A has one control
 // for this and so does BMO Vcomp.
 //
 // **Fast to open, slow to close, with a hold.** Opening is the direction that

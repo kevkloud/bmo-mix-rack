@@ -2,8 +2,8 @@
 """Analyse a dry / competitor / BMO WAV triad for BMO Opto.
 
 Takes matched-level WAV renders of the *same* input signal -- one
-unprocessed, one run through a competitor plugin (UA or Slate's LA-2A for
-Tele mode, UA Distressor or Slate FG-Stress for Stressed mode), one run
+unprocessed, one run through a competitor plugin (Opto plug A or B for
+Tele mode, Comp plug C or D for Stressed mode), one run
 through BMO Opto (see `measure gen` / `measure render` in
 tools/measure/opto/main.cpp for producing a matched BMO pass on the same
 source) -- and reports the numbers a shootout actually needs:
@@ -20,7 +20,7 @@ Nothing here is hardcoded to one plugin -- pass any competitor's bounce as
 `--competitor` and it's read the same way BMO's own render is.
 
     python3 trace_measurements.py dry.wav bmo.wav
-    python3 trace_measurements.py dry.wav bmo.wav --competitor la2a_ua.wav --label "UA LA-2A"
+    python3 trace_measurements.py dry.wav bmo.wav --competitor opto-plug-a.wav --label "Opto plug A"
 
 Needs numpy:
 

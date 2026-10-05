@@ -4,36 +4,36 @@
     (tools/common/Stimulus.h), scored by the same code for all of them.
 
     Why this suite exists: the 2026-09-11 shoot-out on real vocals found BMO
-    about as exact as Antares on a held note, and further behind the faster
+    about as exact as Tuner A on a held note, and further behind the faster
     the pitch moved -- the error of a correction that lands late. CoreTests
     only holds steady notes, so nothing here saw it. This measures it.
 
       hardtune           (runs by default)
         - the ruler reads a known delay and a known correction lag
         - THE LATENCY RULE, worst against worst: BMO's true latency is no more
-          than Waves Tune Real-Time's, measured the same way (Frosty,
+          than Tuner B's, measured the same way (Frosty,
           2026-09-11; AGENTS.md). Necessary, and nowhere near sufficient --
           both figures come from the lowest note in the stimulus.
         - the per-note latency rule is REPORTED here and asserted only under
-          --target: BMO is later than Waves at A4 and A5, by up to 3.90 ms,
+          --target: BMO is later than Tuner B at A4 and A5, by up to 3.90 ms,
           and cannot stop being -- see the note beside the check.
         - BMO's correction lag is no worse than the current baseline, while
           the fix is worked on
 
       hardtune_target    (hardtune_tests --target; disabled in ctest until
                           it passes -- see tests/CMakeLists.txt)
-        - BMO flattens a vibrato as closely as Antares does: **passes since
-          2026-09-12**, 1.24 c against Antares' 1.30, where it was 3.35.
-        - and its worst correction lag is no worse than Antares' worst. Open:
+        - BMO flattens a vibrato as closely as Tuner A does: **passes since
+          2026-09-12**, 1.24 c against Tuner A's 1.30, where it was 3.35.
+        - and its worst correction lag is no worse than Tuner A's worst. Open:
           1.97 ms at A2 against 1.66. Every other vibrato is inside half a
           millisecond.
         - THE LATENCY RULE, PER NOTE. Open, and not reachable on this engine:
-          at A5 Waves' whole delay is less than one period, and one whole-cycle
+          at A5 Tuner B's whole delay is less than one period, and one whole-cycle
           excursion above the floor already exceeds it. Needs the rule to carry
           a live-monitoring budget before it can go green.
 
     All three open checks come from one place, found 2026-09-11: the engine's
-    read delay is a flat 4 ms where the detector's analysis lag and Waves'
+    read delay is a flat 4 ms where the detector's analysis lag and Tuner B's
     delay are both a period of the note. Predicting the pitch forward closed
     most of the correction lag (2026-09-12). The latency half has no fix on
     this engine and needs a decision instead.
@@ -76,12 +76,12 @@ namespace
         of it at A2, where the guard correctly vetoes a real octave error and
         holds the period for up to 2 ms across a fast vibrato. True latency
         goes with it, 10.262 -> 10.427 ms, leaving 8.78 ms of headroom under
-        the Waves ceiling.
+        the Tuner B ceiling.
 
         Frosty accepted the trade on 2026-09-14, after round eight put guard 6
         first in all four blind groups -- ahead of the standing build in every
-        one, and ahead of Antares in three. The residue is still under
-        Antares' 1.30. A cent is 1/100 of a semitone and a listener notices
+        one, and ahead of Tuner A in three. The residue is still under
+        Tuner A's 1.30. A cent is 1/100 of a semitone and a listener notices
         5-10 of them on a held note, so 0.024 is not an audible quantity; the
         blind result is, and it is what this number was loosened for.
 
@@ -252,31 +252,31 @@ int main (int argc, char** argv)
     reportScore ("BMO", bmo);
 
     // THE LATENCY RULE (Frosty, 2026-09-11): a change is safe to take, as far
-    // as latency goes, while BMO's true latency stays no more than Waves Tune
-    // Real-Time's, measured the same way on the same stimulus. Not what the
+    // as latency goes, while BMO's true latency stays no more than Tuner B's,
+    // measured the same way on the same stimulus. Not what the
     // host is told -- both say 0 -- but how late the audio really is.
     //
     // Worst against worst, which is what the rule says and is necessary but
     // nowhere near sufficient: both figures are dominated by the lowest note
-    // in the stimulus, where Waves is 19.2 ms and BMO 9.2, so this passes with
-    // 10 ms to spare while BMO is later than Waves over most of the range.
+    // in the stimulus, where Tuner B is 19.2 ms and BMO 9.2, so this passes with
+    // 10 ms to spare while BMO is later than Tuner B over most of the range.
     // The per-note check below is the one that means anything.
-    report ("Waves Tune Real-Time: true latency (the ceiling)", ref::kWaves.trueLatencyMs, "ms");
-    report ("headroom under the ceiling", ref::kWaves.trueLatencyMs - bmo.trueLatencyMs, "ms");
-    check (bmo.trueLatencyMs <= ref::kWaves.trueLatencyMs,
-           "BMO's true latency is no more than Waves Tune Real-Time's, worst against worst (the latency rule)");
+    report ("Tuner B: true latency (the ceiling)", ref::kTunerB.trueLatencyMs, "ms");
+    report ("headroom under the ceiling", ref::kTunerB.trueLatencyMs - bmo.trueLatencyMs, "ms");
+    check (bmo.trueLatencyMs <= ref::kTunerB.trueLatencyMs,
+           "BMO's true latency is no more than Tuner B's, worst against worst (the latency rule)");
 
     // THE LIVE-MONITORING BUDGET, PER NOTE -- and as of 2026-09-14 this IS the
-    // per-note latency rule. It replaces the per-note comparison against Waves,
-    // which was never the point: root AGENTS.md has always said Waves is the
-    // proxy, and that "a change that is later than Waves at some note, but
+    // per-note latency rule. It replaces the per-note comparison against Tuner B,
+    // which was never the point: root AGENTS.md has always said Tuner B is the
+    // proxy, and that "a change that is later than Tuner B at some note, but
     // still comfortably inside what a singer monitoring through the plugin can
     // work with, is arguable rather than forbidden -- argue it with a figure
     // and Frosty's ear, and write the budget down here when there is one."
     //
     // There is one now. On 2026-09-14, on AURORA, Frosty monitored a duplicated
-    // vocal through the installed build against Waves at 48 kHz on a tone
-    // opening on A2 -- the note where BMO is furthest past Waves in the part of
+    // vocal through the installed build against Tuner B at 48 kHz on a tone
+    // opening on A2 -- the note where BMO is furthest past Tuner B in the part of
     // the range a singer lives in. His answer: "while I can probably convince
     // myself I could hear a difference, I feel like I wouldn't be able to tell
     // had I not seen the chart."
@@ -293,10 +293,10 @@ int main (int argc, char** argv)
     // nearly `liveRest + T`, and getting under it means changing what a splice
     // is rather than tuning a constant.
     //
-    // Waves is still measured and still reported below, as information, and the
+    // Tuner B is still measured and still reported below, as information, and the
     // worst-against-worst check above still stands. What is gone is the
     // per-note assertion against it, which on this engine could never go green:
-    // at A5 Waves' whole delay is 0.709 ms, under one period there (1.136), and
+    // at A5 Tuner B's whole delay is 0.709 ms, under one period there (1.136), and
     // BMO's floor plus one whole-cycle excursion is 1.491. A rule that fails
     // every cell while the ear says it is fine was measuring the wrong thing.
     {
@@ -324,9 +324,9 @@ int main (int argc, char** argv)
                 if (r.name == seg.name)
                     hz = seg.hz;
 
-            // Waves at the same note: reported, not asserted.
-            report ("BMO vs Waves at " + r.name + ": BMO " + std::to_string (r.delayMs).substr (0, 5)
-                        + " ms, Waves at this note", ref::ceilingMsAt (hz), "ms");
+            // Tuner B at the same note: reported, not asserted.
+            report ("BMO vs Tuner B at " + r.name + ": BMO " + std::to_string (r.delayMs).substr (0, 5)
+                        + " ms, Tuner B at this note", ref::ceilingMsAt (hz), "ms");
 
             for (const auto& b : kBudget)
             {
@@ -356,16 +356,16 @@ int main (int argc, char** argv)
     check (bmo.meanLagMs <= kBaselineMeanLagMs * 1.05 && bmo.meanRmsCents <= kBaselineRmsCents * 1.05,
            "BMO's correction lag and vibrato residue are no worse than the 2026-09-11 baseline");
 
-    //== The target: as close as Antares =======================================
-    report ("Antares Auto-Tune Artist: RMS off the note, mean", ref::kAntares.meanRmsCents, "c");
-    report ("Antares Auto-Tune Artist: worst correction lag", ref::kAntares.worstLagMs, "ms");
+    //== The target: as close as Tuner A =======================================
+    report ("Tuner A: RMS off the note, mean", ref::kTunerA.meanRmsCents, "c");
+    report ("Tuner A: worst correction lag", ref::kTunerA.worstLagMs, "ms");
 
     if (target)
     {
-        check (bmo.meanRmsCents <= ref::kAntares.meanRmsCents,
-               "BMO flattens a vibrato at 0 ms as closely as Antares Auto-Tune Artist (mean RMS off the note)");
-        check (bmo.worstLagMs <= ref::kAntares.worstLagMs,
-               "and its worst correction lag is no worse than Antares'");
+        check (bmo.meanRmsCents <= ref::kTunerA.meanRmsCents,
+               "BMO flattens a vibrato at 0 ms as closely as Tuner A (mean RMS off the note)");
+        check (bmo.worstLagMs <= ref::kTunerA.worstLagMs,
+               "and its worst correction lag is no worse than Tuner A's");
     }
 
     return finish (target ? "hardtune target" : "hardtune");

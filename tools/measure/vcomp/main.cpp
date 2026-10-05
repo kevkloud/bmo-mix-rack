@@ -33,7 +33,7 @@
 
       measure_vcomp render [--in in.wav] --out out.wav [flags]
           Arbitrary WAV in, BMO out, every parameter as a flag -- so a result
-          can sit beside a hand-bounced RVox/RComp/DC1A pass at a matched
+          can sit beside a hand-bounced Vocal comp A/Comp A/Comp B pass at a matched
           input. With no --in, uses the harness's own voice.
 
       measure_vcomp gen <voice|phrase|bands|sine> --out file.wav

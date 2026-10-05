@@ -102,7 +102,7 @@ bmo_tune_test(schema       SchemaTests.cpp)
 bmo_tune_test(hardtune     HardTuneTests.cpp)
 bmo_tune_test(voice        VoiceTests.cpp)
 
-# The hard-tune target: BMO as close as Antares on a moving voice. It fails
+# The hard-tune target: BMO as close as Tuner A on a moving voice. It fails
 # today -- that is the point of it (the house rule: fix nothing a test does not
 # first fail on) -- so it is registered but DISABLED, which ctest lists as
 # "Not Run (Disabled)" at the end of every run rather than hiding it. Enable

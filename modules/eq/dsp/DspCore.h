@@ -255,7 +255,7 @@ private:
         the equaliser, class-A output amp, output transformer. The nonlinear
         stages sit inside the oversampled region because that is where they
         alias; the equaliser is linear but rides along, which also spares the
-        1084's 16 kHz shelf the bilinear warping it would suffer at 48 kHz.
+        Console EQ unit B's 16 kHz shelf the bilinear warping it would suffer at 48 kHz.
 
         There are two of these. One is live; the other runs only while the
         oversampling changes, at the new factor on the same live input, so

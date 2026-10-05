@@ -6,13 +6,13 @@
 namespace bmo::eq
 {
 
-// Only the 1084 is modelled. The 1073 was removed: it was the same equaliser
+// Only the Console EQ unit B is modelled. The Console EQ unit A was removed: it was the same equaliser
 // with fewer options -- one high-shelf frequency instead of three, no switchable
 // mid Q, no low-pass, and a different low-cut table -- so keeping it meant
 // carrying a second set of tables and a branch through every filter for a
 // strictly smaller feature set.
 //
-// Every frequency below is from the Neve 1073 & 1084 user manual, issue 5, and
+// Every frequency below is from the Console EQ unit A and B user manual, issue 5, and
 // tests hold both the panel legends and the filter tuning to them.
 
 //==============================================================================
@@ -38,7 +38,7 @@ inline constexpr std::array<float, 6> kMidFreqs { 360.0f, 700.0f, 1600.0f, 3200.
 // Low shelf. Identical on both units.
 inline constexpr std::array<float, 4> kLowShelfFreqs { 35.0f, 60.0f, 110.0f, 220.0f };
 
-// Low cut, 18 dB/octave. Retailers sometimes quote the 1073's 50/80/160/300 for
+// Low cut, 18 dB/octave. Retailers sometimes quote the Console EQ unit A's 50/80/160/300 for
 // this module; the manual gives these, and the resistor modification it
 // describes changes termination rather than frequency.
 inline constexpr std::array<float, 4> kHpfFreqs { 45.0f, 70.0f, 160.0f, 360.0f };
@@ -95,16 +95,16 @@ inline constexpr std::array<float, 5> kLpfFreqs { 6000.0f, 8000.0f, 10000.0f, 14
 
 inline constexpr std::array<float, 6> kMidBranchQ { 1.39f, 1.59f, 1.49f, 1.31f, 2.02f, 2.68f };
 
-/** The 1084's Hi-Q switch narrows the mid band; it scales whatever the
+/** The Console EQ unit B's Hi-Q switch narrows the mid band; it scales whatever the
     position's Q already is rather than replacing it.
 
     The factor is not published. Every source agrees on the direction -- Hi-Q
     is the narrow setting, the other is wide and musical -- but none gives a
-    number, and no measurement of an 1084 is to hand; the plots the rest of
-    these constants are fitted to are of a 1073, which has no such switch.
+    number, and no measurement of a Console EQ unit B is to hand; the plots the rest of
+    these constants are fitted to are of a Console EQ unit A, which has no such switch.
     Doubling is the conventional reading of a two-position narrow/wide switch.
 
-    The manual also specifies the 1084's mid as "smooth +/-12dB or +/-18dB
+    The manual also specifies the Console EQ unit B's mid as "smooth +/-12dB or +/-18dB
     peaking with switchable 'High Q'" without saying which range goes with
     which Q, and that is not modelled: the gain stays +/-18 either way. Guessing
     would mean a knob that reads +18 while producing +12, which is worse than
@@ -119,7 +119,7 @@ inline constexpr float kMidHiQFactor = 2.0f;
 // of 1.30 here invented a 0.87 dB resonance that is not there.
 inline constexpr float kHpfQ       = 1.00f;
 
-// The 1084's low-pass is third order too. The user manual gives it the same
+// The Console EQ unit B's low-pass is third order too. The user manual gives it the same
 // 18 dB per octave as the high-pass, switchable between 6, 8, 10, 14 and
 // 18 kHz -- it was implemented here as a second-order 12 dB/octave section
 // until that was checked. Butterworth again: no measurement of this filter is

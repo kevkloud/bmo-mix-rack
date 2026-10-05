@@ -1,7 +1,7 @@
 # 03 — Early Reflections
 
 ER dossier. Reference voicing: a widely used late-1990s native reverb plugin and
-its stablemate room-emulator; product names appear only in **Sources**.
+its stablemate room-emulator; product names are kept outside the repository.
 **ANECDOTAL** = attributed practice, **DOCUMENTED** = published research or
 vendor docs, **UNVERIFIED** = not established.
 
@@ -9,11 +9,11 @@ vendor docs, **UNVERIFIED** = not established.
 
 ## Part 1 — What mix engineers do
 
-### Jaycen Joshua
+### Engineer A
 
-**ANECDOTAL — verified, his own words.** In a 2010 interview he is sparing with
-reverb: it can "cloud up your tracks and make them less clean", and "reverb is
-the kiss of death on rap vocals". He preferred delays for transparency. [S1]
+**ANECDOTAL — verified, in his own interview.** In a 2010 interview he is sparing
+with reverb: he says it muddies tracks and makes them less clean, and that it
+does real harm to rap vocals. He preferred delays for transparency. [S1]
 
 **ANECDOTAL — verified, workshop Q&A attributed to him.**
 
@@ -37,14 +37,14 @@ ratio.
 
 ### Others
 
-- **Andrew Scheps (2016), verified.** Layers a slap "somewhere in the 110 ms
+- **Engineer B (2016), verified.** Layers a slap "somewhere in the 110 ms
   range" with "a very short reverb — either a plate or a room"; the result still
   reads dry. [S5]
-- **John Leckie, verified.** A small-room algorithm around 40 ms makes a source
+- **Engineer C, verified.** A small-room algorithm around 40 ms makes a source
   *drier*: "You can actually make something drier by adding something." [S6]
-- **Second-hand:** Chris Lord-Alge extends ambience already in the indirect mics
-  rather than manufacturing it, and mixes largely in mono [S7]; Al Schmitt
-  blended real chambers and room mics with close mics [S8]; Michael Brauer notes
+- **Second-hand:** Engineer D extends ambience already in the indirect mics
+  rather than manufacturing it, and mixes largely in mono [S7]; Engineer E
+  blended real chambers and room mics with close mics [S8]; Engineer F notes
   "dry" requests really mean "not reverb" [S9].
 
 Common thread: ER serves *placement and tone*, not reverb.
@@ -119,7 +119,7 @@ The ER section must be a **first-class, independently controllable stage**.
   room.
 - **Pre-delay that moves the tail but optionally not the ER.** Default tail-only,
   so ITDG and tail onset stay separable; add a link switch and support
-  **negative** values. Per Joshua's phasing trap, internal pre-delay must live on
+  **negative** values. Per Engineer A's phasing trap, internal pre-delay must live on
   a fully wet path — dry must never be summed against a delayed copy of itself.
 - **Size scaling of tap times**, in metres or m³, offering both the linked
   "distance" behaviour (ER spacing, pre-delay and levels together) and unlinked
@@ -167,30 +167,24 @@ The ER section must be a **first-class, independently controllable stage**.
 
 ## Sources
 
-- [S1] Tingen, "Secrets Of The Mix Engineers: Jaycen Joshua", *Sound On Sound*,
-  Aug 2010 — soundonsound.com/techniques/secrets-mix-engineers-jaycen-joshua
-- [S2] community.mwtm.com/t/reverb-delay-trick/2380
-- [S3] community.mwtm.com/t/lead-vocal-reverb/7296
-- [S4] Second-hand accounts of the Waves TrueVerb technique:
-  braylenhope.com/jaycen-joshuas-reverb-trick-for-creating-depth/ ·
-  audiospectra.net/jaycen-joshua-trueverb-trick/ ·
-  mixinggpt.com/blog/jaycen-joshua-mixing-techniques ·
-  youtube.com/watch?v=jVfIeUOFntU
-- [S5] Levine, "Andrew Scheps: Mixing in Parallel (Part 2)", *Audiofanzine*,
-  9 Jun 2016 — en.audiofanzine.com/sound-technique/editorial/articles/mixing-in-parallel-part-2.html
+- [S1] Tingen, "Secrets Of The Mix Engineers: Engineer A", *Sound On Sound*,
+  Aug 2010
+- [S2] a workshop provider's community forum thread on a reverb-delay trick
+- [S3] the same forum, a thread on lead-vocal reverb
+- [S4] Second-hand accounts of the technique with Reference A's predecessor:
+  three blog retellings and a video
+- [S5] Levine, "Engineer B: Mixing in Parallel (Part 2)", *Audiofanzine*,
+  9 Jun 2016
 - [S6] Senior, "How To Use Reverb Like A Pro: Part 2", *Sound On Sound*, Aug 2008
-  — soundonsound.com/techniques/how-use-reverb-pro-part-2?page=3 (Leckie on the
-  Lexicon 480 Small Room algorithm)
-- [S7] v2.puremix.com/blog/when-indirect-is-better.html (HTTP 522; summary only)
-- [S8] prosoundweb.com/in-the-studio-an-interview-with-legendary-engineer-al-schmitt/
-- [S9] uaudio.com/blogs/ua/michael-brauer-ua-interview
+  (Engineer C on the HW-2 Small Room algorithm)
+- [S7] a mixing-tutorial site's article, "When indirect is better" (HTTP 522; summary only)
+- [S8] a trade-press interview with Engineer E
+- [S9] an interview with Engineer F on Vendor 4's blog
 - [S10] Olive & Toole, "The Detection of Reflections in Typical Rooms", *JAES*,
   Jul 1989 (pearl-hifi.com mirror; PDF not machine-extractable — figures from
   general knowledge, medium confidence)
 - [S11] acousplan.com/glossary/lf-lateral-fraction
 - [S12] davidgriesinger.com — esp. "The Effects of Early Reflections on
   Proximity, Localization and Loudness"
-- [S13] Waves TrueVerb owner's manual —
-  archive.org/stream/Waves_TrueVerb_owners_manual/Waves_TrueVerb_owners_manual_djvu.txt
-- [S14] Waves Renaissance Reverb user guide —
-  assets.wavescdn.com/pdf/plugins/renaissance-reverb.pdf
+- [S13] Reference A's predecessor owner's manual (archived scan)
+- [S14] Reference A user guide

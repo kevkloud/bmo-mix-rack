@@ -677,7 +677,7 @@ int main()
 
     //== 11. Low frequencies distort far harder -- the transformer's signature =
     // Core flux is the integral of applied voltage, so at a fixed level the
-    // bottom of the band drives the core far harder than the top. Marinair
+    // bottom of the band drives the core far harder than the top. Vendor 15
     // measured 0.1 % at 40 Hz against 0.01 % at 1 kHz for the line transformer
     // in these units. A memoryless waveshaper distorts every frequency alike
     // and cannot produce this at all.
@@ -849,8 +849,8 @@ int main()
 
     //== 16b. Bell widths match the measured hardware =======================
     // Regression guard on the calibration. Targets are realised -3 dB widths
-    // at +18 dB, traced from a response plot of an assembled board published
-    // with the Nyan-1073-EQ hardware project (CC BY-SA 4.0). `measure fitq`
+    // at +18 dB, traced from a response plot of an assembled board; the source and its
+    // share-alike attribution are in modules/eq/dsp/ModelTables.h. `measure fitq`
     // solves the branch Q values from these.
     {
         const double target[6] { 1.13, 1.00, 1.06, 1.15, 0.74, 0.52 };
@@ -914,7 +914,7 @@ int main()
     // Frequencies live both in the tables the filters are tuned from and in the
     // strings the panel prints, and nothing ties the two together, so they are
     // checked against each other in the parameter tests as well. These figures
-    // are from the Neve 1073 & 1084 user manual, issue 5.
+    // are from the Console EQ unit A and B user manual, issue 5.
     {
         // High cut: 18 dB/octave, like the low cut. It was built as a
         // second-order 12 dB/octave section until the manual was checked.

@@ -50,7 +50,7 @@ Three things follow, and the first two are what the ear will hear.
    At CRUSH 75 on a −12 dBFS peak that is a 12 dB (Tele) or 16 dB (Stressed)
    spike on the front of each word relative to the settled level. On a vocal
    it reads as a tick or a spit on hard consonants. Every compressor without
-   lookahead does this; the LA-2A does it; it is louder here because CRUSH
+   lookahead does this; the Opto unit A does it; it is louder here because CRUSH
    at 75 is deep. Only lookahead removes it, and Opto declares zero latency.
 
 2. **The reduction arrives slowly at the drive a vocal actually sees, and
@@ -69,7 +69,7 @@ Three things follow, and the first two are what the ear will hear.
    at the release rate; as `chargeDb` builds over 300 ms the release
    lengthens, the sag shrinks, and the envelope creeps up. That is why the
    50 ms column is still short of the final figure in every row. In Tele
-   it is the T4 cell's character; in Stressed it is a side effect.
+   it is the optical cell's character; in Stressed it is a side effect.
 
 The release, read from 20 ms after the hold ends (past a small DC blip from
 Tele's drive stage, see below), matches the 0.2.1 handoff: Tele at CRUSH 50
@@ -90,7 +90,7 @@ Neither is in the tree. Both are one-line changes to `Detector.h`, patched
 into scratchpad copies and measured with the same harness.
 
 - **Candidate A — Stressed's attack constant 10 ms → 3 ms.** Tele untouched.
-  The Distressor is a VCA unit whose attack is a knob; its Opto setting is
+  The Comp unit B is a VCA unit whose attack is a knob; its optical-emulation setting is
   about release. Stressed at CRUSH 50 / −12 then reaches 63 % in 6 ms and
   90 % in 20 ms (was 21 / 66), and matches Tele's speed at every setting.
   Leak unchanged.
@@ -111,7 +111,7 @@ into scratchpad copies and measured with the same harness.
 
 **Blind set:** `field-audio/opto-attack-2026-09-14/` in the main worktree
 (gitignored). Two groups, Tele 75 and Stressed 75, three letters each, the
-Failure take through each variant, LINK on, COLOR off, RMS-matched to the
+Song A take through each variant, LINK on, COLOR off, RMS-matched to the
 dry. `ANSWERS.md` is the form, `KEY.txt` the decode. Max reduction on that
 take is 16.3 dB in Tele and 20.8 to 22.4 dB in Stressed, so this is the
 "10 dB plus" case Frosty asked about.
@@ -121,7 +121,7 @@ take is 16.3 dB in Tele and 20.8 to 22.4 dB in Stressed, so this is the
 Whether any of it should change is Frosty's call, on those renders. The
 notes say the 10 ms attack has "no source supporting it moving"; candidate B
 is the case that a photocell's attack does move with light, and candidate A
-is the case that the Distressor's does not need to be slow at all. If a
+is the case that the Comp unit B's does not need to be slow at all. If a
 candidate wins, it goes in as a constant (A) or a five-line change (B) in
 `Detector.h`, with `testAttackReachesReductionInTime`-style absolute
 assertions on the table above, and the thirteen preset levels re-solved
@@ -145,7 +145,7 @@ build anywhere it differs from it.
 
 ## The Tele group is a null, and it says so itself
 
-Candidate A changes the Distressor cell only, so in **Tele** it is the shipped
+Candidate A changes the Comp unit B cell only, so in **Tele** it is the shipped
 build. The two files were rendered separately and are byte-identical:
 
     Tele 75/B.wav  4034f625b1f48e2e89d3e848c51c39d2b2fa4620f6210c22bdea74c3da6d7e29
@@ -164,7 +164,7 @@ is a fact about the change and not about the ear.
 Three genuinely different files, and the ranking is 1 / 2 = 2:
 
 - **candidate B best** — the light-dependent attack, both cells.
-- **shipped and candidate A tied for second.** Candidate A is the Distressor
+- **shipped and candidate A tied for second.** Candidate A is the Comp unit B
   attack at 3 ms against the shipped 10 ms, which is the larger change of the
   two on paper (t63 11 ms → 3.5 ms, t90 42 ms → 12.5 ms). Heard flat against
   the shipped build.

@@ -199,7 +199,7 @@ void OptoPanel::setChoice (juce::RangedAudioParameter& param, float normalisedVa
 void OptoPanel::timerCallback()
 {
     // Color has no off state in Tele mode: DspCore reads
-    // `mode == Mode::La2a || params.color`, so in Tele it is on whatever the
+    // `mode == Mode::OptoUnitA || params.color`, so in Tele it is on whatever the
     // parameter says. The switch is therefore drawn locked on there -- lit,
     // and not clickable.
     //

@@ -26,12 +26,12 @@ On AURORA, on the exact commit CI is building:
 - **26 of 26** full Release suites, plugins included
 - **15 of 15** DSP-only suites
 - corpus mean gross error 1.9344 %, unchanged, no item worse
-- a render of Failure and Fuji at 20 ms from this tree is **bit-identical** to
+- a render of Song A and Song B at 20 ms from this tree is **bit-identical** to
   the files Frosty ranked in round eight (`90bcf29c1fc35464`,
   `1837d485f0bc68c4`) — what shipped is what he heard
 
 `tune_hardtune_target` remains disabled. Its one open check is Tune's worst
-correction lag at A2, 1.97 ms against Antares' 1.66; every other vibrato is
+correction lag at A2, 1.97 ms against Tuner A's 1.66; every other vibrato is
 inside half a millisecond.
 
 ## Read the earlier CI run correctly
@@ -74,12 +74,12 @@ convention had already lapsed once before this.
 2. **Three checklists do not exist yet** and stage 4 wants them written
    *before* the round, not during it: **BMO CEQ**, **BMO Util**, and **the rack
    itself**. Every other module has one.
-3. **Tune, next by ear**: Failure at 20 ms, the one group of four where Antares
+3. **Tune, next by ear**: Song A at 20 ms, the one group of four where Tuner A
    still wins, and the pop at **6.137 s** that guard 6 does not clear — a
    phrase end where clarity falls to 0.05 and the detector keeps tracking
    noise. That is the voicing item, not the octave one.
 4. **`bmo-tune-field`'s ON NOISE exclusion is wrong** and should be re-scored
-   rather than deleted. Frosty heard a pop "at the word spills" on Fuji that
+   rather than deleted. Frosty heard a pop "at the word spills" on Song B that
    the tool discounts by design; guard 6 removed the two splices it was
    discounting (15.950 s and 19.457 s, landing 1.63 and 1.60). Fourth measure
    retired against these ears, after splice count, splice landing error and the

@@ -23,7 +23,7 @@ happened during the 2026-09-09 listening pass.
 ### `source` — a mono file cannot test ASYMMETRY
 
 Section 2 of the checklist was nearly run on a file that could not exercise it.
-`fuji NOT SATURATED.wav` looks like a stereo vocal and is a mono one in a
+`songb NOT SATURATED.wav` looks like a stereo vocal and is a mono one in a
 stereo container: side peak `0.0000305`, which is exactly one 16-bit LSB, with
 55.5 % of samples bit-identical between channels.
 
@@ -32,7 +32,10 @@ nothing to shear. It measured −102 dBFS, which reads as "the control did
 something" and is the dither. `pass` now calls that case out by name rather
 than reporting a pass.
 
-    measure_dim source "fuji NOT SATURATED.wav"
+    measure_dim source "songb NOT SATURATED.wav"
+
+The file name is written by code; the file keeps its own name on disk, and
+the key outside the repository maps the two.
 
 ### `pass` — the meter pass without a DAW
 
@@ -57,7 +60,7 @@ click`. A number above 1.5× is a click whether or not anyone has heard it.
 
 ### `corr` — gate on level, or the number lies
 
-Ungated, the dry mono Fuji file reads `min r = −0.2583`, which looks like real
+Ungated, the dry mono Song B file reads `min r = −0.2583`, which looks like real
 side content and is the LSB noise in the gaps between phrases. Gated at
 −80 dBFS the same file reads `0.9999` with a swing of `0.0017`, which is true.
 
@@ -65,7 +68,7 @@ side content and is the LSB noise in the gaps between phrases. Gated at
 
 ### `comb` — a moving comb is invisible to an average
 
-The one that earned its keep. §05 predicts Chorus-Ensemble will comb in mono
+The one that earned its keep. §05 predicts Host stock chorus A will comb in mono
 and Dimension will not. A time-averaged spectrum of the two mono sums showed
 **no notches at all**, which §07 says would invalidate the whole comparison.
 
@@ -74,8 +77,8 @@ so over twenty seconds they average away to nothing. Per 85 ms frame:
 
 | mono sum | mean | std dev | worst frame |
 |---|---|---|---|
-| Chorus-Ensemble | +0.77 dB | **2.53 dB** | **−19.78 dB** |
-| CLA Vocals | −0.03 dB | 0.78 dB | −4.16 dB |
+| Host stock chorus A | +0.77 dB | **2.53 dB** | **−19.78 dB** |
+| Vocal doubler A | −0.03 dB | 0.78 dB | −4.16 dB |
 | **Dimension** | 0.00 dB | 0.00 dB | 0.00 dB |
 
 **A long-term average will not find a moving comb. Measure per frame.**

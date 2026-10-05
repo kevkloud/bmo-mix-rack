@@ -111,10 +111,10 @@ const size_t kCycle = (size_t) std::llround (kSampleRate / 220.0);
     more than three seconds. */
 void testAModeRoundTripComesBackWhereItWouldHaveBeen()
 {
-    for (const auto mode : { Mode::La2a, Mode::Distressor })
+    for (const auto mode : { Mode::OptoUnitA, Mode::CompUnitB })
     {
-        const auto name  = std::string (mode == Mode::La2a ? "Tele" : "Stressed");
-        const auto other = mode == Mode::La2a ? Mode::Distressor : Mode::La2a;
+        const auto name  = std::string (mode == Mode::OptoUnitA ? "Tele" : "Stressed");
+        const auto other = mode == Mode::OptoUnitA ? Mode::CompUnitB : Mode::OptoUnitA;
 
         // The programme, 18 dB hotter for 100 ms at 2 s.
         auto x = sine (220.0, 9.0, kProgrammeAmp);
@@ -179,8 +179,8 @@ void testModeCrossesOverWithoutAStep()
 {
     for (const auto crush : { 60.0f, 100.0f })
     {
-        const auto toStressed = switchStepRatio (params (Mode::La2a, crush), params (Mode::Distressor, crush));
-        const auto toTele     = switchStepRatio (params (Mode::Distressor, crush), params (Mode::La2a, crush));
+        const auto toStressed = switchStepRatio (params (Mode::OptoUnitA, crush), params (Mode::CompUnitB, crush));
+        const auto toTele     = switchStepRatio (params (Mode::CompUnitB, crush), params (Mode::OptoUnitA, crush));
 
         check (toStressed < 1.5, "Tele -> Stressed at crush " + std::to_string ((int) crush)
                                    + " steps by " + std::to_string (toStressed) + " times the signal's own step (under 1.5)");
@@ -198,9 +198,9 @@ void testLinkCrossesOverWithoutAStep()
 {
     constexpr double quieter = 0.2512;   // R 12 dB under L
 
-    for (const auto mode : { Mode::La2a, Mode::Distressor })
+    for (const auto mode : { Mode::OptoUnitA, Mode::CompUnitB })
     {
-        const auto name = std::string (mode == Mode::La2a ? "Tele" : "Stressed");
+        const auto name = std::string (mode == Mode::OptoUnitA ? "Tele" : "Stressed");
 
         const auto unlink = switchStepRatio (params (mode, 100.0f, true), params (mode, 100.0f, false), 1, quieter);
         const auto link   = switchStepRatio (params (mode, 100.0f, false), params (mode, 100.0f, true), 1, quieter);
@@ -230,10 +230,10 @@ void testLinkCrossesOverWithoutAStep()
     at -6 dBFS with 6 dB of LEVEL, nothing being reduced. */
 void testColorCrossesOverWithoutAStep()
 {
-    const auto on  = switchStepRatio (params (Mode::Distressor, 0.0f, true, false, 6.0f),
-                                      params (Mode::Distressor, 0.0f, true, true, 6.0f), 0, 1.0, 0.5);
-    const auto off = switchStepRatio (params (Mode::Distressor, 0.0f, true, true, 6.0f),
-                                      params (Mode::Distressor, 0.0f, true, false, 6.0f), 0, 1.0, 0.5);
+    const auto on  = switchStepRatio (params (Mode::CompUnitB, 0.0f, true, false, 6.0f),
+                                      params (Mode::CompUnitB, 0.0f, true, true, 6.0f), 0, 1.0, 0.5);
+    const auto off = switchStepRatio (params (Mode::CompUnitB, 0.0f, true, true, 6.0f),
+                                      params (Mode::CompUnitB, 0.0f, true, false, 6.0f), 0, 1.0, 0.5);
 
     check (on < 1.5,  "Color on steps by " + std::to_string (on) + " times the signal's own step (under 1.5)");
     check (off < 1.5, "Color off steps by " + std::to_string (off) + " times the signal's own step (under 1.5)");

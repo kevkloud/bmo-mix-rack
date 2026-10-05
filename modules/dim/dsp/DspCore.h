@@ -362,7 +362,7 @@ inline bool asymmetryIsLive (float widthPercent, float rotationDegrees) noexcept
     **Rotation and asymmetry are the two exceptions, and they are deliberate.**
     Rotation turns the whole soundfield, which necessarily moves centre material
     off centre and therefore changes the mono sum; asymmetry adds a share of the
-    side signal to the mid, and the S1's own manual says outright that it
+    side signal to the mid, and Imager A's own manual says outright that it
     "changes relative balance of left & right both in stereo and in mono". Both
     are identity at their defaults, so a Dimension left alone is still
     mono-exact -- but a claim that the module is unconditionally mono-safe would
@@ -495,7 +495,7 @@ public:
         diffuseSm.setTarget (p.diffusePercent * 0.01f);
         depthSm  .setTarget (p.depthPercent * 0.01f);
         // Negated so the knob reads like a pan control: + moves the image
-        // right, - moves it left. The S1 manual fixes the rotation law but
+        // right, - moves it left. Imager A's manual fixes the rotation law but
         // says nothing about which way the knob turns, so the sign is a free
         // choice -- and the unnegated form put +30 degrees to the LEFT, which
         // is backwards from every pan knob a user has ever touched. Confirmed
@@ -643,7 +643,7 @@ public:
                 mid = m2; side = s2;
             }
 
-            // Gerzon's asymmetry, taken from the S1 manual rather than guessed
+            // Gerzon's asymmetry, taken from Imager A's manual rather than guessed
             // at. Three sentences constrain it, and together they leave one
             // linear answer:
             //

@@ -3,7 +3,7 @@
 What this branch changes, what was measured to justify it, and what is still
 open. Written for someone reading the diff cold.
 
-Everything below was measured against real renders: a vocal ("Fuji") bounced
+Everything below was measured against real renders: a vocal ("Song B") bounced
 from Ableton through BMO and through two hardware-model references, all
 gain-matched. Where a number appears, it came from a file, not from a
 simulation of one — except where explicitly labelled.
@@ -18,9 +18,9 @@ dry file and reading it across the nine phrase gaps of 250 ms or more:
 
 | | peak GR | entering gap | leaving gap | recovered |
 |---|---|---|---|---|
-| Distressor (reference) | 7.77 dB | 3.60 | −0.51 | **114%** |
-| Distressor + Color | 8.26 dB | 3.83 | −0.48 | **112%** |
-| Competitor LA-2A (reference) | 4.15 dB | 1.47 | −0.07 | **105%** |
+| Comp unit B (reference) | 7.77 dB | 3.60 | −0.51 | **114%** |
+| Comp unit B + Color | 8.26 dB | 3.83 | −0.48 | **112%** |
+| Competitor Opto unit A (reference) | 4.15 dB | 1.47 | −0.07 | **105%** |
 | BMO Tele | 5.78 dB | 3.78 | 1.39 | **63%** |
 | BMO ELD | 5.04 dB | 2.87 | 2.21 | **23%** |
 
@@ -38,13 +38,13 @@ against the same renders, reproducing the measured 63% / 23% to within a
 couple of points *before* anything changed, which is what made it safe to fit
 constants against:
 
-    La2aCell  kReleaseSlowMaxTauSec   15 -> 4
+    OptoUnitACell  kReleaseSlowMaxTauSec   15 -> 4
     Stressed  kReleaseSlowTauSec      20 -> 3
     Stressed  kChargeReleaseTauSec     4 -> 0.7
 
-Tele now measures 4.26 / 1.76 / 0.00 / **100%** against the LA-2A's 4.15 /
+Tele now measures 4.26 / 1.76 / 0.00 / **100%** against the Opto unit A's 4.15 /
 1.47 / −0.07 / 105%. ELD measures 7.48 / 3.66 / 0.27 / **93%** against the
-Distressor's 7.77 / 3.60 / −0.51 / 114%. (Above 100% is a method artifact —
+Comp unit B's 7.77 / 3.60 / −0.51 / 114%. (Above 100% is a method artifact —
 the render-derived envelope can overshoot, the simulation floors at zero.
 93–100% and 105–114% are the same behaviour.)
 
@@ -53,7 +53,7 @@ CRUSH 85 the cells still only give back 70% (Tele) and 44% (ELD). Recover
 between phrases, hold on when leaned on.
 
 **A test was deleted for being relative.**
-`testDistressorReleaseCeilingExceedsLa2a` compared the two modes' retained
+`testCompUnitBReleaseCeilingExceedsOptoUnitA` compared the two modes' retained
 *fractions*. It passed for the whole of 0.2.0 while Stressed sat on **26.7 dB
 of reduction ten seconds into pure digital silence** — because Tele was
 sitting on 9.2, so the ratio still held. `testReleaseGivesTheGainBack`
@@ -62,7 +62,7 @@ holding after 1 s. Neither can be satisfied alone, so "fix it by making it a
 fast compressor" fails the second.
 
 **A listening result worth recording.** The tester had reported a missing
-presence around 2.5 kHz and asked for the LA-2A's 2–2.4 kHz lift to be
+presence around 2.5 kHz and asked for the Opto unit A's 2–2.4 kHz lift to be
 modelled. Fine-band analysis said there was nothing there to add — BMO tracks
 the reference through 2–3.2 kHz and sits slightly *higher*. The hypothesis was
 that the release bug caused it, since Tele was leaving 1.39 dB of reduction
@@ -287,7 +287,7 @@ independent confirmation that it was inert (0.2.4 review, AURORA,
   off the panel and out of the schema, and any session that had set it off
   would open sounding different. It can be re-opened later as a deliberate
   retirement rather than a leftover question.
-- **The 2–2.4 kHz LA-2A lift** is deliberately still not modelled. It was
+- **The 2–2.4 kHz Opto unit A lift** is deliberately still not modelled. It was
   asked for, measured, found absent, and the release fix resolved the
   perception instead.
 

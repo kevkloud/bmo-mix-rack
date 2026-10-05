@@ -8,13 +8,13 @@ A tickable version of this lives as an artifact, which is easier to work from
 at the desk. Frosty has the link; it is not recorded here.
 
 Dimension has no meter of its own — a goniometer is the meter its panel wants
-and is deliberately deferred. **SSL Meter Pro stands in for it.**
+and is deliberately deferred. **Meter plug A stands in for it.**
 
 ---
 
 ## 01. Set the bench up
 
-    Source -> BMO Dimension -> Utility (gain match) -> SSL Meter Pro
+    Source -> BMO Dimension -> Utility (gain match) -> Meter plug A
 
 - Chain the meter **last**, after the gain-match Utility. Metering ahead of the
   trim measures a signal you are about to change.
@@ -67,7 +67,7 @@ paths, so **silence means they are identical**.
       **still** null — that is the whole topology.
 - [ ] Turn **ROTATE** or **ASYM**. It must now **fail** to null. These are the
       two documented exceptions and they are meant to break the sum.
-- [ ] Run **Chorus-Ensemble** through the same mono null. It should leak badly.
+- [ ] Run **Host stock chorus A** through the same mono null. It should leak badly.
       **If it nulls, your mono path is not summing** and nothing above was a
       valid test.
 
@@ -113,35 +113,35 @@ finding.**
 - [ ] Repeat on **bass or a low pad** — 34.6 dB at 110 Hz, beating ~1.3 Hz. Is
       it unusable on low material?
 
-## 05. Against Ableton Chorus-Ensemble
+## 05. Against Host stock chorus A
 
-Not a stand-in for MicroPitch — the opposite. Chorus-Ensemble is the
+Not a stand-in for Pitch widener A — the opposite. Host stock chorus A is the
 **conventional wiring**, detuned voices panned against each other, which is
 precisely the topology Dimension rejects. It is the counterexample.
 
-- [ ] Duplicate the track, Chorus-Ensemble on the copy, **Ensemble** mode.
+- [ ] Duplicate the track, Host stock chorus A on the copy, **Ensemble** mode.
 - [ ] Gain-match the two before comparing anything.
-- [ ] **Sum both to mono.** Chorus-Ensemble should **comb** — visible notches
+- [ ] **Sum both to mono.** Host stock chorus A should **comb** — visible notches
       and level loss. Dimension should show **nothing at all**.
 - [ ] Record the mono-sum level change for each. Dimension's should be 0.0 dB
       with ROTATE and ASYM at their defaults.
 - [ ] **Is the trade in the direction we want?** Theirs combs in mono and does
       not throb. Ours throbs and does not comb. Neither is free.
 
-## 06. Against CLA Vocals
+## 06. Against Vocal doubler A
 
 The checklist's own named reference. Its Pitch send is the detune doubler,
-wired conventionally like Chorus-Ensemble.
+wired conventionally like Host stock chorus A.
 
-- [ ] CLA Vocals on a duplicate, **Pitch send up**, everything else neutral.
+- [ ] Vocal doubler A on a duplicate, **Pitch send up**, everything else neutral.
 - [ ] Accept that this is **not apples-to-apples** and note where it is not —
-      CLA Vocals is a whole chain, and its compression, EQ and reverb all move
+      Vocal doubler A is a whole chain, and its compression, EQ and reverb all move
       level and tone.
 - [ ] Gain-match, then A/B in stereo. Which reads wider at matched level?
 - [ ] **Sum to mono.** The same comb check as 05.
 - [x] On a mono vocal, compare the **throb** specifically — steady width, or
       audible tremolo? Not "shimmer or tremolo": shimmer is not the target and
-      CLA Vocals is a reference for how the problem was solved elsewhere, not a
+      Vocal doubler A is a reference for how the problem was solved elsewhere, not a
       standard to match. *2026-09-09: not an audible throb, no shimmer, no high
       end added. Passes.*
 
@@ -158,7 +158,7 @@ wired conventionally like Chorus-Ensemble.
 - The goniometer **breathes** between a vertical trace and a spread blob.
 - At ASYM 25–50 %, a centre vocal **does not move**. Exactly.
 - True Peak stays under the ceiling across the whole preset sweep.
-- Chorus-Ensemble and CLA Vocals **do** notch in mono.
+- Host stock chorus A and Vocal doubler A **do** notch in mono.
 
 ### Do not want to see
 

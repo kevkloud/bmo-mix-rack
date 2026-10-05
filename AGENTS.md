@@ -44,8 +44,8 @@ Two rewritten commits left audio objects unreachable but present on
 
 | commit | what it swept in | when |
 |---|---|---|
-| `6f504bc` | `corpus/`, `renders/`, `reports/` — renders of the Failure and Fuji takes | 2026-09-14 |
-| `dd04f8f` | `renders/` of the Failure take, `opto_measurements/` | 2026-09-14 |
+| `6f504bc` | `corpus/`, `renders/`, `reports/` — renders of the Song A and Song B takes | 2026-09-14 |
+| `dd04f8f` | `renders/` of the Song A take, `opto_measurements/` | 2026-09-14 |
 
 Both are unreachable from every branch, so **no merge or rebase can carry them
 forward** — a merge moves reachable history only, and an unreachable commit is
@@ -136,21 +136,21 @@ add a parameter at the **end** of `specs()`, never in the middle.
 
 ## The latency rule (BMO Tune RT)
 
-**BMO Tune RT's true latency may never exceed Waves Tune Real-Time's,
+**BMO Tune RT's true latency may never exceed Tuner B's,
 measured the same way on the same stimulus** (Frosty, 2026-09-11). True
 latency is how late the audio really is, not what the plugin reports -- both
 report 0. Within the ceiling a change may make the audio later without
 asking; say the new figure and the headroom left in the commit body.
-Re-measure when Waves updates; `testing-notes/latency-and-lag-2026-09-11.md`
+Re-measure when Tuner B updates; `testing-notes/latency-and-lag-2026-09-11.md`
 has the commands.
 
 **The ceiling is a curve, not a number, and the comparison is per note**
-(Frosty, 2026-09-11). Waves' delay while correcting is nearly proportional to
+(Frosty, 2026-09-11). Tuner B's delay while correcting is nearly proportional to
 the period -- 19.2 ms at E2, 0.7 ms at A5, 1.68 ms per ms of period -- so a
 single figure is only that tuner's delay at one note and says nothing about
 any other. `references::ceilingMsAt (hz)` reads it off the measured curve in
 `tools/tune/common/References.h`; hold changes to that. Before 2026-09-11 the
-rule was the scalar 10.62 ms, which is Waves at A2, and it got the answer
+rule was the scalar 10.62 ms, which is Tuner B at A2, and it got the answer
 wrong in both directions.
 
 **The curve stops at E2, because the product does** (Frosty, 2026-09-11:
@@ -160,17 +160,17 @@ still declare a 55 Hz floor in `params.h`, so either those ranges come up or
 the curve goes down; until one of those happens, their bottom two and a half
 tones are unjudged.
 
-**What the rule is really protecting is live monitoring**, and Waves is the
+**What the rule is really protecting is live monitoring**, and Tuner B is the
 proxy for it, not the point (Frosty, 2026-09-11: per note is preferred, "so
 long as it remains fast enough for live monitor we can adjust"). So a change
-that is later than Waves at some note, but still comfortably inside what a
+that is later than Tuner B at some note, but still comfortably inside what a
 singer monitoring through the plugin can work with, is arguable rather than
 forbidden -- argue it with a figure and Frosty's ear, and write the budget
 down here when there is one.
 
 **There is one, from 2026-09-14** (Frosty, on AURORA). He monitored a
-duplicated vocal through the installed build against Waves at 48 kHz, on a
-tone opening on A2 -- the note where BMO is furthest past Waves in the part of
+duplicated vocal through the installed build against Tuner B at 48 kHz, on a
+tone opening on A2 -- the note where BMO is furthest past Tuner B in the part of
 the range a singer lives in -- and said: *"while I can probably convince
 myself I could hear a difference, I feel like I wouldn't be able to tell had I
 not seen the chart."*
@@ -190,11 +190,11 @@ it would take: the engine's floor is the rest plus one whole cycle, so this
 curve is very nearly `liveRest + T`, and getting under it means changing what
 a splice **is**, not tuning a constant.
 
-**Waves is now information, not the per-note gate.** The curve stays measured
+**Tuner B is now information, not the per-note gate.** The curve stays measured
 in `References.h` and is still reported beside every note, and the
 worst-against-worst check still runs. What was retired on 2026-09-14 is the
 per-note assertion against it, which on this engine could never go green: at
-A5 Waves' whole delay is 0.709 ms, under one period there (1.136), while BMO's
+A5 Tuner B's whole delay is 0.709 ms, under one period there (1.136), while BMO's
 floor plus one whole-cycle excursion is 1.491. A rule that failed every cell
 while the ear said it was fine was measuring the wrong thing.
 

@@ -18,7 +18,7 @@ inline constexpr auto kModuleName = "LTV Comp";
 // The face, and the switch that reveals the rest.
 //
 // BMO Vcomp is a *vocal* compressor, not the suite's general-purpose one, and
-// the face it presents is the RVox/DC1A face: one knob for how hard it works,
+// the face it presents is the Vocal comp A/Comp B face: one knob for how hard it works,
 // one for how loud it comes out, and a gate, because a compressor with 26 dB
 // of makeup on it lifts the room tone by 26 dB too.
 //
@@ -95,7 +95,7 @@ inline const ParamSpecs& specs()
         // down, tightens the knee and raises the ratio together, and adds the
         // makeup that keeps the level where it was -- so turning it up makes
         // the vocal denser and more forward rather than louder, which is what
-        // RVox's one knob does and what people actually want from it. See
+        // Vocal comp A's one knob does and what people actually want from it. See
         // curveFor() in Detector.h for the three sweeps and autoMakeupDb()
         // for the compensation.
         //
@@ -109,7 +109,7 @@ inline const ParamSpecs& specs()
         // in dBFS. It exists because of the auto makeup -- at AMOUNT 80 this
         // module adds about 26 dB, and it adds it to room tone, headphone
         // bleed and mic noise between lines just as willingly as to the voice.
-        // RVox has exactly this, for exactly this reason, and exactly one
+        // Vocal comp A has exactly this, for exactly this reason, and exactly one
         // control for it: no ratio, no timing, no range.
         //
         // Defaults to kGateOffDb, where it is exactly inert. The range runs to

@@ -328,14 +328,14 @@ int main()
         // budget over its margin -- never longer than noteDwellMs.
         //
         // Why, measured: round three (2026-09-11) heard the flat 40 ms dwell
-        // as pops at retune 20 ms, and on Failure every splice it added fell
+        // as pops at retune 20 ms, and on Song A every splice it added fell
         // while it held the target off the note the singer had reached,
         // pulling about 91 cents. The pull is not the dwell's doing -- a
         // singer between two scale notes is pulled either way -- but the
         // margin is, for as long as it holds, and that is what drags the
         // engine's read past its window. Billing it took the splices back to
         // round two's count at 20 ms and below both at 0 ms, for a few more
-        // neighbour flips (33 -> 38 on Failure, against 70 with no dwell).
+        // neighbour flips (33 -> 38 on Song A, against 70 with no dwell).
         // Frosty chose this over a cautious variant on those numbers (2026-09-11).
         const auto billed = [] (double pullCents)
         {
@@ -584,8 +584,8 @@ int main()
         // hop usually is (a voice cannot move 40 cents in half a millisecond),
         // and a brief wrong one when it was real. It is bounded by the clamp
         // throughout, and on the two shoot-out takes it costs nothing
-        // measurable: splices 44 -> 41 and 38 -> 36 on Failure, flips and
-        // dropouts identical, Fuji unchanged.
+        // measurable: splices 44 -> 41 and 38 -> 36 on Song A, flips and
+        // dropouts identical, Song B unchanged.
         {
             const auto hop = 24;
             const auto step = (size_t) (0.5 * fs);

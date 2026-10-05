@@ -135,11 +135,11 @@ So you do not re-derive it:
   can start regardless; just expect his listening notes to arrive mid-pass and
   possibly add items.
 - **Two candidates were heard and rejected** this session: Tune's phrase-end
-  fix (lost both Fuji groups) and Opto's attack candidates (three rounds, no
+  fix (lost both Song B groups) and Opto's attack candidates (three rounds, no
   distinguishable difference). Neither is merged. Do not resurrect either as
   part of a UI pass.
-- **Open elsewhere, not yours:** Fuji has 5 of 11 splices over 0.5 landing
-  error where Failure now has none, which is the real remaining Tune target;
+- **Open elsewhere, not yours:** Song B has 5 of 11 splices over 0.5 landing
+  error where Song A now has none, which is the real remaining Tune target;
   `OptoDspTests` does not pin the attack at all; the Vcomp THRU presets are
   still at AMOUNT 35 pending Frosty's ear.
 

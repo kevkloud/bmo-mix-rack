@@ -27,7 +27,7 @@ bottom out at 6 ms and climb after -- not because the rest was failing, but
 because more and more of the range fell on the side the law refused to
 correct.
 
-| rest | true latency | correction lag | vibrato residue | Failure splices | Fuji splices |
+| rest | true latency | correction lag | vibrato residue | Song A splices | Song B splices |
 |---|---:|---:|---:|---:|---:|
 | 2 ms | 7.55 ms | 1.38 ms | 1.89 c | 49 | 33 |
 | **4 ms (ships today)** | 10.26 | 0.71 | 1.24 c | 36 | 22 |
@@ -35,8 +35,8 @@ correct.
 | 8 ms | 13.74 | −0.51 | 1.05 c | 31 | 11 |
 
 By measurement 6 ms is the best correction available: the lag is essentially
-zero, the residue beats Antares' 1.30 for the first time by a clear margin,
-and Fuji's splices more than halve. It costs 1.7 ms of latency.
+zero, the residue beats Tuner A's 1.30 for the first time by a clear margin,
+and Song B's splices more than halve. It costs 1.7 ms of latency.
 
 **But measurement has been wrong twice about what you would hear** -- splice
 count and splice landing error both improved while the sound did not. So the
@@ -49,14 +49,14 @@ traded here; it is written down above and it is yours to accept or refuse
 after you know which one wins.
 
 Splices especially, since you've called them the biggest enemy -- the deeper
-arms should have materially fewer, and Fuji's should more than halve. But also
+arms should have materially fewer, and Song B's should more than halve. But also
 tracking, formants, and anything that sounds processed on held notes.
 
 You will not feel the latency in these files; they are aligned so only the
 tuning compares. That is deliberate: decide what sounds right first, then we
 find out whether its latency is liveable.
 
-## Failure 0 ms
+## Song A 0 ms
 
 Ranking (best to worst): 
 
@@ -65,7 +65,7 @@ Ranking (best to worst):
 - C: 
 - D: 
 
-## Failure 20 ms
+## Song A 20 ms
 
 Ranking (best to worst): 
 
@@ -74,7 +74,7 @@ Ranking (best to worst):
 - C: 
 - D: 
 
-## Fuji 0 ms
+## Song B 0 ms
 
 Ranking (best to worst): 
 
@@ -83,7 +83,7 @@ Ranking (best to worst):
 - C: 
 - D: 
 
-## Fuji 20 ms
+## Song B 20 ms
 
 Ranking (best to worst): 
 
@@ -118,21 +118,21 @@ distinguishable, so there is nothing to rank.
 
 | group | A | B | C | D |
 |---|---|---|---|---|
-| Failure 0 ms | 8 ms | 4 ms | 2 ms | 6 ms |
-| Failure 20 ms | 4 ms | 6 ms | 2 ms | 8 ms |
-| Fuji 0 ms | 2 ms | 6 ms | 4 ms | 8 ms |
-| Fuji 20 ms | 6 ms | 4 ms | 2 ms | 8 ms |
+| Song A 0 ms | 8 ms | 4 ms | 2 ms | 6 ms |
+| Song A 20 ms | 4 ms | 6 ms | 2 ms | 8 ms |
+| Song B 0 ms | 2 ms | 6 ms | 4 ms | 8 ms |
+| Song B 20 ms | 6 ms | 4 ms | 2 ms | 8 ms |
 
 ## What that settles
 
 **The rest is not what makes a pop.** Across those four arms the splice count
-runs 49 / 36 / 31 / 31 on Failure and 33 / 22 / 10 / 11 on Fuji -- a fourfold
-change in window room, better than a threefold change in splice count on Fuji
+runs 49 / 36 / 31 / 31 on Song A and 33 / 22 / 10 / 11 on Song B -- a fourfold
+change in window room, better than a threefold change in splice count on Song B
 -- and they are indistinguishable. That closes the axis the last three rounds
 have been spent on.
 
 It also closes the case for the deeper rest on correction grounds. 6 ms
-measures best (residue 0.94 c against 1.24 at 4 ms, Fuji's splices halved),
+measures best (residue 0.94 c against 1.24 at 4 ms, Song B's splices halved),
 but if the difference is inaudible there is no reason to spend 1.7 ms of
 latency on it. **The rest stays at 4 ms.**
 
@@ -159,4 +159,4 @@ Six against six, cleanly separated, first try -- where the splice count and
 the splice landing error were each refuted against these same ears. **The
 audible pops are the detector losing the period and the engine splicing on a
 period that is not the singer's.** `bmo-tune-field` reports it now: 12 of 37
-on Failure at 20 ms, 4 of 16 on Fuji.
+on Song A at 20 ms, 4 of 16 on Song B.

@@ -19,7 +19,7 @@ namespace bmo::opto
 // Pulled in under these names so the rest of this file reads as it always
 // did. Ratio and knee are still fixed per mode; only threshold moves with
 // CRUSH, because neither real unit has a ratio control -- CRUSH is a stand-in
-// for the Peak Reduction knob, which pushes more signal over a fixed
+// for the unit's single reduction knob, which pushes more signal over a fixed
 // circuit's threshold rather than reshaping the circuit itself.
 using dsp::Curve;
 using dsp::feedforwardSlope;
@@ -263,34 +263,34 @@ inline float attackCoeffFor (float steadyTauSec, float quickTauSec, double rate,
     return steady + (coeffFor (quickTauSec, rate) - steady) * quick;
 }
 
-/** CRUSH, 0-100 on the panel, mapped to threshold only. LA-2A: ~3:1, a soft
+/** CRUSH, 0-100 on the panel, mapped to threshold only. Opto unit A: ~3:1, a soft
     16 dB knee -- both fixed, per the digest's "effectively fixed/soft-knee,
     not a user ratio control."
 
-    The 3:1 goes through feedbackSlope() because La2aCell is a feedback cell
+    The 3:1 goes through feedbackSlope() because OptoUnitACell is a feedback cell
     and this is the figure it must be handed to actually *deliver* 3:1 --
     corrected in 0.2.0, where passing the feedforward figure was quietly
     delivering 1.67:1. */
-inline Curve curveForLa2a (float crushPercent) noexcept
+inline Curve curveForOptoUnitA (float crushPercent) noexcept
 {
     const auto c = std::clamp (crushPercent, 0.0f, 100.0f) / 100.0f;
     return { -8.0f + c * -30.0f, feedbackSlope (3.0f), 16.0f };
 }
 
-/** Distressor's 10:1 "Opto" ratio setting: fixed 10:1, a harder/shorter 6 dB
+/** Comp unit B's optical-emulation ratio position: fixed 10:1, a harder/shorter 6 dB
     knee -- "reminiscent of 60s/70s gear," a harder catch than a true optical
-    unit, per the digest. Same threshold sweep as LA-2A so CRUSH means the
+    unit, per the digest. Same threshold sweep as Opto unit A so CRUSH means the
     same thing (how much signal crosses the fixed circuit's threshold) in
     both modes; the character difference is ratio, knee, topology and
     release, not the sweep itself. */
-inline Curve curveForDistressor (float crushPercent) noexcept
+inline Curve curveForCompUnitB (float crushPercent) noexcept
 {
     const auto c = std::clamp (crushPercent, 0.0f, 100.0f) / 100.0f;
     return { -8.0f + c * -30.0f, feedforwardSlope (10.0f), 6.0f };
 }
 
 //==============================================================================
-/** LA-2A: a feedback cell with a genuine dosage-dependent release.
+/** Opto unit A: a feedback cell with a genuine dosage-dependent release.
 
     Feedback, not feedforward. `process()` returns `input * gainLin` using
     the gain the *previous* sample's envelope produced, then updates the
@@ -303,7 +303,7 @@ inline Curve curveForDistressor (float crushPercent) noexcept
     the slow stage's own time constant is not one fixed number, and not just
     a one-pole low-pass of reductionDb either -- a low-pass alone saturates
     within about a second regardless of how much longer the hit continues,
-    so it can't tell a 2-second hit from a 10-second one, which the T4
+    so it can't tell a 2-second hit from a 10-second one, which the optical
     cell's CdS photoresistor demonstrably can (its recovery is governed by
     at least two charge-trap populations with different relaxation rates,
     which is exactly why it has "memory" of exposure in the first place).
@@ -320,7 +320,7 @@ inline Curve curveForDistressor (float crushPercent) noexcept
     built for this cell too, and heard blind on 2026-10-03 with each build
     entered twice: both copies with it were ranked below both without. So it
     is not here. The other cell has it -- see attackCoeffFor(). */
-class La2aCell
+class OptoUnitACell
 {
 public:
     void prepare (double sampleRate) noexcept { rate = sampleRate; recentPeak.prepare (rate); keptLevel.prepare (rate); reset(); }
@@ -409,7 +409,7 @@ private:
     /** Slow tail ceiling: a long, heavy hit. 15 s until 0.2.1, which measured
         badly against a real one.
 
-        Rendered against a competitor LA-2A on the same vocal, gain-matched,
+        Rendered against a competitor Opto unit A on the same vocal, gain-matched,
         the reference recovered *completely* in every phrase gap of 0.3-1.0 s
         -- entering gaps at 1.47 dB and leaving them at -0.07. Ours entered at
         3.78 and left at 1.39, recovering only 63%, and the shortfall grew
@@ -421,7 +421,7 @@ private:
         At 4 s the same render reproduces the reference on all four figures --
         peak 4.26 against 4.15, entering 1.76 against 1.47, leaving 0.00
         against -0.07, recovering 100% against 105%. It is also inside the
-        0.5-5 s the sources give for the T4 cell's second stage, which 15 s
+        0.5-5 s the sources give for the optical cell's second stage, which 15 s
         never was.
 
         The dosage memory this ceiling exists for is untouched: driven hard
@@ -445,13 +445,13 @@ private:
 };
 
 //==============================================================================
-/** Distressor, 10:1 "Opto" ratio: a feedforward cell with electronically-
-    timed auto-release -- a different topology from the LA-2A on purpose.
-    The Distressor is a VCA-based feedforward compressor; its Opto setting
+/** Comp unit B at its 10:1 optical-emulation position: a feedforward cell with electronically-
+    timed auto-release -- a different topology from the Opto unit A on purpose.
+    The Comp unit B is a VCA-based feedforward compressor; its optical-emulation setting
     switches in dedicated detector/timing circuitry built to *emulate* an
     optical unit's feel, not an actual photoresistor. There's no published
     schematic and no source found describing multi-population charge-trap
-    behavior for it the way real CdS cells have -- so unlike La2aCell, this
+    behavior for it the way real CdS cells have -- so unlike OptoUnitACell, this
     doesn't get a continuously-growing dosage state. A single charge-driven
     blend between a fast floor and this mode's own (much longer, ~20 s)
     ceiling is the more honest model: it's the standard way this class of
@@ -464,7 +464,7 @@ private:
     lengthen with programme material, per the digest. It does quicken when
     the cell is more than 6 dB short of what is asked -- see
     attackCoeffFor(), which is a measurement's doing and not the digest's. */
-class DistressorCell
+class CompUnitBCell
 {
 public:
     void prepare (double sampleRate) noexcept { rate = sampleRate; recentPeak.prepare (rate); keptLevel.prepare (rate); reset(); }
@@ -533,9 +533,9 @@ private:
     static constexpr float kReleaseFastTauSec  = 0.06f;
 
     /** This mode's slow ceiling. 20 s until 0.2.1, for the same reason
-        La2aCell's was 15 -- and measured just as badly.
+        OptoUnitACell's was 15 -- and measured just as badly.
 
-        Against a real Distressor on the same vocal, gain-matched: the
+        Against a real Comp unit B on the same vocal, gain-matched: the
         reference peaked at 7.77 dB, entered phrase gaps at 3.60 and left them
         at -0.51, recovering fully every time. Ours recovered **23%**, leaving
         2.21 dB of reduction standing when the next phrase arrived, which is
@@ -545,18 +545,18 @@ private:
 
         At 3 s, with kChargeReleaseTauSec below, the same render gives peak
         7.48, entering 3.66, leaving 0.27, recovering 93%. Shorter than
-        La2aCell's ceiling and that is not a mistake: the Distressor is a VCA
-        feedforward unit whose Opto setting is electronically timed, and it
+        OptoUnitACell's ceiling and that is not a mistake: the Comp unit B is a VCA
+        feedforward unit whose optical-emulation setting is electronically timed, and it
         measurably recovers faster than the optical unit while reducing more.
-        La2aCell's tau also slides with dosage where this one does not, so at
-        low exposure the LA-2A is nearer 1 s regardless. */
+        OptoUnitACell's tau also slides with dosage where this one does not, so at
+        low exposure the Opto unit A is nearer 1 s regardless. */
     static constexpr float kReleaseSlowTauSec  = 3.0f;
     static constexpr float kChargeAttackTauSec = 0.3f;
 
     /** How fast the cell forgets a hit. Until 0.2.0 this reused
         kReleaseSlowTauSec -- the *ceiling* -- so any hit deep enough to move
         chargeDb pinned release near 20 s for a long time afterwards, which
-        is what "Stressed's release feels too long" was. La2aCell has always
+        is what "Stressed's release feels too long" was. OptoUnitACell has always
         used a separate, much shorter constant (1 s) for the same job; this
         gives Stressed its own, still slower than Tele's.
 
@@ -582,7 +582,7 @@ private:
 };
 
 //==============================================================================
-/** A one-pole DC blocker: needed after La2aDrive's asymmetric term, which
+/** A one-pole DC blocker: needed after OptoUnitADrive's asymmetric term, which
     would otherwise push a DC offset through the rest of the chain. */
 class DcBlocker
 {
@@ -616,7 +616,7 @@ private:
     float x1 = 0.0f, y1 = 0.0f;
 };
 
-/** LA-2A Drive: the 12AX7/12BH7 makeup stage, 6AQ5 and output transformer's
+/** Opto unit A Drive: the tube makeup and output stages and output transformer's
     mild, mostly low-order warmth -- modelled as a symmetric soft clip (odd
     harmonics, the bulk of any tube stage's output) plus a small asymmetric
     (quadratic) term that adds the low-order *even* harmonics a single-ended
@@ -633,7 +633,7 @@ private:
     approaches and exceeds where the curve bends -- the shape a passive
     tube/transformer stage actually has, and the one testQuietSignalIsLeftAlone
     and testMakeupGainIsExact both hold this to. */
-class La2aDrive
+class OptoUnitADrive
 {
 public:
     void prepare (double sampleRate) noexcept { dc.prepare (sampleRate); }
@@ -663,16 +663,16 @@ private:
     DcBlocker dc;
 };
 
-/** Distressor Drive: the tape-like 3rd-harmonic flattening stage (the
+/** Comp unit B Drive: the tape-like 3rd-harmonic flattening stage (the
     grittier of its two switchable harmonic options, chosen over the gentler
     Class-A 2nd-harmonic stage as the character this toggle represents) --
     a purely symmetric soft clip, which is what generates odd harmonics
     (3rd, 5th, ...) without needing a separate DC blocker. A larger `k` than
-    La2aDrive's on purpose -- see La2aDrive for why `/ k` and not `/ tanh (k)`
+    OptoUnitADrive's on purpose -- see OptoUnitADrive for why `/ k` and not `/ tanh (k)`
     -- so it still passes a quiet signal through near enough unchanged but
     compresses considerably more at the levels it's meant to be heard on,
-    reading as grittier and further from the LA-2A's own tone. */
-class DistressorDrive
+    reading as grittier and further from the Opto unit A's own tone. */
+class CompUnitBDrive
 {
 public:
     void reset() noexcept {}

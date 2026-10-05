@@ -1875,9 +1875,11 @@ int main (int argc, char** argv)
     // instance glides there from its construction defaults and, in float,
     // stalls a few hundred ulps short. (Holding the hi-cut's glide alone
     // moved the floor to -91 dB.) The old table playing on measured +0.18 dB.
-    // Since 2026-10-05 a fresh instance starts at its settings too, and the
-    // two are identical: the residual prints about -3018 dB, the floor of
-    // `residualDb`, so the -80 dB bar is loose now but still right.
+    //
+    // **Since 2026-10-05 the bar is exact equality, over the whole 0.5 s.** A
+    // fresh instance starts at its settings and reset() lands on them, so the
+    // two play the same samples; the residual had been printing about
+    // -3018 dB, the floor of `residualDb`, against the -80 dB bar.
     {
         struct Move { const char* what; int index; float value; };
         bool landed = true;
@@ -1906,12 +1908,14 @@ int main (int argc, char** argv)
             Stereo h;
             runNoise (ref, h, 0, 24000, 512);
 
-            const auto r = residualDb (h, s, 14400, 24000);
-            std::cout << "  reset() in " << m.what << ": " << r << " dB residual against a fresh instance at the new setting\n";
-            landed = landed && r <= -80.0;
+            double worst = 0.0;
+            for (size_t i = 0; i < h.l.size(); ++i)
+                worst = std::max ({ worst, (double) std::abs (h.l[i] - s.l[i]), (double) std::abs (h.r[i] - s.r[i]) });
+            std::cout << "  reset() in " << m.what << ": largest difference from a fresh instance at the new setting " << worst << "\n";
+            landed = landed && worst == 0.0;
         }
 
-        check (landed, "reset() during a crossfade or a TYPE dip lands on the new setting, not the old one (residual under -80 dB)");
+        check (landed, "reset() during a crossfade or a TYPE dip lands on the new setting: a fresh instance's samples, exactly");
     }
 
     //== The ER hi-cut is designed at the rate the generator runs at =============
@@ -1959,6 +1963,50 @@ int main (int argc, char** argv)
         }
 
         check (same, "ER HI-CUT sent before prepare() is designed at the prepared rate, 96 and 192 kHz");
+    }
+
+    //== The ER hi-cut's glide lands exactly ======================================
+    //
+    // After a move the coefficient's 20 ms glide stopped 1.3e-5 to 5.7e-5
+    // short of its target for good (QA's review, 2026-10-05): in float the
+    // step fell under half an ulp. Every later render then sat -111 to
+    // -117 dB from one that had never moved. 3 kHz, 0.1 s of noise, then
+    // 7 kHz and 1 s more -- 50 time constants -- must leave the coefficient
+    // exactly on its target, at 44.1, 48, 96 and 192 kHz.
+    {
+        bool arrived = true;
+
+        for (const auto rate : { 44100.0, 48000.0, 96000.0, 192000.0 })
+        {
+            ErGenerator g;
+            g.setHiCut (3000.0f);
+            g.prepare (rate, 512);
+
+            std::vector<float> x (512), l (512), r (512);
+            int n = 0;
+            const auto run = [&] (double seconds)
+            {
+                for (int at = 0; at < (int) (seconds * rate); at += 512)
+                {
+                    for (int i = 0; i < 512; ++i)
+                        x[(size_t) i] = 0.5f * noiseAt (n++);
+                    g.process (x.data(), l.data(), r.data(), 512);
+                }
+            };
+
+            run (0.1);
+            g.setHiCut (7000.0f);
+            run (1.0);
+
+            const auto gap = (double) g.hiCutTargetCoefficient() - (double) g.hiCutCoefficient();
+            if (gap != 0.0)
+            {
+                arrived = false;
+                std::cerr << "  ER HI-CUT 3 -> 7 kHz at " << rate << " Hz: the coefficient stops " << gap << " short\n";
+            }
+        }
+
+        check (arrived, "the ER hi-cut's glide lands exactly on its target after a move, 44.1 to 192 kHz");
     }
 
     //== The module is at its settings from its first sample =====================

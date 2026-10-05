@@ -2563,15 +2563,25 @@ namespace
         // that tree on 2026-10-03. They agree to 3.9e-12 relative between the
         // DLL and the static runtime (/MD, /MT) -- 6f6b8c3 and this tree are
         // bit-identical under each -- and a 1e-9 error in one coefficient
-        // moves them by 6e-9 to 4e-8. So 1e-10 under MSVC, 25 times the
-        // spread measured, catches that; elsewhere, where no spread has been
-        // measured, 1e-9 is the bound, and it may miss an error that small.
-        // The float output's exact hash is printed, for the record only: it
-        // differs in the last place between runtimes.
+        // moves them by 6e-9 to 4e-8. So 1e-10 of each figure under MSVC, 25
+        // times the spread measured, catches that.
+        //
+        // Elsewhere the figures cannot be held that closely to numbers made
+        // with another compiler and maths library. The first time this ran
+        // off Windows (the macOS job, 2026-10-04) the samples came out about
+        // 1e-8 away, 2e-7 of the row's RMS and 2e-6 of the smaller samples
+        // themselves, and a bound of 1e-9 of each figure failed all of them.
+        // So there the bound is absolute, 1e-4 of the row's RMS (80 dB under
+        // the signal, several hundred times what was seen): it still catches
+        // a wrong coefficient or a dropped band, and no longer pretends to
+        // catch a 1e-9 one. The float output's exact hash is printed, for the
+        // record only: it differs in the last place between runtimes.
 #if defined (_MSC_VER)
         constexpr double tolerance = 1.0e-10;
+        constexpr bool   ofEachFigure = true;
 #else
-        constexpr double tolerance = 1.0e-9;
+        constexpr double tolerance = 1.0e-4;
+        constexpr bool   ofEachFigure = false;
 #endif
         const double pinned[2][3][6] {
             {   // dynamic
@@ -2592,7 +2602,8 @@ namespace
             {
                 const auto got = heldEngineFigures (which == 0, rates[i]);
                 for (size_t k = 0; k < got.size(); ++k)
-                    checkClose (got[k], pinned[which][i][k], tolerance * std::abs (pinned[which][i][k]),
+                    checkClose (got[k], pinned[which][i][k],
+                                tolerance * (ofEachFigure ? std::abs (pinned[which][i][k]) : pinned[which][i][0]),
                                 std::string ("Held: ") + (which == 0 ? "dynamic" : "static") + " bands' " + names[k]
                                 + " as 6f6b8c3's at " + std::to_string ((int) rates[i]) + " Hz");
 

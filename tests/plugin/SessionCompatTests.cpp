@@ -153,10 +153,28 @@ namespace
         return nullptr;
     }
 
+    /** Exact for a stepped value under MSVC, where the fixtures were made.
+
+        Elsewhere a restored value is a normalised number turned back into a
+        real one by another compiler's arithmetic, and it lands a last bit
+        away: the first run off Windows (the macOS job, 2026-10-04) restored
+        the equaliser's -5.070000648 dB as -5.070000172 and its 0 dB default
+        as -0.000000358. Those are the same setting. So off MSVC every value
+        is held to 1e-5 of its own size (of 1, for a small one). The worst seen
+        on that run was 8.9e-7 of a value (a 261.4 Hz frequency restored
+        3.05e-5 Hz away), so that is eleven times the spread, and finer than
+        any parameter's step except a frequency above 10 kHz, whose step is
+        0.1 Hz: a switch, a choice or a stepped knob still cannot land on its
+        neighbour. */
     bool same (double actual, double expected, bool stepped)
     {
+       #if defined (_MSC_VER)
         return stepped ? actual == expected
                        : std::abs (actual - expected) <= 1.0e-6 * std::max (1.0, std::abs (expected));
+       #else
+        juce::ignoreUnused (stepped);
+        return std::abs (actual - expected) <= 1.0e-5 * std::max (1.0, std::abs (expected));
+       #endif
     }
 
     juce::String figure (double v) { return juce::String (v, 9); }

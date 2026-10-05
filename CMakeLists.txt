@@ -8,6 +8,24 @@ project(BMOMixRack VERSION 0.2.5 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# One arithmetic on every platform. clang and gcc may fuse a multiply and an
+# add into a single operation (-ffp-contract), which rounds once where the
+# two operations round twice; MSVC, which makes the Windows build and every
+# figure the tests pin, does not. On Apple Silicon the fused form is the
+# default, and it is not only a last-bit matter in the audio: a stepped
+# parameter's value is start + step * round(...), and fused, a 0 dB default
+# comes out as -0.000000358 dB (seen on the macOS job, 2026-10-04). A module
+# at its defaults is then not the wire it is on Windows, a rack that has been
+# edited never becomes sample-identical to one that has not, and a session
+# re-saved on a Mac differs in its last digits. Turning contraction off makes
+# the Mac and Linux builds do the arithmetic the Windows build does.
+#
+# It is set here, before any target exists, so that it reaches the modules,
+# the tests, the tools and the framework's own sources alike.
+if(NOT MSVC)
+    add_compile_options(-ffp-contract=off)
+endif()
+
 # The DSP of every module has no JUCE dependency, so its tests and the
 # measurement tools build and run on a machine with no audio framework at all,
 # including a CI container. Configure with -DBMO_DSP_ONLY=ON to skip the

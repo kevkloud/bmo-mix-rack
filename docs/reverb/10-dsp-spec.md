@@ -413,6 +413,154 @@ control, no extra algorithms. **Denormals:** `juce::ScopedNoDenormals` is alread
 applied host-rate in both processors (`00` §2); add an alternating ±1e−20
 injection into one line as belt and braces. **Freeze:** not in v1.
 
+### As built in M3a (2026-10-02, on ICE QUEEN)
+
+`modules/reverb/dsp/LateNetwork.h` departs from this section in the places below.
+Each was forced by a measurement against `11` §6, and each is argued in full
+where it is coded. Everything else above stands.
+
+- **Hadamard, not Householder.** Householder is maximally mixing at four
+  lines, not eight. At eight its diagonal is 0.75, so each line mostly feeds
+  itself, and the late envelope recurred at each type's shortest line
+  (autocorrelation up to 0.28, against 0.2). Hadamard, done as a fast
+  Walsh–Hadamard transform, brought it to 0.08–0.16 at about the same cost.
+  **The line count must now be a power of two: 16 stays open, 12 does not.**
+- **Second-order shelves, half an octave outside each knee.** First-order
+  shelves cannot meet "mid within 5 % whatever the multipliers" with knees
+  three octaves apart: the mid band read 25 % off at a 0.25 multiplier. RBJ
+  shelves at S = 1 (monotonic, so the clamp above still bounds them), placed
+  so each plateau starts at its knee, hold the mid within 1.5 %.
+- **The input diffusers may not ring longer than half of DECAY.** At
+  g = 0.66 and 18 ms an allpass rings 0.3 s on its own, so DECAY 0.3 s
+  measured 0.36 s. Each diffuser's gain is now capped by DECAY. Above about
+  1.1 s the cap never bites.
+- **Denormals are flushed, not injected.** A ±1e−20 injection means a reset
+  network is never silent, which breaks `11` §6's "zeros in, exactly zeros
+  out". Everything the network stores is zeroed below 1e−15 instead.
+- **SIZE scales τ̄ in proportion from each type's own SIZE, floored at
+  5 ms, and the tail's level by √(τ̄ / the type's τ̄).** The first is a
+  reading of `11` §1 ("the late network scales with the taps under SIZE").
+  The second exists because a network's energy at a given T60 grows as
+  T60/τ̄: Hall at 1 m peaked +0.8 dBFS on pink noise at −18 dBFS RMS. Both
+  are CALIBRATE.
+- **A length change runs two whole paths, weighted by when a sample was
+  written** (third form, 2026-10-03). The old read goes through the old
+  filters at the old level and the new read through the new filters at the
+  new level. A sample written before the move is read at the old delay, in
+  full, and never again; a sample written after it is read at the new delay;
+  the two weights cross over across the 30 ms after the move starts; and at
+  no instant do the two paths together weigh more than one. So the reads of
+  a line carry no more energy than was written to it, moving or not.
+
+  *Why it is this and not §5's plain 30 ms crossfade:* a crossfade in read
+  time re-reads the line at its new delay, and reading at a longer delay
+  replays samples that have already been round the loop. Every move put
+  energy back, and SIZE toggling 12 ↔ 30 m every 64 blocks at DECAY 20 s
+  reached +573 dBFS in a minute. The two earlier forms had their own
+  failures: a redesign landing in one step at the end of the fade was the
+  largest step in the move, and blending the *coefficients* does not keep a
+  filter's gain-times-shelf product (a 27 dB burst on a full-range move).
+
+  *What it costs, measured on noise held through one move, Room, DECAY
+  1.8 s, 48 kHz, in 10 ms windows:*
+
+  | move | deepest window | within 1 dB of settled | the move lasts |
+  |---|---|---|---|
+  | 12 → 30 m | 18 dB down | 70 ms | 111 ms |
+  | 30 → 12 m | 1.8 dB down | 160 ms | 111 ms |
+  | 12 → 80 m | silent | 340 ms | 246 ms |
+  | 80 → 12 m | 0.9 dB down | 300 ms | 246 ms |
+
+  A line that grows is quiet between its old delay and its new one, because
+  nothing written since the move has reached the new delay yet. A move lasts
+  the longest line, old or new, plus 30 ms, and the next move waits for it,
+  so SIZE under automation steps at that pace. **The ER generator keeps §3's
+  30 ms crossfade**: it is feed-forward, has no loop to feed, and so cannot
+  grow. "ER and late sharing the scheme" (§5) no longer holds, on purpose.
+
+  **On held noise the cost passes; on a decaying tail it stays.** With
+  signal still arriving, the network refills and settles at the new SIZE's
+  own level, so a move costs only the dip in the table above. With nothing
+  arriving, whatever a move drops is gone: every move makes the tail
+  quieter than SIZE held at either end, for good, and **shrinking costs
+  more than growing**. A shrinking line reads its pre-move samples at the
+  old delay to the end, and the new path stays silent until they are done,
+  so what was written in between is lost. Measured on ICE QUEEN (QA's
+  probe, `gap`; Room unless named, DECAY 5 s, a 10 ms burst at −18 dBFS RMS
+  at 0, one move at 0.3 s, 48 kHz / 32, the late output alone), the level
+  1–2 s after the move against SIZE held at the old size:
+
+  | move | during the move | 1–2 s after, for good |
+  |---|---|---|
+  | 12 → 13 m | 3.2 dB down | −1.2 dB |
+  | 12 → 30 m | 17.4 dB down | −1.2 dB |
+  | 12 → 80 m | silent, 80 ms more than 20 dB down | −1.2 dB |
+  | 0.5 → 80 m | silent, 110 ms more than 20 dB down | −5.0 dB |
+  | 30 → 12 m | 6.6 dB down | −4.5 dB |
+  | 80 → 12 m | 11.8 dB down | −10.8 dB |
+  | 80 → 0.5 m | 20.9 dB down | −19.5 dB |
+  | Ambience 80 → 0.5 m | 20.4 dB down | −18.3 dB |
+
+  Against SIZE held at the *new* size the figures are within 0.2 dB of these.
+
+  **Under automation the losses add up**, one per move. QA's `autolevel`
+  (Room, DECAY 20 s, both multipliers 2.0, 48 kHz, SIZE written once per
+  32-sample block; ICE QUEEN): the loop energy's T60, fitted 5–35 dB under
+  its peak after a 10 ms burst, and the output level on held noise at
+  −18 dBFS RMS over 10–60 s against SIZE held at 12 m:
+
+  | SIZE | tail T60 | held noise |
+  |---|---|---|
+  | held at 12 m | 39.45 s | 0 dB |
+  | LFO 12..13 m, 10 s period | 21.58 s | −3.22 dB |
+  | LFO 12..15 m, 10 s period | 18.44 s | −6.05 dB |
+  | LFO 12..30 m, 4 s period | 6.65 s | −8.79 dB |
+  | toggled 12 ↔ 30 m every 64 blocks | 1.91 s | −12.68 dB |
+
+  `reverb_dsp_tests` pins the held row, the first LFO and the toggle (on the
+  output's energy, which gives 39.45, 21.6 and 1.91 s and −3.22 dB), so a
+  change to the loss in either direction fails.
+
+  **Frosty, 2026-10-03: "a held SIZE is untouched; automating SIZE thins the
+  tail" is the behaviour for 0.2.6**, with gliding the line lengths as the
+  fallback if the listening pass disagrees. SIZE is a set-and-leave control.
+
+  **Frosty accepted this trade-off on 2026-10-03, with a fallback named.**
+  If the gap on a growing SIZE move turns out to matter in use, the
+  fallback is to **glide the line lengths** instead: no gap and no replay,
+  at the price §5 refused it for, a pitch bend across the whole tail for as
+  long as the move lasts ("a chorus and not a room"). It is not built. A
+  third option was set aside: letting the old room ring out beside the new
+  one, which has no gap and cannot grow but doubles the tail's memory and
+  its cost during a move.
+- **DECAY and both multipliers wait for a length move to end**, departing
+  from §5's 20 ms smoothing while SIZE moves. A move takes no new request
+  until it is over, so under SIZE automation the three reach the network once
+  a move: every 111 ms (Room 12 ↔ 30 m) to 289 ms (Ambience 0.5 → 80 m) at
+  48 kHz, against one 32-sample block (0.7 ms) with SIZE held. Left on
+  purpose: the two-path sum during a move is held by measurement, and that
+  measurement ran with the coefficients still. `reverb_dsp_tests` pins it.
+
+Four more, from QA's two passes on PR #38 (2026-10-03):
+
+- **The absorbent filters run in double.** In float, at 96 and 192 kHz, the
+  rounded coefficients realised a DC loop gain of up to 1.0071 and the tail
+  grew without limit. The lines stay float.
+- **`reset()` and `prepare()` build from the current settings**, never from a
+  move in flight; an unprepared network holds no lengths and outputs zeros;
+  and the search for line lengths is bounded.
+- **The early reflections' one-poles flush below 1e−15 too**, so a silent
+  instance is exactly silent with flush-to-zero off.
+- **The level at the far corner is intended** (Frosty, 2026-10-03). Plate,
+  DECAY 20 s, both multipliers at 2.0, REVERB 0 dB, on noise at −18 dBFS RMS,
+  peaks at +3.4 to +4.1 dBFS. A 40 s tail holds that energy, nothing scales
+  the level by decay, and REVERB is the control for it.
+
+Two items are red and recorded, not hidden, both Plate: modal density, Σ*m*ᵢ
+= 0.146 s against 0.15 s (this section predicted it), and late-envelope
+autocorrelation of 0.202 against 0.2. M3b's modulation or M4's line count
+takes them back.
+
 ## 5. Parameter changes, bypass, tail reporting
 
 Type switch may be a large jump in sound (`01` D3) but must not click: 30 ms
@@ -430,8 +578,8 @@ over 150 ms in `reset()`; a real bypass needs a rack change (§8).
 (`SingleModuleProcessor.h:41`, `RackProcessor.h:124`); reverb is the first module
 for which that is wrong. Report
 **T_tail = preDelay_s + T_mid·max(1, *r*_lo, *r*_hi) + *t*_ER,max + 0.05 s**,
-from parameter values rather than DSP state, clamped to a 30 s ceiling so a
-20 s × 2.0 setting does not hand the host 40 s. Tails compound along a chain, so
+from parameter values rather than DSP state, clamped to a 40 s ceiling (30 s until 2026-10-02) so a
+setting at the corner (40.8 s of arithmetic) hands the host 40 s and no more. Tails compound along a chain, so
 the rack figure is the **sum** over occupied slots, not the maximum.
 
 ## 6. CPU and memory
@@ -457,6 +605,23 @@ ops/sample on its own.
 comparable figure is BMO Tune RT at 0.934 % median, 48 kHz/128: **≤1.5 % of one
 core at 48 kHz/128 and ≤5 % at 192 kHz, per instance**, so eight slots stay under
 12 % and 40 %. Measure via `tools/measure/reverb/main.cpp`, do not infer.
+
+*As measured with the tail in (M3a, 2026-10-03, on an idle ICE QUEEN):* the
+worst case at 192 kHz / 32, SIZE 80, DENSITY 100, is **4.77–5.18 %** across
+the types, a hair past the 5 % line for Room and Plate. **Frosty accepts it
+at 192 kHz** — "a high-fidelity rate where added cost should be expected" —
+so the measured **5.18 %** stands as accepted. It is not a new budget:
+whatever M3b's EQ and modulation add on top is measured and brought to
+Frosty, not assumed to fit. 48 kHz / 128 stays at ≤1.5 % (measured
+1.10–1.22 %).
+
+**These are figures for held settings.** While a length move is in flight
+the tail runs two paths and the early reflections rebuild their table, and
+at 192 kHz / 32 QA measured a mean of about 10.5 % of the block with a 99th
+percentile near 40 % (Room, SIZE 30 ↔ 12 m toggled every block and every 64
+blocks; 2026-10-03, ICE QUEEN, and the same before and after the move was
+reworked that day: 10.4 % and 39.9 % on a quiet machine). No dropout at
+that; it is a cost of moving SIZE or TYPE, not of holding them.
 
 **Memory** (float32): ER 0.25 s × 2 ch, pre-delay 0.25 s × 2 ch, FDN Σ ≈ 0.7 s
 with modulation headroom, diffuser and allpasses ≈ 0.1 s — ≈1.55 s

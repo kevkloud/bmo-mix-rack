@@ -63,6 +63,21 @@ add_test(NAME dwell_dsp COMMAND dwell_dsp_tests)
 bmo_add_dsp_tool(reverb_dsp_tests dsp/ReverbDspTests.cpp)
 target_link_libraries(reverb_dsp_tests PRIVATE bmo_reverb_dsp)
 add_test(NAME reverb_dsp COMMAND reverb_dsp_tests)
+# A regression that hangs has to fail here, not stall the job until the
+# runner gives up: reset() before prepare() spun forever on 6067809 and only
+# a probe run by hand found it. (ctest's own default is 1500 s.)
+#
+# **The fence is set by the Debug build**, because scripts/build.sh tests
+# that one. On ICE QUEEN (2026-10-03) the default run takes 40 to 67 s in
+# Release and 271 to 447 s in Debug -- most of the spread is other builds
+# sharing the machine -- so the fence is 1350 s, three times the slowest.
+# Of a 387 s Debug run, 250 s is "the tail never grows, at the rates where
+# it did" (96 and 192 kHz, 20 s each); the kept-moving rows are 21 s. It
+# was 300 s while the kept-moving test ran all 43 rows by default, which
+# took 374 to 404 s in Debug and timed the suite out; those rows are behind
+# --long now, which ctest does not pass. A run that reaches the fence still
+# fails, as a timeout.
+set_tests_properties(reverb_dsp PROPERTIES TIMEOUT 1350)
 
 endif()
 
@@ -153,6 +168,8 @@ target_link_libraries(reverb_tests PRIVATE bmo_reverb)
 # into the executable itself, so the define is consistent across it.
 target_compile_definitions(reverb_tests PRIVATE JUCE_MODAL_LOOPS_PERMITTED=1)
 add_test(NAME reverb COMMAND reverb_tests)
+# The same fence as reverb_dsp, for the same reason; this one takes seconds.
+set_tests_properties(reverb PROPERTIES TIMEOUT 300)
 
 bmo_add_tool(rack_tests plugin/RackTests.cpp ${BMO_ROOT}/products/rack/Registry.cpp)
 target_link_libraries(rack_tests PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp bmo_deesser bmo_fetcomp bmo_dwell bmo_reverb)

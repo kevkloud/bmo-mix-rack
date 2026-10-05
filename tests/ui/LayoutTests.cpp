@@ -2985,7 +2985,7 @@ void checkReverbPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
             params.setReal (R::Index::decay, 20.0f);
             params.setReal (R::Index::damplo, 2.0f);
             checkNear (screen.tailWindowSeconds(), (double) R::LingerScreen::kMaxSeconds, 1.0e-3,
-                       who + " a 40 s tail should draw against the 30 s clamp");
+                       who + " a 40.1 s tail should draw against the 40 s clamp");
 
             params.setReal (R::Index::damplo, R::specs()[(size_t) R::Index::damplo].def);
             params.setReal (R::Index::decay, R::specs()[(size_t) R::Index::decay].def);

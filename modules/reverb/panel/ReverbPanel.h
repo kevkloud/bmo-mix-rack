@@ -446,7 +446,7 @@ public:
         so the axis can never be asked to draw a tail longer than the host is
         told about. `tailWindowSeconds` is where the axis actually ends. */
     static constexpr float kMinMs      = 1.0f;
-    static constexpr float kMaxSeconds = 30.0f;
+    static constexpr float kMaxSeconds = 40.0f;
 
     /** How much of the box is left blank after the drawn tail reaches the
         floor, **as a fraction of the width and not as a multiple of the

@@ -118,6 +118,14 @@ constexpr double kLevelToleranceDb = 1.0;
 // size: back within 1 dB of the clean render's 10 ms level 30 ms after the
 // bad sample at every level, nothing latched. Its bound is the suite's usual
 // 1.25 x + 0.25 s, 0.29 s.
+//
+// BMO Linger's row was re-measured on ICE QUEEN, 2026-10-04, on the merge of
+// main into the tail's branch (M3a). It had been recorded at 0.06 s at every
+// level, when the module was early reflections only. With the late network a
+// hot sample rings in the tail and leaves at the tail's own rate, DECAY 1.8 s
+// at the defaults: 1.76, 2.18, 3.05 and 6.40 s, longer the hotter the sample
+// and nothing latched. That is a reverb with a huge sample in it, not a
+// failure to recover, so the row records it rather than the old figure.
 constexpr Recorded kRecorded[] {
     //                 +60      +72      +96      4e9       settled
     { "util",    { 0.00,    0.00,    0.00,    0.00  }, 0.0 },
@@ -130,7 +138,7 @@ constexpr Recorded kRecorded[] {
     { "deesser", { 0.00,    0.00,    0.00,    0.00  }, 0.0 },
     { "fetcomp", { 1.17,    1.28,    2.93,    12.97 }, 0.0 },
     { "dwell",   { 1.88,    1.88,    1.90,    1.90  }, 0.0 },
-    { "reverb",  { 0.06,    0.06,    0.06,    0.06  }, 0.0 },
+    { "reverb",  { 1.76,    2.18,    3.05,    6.40  }, 0.0 },
     { "tune",    { 0.03,    0.03,    0.03,    0.03  }, 0.0, true },
 };
 

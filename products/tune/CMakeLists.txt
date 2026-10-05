@@ -6,10 +6,11 @@
 # orphans every session that references the plugin. Btun and
 # com.lt3audio.bmotunert were allocated by Frosty on 2026-09-10.
 #
-# INSTALL_AFTER_BUILD FALSE, where the rack's products take the suite default:
-# a Debug build installs itself over the user's plugin folder, and Tune's
-# builds are still being compared by ear against the installed 0.1. Install it
-# by hand from products/tune/BmoTuneRT_artefacts/<config>/VST3.
+# INSTALL_AFTER_BUILD FALSE, where the rack's products take the suite's
+# BMO_INSTALL_AFTER_BUILD option: even a build that asks for the install does
+# not put this one over the user's plugin folder, because Tune's builds are
+# still being compared by ear against the installed 0.1. Install it by hand
+# from products/tune/BmoTuneRT_artefacts/<config>/VST3.
 bmo_add_plugin(BmoTuneRT
     PRODUCT_NAME        "BMO Tune RT"
     PLUGIN_CODE         Btun

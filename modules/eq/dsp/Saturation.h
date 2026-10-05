@@ -170,8 +170,8 @@ private:
     that a transformer distorts low frequencies far harder than high ones at the
     same voltage. Core flux is the integral of applied voltage, so for a fixed
     level the flux a signal produces falls as 1/f: bass drives the core towards
-    its knee while treble never gets near it. Marinair's own figures for the
-    T1442 line transformer used in these units show it plainly -- 0.1 % at
+    its knee while treble never gets near it. Vendor 15's own figures for the
+    line transformer used in these units show it plainly -- 0.1 % at
     40 Hz against 0.01 % at 1 kHz and 10 kHz, all at +20 dB in.
 
     So the signal is pre-emphasised into a flux-like domain, saturated there,
@@ -182,7 +182,7 @@ private:
     The emphasis is shelved rather than a true integrator: a real core's
     response to flux is not unbounded, and 26 dB of tilt between 25 Hz and
     500 Hz puts the 40 Hz / 1 kHz distortion ratio at very nearly the 10:1
-    Marinair measured.
+    Vendor 15 measured.
 */
 class TransformerStage
 {

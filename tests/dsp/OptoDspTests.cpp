@@ -304,15 +304,15 @@ std::pair<float, float> reductionAtEndAndAfter (double loudSeconds, double silen
     given it's the intentionally simpler of the two models, not a bug. */
 void testReleaseIsProgramDependent()
 {
-    const auto afterShortTele = reductionAfter (0.2, 3.0, 80.0f, Mode::La2a);
-    const auto afterLongTele  = reductionAfter (2.5, 3.0, 80.0f, Mode::La2a);
+    const auto afterShortTele = reductionAfter (0.2, 3.0, 80.0f, Mode::OptoUnitA);
+    const auto afterLongTele  = reductionAfter (2.5, 3.0, 80.0f, Mode::OptoUnitA);
 
     check (afterLongTele > afterShortTele + 0.5f,
            "Tele: 3s after the hit ends, a long one (" + std::to_string (afterLongTele)
              + " dB left) still shows more reduction than a short one (" + std::to_string (afterShortTele) + " dB left)");
 
-    const auto afterShortStressed = reductionAfter (0.2, 3.0, 80.0f, Mode::Distressor);
-    const auto afterLongStressed  = reductionAfter (2.5, 3.0, 80.0f, Mode::Distressor);
+    const auto afterShortStressed = reductionAfter (0.2, 3.0, 80.0f, Mode::CompUnitB);
+    const auto afterLongStressed  = reductionAfter (2.5, 3.0, 80.0f, Mode::CompUnitB);
 
     check (afterLongStressed > afterShortStressed + 0.05f,
            "Stressed: 3s after the hit ends, a long one (" + std::to_string (afterLongStressed)
@@ -324,8 +324,8 @@ void testReleaseIsProgramDependent()
     "Stressed retains a larger fraction than Tele" -- passed for the whole of
     0.2.0 while both modes were failing to release at all.
 
-    What it was hiding, measured against a real Distressor and a competitor
-    LA-2A on the same gain-matched vocal: both references recovered
+    What it was hiding, measured against a real Comp unit B and a competitor
+    Opto unit A on the same gain-matched vocal: both references recovered
     *completely* in every phrase gap of 0.3-1.0 s. Ours recovered 63% (Tele)
     and 23% (ELD), and got worse across the take -- the first gaps recovered
     112-122%, the last five 32-47%. Ten seconds into pure digital silence,
@@ -342,9 +342,9 @@ void testReleaseIsProgramDependent()
     the mode the dosage memory that is the whole point of the model. */
 void testReleaseGivesTheGainBack()
 {
-    for (const auto mode : { Mode::La2a, Mode::Distressor })
+    for (const auto mode : { Mode::OptoUnitA, Mode::CompUnitB })
     {
-        const auto name = std::string (mode == Mode::La2a ? "Tele" : "Stressed");
+        const auto name = std::string (mode == Mode::OptoUnitA ? "Tele" : "Stressed");
 
         const auto afterThree = reductionAtEndAndAfter (10.0, 3.0, 60.0f, mode).second;
         check (afterThree < 1.0f,
@@ -359,8 +359,8 @@ void testReleaseGivesTheGainBack()
 
 /** Stressed's fixed 10:1 ratio should catch harder than Tele's fixed 3:1 at
     the same Crush setting and input level -- the one thing CRUSH does not
-    equalize between modes, on purpose (see curveForLa2a/curveForDistressor). */
-void testDistressorRatioExceedsLa2a()
+    equalize between modes, on purpose (see curveForOptoUnitA/curveForCompUnitB). */
+void testCompUnitBRatioExceedsOptoUnitA()
 {
     const auto dry = sine (1000.0, 1.0, 0.5);
 
@@ -383,8 +383,8 @@ void testDistressorRatioExceedsLa2a()
         return core.currentGainReductionDb();
     };
 
-    const auto tele = reductionFor (Mode::La2a);
-    const auto stressed = reductionFor (Mode::Distressor);
+    const auto tele = reductionFor (Mode::OptoUnitA);
+    const auto stressed = reductionFor (Mode::CompUnitB);
 
     check (stressed > tele, "Stressed's fixed 10:1 ratio reduces more than Tele's fixed 3:1 at the same Crush");
 }
@@ -426,7 +426,7 @@ void testColorTogglesHarmonics()
 
     DspCore::Params off;
     off.crushPercent = 0.0f;   // minimal cell action; identical in both runs either way
-    off.mode = Mode::Distressor;
+    off.mode = Mode::CompUnitB;
     off.color = false;
 
     DspCore::Params on = off;
@@ -451,7 +451,7 @@ void testTeleColorIsLocked()
 
     DspCore::Params colorOff;
     colorOff.crushPercent = 0.0f;   // minimal cell action; identical in every run below either way
-    colorOff.mode = Mode::La2a;
+    colorOff.mode = Mode::OptoUnitA;
     colorOff.color = false;
 
     DspCore::Params colorOn = colorOff;
@@ -462,17 +462,17 @@ void testTeleColorIsLocked()
 
     check (wetColorOff == wetColorOn, "Tele: output is identical whether Color's parameter is off or on -- the lock ignores it");
 
-    // And the lock isn't hiding a no-op: La2aDrive is a genuine nonlinearity
+    // And the lock isn't hiding a no-op: OptoUnitADrive is a genuine nonlinearity
     // (checked directly, not by comparing against a different mode's
     // output, which would also differ for cell/topology reasons that have
     // nothing to do with Color) -- a fixed multiply would give the same
     // input/output gain at any level; a saturator's gain changes with it.
-    La2aDrive lowShaper, highShaper;
+    OptoUnitADrive lowShaper, highShaper;
     const auto gainLow  = lowShaper.process (0.1f) / 0.1f;
     const auto gainHigh = highShaper.process (0.9f) / 0.9f;
 
     check (std::abs (gainHigh - gainLow) > 0.02f,
-           "La2aDrive's gain at 0.9 (" + std::to_string (gainHigh) + ") differs from its gain at 0.1 ("
+           "OptoUnitADrive's gain at 0.9 (" + std::to_string (gainHigh) + ") differs from its gain at 0.1 ("
              + std::to_string (gainLow) + ") -- it's a nonlinearity, not a fixed multiply");
 }
 
@@ -484,7 +484,7 @@ void testStability()
     for (int i = 0; i < 48000; ++i)
         nasty.push_back ((float) ((i / 64) % 2 == 0 ? 3.0 : -3.0));   // past full scale
 
-    for (auto mode : { Mode::La2a, Mode::Distressor })
+    for (auto mode : { Mode::OptoUnitA, Mode::CompUnitB })
     {
         for (bool link : { false, true })
         {
@@ -581,9 +581,9 @@ void testReductionIsTheSameAtEverySampleRate()
 
     const char* const what[] { "settled reduction", "reduction at the end of a loud passage", "reduction a second after it" };
 
-    for (const auto mode : { Mode::La2a, Mode::Distressor })
+    for (const auto mode : { Mode::OptoUnitA, Mode::CompUnitB })
     {
-        const auto name = std::string (mode == Mode::La2a ? "Tele" : "Stressed");
+        const auto name = std::string (mode == Mode::OptoUnitA ? "Tele" : "Stressed");
         const auto reference = readings (48000.0, mode);
 
         check (reference[0] > 10.0 && reference[1] > reference[0] + 3.0,
@@ -603,7 +603,7 @@ void testReductionIsTheSameAtEverySampleRate()
 //==============================================================================
 /** Each mode delivers the ratio it claims -- measured, not assumed.
 
-    Added in 0.2.0 because testDistressorRatioExceedsLa2a only ever checked
+    Added in 0.2.0 because testCompUnitBRatioExceedsOptoUnitA only ever checked
     that Stressed reduces *more* than Tele, which is true for any pair of
     numbers in the right order. It stayed true, and silent, while Tele's
     feedback loop was quietly delivering 1.67:1 against a stated 3:1: the
@@ -611,9 +611,9 @@ void testReductionIsTheSameAtEverySampleRate()
     feedbackSlope() in Detector.h. */
 void testDeliveredRatioMatchesTheSpec()
 {
-    checkNear (deliveredRatio (Mode::La2a, 50.0f), 3.0, 0.4,
+    checkNear (deliveredRatio (Mode::OptoUnitA, 50.0f), 3.0, 0.4,
                "Tele delivers ~3:1 through its feedback loop");
-    checkNear (deliveredRatio (Mode::Distressor, 50.0f), 10.0, 1.0,
+    checkNear (deliveredRatio (Mode::CompUnitB, 50.0f), 10.0, 1.0,
                "Stressed delivers ~10:1 feedforward");
 }
 
@@ -624,11 +624,11 @@ void testDeliveredRatioMatchesTheSpec()
     Added in 0.2.0 because testColorTogglesHarmonics only checks that Color
     on differs from Color off, and an odd-harmonic stage differs from no
     stage just as well as an even-harmonic one does. That let a sgn() factor
-    sit in La2aDrive making the whole function odd -- so it produced no even
+    sit in OptoUnitADrive making the whole function odd -- so it produced no even
     harmonics whatsoever while its comment claimed the opposite. */
 void testTeleDriveProducesEvenHarmonics()
 {
-    La2aDrive drive;
+    OptoUnitADrive drive;
     drive.prepare (kSampleRate);
 
     const auto dry = sine (200.0, 1.0, 0.5);
@@ -773,9 +773,9 @@ double meanReduction (const std::vector<float>& trace, double atSec, double leng
     10.8 dB a full second later; the level took 3.5 and 7.2 s to come back. */
 void testASpikeDoesNotLeaveADip()
 {
-    for (const auto mode : { Mode::La2a, Mode::Distressor })
+    for (const auto mode : { Mode::OptoUnitA, Mode::CompUnitB })
     {
-        const auto name = std::string (mode == Mode::La2a ? "Tele" : "Stressed");
+        const auto name = std::string (mode == Mode::OptoUnitA ? "Tele" : "Stressed");
         constexpr double burstSec = 0.020;
 
         const auto trace = reductionTrace (programmeWithBursts (kPrerollSec + 3.0, 18.0, burstSec, { kPrerollSec }),
@@ -803,9 +803,9 @@ void testASpikeDoesNotLeaveADip()
     before it had added, or less. */
 void testRepeatedSpikesDoNotRatchet()
 {
-    for (const auto mode : { Mode::La2a, Mode::Distressor })
+    for (const auto mode : { Mode::OptoUnitA, Mode::CompUnitB })
     {
-        const auto name = std::string (mode == Mode::La2a ? "Tele" : "Stressed");
+        const auto name = std::string (mode == Mode::OptoUnitA ? "Tele" : "Stressed");
 
         std::vector<double> onsets;
         for (int k = 0; k < 10; ++k) onsets.push_back (kPrerollSec + k);
@@ -838,9 +838,9 @@ void testRepeatedSpikesDoNotRatchet()
     are set so that half of either going missing fails. */
 void testAHeldLevelIsStillProgramme()
 {
-    for (const auto mode : { Mode::La2a, Mode::Distressor })
+    for (const auto mode : { Mode::OptoUnitA, Mode::CompUnitB })
     {
-        const auto name = std::string (mode == Mode::La2a ? "Tele" : "Stressed");
+        const auto name = std::string (mode == Mode::OptoUnitA ? "Tele" : "Stressed");
 
         const auto held    = reductionTrace (programmeWithBursts (kPrerollSec + 5.0, 18.0, 5.0, { kPrerollSec }), mode, 100.0f);
         const auto settled = meanReduction (held, kPrerollSec + 4.9, 0.1);
@@ -849,7 +849,7 @@ void testAHeldLevelIsStillProgramme()
         for (auto i = (size_t) std::llround (kPrerollSec * 1000.0); i < held.size(); ++i)
             if (held[i] >= settled - 1.0) { arrivedMs = (double) i - kPrerollSec * 1000.0; break; }
 
-        const auto limitMs = mode == Mode::La2a ? 20.0 : 65.0;
+        const auto limitMs = mode == Mode::OptoUnitA ? 20.0 : 65.0;
         check (arrivedMs >= 0.0 && arrivedMs <= limitMs,
                name + ": a held 18 dB step is within 1 dB of its settled reduction in "
                  + std::to_string (arrivedMs) + " ms (limit " + std::to_string (limitMs) + ")");
@@ -858,7 +858,7 @@ void testAHeldLevelIsStillProgramme()
         const auto before = meanReduction (hit, kPrerollSec - 0.5, 0.5);
         const auto after  = meanReduction (hit, kPrerollSec + 2.0, 0.01) - before;
 
-        const auto holdsAtLeast = mode == Mode::La2a ? 5.5 : 9.5;
+        const auto holdsAtLeast = mode == Mode::OptoUnitA ? 5.5 : 9.5;
         check (after > holdsAtLeast,
                name + ": a second after a 1 s louder passage the cell is still holding "
                  + std::to_string (after) + " dB of it (more than " + std::to_string (holdsAtLeast) + ")");
@@ -896,8 +896,8 @@ double attackMs (Mode mode, float crushPercent, double stepDb, double fraction)
     and after the quick stage existed. */
 void testASmallStepKeepsTheTenMillisecondAttack()
 {
-    const auto tele     = attackMs (Mode::La2a, 60.0f, 3.0, 0.63);
-    const auto stressed = attackMs (Mode::Distressor, 60.0f, 3.0, 0.63);
+    const auto tele     = attackMs (Mode::OptoUnitA, 60.0f, 3.0, 0.63);
+    const auto stressed = attackMs (Mode::CompUnitB, 60.0f, 3.0, 0.63);
 
     check (tele >= 9.0 && tele <= 15.0,
            "Tele covers 63% of a 3 dB step in " + std::to_string (tele) + " ms (9 to 15)");
@@ -937,8 +937,8 @@ double letThroughDb (Mode mode)
     settles. */
 void testASpikeIsCaught()
 {
-    const auto stressed = letThroughDb (Mode::Distressor);
-    const auto tele     = letThroughDb (Mode::La2a);
+    const auto stressed = letThroughDb (Mode::CompUnitB);
+    const auto tele     = letThroughDb (Mode::OptoUnitA);
 
     check (stressed < 9.5, "Stressed lets an 18 dB spike through by " + std::to_string (stressed) + " dB (under 9.5)");
 
@@ -959,7 +959,7 @@ void testASpikeIsCaught()
     it under 1. */
 void testTeleKeepsItsAttackOnALargeStep()
 {
-    const auto tele = attackMs (Mode::La2a, 100.0f, 18.0, 0.63);
+    const auto tele = attackMs (Mode::OptoUnitA, 100.0f, 18.0, 0.63);
 
     check (tele >= 2.0 && tele <= 5.0,
            "Tele covers 63% of an 18 dB step in " + std::to_string (tele) + " ms (2 to 5)");
@@ -975,7 +975,7 @@ int main()
     testMakeupGainIsExact();
     testReleaseIsProgramDependent();
     testReleaseGivesTheGainBack();
-    testDistressorRatioExceedsLa2a();
+    testCompUnitBRatioExceedsOptoUnitA();
     testDeliveredRatioMatchesTheSpec();
     testTeleDriveProducesEvenHarmonics();
     testCrushZeroAtProperGainStaging();

@@ -3,8 +3,8 @@
 Sonic references for the reverb module. Tags: **[D]** documented in a primary
 source, **[M]** measured, **[A]** anecdotal (review/tutorial/marketing). No
 independent measurements of either product were found anywhere, so **[M] is
-unused below** — that is itself a finding. Brand names appear only in
-**Sources and key**.
+unused below** — that is itself a finding. Brand names are not in the
+repository; the key from labels to products is kept outside it.
 
 - **Reference A** — a widely used late-1990s native algorithmic reverb plugin.
   Primary reference.
@@ -20,8 +20,10 @@ plugin: that product's early-reflection system was taken as a starting point and
 improved, and a **new, separate tail engine** was built behind it. Two
 generators, each with its own output fader.
 
-**Types (12) [D].** Hall 1, Hall 2, Room, Chamber, Church, Plate 1, Plate 2,
-Reverse, Gated, Non-Linear, EchoVerb, ResoVerb. The type menu sets reverb **and
+**Types (12) [D].** Numbered here in the maker's menu order, not named: types 1
+and 2 are halls, 3 a room, 4 a chamber, 5 a church, 6 and 7 plates, 8 reverse,
+9 gated, 10 non-linear, 11 an echo-and-reverb hybrid and 12 a resonant reverb.
+The type menu sets reverb **and
 early-reflection behaviour globally** — it swaps the engine. Per-type reflection
 patterns are not published.
 
@@ -72,33 +74,36 @@ balance → EQ and damping → decorrelation.
 
 ## B. Reference B
 
-**Modes (22), developer's own wording [D]**
-- *Hall/plate/room lineage (late 70s–early 80s)*: Concert Hall (huge image, echo
-  density adjustable sparse→dense, chorused modulation, clean tone); Bright Hall
-  (brighter onset, deeper modulation); Plate (highly diffuse, bright onset, high
-  density); Room (medium diffusion/early echo density, darker); Chamber
-  (transparent, dense, less colour).
-- *Late-80s randomised lineage*: Random Space (deep, wide, **slow attack**, more
-  diffusion than its inspiration; randomised internal delays rather than
-  chorusing, avoiding metallic artefacts without pitch change); Chorus Space
-  (chorused instead); Smooth Random (same randomisation, **tighter attack**).
-- *Explicit ER modes*: **Ambience** — time-varying **randomised early
-  reflections** plus a full tail, with the **Attack knob as the early/late
-  balance**, for air felt not heard. **Sanctuary** — nods to a classic German
-  1970s digital reverberator: **discrete early reflections** then a late reverb
-  that builds echo density rapidly, plus period converter bit reduction and
-  floating-point gain.
-- *Converter grit*: Dirty Hall, Dirty Plate — emulating a famous 1980s hall unit
-  and a British 1980s unit: floating-point converter quantisation, steep
-  anti-alias lowpass, fixed-point quantisation of audio **and of the modulation
-  signals**.
-- *Smooth Plate / Smooth Room*: modern update of the classic hall-unit
-  algorithms, with output taps shaped for natural exponential decay.
-- *Others*: Nonlin (Size = duration, Attack morphs truncated → flat gated →
-  reverse), Chaotic Hall/Chamber/Neutral (tape wow-and-flutter plus
-  pre-emphasis/nonlinearity/de-emphasis saturation), Cathedral, Palace (1980s
-  "room simulator" with higher density; its late diffusion is described as
-  **reducing perceived pre-delay**), Chamber1979, Hall1984.
+**Modes (22), from the developer's own descriptions [D]** (the modes' own names
+are left out; each group keeps its count and what each mode does)
+- *Hall/plate/room lineage (late 70s–early 80s), five modes*: a large hall (huge
+  image, echo density adjustable sparse→dense, chorused modulation, clean tone);
+  a brighter hall (brighter onset, deeper modulation); a plate (highly diffuse,
+  bright onset, high density); a room (medium diffusion/early echo density,
+  darker); a chamber (transparent, dense, less colour).
+- *Late-80s randomised lineage, three modes*: a deep, wide space with a **slow
+  attack** and more diffusion than its inspiration, using randomised internal
+  delays rather than chorusing (avoiding metallic artefacts without pitch
+  change); the same space chorused instead; and the same randomisation with a
+  **tighter attack**.
+- *Explicit ER modes, two*: an **ambience mode** — time-varying **randomised
+  early reflections** plus a full tail, with the **Attack knob as the
+  early/late balance**, for air felt not heard — and a mode that nods to a
+  classic German 1970s digital reverberator (HW-4): **discrete early
+  reflections** then a late reverb that builds echo density rapidly, plus
+  period converter bit reduction and floating-point gain.
+- *Converter grit, two modes (a hall and a plate)*: emulating a famous 1980s
+  hall unit (HW-1) and a British 1980s unit (HW-6): floating-point converter
+  quantisation, steep anti-alias lowpass, fixed-point quantisation of audio
+  **and of the modulation signals**.
+- *Two smooth modes (a plate and a room)*: modern update of the classic
+  hall-unit algorithms, with output taps shaped for natural exponential decay.
+- *Others, eight modes*: a non-linear mode (Size = duration, Attack morphs
+  truncated → flat gated → reverse); three tape-coloured modes (a hall, a
+  chamber and a neutral one: wow-and-flutter plus pre-emphasis/nonlinearity/
+  de-emphasis saturation); a cathedral; a 1980s "room simulator" style mode
+  with higher density, whose late diffusion is described as **reducing
+  perceived pre-delay**; and one further chamber and one further hall.
 
 **Colours [D].** *1970s*: ~10 kHz bandwidth, internally **downsampled** for
 lower-rate artefacts, dark noisy modulation that can throw random sidebands on
@@ -111,7 +116,7 @@ Diffusion, Late Diffusion, Mod Rate, Mod Depth, High Cut, Low Cut, high-shelf
 Damping (100 Hz…20 kHz [A]), Bass multiplier **0.25×…4×** of decay below a
 crossover [A] with **Bass Freq 100 Hz…10 kHz** ([D] — vendor changelog restores
 exactly this range). **Attack** builds the onset in most modes and becomes the
-**early/late balance** in Ambience and Sanctuary [D]. **Early Diffusion**
+**early/late balance** in the two explicit-ER modes [D]. **Early Diffusion**
 controls both the **level and density of the early reflections**; **Late
 Diffusion** raises tail density and masks pre-delay [A, from tooltips].
 
@@ -182,17 +187,19 @@ frequency-dependent decay as a *multiplier* rather than a filter, and the first
   except Bass Freq.
 - Any impulse-response, echo-density or latency measurement of either product.
 
-## Sources and key
+## Sources
 
-| Label | Real name | Sources |
-|---|---|---|
-| Reference A | Waves Renaissance Reverb (R-Verb) | https://assets.wavescdn.com/pdf/plugins/renaissance-reverb.pdf · mirror https://manuals.plus/waves/984272-renaissance-reverb-manual · https://www.waves.com/plugins/renaissance-reverb · https://www.waves.com/support/tech-specs/plugin-latency · https://www.soundonsound.com/reviews/waves-renaissance-maxx |
-| A's predecessor | Waves TrueVerb | named in the R-Verb manual introduction |
-| Reference B | Valhalla DSP ValhallaVintageVerb | https://valhalladsp.com/shop/reverb/valhalla-vintage-verb/ · https://valhalladsp.com/2023/02/10/valhallavintageverb-the-modes/ · ranges from https://www.loopmasters.com/articles/4273-ValhallaDSP-Reverbs-Quick-Start-Guide |
-| Reference C | Valhalla DSP ValhallaRoom | https://valhalladsp.com/2011/05/04/valhallaroom-early-reflections-versus-early-energy/ · https://valhalladsp.com/2011/01/21/reverbs-diffusion-allpass-delays-and-metallic-artifacts/ |
-| "classic German 1970s digital reverberator" | EMT 250 | named generically by the Valhalla developer |
-| "famous 1980s hall unit" | Lexicon 224XL | named by the Valhalla developer |
-| "British 1980s digital reverb" | AMS RMX-16 | named by the Valhalla developer |
+The key from these labels to products lives outside the repository.
 
-Developer of References B and C: Sean Costello (Don Gunn credited on the "Dirty"
+| Label | Sources |
+|---|---|
+| Reference A | the maker's user guide (and a mirror of it), product page and plugin-latency table; a magazine review |
+| A's predecessor | named in the Reference A manual introduction |
+| Reference B | the maker's product page and a developer blog post on its modes; ranges from a third-party quick-start guide |
+| Reference C | two developer blog posts, on early reflections versus early energy and on diffusion allpasses and metallic artefacts |
+| "classic German 1970s digital reverberator" (HW-4) | named generically by the developer of References B and C |
+| "famous 1980s hall unit" (HW-1) | named by the developer of References B and C |
+| "British 1980s digital reverb" (HW-6) | named by the developer of References B and C |
+
+Developer of References B and C: Developer A (Developer B credited on the converter-grit
 modes).

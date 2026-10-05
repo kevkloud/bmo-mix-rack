@@ -84,7 +84,7 @@ inline const ParamSpecs& specs()
         S::boolParam  (kAutoGain, "Auto Gain", false),
 
         // The one module in the suite whose default is not zero-latency: the
-        // 1073 model's 16 kHz shelf needs the headroom. See the plan.
+        // Console EQ unit A model's 16 kHz shelf needs the headroom. See the plan.
         S::choiceParam (kOversampling, "Oversampling", { "Off", "2x", "4x", "8x" }, 1),
     };
 

@@ -85,7 +85,7 @@ enum Index
 
     The value is the one-pole time constant of the correction (tau, as
     CorrectionLaw uses it). On the 2026-09-11 shoot-out, tau matched to
-    Antares' and Waves' 10 and 20 ms settings landed with them on real vocals,
+    Tuner A's and Tuner B's 10 and 20 ms settings landed with them on real vocals,
     so the number means about what theirs does. */
 inline constexpr int kNumRetuneSteps = 146;
 inline constexpr int kRetuneFineSteps = 51;     ///< 0.0 ... 5.0 ms, 0.1 apart

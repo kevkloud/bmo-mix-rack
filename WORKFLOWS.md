@@ -481,6 +481,6 @@ Open, in order: what makes a splice audible (the blocker -- two metrics have
 been refuted); the detector's octave and twelfth errors on scoops; the
 live-monitoring budget, which is Frosty's to set and which the per-note
 latency rule cannot go green without. The latency rule governs every change,
-and it is a curve -- Waves' measured delay at each note,
+and it is a curve -- Tuner B's measured delay at each note,
 `references::ceilingMsAt` -- not the scalar 10.62 ms it was written as until
 2026-09-11.

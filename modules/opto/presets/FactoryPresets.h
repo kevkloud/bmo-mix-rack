@@ -87,8 +87,8 @@ namespace bmo::opto
     drive and Color stages and lands ~8dB out at deep settings.
 
     A source-dependent auto-makeup was considered here in 0.2.0 and
-    **rejected**: it would have made all of this moot, but neither the LA-2A
-    nor the Distressor has one, and Frosty chose to keep LEVEL the hand-set
+    **rejected**: it would have made all of this moot, but neither the Opto unit A
+    nor the Comp unit B has one, and Frosty chose to keep LEVEL the hand-set
     makeup the hardware actually has. See params.h.
 
     None of these are ear-tuned against real programme material -- Frosty may

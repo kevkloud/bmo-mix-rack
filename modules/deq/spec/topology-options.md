@@ -10,7 +10,7 @@ called BMO Parametric; it is BMO DEQ.)
 
 | | formula | where it comes from |
 |---|---|---|
-| **Parallel** | `out = x + Σ (H_k·x − x)` | the spec's C4; TDR Nova describes itself as a parallel dynamic EQ |
+| **Parallel** | `out = x + Σ (H_k·x − x)` | the spec's C4; EQ plug B describes itself as a parallel dynamic EQ |
 | **Serial** | `out = H_n(… H_2(H_1(x)))` | the conventional parametric EQ |
 | **Hybrid** | cut filters in series, gain bands in parallel | not in the spec; evaluated here because it fixes parallel's worst failure |
 
@@ -127,8 +127,8 @@ the same and order-independent. Only what the gain does to the audio differs.)
 - **"Band solo" is exact:** each band's contribution `H_k·x − x` is
   independent of the others. In serial, a soloed band's contribution also
   includes whatever the bands before it did (negligible unless they overlap).
-- **It is what the spec's competitive target (Nova) does**, so it is the
-  closer match for a "Nova parity" claim.
+- **It is what the spec's competitive target (EQ plug B) does**, so it is the
+  closer match for a "EQ plug B parity" claim.
 
 ## Recommendation
 

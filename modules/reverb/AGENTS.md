@@ -518,7 +518,7 @@ enveloped by ER SHAPE and ER SPREAD.
 image-source tap times and pans from Taps, with Energy's envelope replacing the
 physical `(1/d)·β^n` gain law. It held index 2 only so it could be heard before
 the order froze. Frosty heard it at the M2 listening checkpoint on ICE QUEEN
-(HEDD Type 20 MK2), wet, on a vocal and a guitar: "a slightly worse" Taps.
+(Monitors A), wet, on a vocal and a guitar: "a slightly worse" Taps.
 That made it a synonym for a neighbour rather than a third behaviour, so it
 went while cutting was free. Do not bring it back as a choice position after
 ship: the count is what `ermode`'s normalisation depends on. The write-up is

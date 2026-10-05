@@ -55,12 +55,12 @@ public:
 
     /** What to report to the host: always 0. Live only -- the plugin runs
         contract::kLiveRestMs behind at rest (4 ms since 2026-09-11) and up to
-        a period further while correcting, and says 0, as Waves does
+        a period further while correcting, and says 0, as Tuner B does
         (LatencyContract.h).
 
         A flat rest against competitors whose delay tracks the note: BMO is
         the least late of the three on a bass note and the latest on a high
-        one, over Waves from about C3 upward -- 4.6 ms at A5 where Waves is
+        one, over Tuner B from about C3 upward -- 4.6 ms at A5 where Tuner B is
         0.7. testing-notes/tune-latency-review-2026-09-11.md. */
     static constexpr int kReportedLatency = 0;
 

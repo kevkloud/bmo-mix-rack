@@ -7,7 +7,7 @@ new plugin.
 
 | Product | What it is | Width |
 |---|---|---|
-| **BMO CEQ** | the console EQ: Neve-style, three bands, low cut, oversampled. Was FrostyEQ, then BMO EQ | 280 |
+| **BMO CEQ** | the console EQ: three bands, low cut, oversampled. Was FrostyEQ, then BMO EQ | 280 |
 | **BMO Saturator** | Drive, tone and blend, with auto-gain | 260 |
 | **BMO Util** | Gain, pan, width, polarity, mono | 160 |
 | **BMO Opto** | A two-knob opto-style leveller, CRUSH and LEVEL, with a feedback detector | 220 |

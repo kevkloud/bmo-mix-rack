@@ -28,13 +28,13 @@ as of M2), then the two notes it points at:
   installed here.
 - **The listening set:** `packages/reverb-listening/set-2026-09-24/` on ICE
   QUEEN (gitignored): `sources/` (15 clips), `linger/` (67 renders, ER only),
-  `refs/` (54 renders through the UAD units). Also
+  `refs/` (54 renders through the Vendor 4 units). Also
   `packages/reverb-listening/refs/` with the impulse stimulus and the
   reference IRs. **No audio is in the tree**; check `git status --short`
   before any `git add`.
-- **The bounce board:** https://claude.ai/artifact/YJjvAsyiDR2cyNzkPAsexy,
+- **The bounce board:** an artifact in Frosty's workspace (the link is not recorded here),
   pinned. It says who bounces what and carries the headless figures. Open
-  cells are Frosty's Renaissance bounces in Live.
+  cells are Frosty's Reference A bounces in Live.
 - **Memory** for this project lists the same state under "Linger M2 state"
   and "Linger reference plugins on ICE QUEEN".
 
@@ -65,12 +65,12 @@ CPU on ICE QUEEN, worst case, median of five: 0.87 % at 48 kHz/128,
   default 50 %, 100 % is verb only for a send. Pinned at five points.
 - **ER flatness rule** (Frosty, 24th): octave-smoothed, 250 Hz–8 kHz, within
   6 dB about the tilt at DENSITY 100 %, asserted; 4.6 dB today.
-- **References** (Frosty, 25th): Valhalla is dropped. The set is Renaissance
-  Reverb (Live only: the Waves shell hangs the headless host) plus the four
-  UAD units licensed here: Lexicon 224, Pure Plate, RealVerb-Pro, Precision
-  Reflection Engine. The PRE is early reflections only and the nearest
-  direct comparison for M2. Five other UAD verbs are unlicensed
-  pass-throughs. Slate VerbSuite renders two clips of four headless and is
+- **References** (Frosty, 25th): Vendor 3 is dropped. The set is Reference A
+  (Live only: Shell B hangs the headless host) plus the four
+  Vendor 4 units licensed here: Reverb plugs D, E, F and O.
+  Reverb plug O is early reflections only and the nearest
+  direct comparison for M2. Five other Vendor 4 reverbs are unlicensed
+  pass-throughs. Reverb plug G renders two clips of four headless and is
   not relied on.
 - **808s stay out** of reverb tests (Frosty, 24th).
 - **44.1 kHz sources are fine** (25th): every tool runs at the file's rate.
@@ -109,13 +109,13 @@ Recorded in the M2 note and not blocking:
 3. If Frosty has listened: write his verdicts into
    `testing-notes/linger-listening-set-2026-09-24.md` under a new heading,
    naming ICE QUEEN, and update `HANDOFF-linger-dsp.md`'s open list.
-4. If Renaissance bounces have landed in Live: `measure_reverb analyse` on
+4. If Reference A bounces have landed in Live: `measure_reverb analyse` on
    them for the table in the M2 note, and turn the board's cells green.
 5. Do not start M3 on this branch.
 
 ## Playback cautions for the listener
 
 `linger/lead-vocal-03-room12-mix50.wav` peaks at +1.1 dBFS and
-`refs/lead-vocal-03-realverbpro-wet.wav` at +0.9 (float files, no clipping in
+`refs/lead-vocal-03-plugF-wet.wav` at +0.9 (float files, no clipping in
 the file, clipping on playback). The references have tails and Linger does
 not, so the comparison is early reflections against full reverbs until M3.

@@ -16,7 +16,7 @@ namespace bmo::vcomp
 // also what makes the module clip: at the top of the knob it is adding nearly
 // 29 dB, and anything the compressor did not catch arrives at the output with
 // all of that on top. measure_vcomp's preset report had "In Front" and "Keep
-// The Chest" peaking above 0 dBFS on a source whose RMS was -18. RVox is gate
+// The Chest" peaking above 0 dBFS on a source whose RMS was -18. Vocal comp A is gate
 // -> compressor -> limiter for exactly this reason; this is the third stage.
 //
 // **Zero latency, and therefore not a brickwall in the modern sense.** A true
@@ -26,7 +26,7 @@ namespace bmo::vcomp
 // instantaneous instead: the gain for a sample is computed from that same
 // sample, which guarantees the ceiling without a single sample of delay and
 // pays for it in distortion on the fastest transients rather than in overshoot.
-// That is the same trade RVox makes, and it is why a limiter on a tracking
+// That is the same trade Vocal comp A makes, and it is why a limiter on a tracking
 // vocal is allowed to exist at all.
 //
 // **The knee only ever pulls down early.** With a soft knee centred on the
@@ -50,7 +50,7 @@ namespace bmo::vcomp
 // which is the honest version: a safety limiter that refused to act near 0
 // dBFS would not be one.
 //
-// **No parameters.** RVox's limiter has no controls and neither does this: it
+// **No parameters.** Vocal comp A's limiter has no controls and neither does this: it
 // is a safety net on a gain stage the user did not ask for, not an effect. The
 // ceiling sits a hair under full scale rather than at it, so the module is
 // inert for anything that was not going to clip anyway -- a signal at -1 dBFS

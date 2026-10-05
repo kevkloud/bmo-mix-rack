@@ -1,4 +1,4 @@
-# True latency and correction lag: BMO Tune RT, Antares, Waves -- 2026-09-11
+# True latency and correction lag: BMO Tune RT, Tuner A, Tuner B -- 2026-09-11
 
 Measured on **AURORA**, 48 kHz, blocks of 128, uncompensated. Every tuner was
 put through the same file and scored by the same code, so the numbers compare.
@@ -7,15 +7,19 @@ put through the same file and scored by the same code, so the numbers compare.
 
 ```
 build/tools/Release/bmo-tune-ref stimulus stimulus-48k.wav
-build-plugin/tools/Release/bmo-tune-hostrender "C:\Program Files\Common Files\VST3\Auto-Tune Artist.vst3" ^
-    stimulus-48k.wav antares.wav --setn "Input Type=0.5" --set "Retune Speed=0" ^
-    --set "Humanize=0" --set "Natural Vibrato=0" --set "Flex-Tune=0"
-build-plugin/tools/Release/bmo-tune-hostrender "C:\Program Files\Common Files\VST3\WaveShell1-VST3 16.0_x64.vst3" ^
-    --type "Waves Tune Real-Time Mono" stimulus-48k.wav waves.wav --set "Speed=0" --set "Note Transition=0"
-build/tools/Release/bmo-tune-ref score antares.wav
-build/tools/Release/bmo-tune-ref score waves.wav
+build-plugin/tools/Release/bmo-tune-hostrender "C:\Program Files\Common Files\VST3\Tuner A.vst3" ^
+    stimulus-48k.wav tuner-a.wav --setn "<input type>=0.5" --set "<correction speed>=0" ^
+    --set "Tuner A control 1=0" --set "Tuner A control 2=0" --set "Tuner A control 3=0"
+build-plugin/tools/Release/bmo-tune-hostrender "C:\Program Files\Common Files\VST3\Shell B 16.0_x64.vst3" ^
+    --type "Tuner B Mono" stimulus-48k.wav tuner-b.wav --set "<speed>=0" --set "<transition time>=0"
+build/tools/Release/bmo-tune-ref score tuner-a.wav
+build/tools/Release/bmo-tune-ref score tuner-b.wav
 build/tools/Release/bmo-tune-ref bmo
 ```
+
+The plugin file names and the parameter names above are written by code;
+the installed files and the plugins' own parameters keep their real names,
+and the key outside the repository maps the two. Substitute them to run it.
 
 - **The stimulus** (`tools/tune/common/Stimulus.h`): 19.5 s of a synthetic low male
   voice -- in-tune held notes on A2, D3, E3 and A3; the same four notes with
@@ -39,12 +43,12 @@ build/tools/Release/bmo-tune-ref bmo
 | | Reports to host | True latency, worst | In tune | While correcting | Correction lag, mean / worst | RMS off the note while flattening |
 |---|---|---|---|---|---|---|
 | **BMO Tune RT** (this commit) | 0 ms | **3.82 ms** | 0.66-1.01 | 2.94-3.82 | 6.22 / 8.95 ms | 6.61 c |
-| **Antares Auto-Tune Artist** (Low Male) | 2.33 ms | 6.49 ms | 3.00-6.49 | 5.26-5.95 | **-0.24 / 1.66 ms** | **1.30 c** |
-| **Waves Tune Real-Time** 16.0.23.24 (Mono) | 0 ms | 10.62 ms | 5.93-10.50 | 7.33-10.62 | 1.32 / 2.13 ms | 1.73 c |
+| **Tuner A** (low male range) | 2.33 ms | 6.49 ms | 3.00-6.49 | 5.26-5.95 | **-0.24 / 1.66 ms** | **1.30 c** |
+| **Tuner B** 16.0.23.24 (Mono) | 0 ms | 10.62 ms | 5.93-10.50 | 7.33-10.62 | 1.32 / 2.13 ms | 1.73 c |
 
 Per segment:
 
-| segment | BMO | Antares | Waves |
+| segment | BMO | Tuner A | Tuner B |
 |---|---|---|---|
 | in tune A2, delay | 0.85 | 3.00 | 10.50 |
 | in tune D3, delay | 0.66 | 4.02 | 7.69 |
@@ -60,14 +64,14 @@ Per segment:
 What it says:
 
 - **BMO is the least late of the three**, and the only one close to what it
-  reports. Waves also reports 0 and runs up to 10.6 ms late, more on low
-  notes (about one cycle of the note plus 1-1.4 ms). Antares reports 2.33 ms and runs 3-6.5.
+  reports. Tuner B also reports 0 and runs up to 10.6 ms late, more on low
+  notes (about one cycle of the note plus 1-1.4 ms). Tuner A reports 2.33 ms and runs 3-6.5.
   Ableton compensates only what is reported, which is why the shoot-out
-  exports showed Antares 2-3 ms off and Waves anywhere from 0.75 to 10 ms.
+  exports showed Tuner A 2-3 ms off and Tuner B anywhere from 0.75 to 10 ms.
 - **BMO's correction is about one cycle late** (4.0 ms at A3, 9.0 at A2) and
-  that lag is nearly all its error on a moving voice. Antares spends its
-  latency on looking ahead and lands on time or early; Waves is 1-2 ms late.
-- **Under the latency rule** (root `AGENTS.md`) the ceiling is Waves' 10.62 ms
+  that lag is nearly all its error on a moving voice. Tuner A spends its
+  latency on looking ahead and lands on time or early; Tuner B is 1-2 ms late.
+- **Under the latency rule** (root `AGENTS.md`) the ceiling is Tuner B's 10.62 ms
   and BMO has 6.8 ms of headroom -- enough to delay the audio by a cycle at
   A2 and put the correction on time, if prediction alone does not get there.
 
@@ -76,29 +80,29 @@ What it says:
 `tools/tune/common/References.h` records both tuners' figures with their settings.
 `tests/dsp/HardTuneTests.cpp`:
 
-- every run: true latency <= Waves' (the latency rule); correction lag and
+- every run: true latency <= Tuner B's (the latency rule); correction lag and
   vibrato residue no worse than today's (6.22 ms, 6.61 c);
-- `--target`, disabled in ctest until it passes: vibrato residue <= Antares'
-  1.30 c, worst correction lag <= Antares' 1.66 ms. Fails today.
+- `--target`, disabled in ctest until it passes: vibrato residue <= Tuner A's
+  1.30 c, worst correction lag <= Tuner A's 1.66 ms. Fails today.
 
-## What is still needed from Frosty (the Antares reference)
+## What is still needed from Frosty (the Tuner A reference)
 
 The numbers above are from AURORA's own plugins, rendered by our host. To
 make them the reference with confidence:
 
 1. **The same render in Ableton, as a cross-check.** Put
    `stimulus-48k.wav` (from `bmo-tune-ref stimulus`) on an audio track at
-   48 kHz, turn **Options > Delay Compensation off**, insert Auto-Tune Artist
-   with the settings above (Low Male, Chromatic, Retune Speed 0, Humanize 0,
-   Natural Vibrato 0, Flex-Tune 0), and export that track from the start of
-   the clip as 32-bit float, dither off. The same with Waves Tune Real-Time
-   (Speed and Note Transition at minimum, Chromatic). Say the buffer size
+   48 kHz, turn **Options > Delay Compensation off**, insert Tuner A
+   with the settings above (low male range, chromatic, correction speed 0, Tuner A control 1 0,
+   Tuner A control 2 0, Tuner A control 3 0), and export that track from the start of
+   the clip as 32-bit float, dither off. The same with Tuner B
+   (speed and transition time at minimum, chromatic). Say the buffer size
    and which machine. `bmo-tune-ref score` on the two exports should agree
    with the table; if it does not, the host differs and Ableton's figure is
    the one to hold to.
-2. **Which Antares is the target.** Auto-Tune Pro is installed on AURORA
-   too. If Pro is the one to beat, its render goes in `References.h` beside
-   Artist's -- one command, once the settings are known.
-3. **Any Auto-Tune setting used in real sessions that is not a parameter**
+2. **Which of Vendor 1's tuners is the target.** Tuner C is installed on
+   AURORA too. If Tuner C is the one to beat, its render goes in
+   `References.h` beside Tuner A's -- one command, once the settings are known.
+3. **Any Tuner A setting used in real sessions that is not a parameter**
    the host can see -- a low-latency switch, or Tracking moved off 50.
 4. **Ears on the blind set** (`shootout-2026-09-11.md`, "The blind set").

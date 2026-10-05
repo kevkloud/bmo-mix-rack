@@ -21,9 +21,9 @@ the mid path left as a plain wire:
 
 | Stage | Does | Modelled on |
 |---|---|---|
-| Generate | Two opposed detuned voices, their difference injected into S | MicroPitch, CLA Vocals |
-| Diffuse | Modulated all-pass cascade on S | Dimension D / phaser |
-| Image | Width, Gerzon bass shuffler, rotation, asymmetry | Waves S1 |
+| Generate | Two opposed detuned voices, their difference injected into S | Pitch widener A, Vocal doubler A |
+| Diffuse | Modulated all-pass cascade on S | Chorus unit A / phaser |
+| Image | Width, Gerzon bass shuffler, rotation, asymmetry | Imager A |
 
 The topology is the whole point. Because `L + R = 2M`, side-only work
 cancels in the mono sum **by construction rather than by testing**.
@@ -82,14 +82,14 @@ They are not the same shape, and the difference matters:
 
 ---
 
-## 3. Asymmetry was rebuilt from the S1 manual
+## 3. Asymmetry was rebuilt from Imager A's manual
 
 It shipped in the first commit as an unequal output trim — `outL *= 1+a`,
 `outR *= 1-a` — described in its own comment as "a reading, not a port". It
 was a conventional balance control, and a dead-centre 0.5/0.5 source came
 out **0.75/0.25**.
 
-The S1's manual specifies the control in three sentences:
+Imager A's manual specifies the control in three sentences:
 
 > "does not affect central mono in-phase sounds in any way, but adjusts the
 > relative level of left and right sounds"
@@ -220,7 +220,7 @@ the price of the mono-safety, it is undocumented anywhere else, and no test
 can settle whether the width reads as steady or as an audible tremolo.
 
 **Settled by ear 2026-09-09: it passes.** Not an audible throb, a slight
-tremolo at most, and no shimmer or added high end. MicroPitch is a research
+tremolo at most, and no shimmer or added high end. Pitch widener A is a research
 reference for how others solved this, never a target — the shimmer is the part
 this module does not want, so width without it is the design working, not a
 shortfall. See `testing-notes/dim-bench-state-2026-09-09.md`.
@@ -276,7 +276,7 @@ The Palette Book now says so at the top and names both stale facts:
 
 **`Bpar` and the teal `#5ecfc0` are reserved, not spent** — for a future BMO
 Parametric, which is not being built. `products/AGENTS.md` also records that
-BMO EQ's name is the wrong way round for that future: BMO EQ is a Neve 1084
+BMO EQ's name is the wrong way round for that future: BMO EQ is a Console EQ unit B
 model with stepped frequency selectors and no continuous Q, so it is the
 *specific* product wearing the generic word, while a parametric EQ would be
 the general-purpose one wearing a name that reads as a variant. The
@@ -301,7 +301,7 @@ and is gitignored.
 
 This branch was developed and measured with:
 
-    -- BMO fonts: %USERPROFILE%/Documents/FONTS (.bmo-fontdir)
+    -- BMO fonts: <the owner's font folder> (.bmo-fontdir)
 
 That path is local to one machine and is deliberately not committed — set
 your own once with `scripts/set-font-dir.sh <path>` and every build in that

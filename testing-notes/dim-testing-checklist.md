@@ -49,7 +49,7 @@ nobody has heard it yet.
 
 - On a **mono vocal**, DETUNE on, CENTS 10: does the width read as steady, or
   as an audible tremolo/flutter? **Width is the target and shimmer is not** —
-  MicroPitch is a research reference for how others solved this, not a
+  Pitch widener A is a research reference for how others solved this, not a
   standard to match, and its high-end sparkle is the part this module does not
   want. Widened with no shimmer is the pass.
   *Answered 2026-09-09: not an audible throb, slight tremolo at most, no high
@@ -59,7 +59,7 @@ nobody has heard it yet.
   would expect, since the gentle setting throbs hardest.
 - On **bass or a low pad**: the beat is slowest and deepest down there
   (34.6 dB at 110 Hz). Is it unusable on low material?
-- Compare against **MicroPitch or CLA Vocals** on the same source. Those comb
+- Compare against **Pitch widener A or Vocal doubler A** on the same source. Those comb
   in mono and this does not — is the trade audible in the direction we want?
 
 If this reads badly, the fix is a design decision, not a bug fix: the voices
@@ -68,7 +68,7 @@ depths. Flag what you hear before anyone changes it.
 
 ## 2. ASYMMETRY — does the far side widening read as depth or as phasiness
 
-Rebuilt this pass, from the S1 manual rather than from a guess. It was a
+Rebuilt this pass, from Imager A's manual rather than from a guess. It was a
 plain balance control and moved a dead-centre source (0.5/0.5 at +50% came
 out 0.75/0.25), which is the one thing Gerzon's control is defined as not
 doing. It is now a shear: the centre never moves at any setting.
@@ -154,7 +154,7 @@ mono track; the rest need a stereo source to do anything.
 
 - Do "Wide Vocal", "Mono to Stereo" and "Thicken" separate from each other,
   or are they three points on one line?
-- "Bass Shuffle" sits on the S1 manual's own recommendation (2.0 @ 650 Hz)
+- "Bass Shuffle" sits on Imager A's manual's own recommendation (2.0 @ 650 Hz)
   — does that read as more spacious, or just louder in the low end?
 - Anything that jumps in level against Init at the same settings.
 

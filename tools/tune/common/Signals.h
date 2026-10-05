@@ -226,7 +226,7 @@ struct VoiceSettings
     double breath = 0.0;         ///< noise level relative to the voiced source
     /** The fundamental's level against the source's usual 1/k^2, in dB. A
         real voice can carry a fundamental well under its second harmonic --
-        the Failure take of the 2026-09-11 shoot-out does, on a D4 /a/ whose
+        the Song A take of the 2026-09-11 shoot-out does, on a D4 /a/ whose
         first formant sits on the octave -- and a detector that has only met
         strong fundamentals locks an octave up on it. -20 puts it 8 dB under
         the second harmonic at the source, before the formants. */

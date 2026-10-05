@@ -47,7 +47,7 @@ Concise modern overview: Zahorik & Neal, "Reflected Sound: Friend or Foe?", *Aco
 
 ### 1.2 Haas 1951 — the paper was read, and the folklore is wrong in a specific way
 
-Haas, H. (1951), "Über den Einfluß eines Einfachechos auf die Hörsamkeit von Sprache," *Acustica* 1(2), 49–58 (his 1949 Göttingen dissertation); English: "The Influence of a Single Echo on the Audibility of Speech," *JAES* 20(2), 146–159 (1972), trans. Ehrenberg. Free scan: https://www.effectrode.com/wp-content/uploads/2025/07/The_Influence_of_a_Single_Echo_on_the_Audibility_of_Speech_Helmut_Haas_1949.pdf **[primary verified — all numbers below are from the paper's own text]**
+Haas, H. (1951), "Über den Einfluß eines Einfachechos auf die Hörsamkeit von Sprache," *Acustica* 1(2), 49–58 (his 1949 Göttingen dissertation); English: "The Influence of a Single Echo on the Audibility of Speech," *JAES* 20(2), 146–159 (1972), trans. Ehrenberg. **[primary verified — all numbers below are from the paper's own text]**
 
 Conditions: two matched loudspeakers, **3 m from the observer, at ±45°**; measurements on the roof of the Institute (free field), plus rooms of RT ≈ 0.8 s and 1.6 s. Continuous text at **5.3 syllables/s** for all tests (speed itself varied over **3.5 / 5.3 / 7.4 syll/s**). Primary loudspeaker at ~55 phon.
 
@@ -176,7 +176,7 @@ The primaries are online and free, and his position is at odds with the Barron/B
 - A 12′×15′×9′ room (RT 0.2 s, time constant 30 ms) "will not be enveloping with a single sound source" — too little delay to generate interaural fluctuations; only ESI is available.
 - Optimum source angles for envelopment: 90° below 700 Hz, moving toward the medial plane above; about 150° for broadband energy above 2 kHz.
 
-**On the 50–150 ms region**, from a magazine interview about his surround reverb algorithm work — https://www.soundonsound.com/people/david-griesinger-lexicon-creating-reverb-algorithms-surround-sound: "Between 50mS and 120mS is probably the worst possible time to get energy from an intelligibility point of view." His design strategy there: strong reflections **before 50 ms** create distance without harming intelligibility; a flatter, low-level profile out to **160 ms**; exponential decay after that for reverberance and envelopment. Removing the 50–150 ms energy entirely leaves an audible gap in reverberation onset.
+**On the 50–150 ms region**, from a magazine interview about his surround reverb algorithm work: "Between 50mS and 120mS is probably the worst possible time to get energy from an intelligibility point of view." His design strategy there: strong reflections **before 50 ms** create distance without harming intelligibility; a flatter, low-level profile out to **160 ms**; exponential decay after that for reverberance and envelopment. Removing the 50–150 ms energy entirely leaves an audible gap in reverberation onset.
 
 **On clarity metrics:** his 2007 ICA Madrid and 2013 ICA "What is Clarity and how can it be measured?" both start from the observation that halls with very similar measured RT, EDT and C80 sound quite different.
 

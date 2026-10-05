@@ -7,9 +7,9 @@
 
     The manifest is one line per file, tab-separated; '#' starts a comment:
 
-        group <TAB> Failure 0 ms <TAB> path/to/dry.wav
-        Antares <TAB> path/to/antares.wav
-        Waves <TAB> path/to/waves.wav
+        group <TAB> Song A 0 ms <TAB> path/to/dry.wav
+        Tuner A <TAB> path/to/tuner-a.wav
+        Tuner B <TAB> path/to/tuner-b.wav
         BMO <TAB> path/to/bmo.wav
         group <TAB> ...
 

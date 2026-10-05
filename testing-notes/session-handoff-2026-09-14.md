@@ -17,7 +17,7 @@ left; nothing here needs re-deriving.
 | **`integration`** | unchanged at `42439d7`. Worktree `../bmo-mix-rack-333-int`. |
 | **`review-0.2.4`** (on the fork) | worktree `../bmo-mix-rack-333-review`, off `integration`. `bf03cca` the docs, `240de6d` the fixes, `f10a155` the checklist update, plus this file. Full Release `ctest` **26 of 26** on AURORA. **Not through CI.** |
 | **`tune-phrase-end`** (on the fork) | worktree `../bmo-mix-rack-333-tunefix`, off `review-0.2.4`. `6900bc1`, the Tune candidate. 8 of 8 tune suites. Not through CI. |
-| **Blind sets** (gitignored, main worktree `bmo-mix-rack-333/field-audio/`) | `blind-2026-09-14-round9/` (Tune: Antares, shipped guard 6, candidate; `KEY.txt` beside it) and `opto-attack-2026-09-14/` (Opto: shipped, candidate A, candidate B; `KEY.txt` beside it). Neither has been heard. |
+| **Blind sets** (gitignored, main worktree `bmo-mix-rack-333/field-audio/`) | `blind-2026-09-14-round9/` (Tune: Tuner A, shipped guard 6, candidate; `KEY.txt` beside it) and `opto-attack-2026-09-14/` (Opto: shipped, candidate A, candidate B; `KEY.txt` beside it). Neither has been heard. |
 | **Memory** | `review-0-2-4-state.md` in the auto-memory folder says the same as this table, shorter. |
 
 The other worktrees (`-deq`, `-tune`, `-tunework`, `-pop`) belong to earlier
@@ -36,7 +36,7 @@ stale despite their timestamps.
   rendered blind; **nothing changed in any tree.**
 - Tune's remaining pop diagnosed and a candidate built: the law was
   confirming note jumps with the detector's frozen period echoed back.
-  Field tool: Failure 0 ms worst landing 1.95 → 0.76, jumps 7 → 5, dropouts
+  Field tool: Song A 0 ms worst landing 1.95 → 0.76, jumps 7 → 5, dropouts
   unchanged, corpus gross error unchanged with no item worse
   (`tune-blind-round9-2026-09-14.md`).
 - Fixed on `review-0.2.4`, all bug-class, none a character change: EQ Phase
@@ -57,7 +57,7 @@ stale despite their timestamps.
 
 The first push of the Tune commit swept in `corpus/`, `renders/` and
 `reports/` — the scorer's working folders, which nothing ignored — and
-`renders/` held renders of the Failure and Fuji takes. The commit was
+`renders/` held renders of the Song A and Song B takes. The commit was
 rewritten to its five files within minutes, the three folders are in
 `.gitignore` now (on `tune-phrase-end`; carry it to `integration`), and the
 branch was force-pushed. The old commit `6f504bc` is unreachable on the fork

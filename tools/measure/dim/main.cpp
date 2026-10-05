@@ -17,7 +17,7 @@
     L and R are bit-identical.
 
     Written because the 2026-09-09 listening pass nearly ran section 2 of the
-    checklist on a file that could not exercise it. `fuji NOT SATURATED.wav`
+    checklist on a file that could not exercise it. `songb NOT SATURATED.wav`
     looks like a stereo vocal and is a MONO one in a stereo container: side
     peak 0.0000305, exactly one 16-bit LSB, with 55.5 % of samples identical.
     ASYMMETRY is a shear -- `mid += a * side` -- so with no side content it
@@ -55,7 +55,7 @@
     For bounces that came out of a DAW. `r = (M^2 - S^2) / (M^2 + S^2)`, per
     window, reported as min/median/mean/max plus the share below zero.
 
-    **Gate on level or the number is meaningless.** Ungated, the dry mono Fuji
+    **Gate on level or the number is meaningless.** Ungated, the dry mono Song B
     file read min r = -0.2583, which looked like real side content and was the
     LSB noise in the gaps between phrases. Gated at -80 dBFS it reads 0.9999
     with a swing of 0.0017, which is the truth.
@@ -63,16 +63,16 @@
     ------------------------------------------------------------------------
     `comb` -- per-frame band deviation, which is how you find a MOVING comb
 
-    The one that earned its keep. Section 05 predicts Chorus-Ensemble will
+    The one that earned its keep. Section 05 predicts Host stock chorus A will
     comb in mono and Dimension will not, and a time-averaged spectrum of the
     two mono sums showed **no notches at all** -- which the meter pass says
     would invalidate the whole comparison.
 
     Wrong instrument, not a wrong premise. A modulated chorus sweeps its
     notches, so they average away to nothing over 20 seconds. Measured per
-    85 ms frame instead, Chorus-Ensemble's mono sum wanders with a standard
+    85 ms frame instead, Host stock chorus A's mono sum wanders with a standard
     deviation of 2.53 dB and individual frames 19.78 dB down, against 0.78 dB
-    and -4.16 dB for CLA Vocals and exactly zero for Dimension.
+    and -4.16 dB for Vocal doubler A and exactly zero for Dimension.
 
     **A long-term average will not find a moving comb. Measure per frame.**
 */

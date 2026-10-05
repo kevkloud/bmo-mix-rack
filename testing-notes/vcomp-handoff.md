@@ -17,8 +17,8 @@ no errors. The Vcomp DSP suite is 55 checks.
 ## What it is
 
 A modern feedforward vocal compressor, alongside BMO Opto rather than instead
-of it. Frosty's brief: the sound of Waves RVox and RComp, the simplicity of
-RVox and Klanghelm DC1A.
+of it. Frosty's brief: the sound of Vocal comp A and Comp A, the simplicity of
+Vocal comp A and Comp B.
 
     in -> gate -> [band split] -> compressor on the mid band
        -> + the thru bands -> auto makeup -> OUTPUT -> limiter
@@ -40,7 +40,7 @@ a second listen. All five are in `77e5f57` and `d72075c`.
 | "Not sure what ARC is doing" | Slow branch 5x -> 10x RELEASE, charge 2x -> 1.2x | ARC on vs off at the default: **-26.4 dB -> -16.7 dB** (AMOUNT 40), **-20.2 -> -11.9** (AMOUNT 70) |
 | Gate needs to expand deeper | 3:1/50 dB -> **6:1/60 dB** | shut depth at GATE -40: **-16.4 dB -> -40.6 dB** |
 | Gate pops on the way in | Open 0.5 ms -> **3 ms** | slew **113.3 -> 19.2 dB/ms**; onset cost 0.00 dB at every usable threshold |
-| Limiter missing (RVox's third stage) | Instantaneous, zero latency, last in chain | ceiling holds exactly at -0.10 dBFS at every AMOUNT/OUTPUT combination |
+| Limiter missing (Vocal comp A's third stage) | Instantaneous, zero latency, last in chain | ceiling holds exactly at -0.10 dBFS at every AMOUNT/OUTPUT combination |
 
 ---
 

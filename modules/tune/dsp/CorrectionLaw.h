@@ -28,7 +28,7 @@ struct CorrectionSettings
         noteClearCents closer than the held one (the pitch 30 cents across the
         midpoint: a real step arrives 100-200 cents closer, at once), or to
         stay closer, past the hysteresis, for noteDwellMs. 30 was tried first
-        and was too little: on Failure the singer sits on D#, midway between
+        and was too little: on Song A the singer sits on D#, midway between
         D and E, and a +/-15 cent wobble there still flipped every time. */
     double noteClearCents = 60.0;
     double noteDwellMs = 40.0;
@@ -37,7 +37,7 @@ struct CorrectionSettings
         pull it carries for free.
 
         Round three (2026-09-11) heard the flat dwell as pops at retune 20 ms,
-        and on Failure every splice it added fell while it held the target off
+        and on Song A every splice it added fell while it held the target off
         the note the singer had reached, pulling about 91 cents. A held note is
         shifted by that pull for as long as it is held, and the engine's read
         drifts at the same rate; far enough, and it splices a whole period
@@ -84,16 +84,16 @@ struct CorrectionSettings
             1 ms   0.982 ms   1.248 c        5 ms   1.148 ms   1.469 c
             2 ms   1.013 ms   1.289 c
 
-        Monotonic, and by 3 ms it is already past Antares' 1.30 c. On the
-        Failure take it buys nothing either: 42 splices against 44 at 2 ms,
+        Monotonic, and by 3 ms it is already past Tuner A's 1.30 c. On the
+        Song A take it buys nothing either: 42 splices against 44 at 2 ms,
         flips and dropouts identical. The median is doing the denoising and
         this was adding lag on top of it. Kept as a knob in case some material
         ever needs it, with the numbers here so nobody turns it up blind. */
     /** How long the target takes to reach a new note, as a one-pole time
         constant. 0 -- the default, and what CLASSIC has always done -- steps
-        straight there. Waves has this as a knob of its own, separate from
+        straight there. Tuner B has this as a knob of its own, separate from
         Speed, and its minimum is 0.1 ms: it will not do an instantaneous note
-        transition at all. BMO does, 341 times in 19 seconds on Failure, each
+        transition at all. BMO does, 341 times in 19 seconds on Song A, each
         one an instant step in the resampling ratio and so an instant step in
         the formants, which is a candidate for the "audible formant shift" and
         the "transition steps on faster words" Frosty has reported.

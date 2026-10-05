@@ -6,7 +6,7 @@ here. 15 of 15 DSP suites green.
 
 ## What started it
 
-After round nine, Frosty noticed the pop on "by" is in the **dry** Failure
+After round nine, Frosty noticed the pop on "by" is in the **dry** Song A
 take, and asked whether the scoring had been counting the take's own events as
 the engine's. The first answer given was too broad and was wrong: the tool
 already gates landing error on whether the ruler calls the dry **periodic**
@@ -25,7 +25,7 @@ this jump land in phase" and says nothing at all about whether that waveform is
 loud enough to hear.
 
 So a splice in a phrase gap, where the take is 30 dB under the voice, can land
-at 1.26 — and 1.26 was **the worst landing on the whole of the Failure take**.
+at 1.26 — and 1.26 was **the worst landing on the whole of the Song A take**.
 
     11.742 s   landing 1.26   -54.2 dB   on pitch
 
@@ -48,7 +48,7 @@ now share one `levelAt` lambda, so they cannot disagree about how loud a moment
 was.
 
 `kQuietBelowVoiceDb` is 25 dB and is not a knife edge on this material: the
-Failure take's splices run -14.4 to -27.9 dB and then one at -54.2, so the
+Song A take's splices run -14.4 to -27.9 dB and then one at -54.2, so the
 threshold at -48.5 sits in a 26 dB gap with nothing near it.
 
 ## What it changes, which is more than a tidy-up
@@ -57,19 +57,19 @@ Shipped guard 6, the 0.2.4 build, on the round-nine dry files:
 
 | take | before | after |
 |---|---|---|
-| Failure | ON PITCH worst **1.26**, over 0.5: **1 of 19** | ON PITCH worst **0.49**, over 0.5: **0 of 18** (+ one in a gap) |
-| Fuji | — | ON PITCH worst **1.52**, over 0.5: **5 of 11**, none in a gap |
+| Song A | ON PITCH worst **1.26**, over 0.5: **1 of 19** | ON PITCH worst **0.49**, over 0.5: **0 of 18** (+ one in a gap) |
+| Song B | — | ON PITCH worst **1.52**, over 0.5: **5 of 11**, none in a gap |
 
-**Failure has no audible bad landing at all**, and Fuji has five. The two takes
+**Song A has no audible bad landing at all**, and Song B has five. The two takes
 had looked comparable; they are not, and the difference was hidden by one
-inaudible splice sitting at the top of Failure's column.
+inaudible splice sitting at the top of Song A's column.
 
 That is worth sitting with. Rounds three through nine were largely spent
-driving down a Failure figure that was mostly this one splice, on the take that
-turns out to be the *healthy* one — while Fuji, with five genuinely loud bad
+driving down a Song A figure that was mostly this one splice, on the take that
+turns out to be the *healthy* one — while Song B, with five genuinely loud bad
 landings, was the take the ear kept complaining about. Round nine's own verdict
-fits: the candidate improved Failure and was ranked **last on both Fuji
-groups**, and Frosty's words for Fuji were "missing notes" and "worst, bad".
+fits: the candidate improved Song A and was ranked **last on both Song B
+groups**, and Frosty's words for Song B were "missing notes" and "worst, bad".
 
 ## What this does not do
 
@@ -80,4 +80,4 @@ groups**, and Frosty's words for Fuji were "missing notes" and "worst, bad".
   `bmo-tune-score` are untouched and may have their own version of this
   problem; worth a look before the next round.
 - **It does not choose a next candidate.** But it does say where to point one:
-  Fuji, and the five splices over 0.5 that are on pitch and in the voice.
+  Song B, and the five splices over 0.5 that are on pitch and in the voice.

@@ -1,6 +1,6 @@
 # scripts/build.sh never compiled anything on macOS
 
-**2026-09-21, on the MacBook Pro** — `Kevin's MacBook Pro (2)`, macOS 26.6.2,
+**2026-09-21, on Device A** — Kevin's Mac laptop, macOS 26.6.2,
 arm64. Branch `frosty-buildsh-mac-empty-args`, off `origin/main` at `5bc8e21`.
 
 > **This machine has no name in the convention.** Root `AGENTS.md`, "Which

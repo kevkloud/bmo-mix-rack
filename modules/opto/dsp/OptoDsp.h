@@ -25,7 +25,7 @@ public:
         DspCore::Params p;
         p.crushPercent = v[crush];
         p.levelDb      = v[level];
-        p.mode         = v[mode] > 0.5f ? Mode::Distressor : Mode::La2a;
+        p.mode         = v[mode] > 0.5f ? Mode::CompUnitB : Mode::OptoUnitA;
         p.link         = v[link]  > 0.5f;
         p.color        = v[color] > 0.5f;
 

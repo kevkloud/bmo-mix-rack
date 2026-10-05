@@ -13,8 +13,8 @@
 
       2. Comparison-ready rendering: arbitrary WAV in, BMO's processed WAV
          out, with Mode/Crush/Level/Link/Color as flags -- so the result can
-         sit next to a hand-bounced competitor pass (UA/Slate LA-2A for Tele,
-         UA Distressor/Slate FG-Stress for Stressed) at a matched input.
+         sit next to a hand-bounced competitor pass (Opto plug A or B for Tele,
+         Comp plug C or D for Stressed) at a matched input.
          `gen` exports the harness's own built-in test signals as WAV, so the
          *same* file can be fed through a competitor plugin for that
          comparison rather than something only approximately alike.
@@ -23,7 +23,7 @@
         measure gen <short|long|light|ceiling|sine> --out file.wav
                      [--freq hz] [--seconds s] [--amp a]
         measure render [--in in.wav] --out out.wav
-                     [--mode la2a|distressor] [--crush pct] [--level db]
+                     [--mode tele|stressed] [--crush pct] [--level db]
                      [--link 0|1] [--color 0|1]
 
     With no --in, render uses a short/long/light composite so a one-shot
@@ -89,7 +89,7 @@ std::vector<float> longHit()   { return sine (200.0, 2.5, 0.9); }
     quieter and less aggressively set, not just quieter. */
 std::vector<float> lightHit()  { return sine (200.0, 1.0, 0.3); }
 
-/** The long, heavy hit testDistressorReleaseCeilingExceedsLa2a() uses to
+/** The long, heavy hit testCompUnitBReleaseCeilingExceedsOptoUnitA() uses to
     show Stressed's ~20 s ceiling reaching further than Tele's ~15 s one. */
 std::vector<float> ceilingHit() { return sine (200.0, 8.0, 0.9); }
 
@@ -320,18 +320,18 @@ double peak (const std::vector<float>& x)
 
 double dbfs (double linear) { return 20.0 * std::log10 (std::max (linear, 1.0e-9)); }
 
-const char* modeName (Mode m) { return m == Mode::La2a ? "La2a" : "Distressor"; }
+const char* modeName (Mode m) { return m == Mode::OptoUnitA ? "Tele" : "Stressed"; }
 
 bool parseMode (const std::string& s, Mode& mode)
 {
-    if (s == "la2a" || s == "tele")           { mode = Mode::La2a;       return true; }
-    if (s == "distressor" || s == "stressed") { mode = Mode::Distressor; return true; }
+    if (s == "tele")     { mode = Mode::OptoUnitA; return true; }
+    if (s == "stressed") { mode = Mode::CompUnitB; return true; }
     return false;
 }
 
 //==============================================================================
 /** The checkpoint table testReleaseIsProgramDependent(),
-    testDistressorReleaseCeilingExceedsLa2a() and testQuietSignalIsLeftAlone()
+    testCompUnitBReleaseCeilingExceedsOptoUnitA() and testQuietSignalIsLeftAlone()
     assert against, printed as numbers rather than pass/fail -- so a change
     that moves these shows up here before it shows up as a broken test. Also
     writes each case's dry/wet pair to `outdir` for a listen. */
@@ -353,7 +353,7 @@ void printReleaseReport (const std::string& outdir)
         { "ceiling", ceilingHit, 90.0f, 10.0 },
     };
 
-    for (auto mode : { Mode::La2a, Mode::Distressor })
+    for (auto mode : { Mode::OptoUnitA, Mode::CompUnitB })
     {
         for (const auto& c : cases)
         {
@@ -379,17 +379,17 @@ void printReleaseReport (const std::string& outdir)
     }
 
     std::printf ("\n\"ceiling\" is read as retained %% (checkpoint / end), not raw dB, because\n"
-                 "Distressor's fixed 10:1 ratio starts from a deeper reduction than La2a's\n"
+                 "Stressed's fixed 10:1 ratio starts from a deeper reduction than Tele's\n"
                  "fixed 3:1 at the same crush -- comparing raw dB left over would mostly\n"
                  "re-measure that ratio gap rather than the release timing this is about.\n"
-                 "Distressor's retained %% should still come out higher: its ~20 s release\n"
-                 "ceiling reaches further than La2a's ~15 s one for the same long, heavy hit.\n");
+                 "Stressed's retained %% should still come out higher: its ~20 s release\n"
+                 "ceiling reaches further than Tele's ~15 s one for the same long, heavy hit.\n");
 
     // testQuietSignalIsLeftAlone(): well under Crush 0's threshold, a quiet
     // tone should survive essentially untouched.
     std::printf ("\nquiet signal, Crush 0 (should pass through essentially unchanged):\n");
 
-    for (auto mode : { Mode::La2a, Mode::Distressor })
+    for (auto mode : { Mode::OptoUnitA, Mode::CompUnitB })
     {
         DspCore::Params p; p.crushPercent = 0.0f; p.mode = mode;
         const auto dry = sine (1000.0, 1.0, 0.05);
@@ -412,7 +412,7 @@ void printReleaseReport (const std::string& outdir)
     std::vector<float> r (l.size());
     for (size_t i = 0; i < l.size(); ++i) r[i] = l[i] * 0.25f;
 
-    for (auto mode : { Mode::La2a, Mode::Distressor })
+    for (auto mode : { Mode::OptoUnitA, Mode::CompUnitB })
     {
         for (bool link : { false, true })
         {
@@ -589,7 +589,7 @@ int main (int argc, char** argv)
 
         if (outPath.empty())
         {
-            std::printf ("usage: measure render [--in in.wav] --out out.wav [--mode la2a|distressor]\n"
+            std::printf ("usage: measure render [--in in.wav] --out out.wav [--mode tele|stressed]\n"
                          "                       [--crush pct] [--level db] [--link 0|1] [--color 0|1]\n");
             return 1;
         }
@@ -599,7 +599,7 @@ int main (int argc, char** argv)
 
     std::printf ("usage: measure [release [--outdir dir]\n"
                  "               | gen <short|long|light|ceiling|sine> --out file.wav [--freq hz] [--seconds s] [--amp a]\n"
-                 "               | render [--in in.wav] --out out.wav [--mode la2a|distressor]\n"
+                 "               | render [--in in.wav] --out out.wav [--mode tele|stressed]\n"
                  "                        [--crush pct] [--level db] [--link 0|1] [--color 0|1]]\n");
     return 1;
 }

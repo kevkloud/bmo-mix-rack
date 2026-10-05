@@ -4,7 +4,7 @@
 Explorer). `KEY.txt` sits beside it; don't open it until this is filled in.
 
 Three letters, four groups. Built on **AURORA**, 2026-09-14. One of the three
-is Antares, as an anchor; the other two are BMO, and they differ by one thing.
+is Tuner A, as an anchor; the other two are BMO, and they differ by one thing.
 
 ## What changed, and why this is the question
 
@@ -14,7 +14,7 @@ the six pops you timestamped fire at the **same millisecond at every rest**,
 and in the 40 ms before each one the detector's own f0 spans a ratio of 1.76
 to 3.94, against 1.00 to 1.02 before the quiet ones.
 
-Instrumenting the coarse search on Failure at **17.409 s** found the line. The
+Instrumenting the coarse search on Song A at **17.409 s** found the line. The
 scan breaks out as soon as any lobe's raw correlation clears 0.95 -- before the
 continuity weighting, before McLeod's peak-fraction rule, before every octave
 guard. The coarse window *is* the lag, so at a short lag it is about 1.3 ms,
@@ -39,10 +39,10 @@ the same at every sample rate.
 
 | | BMO now | BMO guard 6 |
 |---|---:|---:|
-| Failure -- splices taken while the detector had lost the period | 12 of 37 | **2 of 27** |
-| Failure -- on the note | 90.2 % | 92.8 % |
-| Failure -- detector jump flips | 65 | 7 |
-| Fuji -- splices taken while the detector had lost the period | 4 of 16 | **2 of 15** |
+| Song A -- splices taken while the detector had lost the period | 12 of 37 | **2 of 27** |
+| Song A -- on the note | 90.2 % | 92.8 % |
+| Song A -- detector jump flips | 65 | 7 |
+| Song B -- splices taken while the detector had lost the period | 4 of 16 | **2 of 15** |
 | corpus mean gross error | 1.9344 % | 1.9344 %, no item worse |
 
 Of the six splices you timestamped, **2.893, 14.455, the 16.1-16.8 cluster and
@@ -54,11 +54,11 @@ not this one.
 **But measurement has now been wrong three times about what you would hear** --
 splice count, splice landing error, and the rest. So the numbers pick the
 candidates and you pick the winner. Two of the three files are BMO; one is
-Antares. Nothing tells you which.
+Tuner A. Nothing tells you which.
 
 ## What to listen for
 
-**Pops on Failure.** Your words, and the worst thing left. If guard 6 is real
+**Pops on Song A.** Your words, and the worst thing left. If guard 6 is real
 you should hear materially fewer of them, at both speeds, and the ones that
 remain should be in different places.
 
@@ -72,7 +72,7 @@ latency cost of this change is nil; the measured cost is 0.05 ms of correction
 lag and 0.02 cents of vibrato residue at A2, and that is a separate question
 waiting on this answer.
 
-## Failure 0 ms
+## Song A 0 ms
 
 Ranking (best to worst): **C > A > B**
 
@@ -80,7 +80,7 @@ Ranking (best to worst): **C > A > B**
 - B: worst, old pops
 - C: best, new pops, less and fewer than A and B
 
-## Failure 20 ms
+## Song A 20 ms
 
 Ranking (best to worst): **C > A > B**
 
@@ -88,7 +88,7 @@ Ranking (best to worst): **C > A > B**
 - B: worst, old pops, loud pops
 - C: best, new pops, significantly softer
 
-## Fuji 0 ms
+## Song B 0 ms
 
 Ranking (best to worst): **C > B > A**
 
@@ -96,7 +96,7 @@ Ranking (best to worst): **C > B > A**
 - B: second, pop on the word spills
 - C: best
 
-## Fuji 20 ms
+## Song B 20 ms
 
 Ranking (best to worst): **C > (A = B, both worst)**
 
@@ -124,17 +124,17 @@ Frosty, blind, before the key was opened. Rankings above; the letters decode:
 
 | group | A | B | C | result |
 |---|---|---|---|---|
-| Failure 0 ms | Antares | BMO now | **guard 6** | **guard 6 > Antares > BMO now** |
-| Failure 20 ms | guard 6 | BMO now | Antares | Antares > **guard 6** > BMO now |
-| Fuji 0 ms | Antares | BMO now | **guard 6** | **guard 6 > BMO now > Antares** |
-| Fuji 20 ms | BMO now | Antares | **guard 6** | **guard 6 > (BMO now = Antares)** |
+| Song A 0 ms | Tuner A | BMO now | **guard 6** | **guard 6 > Tuner A > BMO now** |
+| Song A 20 ms | guard 6 | BMO now | Tuner A | Tuner A > **guard 6** > BMO now |
+| Song B 0 ms | Tuner A | BMO now | **guard 6** | **guard 6 > BMO now > Tuner A** |
+| Song B 20 ms | BMO now | Tuner A | **guard 6** | **guard 6 > (BMO now = Tuner A)** |
 
 **Guard 6 beats the standing build 4-0.** Nothing had beaten round four since
 round four; three arms had been tried and lost. This is the first.
 
-**Guard 6 beats Antares 3-1**, and one of those three is **Failure 0 ms** --
-Antares had won Failure at both speeds in every round it has been in. Its one
-loss is Failure 20 ms, which is now guard 6's weakest group.
+**Guard 6 beats Tuner A 3-1**, and one of those three is **Song A 0 ms** --
+Tuner A had won Song A at both speeds in every round it has been in. Its one
+loss is Song A 20 ms, which is now guard 6's weakest group.
 
 **BMO now is last in three groups and tied last in the fourth.**
 
@@ -142,14 +142,14 @@ loss is Failure 20 ms, which is now guard 6's weakest group.
 
 He separates **"old pops"** from **"new pops"** without being prompted, and the
 split is clean: every arm he calls "old pops" is BMO now. Both the arms he
-calls "new pops" are guard 6 *and Antares*. So the class of pop that has been
-the complaint all week is gone, and what is left is a class Antares has too.
+calls "new pops" are guard 6 *and Tuner A*. So the class of pop that has been
+the complaint all week is gone, and what is left is a class Tuner A has too.
 
-And on Fuji he names a place: **a pop "at the word spills"**, on Antares and on
+And on Song B he names a place: **a pop "at the word spills"**, on Tuner A and on
 BMO now, absent on guard 6 -- *"C: best, slightly more apparent tuning, but no
 pop"*.
 
-That lands on a splice `bmo-tune-field` had been discounting. Fuji at 20 ms,
+That lands on a splice `bmo-tune-field` had been discounting. Song B at 20 ms,
 BMO now, carries two splices the ruler calls **ON NOISE** with landing errors
 of 1.63 and 1.60, at **15.950 s** and **19.457 s**. Guard 6 removes both. The
 tool's own comment says an ON NOISE splice "is not a pop: two unrelated noisy
@@ -163,10 +163,10 @@ the two it discounted here are the two that went.
 
 ### What is still true
 
-- *"still not shippable"* -- and he wrote that about **Antares**, at Failure
+- *"still not shippable"* -- and he wrote that about **Tuner A**, at Song A
   0 ms, not about BMO.
-- *"still clearly audible"* -- guard 6 at Failure 20 ms. Better is not done.
-- Failure 20 ms is where the work goes next. It is the one group Antares still
+- *"still clearly audible"* -- guard 6 at Song A 20 ms. Better is not done.
+- Song A 20 ms is where the work goes next. It is the one group Tuner A still
   wins and the one where guard 6's remaining pops are loudest.
 
 ---
@@ -186,8 +186,8 @@ small:
 | | baseline | guard 6 | change | for scale |
 |---|---:|---:|---:|---|
 | correction lag, mean | 0.70613 ms | 0.75893 ms | +0.053 ms | about 2 samples at 44.1 kHz |
-| vibrato residue, RMS | 1.236 c | 1.2604 c | +0.024 c | a listener notices 5-10 c on a held note; Antares is 1.30 c, so BMO is still ahead of it |
-| true latency | 10.262 ms | 10.427 ms | +0.165 ms | headroom under the Waves ceiling goes 8.9476 -> 8.7828 ms |
+| vibrato residue, RMS | 1.236 c | 1.2604 c | +0.024 c | a listener notices 5-10 c on a held note; Tuner A is 1.30 c, so BMO is still ahead of it |
+| true latency | 10.262 ms | 10.427 ms | +0.165 ms | headroom under the Tuner B ceiling goes 8.9476 -> 8.7828 ms |
 
 **Correction to the record:** commit `c130422`'s message says true latency
 *improves* to 10.427 ms. It does not -- 10.427 is 0.165 ms LATER than 10.262,

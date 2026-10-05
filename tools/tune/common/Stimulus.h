@@ -2,7 +2,7 @@
 
 /*
     The reference stimulus: one synthetic file that every tuner is put through
-    -- BMO Tune RT by its core, Antares and Waves in a host -- and the two
+    -- BMO Tune RT by its core, Tuner A and Tuner B in a host -- and the two
     things measured on what comes back, by the same code for all of them.
     Measured with Analysis.h's ruler, never with any tuner's own detector.
 
@@ -11,7 +11,7 @@
                        and chromatic: a correction L late leaves
                        out - target = L x slope, so the least-squares L over
                        the segment is the lag, in ms. The 2026-09-11
-                       shoot-out found this is where BMO trails Antares on
+                       shoot-out found this is where BMO trails Tuner A on
                        real vocals (testing-notes/shootout-2026-09-11.md).
 
       true latency     how far behind its input the output is, in time --
@@ -23,7 +23,7 @@
                        shift does not hide -- the delay while correcting.
 
     Every segment is a note a low male voice sings (the shoot-out's material
-    and Auto-Tune's "Low Male" input type), in tune at A = 440 or exactly off
+    and Tuner A's setting for the low male voice range), in tune at A = 440 or exactly off
     it by a stated amount, so chromatic hard tuning has one target per
     segment and it is known. Layout: 0.5 s of silence, then each segment
     followed by 0.4 s of silence, so every tuner unlocks between them.
@@ -81,7 +81,7 @@ inline std::vector<Segment> layout()
         // Until this, the stimulus held a correction only on A3 and D3, so
         // the whole-plugin latency gate saw a 2.3-octave range through a
         // 5-semitone window and read 6.53 ms where the engine reaches 15.33
-        // at the bottom and is later than Waves at the top. A2 is the lowest
+        // at the bottom and is later than Tuner B at the top. A2 is the lowest
         // note the rest of the stimulus already holds, so it adds the
         // coverage without widening the range the ruler and the references
         // were measured over.
@@ -89,13 +89,13 @@ inline std::vector<Segment> layout()
         { Kind::marked,  "held +30c A2",      A2,  30.0,  0.0, 0.0, 1.5 },
 
         // And the rest of the range, for the same reason. The latency rule
-        // compares BMO with Waves, but what it compares is pitch-dependent
-        // for both -- Waves' delay tracks the period, BMO's rest does not --
+        // compares BMO with Tuner B, but what it compares is pitch-dependent
+        // for both -- Tuner B's delay tracks the period, BMO's rest does not --
         // so a ceiling taken at one note says nothing about any other. These
         // four give each tuner's delay a curve to be read off instead of a
         // scalar: E2 is the bottom of the Auto range, A4 and A5 the octaves
         // where BMO's flat rest is the larger term and where it turns out to
-        // be later than Waves.
+        // be later than Tuner B.
         //
         // These are also what forced the ruler's envelope wider: a marked A2
         // under the old 10 ms envelope read an ideal corrector 0.31 ms out

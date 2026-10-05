@@ -23,7 +23,7 @@ carrying the measured numbers:
 
     (the link is in Frosty's claude.ai workspace, not recorded here)
 
-`~/Downloads/dimtestingchecklist.md` is **byte-identical** to
+A loose downloaded copy of the checklist is **byte-identical** to
 `testing-notes/dim-testing-checklist.md`, so there is no second version to
 reconcile — but prefer the repo path, since the loose copy will not follow the
 branch.
@@ -41,7 +41,7 @@ handoffs naming ICE QUEEN's user folder are stale. **On this machine that is
 backwards.** This is ICE QUEEN, and its toolchain is current and working:
 
     git 2.55.0.windows.5, cmake 4.4.3, gh 2.100.0, Ableton Live 12 Suite
-    -- BMO fonts: %USERPROFILE%/Documents/FONTS (.bmo-fontdir)
+    -- BMO fonts: <the owner's font folder> (.bmo-fontdir)
 
     cmake -S . -B build      # configures clean
     bash scripts/build.sh    # 12/12 ctest at c957ebf
@@ -54,27 +54,30 @@ not here — §2 below is this machine's inventory.
 
 | needed by | plugin | state |
 |---|---|---|
-| meter pass §01/§03 | SSL Meter Pro | **installed** — the goniometer stand-in |
-| meter pass §05 | Ableton Chorus-Ensemble | **installed** (stock Live 12 Suite) |
-| checklist §1, meter pass §06 | CLA Vocals | **installed** — Waves Plug-Ins V13 |
-| checklist §1 | Eventide MicroPitch | **not installed** |
+| meter pass §01/§03 | Meter plug A | **installed** — the goniometer stand-in |
+| meter pass §05 | Host stock chorus A | **installed** (stock Live 12 Suite) |
+| checklist §1, meter pass §06 | Vocal doubler A | **installed** — Suite B v13 |
+| checklist §1 | Pitch widener A | **not installed** |
 
-MicroPitch's absence does not block anything: checklist §1 says "MicroPitch
-**or** CLA Vocals", and meter pass §05 is explicit that Chorus-Ensemble is not
-a MicroPitch stand-in but its counterexample.
+Pitch widener A's absence does not block anything: checklist §1 says "Pitch widener A
+**or** Vocal doubler A", and meter pass §05 is explicit that Host stock chorus A is not
+a Pitch widener A stand-in but its counterexample.
 
-### The Fuji reference — found, and it will not meet §01's level target
+### The Song B reference — found, and it will not meet §01's level target
 
-    D:\VISUAL\PLUGINS\MIX RACK\SATURATOR\fuji NOT SATURATED.wav
+    <reference folder>\SATURATOR\songb NOT SATURATED.wav
+
+The file name is written by code; the file keeps its own name on disk, and
+the key outside the repository maps the two.
 
 The same source Opto and Saturator were tested with, so continuity of source
 holds. 44.1 kHz, 16-bit stereo, 20.20 s.
 
-Do **not** search for it by the name "Fuji": the two folders that match on
-this machine — `%USERPROFILE%\Documents\FUJI` and `D:\VISUAL\FUJI` — are
-Fujifilm camera directories of JPG/RAF. The audio lives under
-`D:\VISUAL\PLUGINS\MIX RACK\`, which is also where every other module's test
-material and the D: handoffs sit.
+Do **not** search for it by the song's name: the two folders that match on
+this machine are camera directories of photos. The audio lives in the
+owner's reference folder, outside the repository (`<reference folder>` here),
+which is also where every other module's test material and the owner's own
+handoffs sit.
 
 Measured, so the level question is settled before the bench is built:
 
@@ -101,19 +104,19 @@ integrated LUFS on a loop. Pick one and write it down:
 Either way, note that Dimension has no output trim and up to +15.5 dB is
 reachable, so leave real headroom downstream.
 
-## 3. Where the D: handoff is, and why it differs from the repo one
+## 3. Where the owner's handoff is, and why it differs from the repo one
 
-    D:\VISUAL\PLUGINS\MIX RACK\DIMENSION\.md\HANDOFF 9.8.26.md
+    <reference folder>\DIMENSION\.md\HANDOFF 9.8.26.md
 
 The containing folder is literally named `.md`, so it is hidden from a plain
 `ls` and from most globbing — which is why a search for `*DIMENSION*` at the
-top of `D:` finds nothing. The filename is dated and is renamed on each edit,
+top of the drive finds nothing. The filename is dated and is renamed on each edit,
 so the date will move; look for whatever single file is in that folder.
 
 `testing-notes/dim-1.0-handoff.md` in the repo is **an adaptation of it, not a
 copy**, matching what `opto-0.2.1-handoff.md` and `docs/ui-workflow-brief.md`
 already do: the repo version is written for someone reading the diff cold,
-with D: paths, artifact URLs and session scaffolding stripped.
+with local paths, artifact URLs and session scaffolding stripped.
 
 So the two are *supposed* to diverge. Do not "sync" them, and do not treat
 content missing from the repo copy as an omission — check whether it is
@@ -254,7 +257,7 @@ method agrees everywhere else; likely a window-length difference against a
 
 ### The source cannot serve section 2
 
-`fuji NOT SATURATED.wav` is **mono in a stereo container** — side peak
+`songb NOT SATURATED.wav` is **mono in a stereo container** — side peak
 0.0000305, exactly one 16-bit LSB, and 55.5 % of samples are bit-identical
 L == R. That makes it ideal for §1's throb test, which asks for a mono vocal,
 and **useless for §2 and for 02 n3's ASYM leg**: the shear is `mid += 0.25·side`
@@ -289,11 +292,11 @@ re-export was in progress when this was written.
 | **DIMENSION** bounce | 0.264 | −0.970 | 0.997 | **16.1 %** |
 | offline prediction, W130 | 0.30 | −0.89 | — | 18.4 % |
 | ENSEMBLE bounce | 0.785 | −0.084 | 1.000 | **0.6 %** |
-| CLA bounce | 0.516 | −0.416 | 0.997 | **2.8 %** |
+| Vocal doubler A bounce | 0.516 | −0.416 | 0.997 | **2.8 %** |
 
 The offline model is validated against the real host. And the comparison the
 checklist wanted is now numeric: **Dimension spends roughly 27× more time
-anti-phase than Chorus-Ensemble, and 6× more than CLA Vocals.**
+anti-phase than Host stock chorus A, and 6× more than Vocal doubler A.**
 
 ### The comb is real, and it moves — a correction
 
@@ -306,12 +309,12 @@ mono sum as the reference:
 | mono sum | mean dev | std dev | 5th pct | worst frame |
 |---|---|---|---|---|
 | ENSEMBLE | +0.77 dB | **2.53 dB** | −3.42 dB | **−19.78 dB** |
-| CLA | −0.03 dB | 0.78 dB | −1.20 dB | −4.16 dB |
+| Vocal doubler A | −0.03 dB | 0.78 dB | −1.20 dB | −4.16 dB |
 
-Chorus-Ensemble's mono sum wanders ±2.5 dB band-to-band with individual frames
+Host stock chorus A's mono sum wanders ±2.5 dB band-to-band with individual frames
 **20 dB down**. Dimension's does not move at all, ever, by construction.
 **That is the trade the module exists to make, and it is now demonstrated
-rather than argued.** CLA's Pitch send is far gentler than Ensemble here.
+rather than argued.** Vocal doubler A's Pitch send is far gentler than Ensemble here.
 
 **Use a long-term average to look for a moving comb and you will find nothing.
 Measure per frame.**
@@ -331,13 +334,13 @@ signal and was wrong about what it would cost. Worth remembering the next time
 a correlation figure is treated as a verdict rather than as a description.
 
 **"No high end added, no shimmer" is the second half of the pass, not a
-caveat.** Width without shimmer is the intended result. MicroPitch was a
+caveat.** Width without shimmer is the intended result. Pitch widener A was a
 research reference — how the problem has been solved elsewhere — and was never
 the target; the shimmer is the part of it this module deliberately does not
 want. Getting width without it is the design working.
 
 Note that the test documents get this backwards. `dim-testing-checklist.md` §1
-asks "does it read as MicroPitch-style shimmer, or as an audible
+asks "does it read as Pitch widener A-style shimmer, or as an audible
 tremolo/flutter", and `dim-meter-pass.md` §06 repeats it — both phrase shimmer
 as the good outcome and leave no way to record "widened, no shimmer, correct".
 Corrected in both. **A checklist that names a reference product in the question
@@ -351,7 +354,7 @@ left, the opposite of a pan knob. Matches the code exactly — `+30°` on a cent
 source gave L = 1.366, R = 0.366.
 
 **Fixed** by negating the angle in `setParams` and `snap`
-(`modules/dim/dsp/DspCore.h`). The S1 manual fixes the rotation law but says
+(`modules/dim/dsp/DspCore.h`). Imager A's manual fixes the rotation law but says
 nothing about the knob's direction, so the sign was always a free choice. No
 test asserted it — the DSP tests only check that rotation *changes* the mono
 sum, which is sign-agnostic — so nothing needed updating.
@@ -359,7 +362,7 @@ sum, which is sign-agnostic — so nothing needed updating.
 ### ASYMMETRY, finally testable
 
 On a proper stereo source, with DETUNE out, **ASYM and ROTATE both function as
-expected.** That closes §2, which the mono Fuji file could not exercise at all.
+expected.** That closes §2, which the mono Song B file could not exercise at all.
 
 ### New finding: RATE and DEPTH do not earn their panel space
 
@@ -447,4 +450,4 @@ Everything the checklist calls "what only ears can answer":
 - **§5 presets** — whether the three DETUNE presets separate.
 - **meter pass §02** the polarity-null bench in the real host, and §04–06 the
   A/B comparisons. §6 above settles the DSP half of §02 offline; what it cannot
-  settle is the host at your buffer size, and the Chorus-Ensemble leg.
+  settle is the host at your buffer size, and the Host stock chorus A leg.

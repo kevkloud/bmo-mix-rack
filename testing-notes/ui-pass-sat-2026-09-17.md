@@ -153,10 +153,10 @@ by reading the constants:
 
 - **BMO DEQ: none, in any mode.** No oversampling parameter at all, and
   `DspCore::latencySamples()` is a constexpr 0. `Design.h` names oversampling as
-  what costs TDR Nova its latency, so this is the design working.
+  what costs EQ plug B its latency, so this is the design working.
 - **BMO EQ / CEQ: 40 samples at its default**, because it defaults to 2x rather
   than Off -- `modules/eq/params.h:86` calls it the one module in the suite whose
-  default is not zero-latency, for the 1073 model's 16 kHz shelf. Whether that
+  default is not zero-latency, for the Console EQ unit A model's 16 kHz shelf. Whether that
   default is still right is module 8's question, and a product one.
 - **The Saturator still defaults to Off.** What changed today is that the panel
   can now reach the other three, where only a host could before.

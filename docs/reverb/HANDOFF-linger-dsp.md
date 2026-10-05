@@ -90,7 +90,7 @@ and the mono sums at VARIATION 0 and 6. Write the set up in
 has listened, not before.
 
 ~~**Blend is heard at this checkpoint too.**~~ **Heard and cut, 2026-09-26.**
-Frosty listened to the M2 set on ICE QUEEN (HEDD Type 20 MK2). Blend sounded
+Frosty listened to the M2 set on ICE QUEEN (Monitors A). Blend sounded
 like "a slightly worse" Taps, so ER MODE is Taps / Energy, and VARIATION
 defaults to 4 ("2 isnt enough to feel"). Verdicts on every item are in
 `testing-notes/linger-listening-set-2026-09-24.md`. **Ambience** failed the first

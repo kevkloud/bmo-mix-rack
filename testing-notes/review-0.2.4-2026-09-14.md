@@ -71,7 +71,7 @@ attack the way a photocell has. Nothing changes until he has heard them.
   clarity drops below `clarityLo` the detector stops updating `heldPeriod`
   and re-presents the same period every evaluation; `confirmPitch` cannot
   tell that echo from a fresh estimate, so a jump is "confirmed" by the
-  value that proposed it. On Failure at 0 ms this is a D4→C#4→D5→A5→D3 zip
+  value that proposed it. On Song A at 0 ms this is a D4→C#4→D5→A5→D3 zip
   inside 20 ms and the worst-landing splice in the take (1.95 at 6.146 s);
   at 20 ms only the first splice fires. Guard 6 correctly did not veto it,
   so this is the phrase-end item the round-8 note left open, and it is not
@@ -84,15 +84,15 @@ attack the way a photocell has. Nothing changes until he has heard them.
   single frame in the 0.60–0.85 hysteresis band, so a decaying note whose
   clarity flickers to 0.61 never closes and the law keeps reading garbage.
   In-band frames should hold the counter, not reset it. Re-measure the
-  dropout count (12 on Failure, 11 on Fuji) when it changes.
+  dropout count (12 on Song A, 11 on Song B) when it changes.
 - **S** `tools/tune/field/main.cpp:187-196` — frames under −45 dB are
   skipped before they are added to the periodic list, so a splice in a
   quiet gap is labelled by whichever louder frame is nearest, up to tens of
-  ms away (0 ms Failure, 10.722 s at −52 dB labelled "on pitch"). And the
+  ms away (0 ms Song A, 10.722 s at −52 dB labelled "on pitch"). And the
   ON NOISE exclusion the round-8 note retires: score three ways instead of
   dropping, on pitch / on noise loud / on noise quiet, using the ±25 ms
   level the `--splices` listing already computes, with the audible line
-  calibrated on the two Fuji splices Frosty heard.
+  calibrated on the two Song B splices Frosty heard.
 - **N** Guard 6 is bounded as claimed (upward only, 100 cents, 2 ms hold,
   out of the environment, on by default). Two things to write beside it:
   the hold is really "N evaluations" (four at 500 Hz, one at or below
@@ -102,7 +102,7 @@ attack the way a photocell has. Nothing changes until he has heard them.
   Tested at 48 kHz only; the takes are 44.1.
 - **N** `HardTuneTests.cpp:356` — the ratchet constants (0.76 ms / 1.27 c)
   are already rounded up and then multiplied by 1.05 again, so the
-  every-run residue ceiling is 1.33 c, above Antares' 1.30. The budget
+  every-run residue ceiling is 1.33 c, above Tuner A's 1.30. The budget
   table itself is exactly as the note says and is asserted every run.
 - **N** `TuneDsp.h:40-49` — **stereo input: L is processed, R is
   overwritten with L.** Fine for a mono clip on a stereo track; anything
@@ -111,7 +111,7 @@ attack the way a photocell has. Nothing changes until he has heard them.
 - **N** `SingleModuleProcessor` has no `reset()` override, so Live's device
   on/off replays up to `rest + T` of stale ring on re-enable, and the 4 to
   13 ms time jump on bypass is inherent to the Live contract. One line to
-  add the reset; the jump is the same as Waves.
+  add the reset; the jump is the same as Tuner B.
 - **N** Below E2 (Bass and Instrument declare 55 Hz): safe and bounded, no
   overrun; hop 4.5 ms, delay up to ~22 ms while correcting, and no test
   exercises correction below 110 Hz.
@@ -165,7 +165,7 @@ attack the way a photocell has. Nothing changes until he has heard them.
   will see first. Fixed here: indentation; the absolute assertions are
   listed for the next Vcomp session.
 - **S** `modules/vcomp/AGENTS.md` and the checklist contradict the code in
-  the same file (0.5 ms gate open, ARC 2/5, gate 3:1/50, "the limiter RVox
+  the same file (0.5 ms gate open, ARC 2/5, gate 3:1/50, "the limiter Vocal comp A
   has and this does not"). Fixed here.
 - **N** `VcompPanel.cpp:233-319` takes neither input nor output section, so
   OUTPUT does not sit on the shared line in a rack. UI pass.
@@ -299,8 +299,8 @@ attack the way a photocell has. Nothing changes until he has heard them.
   stage without clearing the dry ring, so it clicks and misaligns for up to
   70 samples. Setup control, not to be automated. The top end differs by
   factor, not only in aliasing (a 62 kHz roll-off engages only at 4x and
-  8x). The comment justifying 2x by "the 1073 model's 16 kHz shelf" is
-  stale; the 1073 was removed.
+  8x). The comment justifying 2x by "the Console EQ unit A model's 16 kHz shelf" is
+  stale; the Console EQ unit A was removed.
 - **N** Four EQ parameters have no panel control: High Cut, Mix, Auto
   Gain, Oversampling. Telephone and Mix Bus Sheen depend on two of them.
 - **N** There is no module bypass anywhere and no per-slot bypass in the
@@ -406,8 +406,8 @@ one place:
 
 - **Opto**: the front of words at CRUSH 75 in both modes, then the blind
   set in `field-audio/opto-attack-2026-09-14/`.
-- **Tune**: Failure at 0 ms, 6.13–6.16 s, the phrase end; any held-note
-  tail at 0 ms for a chirp rather than a click; "spills" on Fuji; device
+- **Tune**: Song A at 0 ms, 6.13–6.16 s, the phrase end; any held-note
+  tail at 0 ms for a chirp rather than a click; "spills" on Song B; device
   on/off mid-phrase; a stereo source into Tune.
 - **Vcomp**: Keep The Air on a sibilant take (with the fix, it is 35;
   without, 70); LOW THRU swept with AMOUNT above 60; a click when LOW THRU
@@ -449,7 +449,7 @@ one place:
 8. [ ] The ear-gated changes, each on its own branch with renders:
        - [x] **Tune's frozen-period confirmation**, branch `tune-phrase-end`
              off this one, blind set `field-audio/blind-2026-09-14-round9/`
-             against Antares and the shipped guard 6; the numbers are in
+             against Tuner A and the shipped guard 6; the numbers are in
              `tune-blind-round9-2026-09-14.md`. Frosty ranks it.
        - [x] **Opto's attack**, two candidates rendered in
              `field-audio/opto-attack-2026-09-14/`; nothing in any tree.

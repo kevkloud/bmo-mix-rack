@@ -197,7 +197,7 @@ namespace
         std::printf ("Distortion against frequency and level, input gain at unity.\n"
                      "A transformer's core flux is the integral of applied voltage, so at\n"
                      "a fixed level the bottom of the band works it far harder than the\n"
-                     "top. Marinair measured 0.1 %% at 40 Hz against 0.01 %% at 1 kHz and\n"
+                     "top. Vendor 15 measured 0.1 %% at 40 Hz against 0.01 %% at 1 kHz and\n"
                      "10 kHz for the line transformer in these units.\n\n");
 
         const double levels[] { -24.0, -12.0, -6.0, 0.0 };

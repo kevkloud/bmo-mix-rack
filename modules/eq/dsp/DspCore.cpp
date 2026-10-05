@@ -130,7 +130,7 @@ void DspCore::WetPath::prepare (double hostRate, int newFactor) noexcept
         // Calibration. The transformers are driven so a full-scale tone at the
         // bottom of the band sits near the knee; because the emphasis tilts
         // 26 dB across 25 Hz to 500 Hz, a tone at 1 kHz then sits roughly a
-        // decade lower in distortion, which is what Marinair measured for the
+        // decade lower in distortion, which is what Vendor 15 measured for the
         // line transformer in these units. The class-A stages are gentler but
         // markedly asymmetric, and supply most of the second harmonic.
         inputTransformer [ch].setDrive (kInputIronDrive);

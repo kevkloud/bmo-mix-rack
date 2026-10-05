@@ -45,4 +45,4 @@ landing in imposes constraints the spec does not know about.
 
 ## 4. Confirmed
 
-M/S singularity at β = 2 − √2 and the contribution-blend fix; the |D|², |N|² expansions; the matched pole formulas; the Cytomic table as transcribed; the alpha conventions; the gain computer. T7 low-frequency precision passes in double even in direct form (1.9e-5 dB), so under A5 low-frequency precision is not an argument for the SVF — behaviour under modulation is.
+M/S singularity at β = 2 − √2 and the contribution-blend fix; the |D|², |N|² expansions; the matched pole formulas; the Simper table as transcribed; the alpha conventions; the gain computer. T7 low-frequency precision passes in double even in direct form (1.9e-5 dB), so under A5 low-frequency precision is not an argument for the SVF — behaviour under modulation is.

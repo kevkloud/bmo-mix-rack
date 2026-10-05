@@ -4,7 +4,7 @@
 it from Explorer). `KEY.txt` sits beside it -- do not open it until every
 line here has an answer. This sheet is the part that gets committed.
 
-**Four letters this time, not three.** Antares, the BMO you heard on
+**Four letters this time, not three.** Tuner A, the BMO you heard on
 2026-09-11, and two versions of the current build.
 
 ## What changed, and why
@@ -47,7 +47,7 @@ instead of stepping to it. You have never had this -- the target has always
 stepped, 341 times in 19 seconds on your take, and each step is an instant
 step in the resampling ratio and so in the formants. It is the standing
 suspect for the "audible formant shift" you heard last round and the
-"transition steps on faster words" from round one. Waves has this as a knob
+"transition steps on faster words" from round one. Tuner B has this as a knob
 of its own and will not go below 0.1 ms.
 
 The numbers cannot judge it: smoothing the transition makes splices *worse*
@@ -65,7 +65,7 @@ in the set that only your ears can settle.**
    which is the whole signal path -- if something is duller, grainier or
    less present, that matters more than the pops.
 
-## Failure 0 ms
+## Song A 0 ms
 
 Ranking (best to worst): 
 
@@ -76,7 +76,7 @@ Ranking (best to worst):
 
 Pops -- fewer or softer than before? only on B, same or worse on others
 
-## Failure 20 ms
+## Song A 20 ms
 
 Ranking (best to worst): 
 
@@ -87,7 +87,7 @@ Ranking (best to worst):
 
 Pops -- fewer or softer than before? 
 
-## Fuji 0 ms
+## Song B 0 ms
 
 Ranking (best to worst): 
 
@@ -98,7 +98,7 @@ Ranking (best to worst):
 
 Pops -- fewer or softer than before? 
 
-## Fuji 20 ms
+## Song B 20 ms
 
 Ranking (best to worst): 
 
@@ -116,7 +116,7 @@ did you prefer?
 
 The single worst thing left, across all four: 
 
-Listened on: AURORA, UA Apollo Twin X gen 2, HEDD Type 20 mk2 monitors (Frosty, 2026-09-13)
+Listened on: AURORA, Interface A, Monitors A (Frosty, 2026-09-13)
 
 ---
 
@@ -124,25 +124,25 @@ Listened on: AURORA, UA Apollo Twin X gen 2, HEDD Type 20 mk2 monitors (Frosty, 
 
 | group | A | B | C | D |
 |---|---|---|---|---|
-| Failure 0 ms | **BMO now** | Antares | round four | BMO now + 1 ms |
-| Failure 20 ms | round four | **BMO now** | Antares | BMO now + 1 ms |
-| Fuji 0 ms | round four | Antares | BMO now + 1 ms | **BMO now** |
-| Fuji 20 ms | **BMO now** | round four | BMO now + 1 ms | Antares |
+| Song A 0 ms | **BMO now** | Tuner A | round four | BMO now + 1 ms |
+| Song A 20 ms | round four | **BMO now** | Tuner A | BMO now + 1 ms |
+| Song B 0 ms | round four | Tuner A | BMO now + 1 ms | **BMO now** |
+| Song B 20 ms | **BMO now** | round four | BMO now + 1 ms | Tuner A |
 
 Heard, in order:
 
 | group | order |
 |---|---|
-| Failure 0 ms | Antares > round four > **BMO now** > +1 ms |
-| Failure 20 ms | Antares > (round four = **BMO now**) > +1 ms |
-| Fuji 0 ms | (round four = Antares) > **BMO now** > +1 ms |
-| Fuji 20 ms | round four > **BMO now** > Antares > +1 ms |
+| Song A 0 ms | Tuner A > round four > **BMO now** > +1 ms |
+| Song A 20 ms | Tuner A > (round four = **BMO now**) > +1 ms |
+| Song B 0 ms | (round four = Tuner A) > **BMO now** > +1 ms |
+| Song B 20 ms | round four > **BMO now** > Tuner A > +1 ms |
 
 ## Both changes failed
 
 **The splice landing fix: 0 wins, 1 tie, 3 losses** against the build it
-replaces. "Same pops as before" on Failure, and worse than round four on both
-Fuji groups. It is not earned and it should come out.
+replaces. "Same pops as before" on Song A, and worse than round four on both
+Song B groups. It is not earned and it should come out.
 
 **The 1 ms note transition: worst of four, in all four groups.** No ambiguity
 at all, and it kills the formant hypothesis outright -- smoothing the note
@@ -152,8 +152,8 @@ worse. It also drew the only "bad tracking on held notes" of the round.
 ## The metric was wrong again, in the same way
 
 The landing error said this change was an improvement: mean 0.36 -> 0.31 on
-Failure at 20 ms, worst 1.97 -> 1.79, and on Fuji 0.74 -> 0.68 and 0.56 ->
-0.48. The ear says no change on Failure and a loss on Fuji. **The measure
+Song A at 20 ms, worst 1.97 -> 1.79, and on Song B 0.74 -> 0.68 and 0.56 ->
+0.48. The ear says no change on Song A and a loss on Song B. **The measure
 moved the right way and the sound moved the wrong way.**
 
 That is the second measure to fail this exact test in two days. The splice

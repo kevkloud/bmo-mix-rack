@@ -73,7 +73,7 @@ namespace bmo::dim
     Two things to weigh when it is picked up. A **correlation meter** would fit
     the existing contract exactly -- one float in [-1, +1], one more callback,
     no new infrastructure -- and it is the same reading a goniometer is used
-    for here, since the S1's "within 45 degrees of vertical" rule is a visual
+    for here, since Imager A's "within 45 degrees of vertical" rule is a visual
     reading of correlation. And whatever is built, `tools/snapshot` feeds a
     panel no audio, so the meter renders empty in the review loop the repo
     relies on -- the same gap the Palette Book records against BMO Opto's meter

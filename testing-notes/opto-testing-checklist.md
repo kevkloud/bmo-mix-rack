@@ -13,10 +13,10 @@ not a build or install guide.
 ## 2. Mode — the core thing this session built
 - **Tele** vs **Stressed** should sound like two genuinely different
   units, not one curve with different numbers.
-- Tele: does it feel like the LA-2A-style thing — smoother, does the
+- Tele: does it feel like the Opto unit A-style thing — smoother, does the
   release genuinely seem to get *slower* the longer/harder you drive it
   (not just a fixed release time)?
-- Stressed: does it feel more like a VCA/Distressor-opto thing — grabbier,
+- Stressed: does it feel more like a VCA/Comp unit B opto thing — grabbier,
   simpler release, no "memory" of how long it's been driven?
 
 ## 3. Color drive stage

@@ -9,7 +9,7 @@
 namespace bmo::opto
 {
 
-enum class Mode { La2a = 0, Distressor = 1 };
+enum class Mode { OptoUnitA = 0, CompUnitB = 1 };
 
 /** One-pole parameter smoother, same shape as the one in modules/sat/dsp --
     see that file for why: snaps to the target once it is within epsilon, so
@@ -50,8 +50,8 @@ private:
     output.
 
     Mode picks a genuinely different signal path, not just different curve
-    numbers: one mode runs a feedback cell (La2aCell), the other a feedforward
-    one (DistressorCell) -- see Detector.h for why each is built the way it
+    numbers: one mode runs a feedback cell (OptoUnitACell), the other a feedforward
+    one (CompUnitBCell) -- see Detector.h for why each is built the way it
     is. Link shares one cell's gain reduction across both channels instead of
     letting them compress independently; it is orthogonal to Mode. Color is an
     on/off harmonic stage, mode-flavoured the same way -- except Tele mode has
@@ -84,7 +84,7 @@ public:
     {
         float crushPercent = 35.0f;
         float levelDb      = 0.0f;
-        Mode  mode         = Mode::La2a;
+        Mode  mode         = Mode::OptoUnitA;
         bool  link         = true;
         bool  color        = false;
     };
@@ -96,14 +96,14 @@ public:
 
         for (auto* cells : { &own[0], &own[1], &linked })
         {
-            cells->la2a.prepare (rate);
-            cells->distressor.prepare (rate);
+            cells->optoUnitA.prepare (rate);
+            cells->compUnitB.prepare (rate);
         }
 
         // The drive's DC blocker derives its pole from the rate -- see
         // DcBlocker::prepare() for why a hard-coded one was wrong.
         for (auto& stage : stages)
-            stage.la2aDrive.prepare (rate);
+            stage.optoUnitADrive.prepare (rate);
 
         crushSmoother.prepare (rate, 15.0);
         levelSmoother.prepare (rate, 15.0);
@@ -121,14 +121,14 @@ public:
     {
         for (auto* cells : { &own[0], &own[1], &linked })
         {
-            cells->la2a.reset();
-            cells->distressor.reset();
+            cells->optoUnitA.reset();
+            cells->compUnitB.reset();
         }
 
         for (auto& stage : stages)
         {
-            stage.la2aDrive.reset();
-            stage.distressorDrive.reset();
+            stage.optoUnitADrive.reset();
+            stage.compUnitBDrive.reset();
         }
 
         reportedReductionDb = 0.0f;
@@ -155,8 +155,8 @@ public:
         for (int i = 0; i < numSamples; ++i)
         {
             const auto crushNow      = crushSmoother.tick();
-            const auto teleCurve     = curveForLa2a (crushNow);
-            const auto stressedCurve = curveForDistressor (crushNow);
+            const auto teleCurve     = curveForOptoUnitA (crushNow);
+            const auto stressedCurve = curveForCompUnitB (crushNow);
             const auto makeupLin     = std::pow (10.0f, levelSmoother.tick() / 20.0f);
 
             // 0 is Tele, the two channels' own cells, Color off; 1 is
@@ -178,11 +178,11 @@ public:
                 // runs, heard or not, because its DC blocker has a memory
                 // like the cells do. Stressed's is a real toggle and has
                 // none, so it only runs where it can be heard.
-                const auto tele = stage.la2aDrive.process (heard.tele[ch] * makeupLin);
+                const auto tele = stage.optoUnitADrive.process (heard.tele[ch] * makeupLin);
                 auto stressed   = heard.stressed[ch] * makeupLin;
 
                 if (modeAt > 0.0f && colorAt > 0.0f)
-                    stressed = between (stressed, stage.distressorDrive.process (stressed), colorAt);
+                    stressed = between (stressed, stage.compUnitBDrive.process (stressed), colorAt);
 
                 channelData[ch][i] = between (tele, stressed, modeAt);
             }
@@ -216,14 +216,14 @@ private:
         other has, which is also what gives Mode's crossfade two real sides. */
     struct Cells
     {
-        La2aCell       la2a;
-        DistressorCell distressor;
+        OptoUnitACell  optoUnitA;
+        CompUnitBCell  compUnitB;
     };
 
     struct Stage
     {
-        La2aDrive       la2aDrive;
-        DistressorDrive distressorDrive;
+        OptoUnitADrive  optoUnitADrive;
+        CompUnitBDrive  compUnitBDrive;
     };
 
     /** What one sample comes to in each mode, before makeup and drive. */
@@ -264,7 +264,7 @@ private:
         pairs running and current, so nothing is copied. */
     void followSwitches (int active) noexcept
     {
-        const auto modeTarget  = params.mode == Mode::Distressor ? 1.0f : 0.0f;
+        const auto modeTarget  = params.mode == Mode::CompUnitB ? 1.0f : 0.0f;
         const auto linkTarget  = params.link ? 1.0f : 0.0f;
         const auto colorTarget = params.color ? 1.0f : 0.0f;
 
@@ -286,11 +286,11 @@ private:
             {
                 if (params.link)
                 {
-                    const auto deeperTele     = own[1].la2a.currentReductionDb() > own[0].la2a.currentReductionDb() ? 1 : 0;
-                    const auto deeperStressed = own[1].distressor.currentReductionDb() > own[0].distressor.currentReductionDb() ? 1 : 0;
+                    const auto deeperTele     = own[1].optoUnitA.currentReductionDb() > own[0].optoUnitA.currentReductionDb() ? 1 : 0;
+                    const auto deeperStressed = own[1].compUnitB.currentReductionDb() > own[0].compUnitB.currentReductionDb() ? 1 : 0;
 
-                    linked.la2a       = own[(size_t) deeperTele].la2a;
-                    linked.distressor = own[(size_t) deeperStressed].distressor;
+                    linked.optoUnitA       = own[(size_t) deeperTele].optoUnitA;
+                    linked.compUnitB = own[(size_t) deeperStressed].compUnitB;
                 }
                 else
                 {
@@ -321,11 +321,11 @@ private:
             {
                 auto& cells = own[(size_t) ch];
 
-                heard.tele[ch]     = cells.la2a.process (channelData[ch][i], teleCurve);
-                heard.stressed[ch] = cells.distressor.process (channelData[ch][i], stressedCurve);
+                heard.tele[ch]     = cells.optoUnitA.process (channelData[ch][i], teleCurve);
+                heard.stressed[ch] = cells.compUnitB.process (channelData[ch][i], stressedCurve);
 
-                heard.teleReductionDb     = std::max (heard.teleReductionDb, cells.la2a.currentReductionDb());
-                heard.stressedReductionDb = std::max (heard.stressedReductionDb, cells.distressor.currentReductionDb());
+                heard.teleReductionDb     = std::max (heard.teleReductionDb, cells.optoUnitA.currentReductionDb());
+                heard.stressedReductionDb = std::max (heard.stressedReductionDb, cells.compUnitB.currentReductionDb());
             }
         }
 
@@ -340,14 +340,14 @@ private:
             // Feedback: detection reads the *output*, so derive both
             // channels' outputs from the gain the previous sample decided,
             // pick the louder for detection, then update from that.
-            const auto teleGain = linked.la2a.currentGainLin();
+            const auto teleGain = linked.optoUnitA.currentGainLin();
             const auto lTele = l * teleGain, rTele = r * teleGain;
-            linked.la2a.updateFromOutputSample (std::abs (lTele) > std::abs (rTele) ? lTele : rTele, teleCurve);
+            linked.optoUnitA.updateFromOutputSample (std::abs (lTele) > std::abs (rTele) ? lTele : rTele, teleCurve);
 
             // Feedforward: detection reads the input, and the gain it
             // decides is this sample's.
-            linked.distressor.updateFromInputSample (std::abs (l) > std::abs (r) ? l : r, stressedCurve);
-            const auto stressedGain = linked.distressor.currentGainLin();
+            linked.compUnitB.updateFromInputSample (std::abs (l) > std::abs (r) ? l : r, stressedCurve);
+            const auto stressedGain = linked.compUnitB.currentGainLin();
 
             const float linkedTele[2]     { lTele, rTele };
             const float linkedStressed[2] { l * stressedGain, r * stressedGain };
@@ -358,8 +358,8 @@ private:
                 heard.stressed[ch] = useOwn ? between (heard.stressed[ch], linkedStressed[ch], linkAt) : linkedStressed[ch];
             }
 
-            const auto linkedTeleDb     = linked.la2a.currentReductionDb();
-            const auto linkedStressedDb = linked.distressor.currentReductionDb();
+            const auto linkedTeleDb     = linked.optoUnitA.currentReductionDb();
+            const auto linkedStressedDb = linked.compUnitB.currentReductionDb();
 
             heard.teleReductionDb     = useOwn ? between (heard.teleReductionDb, linkedTeleDb, linkAt) : linkedTeleDb;
             heard.stressedReductionDb = useOwn ? between (heard.stressedReductionDb, linkedStressedDb, linkAt) : linkedStressedDb;

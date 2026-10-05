@@ -22,7 +22,7 @@
 
     The check at the end is the latency rule (Frosty, 2026-09-11; AGENTS.md):
     no cell's true latency -- the WORST of its rest delay and its correcting
-    delay -- may exceed what Waves Tune Real-Time does AT THE SAME NOTE
+    delay -- may exceed what Tuner B does AT THE SAME NOTE
     (references::ceilingMsAt). It still reports separately whether the rest is
     the documented one, so the manual's number is never quietly wrong.
 
@@ -32,12 +32,12 @@
       - It tested the REST delay against the ceiling, which compares a floor
         with a worst: References.h records the ceiling as "worst delay, in
         tune or correcting". It passed whatever the engine did.
-      - The ceiling was a scalar. Waves' delay is about 1.73 x the period with
+      - The ceiling was a scalar. Tuner B's delay is about 1.73 x the period with
         almost no fixed floor, so one number taken at one note is wrong
         everywhere else -- and wrong in both directions. Held to the 10.62 ms
-        figure (Waves at A2), this reported 54 cells over at the bottom of the
-        range, where BMO is in fact comfortably under Waves, and reported
-        nothing at the top, where BMO really is later: 4.64 ms against Waves'
+        figure (Tuner B at A2), this reported 54 cells over at the bottom of the
+        range, where BMO is in fact comfortably under Tuner B, and reported
+        nothing at the top, where BMO really is later: 4.64 ms against Tuner B's
         0.71 at A5.
 
     testing-notes/tune-latency-review-2026-09-11.md.
@@ -248,7 +248,7 @@ int main (int argc, char** argv)
             if (worstHere > ceilingHere)
             {
                 std::fprintf (stderr, "FAIL: %s at %.1f Hz: true latency %.3f ms (rest %.3f, correcting worst "
-                              "%.3f) is over Waves Tune Real-Time's %.3f ms at the same note\n",
+                              "%.3f) is over Tuner B's %.3f ms at the same note\n",
                               rangeSpec.choices[(size_t) r], hz, worstHere, row.restMs, row.worstMs, ceilingHere);
                 ++failures;
                 worstOverall = std::max (worstOverall, worstHere - ceilingHere);
@@ -274,10 +274,10 @@ int main (int argc, char** argv)
         if (auto* f = std::fopen (csvPath.c_str(), "w")) { std::fputs (csv.c_str(), f); std::fclose (f); }
 
     if (failures)
-        std::fprintf (stderr, "bmo-tune-latency: %d cell(s) later than Waves Tune Real-Time at the same note "
+        std::fprintf (stderr, "bmo-tune-latency: %d cell(s) later than Tuner B at the same note "
                               "(the latency rule); worst by %.3f ms\n", failures, worstOverall);
     else
-        std::fprintf (stderr, "bmo-tune-latency: every cell is under Waves Tune Real-Time at its own note "
+        std::fprintf (stderr, "bmo-tune-latency: every cell is under Tuner B at its own note "
                               "(the latency rule)\n");
 
     return failures ? 1 : 0;

@@ -359,7 +359,7 @@ enum ErModeChoice { taps = 0, energy, numErModes };
     **Two, and the count is permanent at first ship.** There was a third,
     Blend: Taps' times and pans with Energy's envelope in place of the physical
     gain law. It held index 2 so it could be heard before the order froze. It
-    was heard on 2026-09-26 on ICE QUEEN (HEDD Type 20 MK2), wet, on a vocal
+    was heard on 2026-09-26 on ICE QUEEN (Monitors A), wet, on a vocal
     and a guitar, and Frosty's verdict was that it sounds like "a slightly
     worse" Taps -- a synonym for its neighbour, not a third behaviour -- so it
     was cut while cutting was free. Taps "sounds great, small room vibe";

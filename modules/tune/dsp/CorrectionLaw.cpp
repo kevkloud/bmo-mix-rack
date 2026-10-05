@@ -85,7 +85,7 @@ int CorrectionLaw::holdOrSwitch (double pitch, int candidate) noexcept
 {
     // At vibrato 0 the decision reads the raw pitch, and a singer sitting
     // near the boundary between two scale notes crossed it with every
-    // wobble: 71 of the note-name flips left on the Failure take were
+    // wobble: 71 of the note-name flips left on the Song A take were
     // between neighbours, and Frosty heard them as "hunting" and chose "hold
     // the note steadier" (2026-09-11). So a switch by a small margin has to
     // hold still for noteDwellMs first; a switch by a clear one -- the pitch
@@ -279,7 +279,7 @@ double CorrectionLaw::tick (const PitchEstimate& e, bool evaluated) noexcept
             // that halves collapses the window under the read pointer and
             // forces a splice at that instant, whatever the rest is.
             //
-            // That is what the audible pops are. Measured on Failure
+            // That is what the audible pops are. Measured on Song A
             // (2026-09-13): in the 40 ms before each of the five splices Frosty
             // hears, the detector's f0 spans a ratio of 1.76 to 3.94; before
             // the quiet ones, 1.00 to 1.02. And they fire at the same

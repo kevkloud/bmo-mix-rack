@@ -3,8 +3,8 @@
 The vocal compressor. Two knobs and a gate handle on the face, five more knobs
 behind a switch, and a modern feedforward detector under all of it.
 
-Frosty set the brief on 2026-09-13: **the sound of Waves RVox and RComp, the
-simplicity of RVox and Klanghelm DC1A**, with attack, release and a sidechain
+Frosty set the brief on 2026-09-13: **the sound of Vocal comp A and Comp A, the
+simplicity of Vocal comp A and Comp B**, with attack, release and a sidechain
 filter behind a "complex mode" and nothing but AMOUNT and MAKEUP before that.
 The gate, the band controls and the three-bar meter came in the same session,
 after the first build was heard about. Everything below follows from that brief
@@ -92,7 +92,7 @@ of ARC crosses over in 10 ms. `vcomp_switch_tests` section 1 holds both.
 It exists because of the auto makeup, which is indiscriminate: at AMOUNT 80 the
 module adds about 26 dB to the voice and to the room tone, headphone bleed and
 mic noise between lines alike. Cleaning that up is the other half of making a
-one-knob compressor usable, which is why RVox ships the same pairing.
+one-knob compressor usable, which is why Vocal comp A ships the same pairing.
 
 - **Ahead of the compressor**, because what it closes has to be closed before
   the makeup amplifies it.
@@ -183,14 +183,14 @@ Three consequences worth knowing before touching it:
   Eight tests carry an OUTPUT trim for exactly this reason; do not remove them
   because "the level does not matter here".
 
-It has no parameters, like RVox's. **How RVox implements theirs is unknown** --
-Waves do not publish it and nothing here is modelled on it beyond the chain
+It has no parameters, like Vocal comp A's. **How Vocal comp A implements theirs is unknown** --
+Vendor 2 does not publish it and nothing here is modelled on it beyond the chain
 order.
 
 ### Three bars, not a needle
 
 BMO Opto's `DynamicsMeter` is a period instrument -- VU ballistics on a 1940s
-scale -- which is right for a module modelling an LA-2A and wrong for this one.
+scale -- which is right for a module modelling an Opto unit A and wrong for this one.
 It also shows one reading at a time behind a three-way switch, and the three
 readings a compressor user wants are wanted together. IN and OUT read left to
 right in dBFS; GR reads right to left from zero, the way every gain-reduction
@@ -361,7 +361,7 @@ whole sum, ARC bolder, the gate deeper and slower to open, and the limiter).
 for the next pass: `curve`, `presets`, `gate`, `gateopen`, `bands`, `balance`,
 `arc` and `colour` each print a table and write WAVs of the same render, so a
 number and a listen are never of different things, and `gen` exports the
-harness's own signals so the same file can be fed through RVox or RComp for
+harness's own signals so the same file can be fed through Vocal comp A or Comp A for
 comparison.
 
 Still open, having been heard once:
@@ -386,13 +386,13 @@ Still open, having been heard once:
 ## Open, and deliberately not built
 
 - **No lookahead, and therefore no latency at any setting.** The one thing a
-  Pro-C-class compressor has that this does not, and what lets the module sit
+  Comp E-class compressor has that this does not, and what lets the module sit
   on a vocal while the singer is listening to it. Adding it later changes
   `latencyForParams` and the module's place in a tracking chain, so it is a
   product decision rather than a feature to slip in. The band split does not
   change this: the crossover is IIR, so it costs phase rather than samples.
   Neither does the limiter -- see below.
-- **No parallel MIX.** Neither RVox nor DC1A has one.
+- **No parallel MIX.** Neither Vocal comp A nor Comp B has one.
 - **No stereo LINK switch.** Stereo is always linked, because two channels of
   one voice compressed independently is a wandering image rather than a stereo
   option. Opto has the switch because it is a general-purpose box that ends up

@@ -132,7 +132,7 @@ float ClassicEngine::process (float input, double cents, double period, bool set
         //
         // This is the measurement the splice COUNT was standing in for and
         // should not have been. Frosty timestamped the pops he hears on
-        // Failure (2026-09-12): seven of seven were splices, but only seven
+        // Song A (2026-09-12): seven of seven were splices, but only seven
         // of thirty-eight splices were audible at all, so a count cannot
         // tell a bad one from a silent one and driving it down did not drive
         // the pops down. testing-notes/tune-blind-2026-09-12.md.

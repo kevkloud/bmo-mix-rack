@@ -1,12 +1,13 @@
 /*
     bmo-tune-ref: the reference stimulus, and the score of any tuner's render
-    of it -- BMO Tune RT's, Antares', Waves' -- by one piece of code
+    of it -- BMO Tune RT's, Tuner A's, Tuner B's -- by one piece of code
     (tools/common/Stimulus.h), so the numbers compare.
 
         bmo-tune-ref stimulus out.wav [--rate 48000]
             Writes the stimulus, 32-bit float mono. Put it through a tuner at
-            retune 0, chromatic, no vibrato/humanize/flex, with the host's
-            delay compensation OFF, and export the result from sample 0.
+            retune 0, chromatic, no vibrato, Tuner A's three humanising
+            controls at 0, with the host's delay compensation OFF, and export
+            the result from sample 0.
 
         bmo-tune-ref score render.wav [--rate 48000] [--offset N] [--channel left|right|mix]
             Scores that render: true latency and correction lag.

@@ -16,7 +16,7 @@ const Line& ltvLine()
 {
     // Frosty's calls, 2026-09-14, from rendered candidates on AURORA.
     //
-    // The pale ground is a Teletronix-style brushed silver. #c8c8c8 was chosen
+    // The pale ground is a Vendor 12-style brushed silver. #c8c8c8 was chosen
     // over a brighter #d5d5d5 and a darker #bdbdbd: the bright one is closest
     // to polished aluminium and the darkest one needed no help, but the middle
     // reads most like a real panel.

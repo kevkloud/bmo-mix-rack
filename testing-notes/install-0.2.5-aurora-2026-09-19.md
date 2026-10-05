@@ -70,5 +70,5 @@ Exit code 0, nine installed, two superseded removed.
   from it yields `<name>.vst3.vst3` and every bundle reads as missing. Use
   `$dir.Name -replace '\.vst3$',''`.
 
-The package is at `Downloads\BMO-0.2.5` on AURORA for copying to ICE QUEEN.
+The package is in a `BMO-0.2.5` folder outside the repository on AURORA, for copying to ICE QUEEN.
 ICE QUEEN's own install is a separate record; nothing here describes it.

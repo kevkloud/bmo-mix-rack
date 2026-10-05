@@ -21,9 +21,9 @@ inline constexpr auto kLevel = "level";
 
 // Which hardware this instance behaves like. Two genuinely different
 // circuits, not a shared curve with different numbers -- see Detector.h.
-// "Tele" (LA-2A) / "Stressed" (Distressor) are placeholder labels, not a
+// "Tele" (Opto unit A) / "Stressed" (Comp unit B) are placeholder labels, not a
 // final naming decision -- that's still open. The Mode enum in DspCore.h
-// keeps the La2a/Distressor names internally regardless of what these
+// keeps the OptoUnitA/CompUnitB names internally regardless of what these
 // display strings end up being.
 inline constexpr auto kMode = "mode";
 
@@ -63,7 +63,7 @@ inline const ParamSpecs& specs()
         // it. A source-dependent auto-makeup (compensating the *average*
         // reduction; compensating the instantaneous reduction would cancel
         // the compression exactly and leave a wire) was raised and rejected
-        // in 0.2.0: neither the LA-2A's Gain knob nor the Distressor's
+        // in 0.2.0: neither the Opto unit A's Gain knob nor the Comp unit B's
         // Output has one, and this module follows the hardware. Revisit only
         // if that fidelity call changes -- kLevel's id, range and default all
         // survive such a change, so it stays possible later.

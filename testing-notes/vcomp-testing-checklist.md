@@ -71,7 +71,7 @@ voice. Drag the handle on the IN meter.
   difference audible, and is ARC the better default?
 - Standard mode runs a fixed 5 ms attack that a standard-mode user cannot
   change. Is 5 ms right for a vocal, or does it want to be faster
-  (denser, more RVox) or slower (more transient through)?
+  (denser, more Vocal comp A) or slower (more transient through)?
 - Turning COMPLEX on with untouched knobs is supposed to be **silent**.
   Verify by ear: flip it back and forth on a held note.
 
@@ -138,10 +138,10 @@ of them set OUTPUT or GATE.
 The point of the module. `measure_vcomp gen voice --out x.wav` writes the
 harness's own source so the *same file* can go through both.
 
-- **RVox**: is BMO's one knob as immediately useful? Is it as dense at
+- **Vocal comp A**: is BMO's one knob as immediately useful? Is it as dense at
   the top?
-- **RComp**: does ARC hold up against the real thing?
-- **DC1A**: is BMO as easy to be right with?
+- **Comp A**: does ARC hold up against the real thing?
+- **Comp B**: is BMO as easy to be right with?
 
 ## 9. Naming (lowest priority)
 

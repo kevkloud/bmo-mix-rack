@@ -58,7 +58,7 @@ offer, and §2's oversampling checks can be driven from the panel now.
 
 ## 5. The iron
 - INPUT +10 / OUTPUT −10 on a drum bus (Drum Bus Iron): bass thickens
-  (2nd and 3rd harmonic at 40–100 Hz), top stays clean. Is that the 1084
+  (2nd and 3rd harmonic at 40–100 Hz), top stays clean. Is that the Console EQ unit B
   story?
 - INPUT +10 on a full-scale kick: about 4 % at 40 Hz. Fuzz or weight?
 - EQL off still runs the iron and keeps the latency: A/B the colour with

@@ -14,7 +14,7 @@ inline constexpr auto kModuleId   = "dim";
 inline constexpr auto kModuleName = "BMO Dimension";
 
 // The imaging stage: what the module does to side content that already
-// exists. Modelled on the Waves S1, including Gerzon's asymmetry control and
+// exists. Modelled on the Imager A, including Gerzon's asymmetry control and
 // his bass shuffler.
 inline constexpr auto kWidth       = "width";
 inline constexpr auto kShuffle     = "shuffle";
@@ -35,7 +35,7 @@ inline constexpr auto kDiffuse = "diffuse";
 inline constexpr auto kRate    = "rate";
 inline constexpr auto kDepth   = "depth";
 
-// The rest of the S1's matrix. Rotation turns the whole soundfield; asymmetry
+// The rest of Imager A's matrix. Rotation turns the whole soundfield; asymmetry
 // skews left against right without moving centre material. Both are reached
 // for far less often than width, which is why they sit at the end.
 inline constexpr auto kRotation  = "rotation";
@@ -79,18 +79,18 @@ inline const ParamSpecs& specs()
 
         // SHUFFLE: Gerzon's bass shuffler, which widens the low end alone to
         // correct for the ears hearing stereo as narrower in the bass than in
-        // the treble. 1.0 is no shuffling and is the default; the S1's manual
+        // the treble. 1.0 is no shuffling and is the default; Imager A's manual
         // puts the useful range at 1.6-2.5 and its maximum at 3.
         S::floatParam (kShuffle, "Bloom", 1.0f, 3.0f, 0.01f, 1.0f),
 
-        // The corner the shuffler works below. The S1 allows 350-1400 Hz and
+        // The corner the shuffler works below. Imager A allows 350-1400 Hz and
         // recommends 600-700 for normal monitoring; 700 is the default here.
         S::floatParam (kShuffleFreq, "Below", 350.0f, 1400.0f, 1.0f, 700.0f, F::Hertz),
 
         // DETUNE: two voices, one shifted up and one down by this many cents,
         // opposed so the pair sums back toward the centre. The classic
         // spreader setting is around 10 cents and the range stops well short
-        // of MicroPitch's 50 -- past about 25 it stops widening and starts
+        // of Pitch widener A's 50 -- past about 25 it stops widening and starts
         // sounding out of tune, and a range that can only be wrong at the top
         // is a range that is too wide.
         S::floatParam (kDetune, "Detune", 0.0f, 25.0f, 0.1f, 10.0f),
@@ -111,7 +111,7 @@ inline const ParamSpecs& specs()
         S::floatParam (kDepth, "Drift Depth", 0.0f, 100.0f, 1.0f, 50.0f, F::Percent),
 
         // ROTATION: the whole stereo stage turned, without changing the
-        // relative levels of anything standing on it. Degrees, and the S1's
+        // relative levels of anything standing on it. Degrees, and Imager A's
         // own control is unbounded in principle -- this stops at 45 either
         // way. That is not a quarter turn, which is what this comment said
         // until 2026-10-03: it is a 45-degree rotation of the mid/side pair,
@@ -128,9 +128,9 @@ inline const ParamSpecs& specs()
         S::floatParam (kRotation, "Turn", -45.0f, 45.0f, 0.5f, 0.0f),
 
         // ASYMMETRY: left against right, with centre material left where it
-        // is. Gerzon's control, and the one the S1 was the first product to
+        // is. Gerzon's control, and the one Imager A was the first product to
         // ship -- it is not a pan, and it is the reason this module is not
-        // just a width knob with a crossover. The S1's manual is the source
+        // just a width knob with a crossover. Imager A's manual is the source
         // for the law and is quoted at the point of use; see the shear in
         // modules/dim/dsp/DspCore.h, and the test that asserts a dead-centre
         // source comes through it unmoved.

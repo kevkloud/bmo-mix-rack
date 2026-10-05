@@ -280,7 +280,7 @@ void testCurveShape()
 
     It used to pin the average gains to the brief's 0.62 and 0.84. Two things
     retired that. Measured on the reference files themselves, the way the brief
-    describes, Fuji's gains are 0.965 and 1.015 -- so those figures do not come
+    describes, Song B's gains are 0.965 and 1.015 -- so those figures do not come
     from this material and pinning to them was pinning to a typo. And the
     operating point is now chosen by ear: a listening test found the fitted
     drive about three times too hot, and the ear wins over a band delta that
@@ -320,7 +320,7 @@ void testAsymmetryMatchesReference()
     const auto asymmetry = std::abs (positive - negative);
 
     check (asymmetry > 0.05,
-           "the curve is asymmetric, and nowhere near the Preesh BG anti-target of 0.004");
+           "the curve is asymmetric, and nowhere near the Saturator plug X anti-target of 0.004");
     check (asymmetry < 0.40, "the asymmetry is a colour, not a fold");
 }
 
@@ -370,7 +370,7 @@ void testLiftIsAboveTheSplit()
     // more native top end than a voice, and measures roughly +3 dB where the
     // harness's reference voice measures +6 to +8. The shape of the result is
     // what generalises, so the shape is what is asserted here. The absolute
-    // figures against Fuji live in `measure verify`.
+    // figures against Song B live in `measure verify`.
     const auto low = delta (20.0, 150.0);
     const auto lowMid = delta (150.0, 600.0);
     const auto mid = delta (600.0, 2500.0);
@@ -389,9 +389,9 @@ void testLiftIsAboveTheSplit()
            "the lift is above the split, not spread across the whole spectrum");
 
     // The anti-target: a lift confined to the top band only, with nothing
-    // below it. Preesh BG's shape.
+    // below it. Saturator plug X's shape.
     check (upper > top - 6.0,
-           "the lift is not confined to the top band, as Preesh BG's was");
+           "the lift is not confined to the top band, as Saturator plug X's was");
 }
 
 /** Dynamics are a side effect of the curve, and the side effect is expansion.

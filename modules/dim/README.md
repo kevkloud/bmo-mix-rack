@@ -10,9 +10,9 @@ this module does disappears in a mono sum instead of comb-filtering it.
 
 | Stage | What it does | In the spirit of |
 |---|---|---|
-| **Generate** | Two detuned voices, one up and one down, their *difference* injected into the side signal | MicroPitch, CLA Vocals |
-| **Diffuse** | A modulated all-pass cascade on the side signal | Dimension D, phasers |
-| **Image** | Width, Gerzon bass shuffler, rotation, asymmetry | Waves S1 |
+| **Generate** | Two detuned voices, one up and one down, their *difference* injected into the side signal | pitch-shift wideners and vocal doublers |
+| **Diffuse** | A modulated all-pass cascade on the side signal | classic stereo choruses, phasers |
+| **Image** | Width, Gerzon bass shuffler, rotation, asymmetry | stereo imagers |
 
 Generate is the only stage that *manufactures* signal rather than shaping it,
 and the only one that is not mono-safe — which is why it is the one on a
@@ -33,7 +33,7 @@ no side signal, so without this nothing below it has anything to work on.
 
 **DETUNE** (the CENTS knob) — how far apart the two voices are pitched, in
 cents. Around 10 is the classic setting. The range stops at 25 rather than
-MicroPitch's 50, because past about 25 it stops widening and starts sounding
+the 50 a pitch-shift widener commonly allows, because past about 25 it stops widening and starts sounding
 out of tune.
 
 **DRIFT** (Diffuse) — how much side signal goes through the swept all-pass
@@ -50,9 +50,9 @@ GENERATE, DRIFT and BLOOM, so at 0 it silences all three.
 
 **BLOOM** / **BELOW** (Shuffle / Shuffle Freq) — Gerzon's bass shuffler,
 widening the low end alone to correct for the ears hearing stereo as narrower
-in the bass. BLOOM at 1.0 is off; the S1 manual puts the useful range at
-1.6–2.5. BELOW is the frequency it works under, printed on the panel, and the
-S1 recommends 600–700 Hz.
+in the bass. BLOOM at 1.0 is off; the usual guidance for a shuffler puts the useful
+range at 1.6–2.5. BELOW is the frequency it works under, printed on the panel, and the
+usual recommendation is 600–700 Hz.
 
 **TURN** (Rotation) — the whole soundfield turned, without changing the
 relative levels of anything standing on it. Positive degrees move the image

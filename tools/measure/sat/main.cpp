@@ -11,8 +11,8 @@
         3. crest factor, dry against saturated
         4. aliasing, as the worst inharmonic product a pure tone produces
 
-    The reference targets in kFuji come from before/after analysis of a real
-    vocal take supplied with the design brief, and the anti-targets in kPreesh
+    The reference targets in kSongB come from before/after analysis of a real
+    vocal take supplied with the design brief, and the anti-targets in kPlugX
     come from a second pass that was judged harsh by ear. The point of keeping
     both here is that the failure mode has a shape: a near-symmetric curve with
     an isolated high-band lift measures "brighter" without measuring "warmer",
@@ -56,13 +56,13 @@ constexpr double kSampleRate = 48000.0;
 
 struct BandTarget { const char* name; double lowHz, highHz, deltaDb; };
 
-/** "Fuji" -- what this plugin is built toward. */
-constexpr double kFujiPositiveGain = 0.62;
-constexpr double kFujiNegativeGain = 0.84;
-constexpr double kFujiAsymmetry    = 0.22;
-constexpr double kFujiCrestChange  = 1.7;    // 20.5 dB dry -> 22.2 dB saturated
+/** "Song B" -- what this plugin is built toward. */
+constexpr double kSongBPositiveGain = 0.62;
+constexpr double kSongBNegativeGain = 0.84;
+constexpr double kSongBAsymmetry    = 0.22;
+constexpr double kSongBCrestChange  = 1.7;    // 20.5 dB dry -> 22.2 dB saturated
 
-constexpr BandTarget kFuji[]
+constexpr BandTarget kSongB[]
 {
     { "20 Hz - 150 Hz",      20.0,   150.0,   -1.1 },
     { "150 Hz - 600 Hz",    150.0,   600.0,   -1.1 },
@@ -71,10 +71,10 @@ constexpr BandTarget kFuji[]
     { "6 kHz - 18 kHz",    6000.0, 18000.0,    8.25 },
 };
 
-/** "Preesh BG" -- the failure mode, kept as a negative constraint rather than
+/** "Saturator plug X" -- the failure mode, kept as a negative constraint rather than
     merely ignored. Near-symmetric, with the lift confined to the top band. */
-constexpr double kPreeshAsymmetry   = 0.004;
-constexpr double kPreeshHighBandDb  = 1.85;
+constexpr double kPlugXAsymmetry   = 0.004;
+constexpr double kPlugXHighBandDb  = 1.85;
 
 //==============================================================================
 // Signals.
@@ -584,8 +584,8 @@ Report analyse (const std::vector<float>& dry, const std::vector<float>& wet,
 
     for (int b = 0; b < 5; ++b)
     {
-        const auto d = bandEnergy (dryPower, kFuji[b].lowHz, kFuji[b].highHz, rate);
-        const auto w = bandEnergy (wetPower, kFuji[b].lowHz, kFuji[b].highHz, rate);
+        const auto d = bandEnergy (dryPower, kSongB[b].lowHz, kSongB[b].highHz, rate);
+        const auto w = bandEnergy (wetPower, kSongB[b].lowHz, kSongB[b].highHz, rate);
         r.bandDb[b] = d > 0.0 && w > 0.0 ? 10.0 * std::log10 (w / d) : 0.0;
     }
 
@@ -611,28 +611,28 @@ std::string juce_format (double value, bool signedValue = false)
 void printReport (const Report& r, double rate, bool showTargets)
 {
     std::printf ("waveshaping asymmetry                      measured%s\n",
-                 showTargets ? "     Fuji" : "");
+                 showTargets ? "   Song B" : "");
     std::printf ("  positive-half average gain               %6.3f%s\n",
-                 r.positiveGain, showTargets ? juce_format (kFujiPositiveGain).c_str() : "");
+                 r.positiveGain, showTargets ? juce_format (kSongBPositiveGain).c_str() : "");
     std::printf ("  negative-half average gain               %6.3f%s\n",
-                 r.negativeGain, showTargets ? juce_format (kFujiNegativeGain).c_str() : "");
+                 r.negativeGain, showTargets ? juce_format (kSongBNegativeGain).c_str() : "");
     std::printf ("  asymmetry                                %6.3f%s\n\n",
-                 r.asymmetry, showTargets ? juce_format (kFujiAsymmetry).c_str() : "");
+                 r.asymmetry, showTargets ? juce_format (kSongBAsymmetry).c_str() : "");
 
     std::printf ("band energy, level-matched (%+.2f dB)      measured%s\n",
-                 r.matchDb, showTargets ? "     Fuji" : "");
+                 r.matchDb, showTargets ? "   Song B" : "");
 
     for (int b = 0; b < 5; ++b)
-        std::printf ("  %-22s              %+6.2f%s\n", kFuji[b].name, r.bandDb[b],
-                     showTargets ? juce_format (kFuji[b].deltaDb, true).c_str() : "");
+        std::printf ("  %-22s              %+6.2f%s\n", kSongB[b].name, r.bandDb[b],
+                     showTargets ? juce_format (kSongB[b].deltaDb, true).c_str() : "");
 
     std::printf ("\ncrest factor                               measured%s\n",
-                 showTargets ? "     Fuji" : "");
+                 showTargets ? "   Song B" : "");
     std::printf ("  dry                                      %6.2f\n", r.dryCrest);
     std::printf ("  processed                                %6.2f\n", r.wetCrest);
     std::printf ("  change                                   %+6.2f%s\n",
                  r.wetCrest - r.dryCrest,
-                 showTargets ? juce_format (kFujiCrestChange, true).c_str() : "");
+                 showTargets ? juce_format (kSongBCrestChange, true).c_str() : "");
 
     std::printf ("\n(%.0f Hz)\n", rate);
 }
@@ -666,7 +666,7 @@ int fitToFiles (const std::string& dryPath, const std::string& targetPath, doubl
                  dryRate, 20.0 * std::log10 (std::max (rms (dry), 1.0e-9)));
 
     for (int b = 0; b < 5; ++b)
-        std::printf ("  %-22s %+6.2f dB\n", kFuji[b].name, goal.bandDb[b]);
+        std::printf ("  %-22s %+6.2f dB\n", kSongB[b].name, goal.bandDb[b]);
 
     std::printf ("  crest factor change    %+6.2f dB\n\n", goal.wetCrest - goal.dryCrest);
 
@@ -798,7 +798,7 @@ int fitToFiles (const std::string& dryPath, const std::string& targetPath, doubl
     std::printf ("                              fitted    target\n");
 
     for (int b = 0; b < 5; ++b)
-        std::printf ("  %-22s  %+6.2f    %+6.2f\n", kFuji[b].name, r.bandDb[b], goal.bandDb[b]);
+        std::printf ("  %-22s  %+6.2f    %+6.2f\n", kSongB[b].name, r.bandDb[b], goal.bandDb[b]);
 
     std::printf ("  crest factor change     %+6.2f    %+6.2f\n", r.wetCrest - r.dryCrest,
                  goal.wetCrest - goal.dryCrest);
@@ -852,13 +852,13 @@ int verify (const std::string& wavPath)
 
     const auto curveAsymmetry = std::abs (curvePositive - curveNegative);
 
-    std::printf ("waveshaping asymmetry, at the curve       measured     Fuji\n");
+    std::printf ("waveshaping asymmetry, at the curve       measured   Song B\n");
     std::printf ("  positive-half average gain               %6.3f     %6.3f\n",
-                 curvePositive, kFujiPositiveGain);
+                 curvePositive, kSongBPositiveGain);
     std::printf ("  negative-half average gain               %6.3f     %6.3f\n",
-                 curveNegative, kFujiNegativeGain);
+                 curveNegative, kSongBNegativeGain);
     std::printf ("  asymmetry                                %6.3f     %6.3f\n\n",
-                 curveAsymmetry, kFujiAsymmetry);
+                 curveAsymmetry, kSongBAsymmetry);
 
     std::printf ("the same measurement end to end            %6.3f / %.3f, asymmetry %.3f\n",
                  r.positiveGain, r.negativeGain, r.asymmetry);
@@ -870,32 +870,32 @@ int verify (const std::string& wavPath)
                  "  even-order content that actually makes the difference is untouched.\n"
                  "  This plugin blocks DC, because an offset costs headroom, thumps when\n"
                  "  the drive is automated, and accumulates through a chain.\n"
-                 "  Which means Preesh BG's 0.004 does not establish that its curve was\n"
+                 "  Which means Saturator plug X's 0.004 does not establish that its curve was\n"
                  "  symmetric: it is also what any DC-blocked saturator measures. Whatever\n"
                  "  separates the two references, this number alone will not find it --\n"
                  "  `measure harmonics` looks at the even-order content directly.\n\n");
 
-    std::printf ("band energy, level-matched (%+.2f dB)      measured     Fuji\n", r.matchDb);
+    std::printf ("band energy, level-matched (%+.2f dB)      measured   Song B\n", r.matchDb);
 
     for (int b = 0; b < 5; ++b)
         std::printf ("  %-22s              %+6.2f     %+6.2f\n",
-                     kFuji[b].name, r.bandDb[b], kFuji[b].deltaDb);
+                     kSongB[b].name, r.bandDb[b], kSongB[b].deltaDb);
 
-    std::printf ("\ncrest factor                              measured     Fuji\n");
+    std::printf ("\ncrest factor                              measured   Song B\n");
     std::printf ("  dry                                      %6.2f     %6.2f\n", r.dryCrest, 20.5);
     std::printf ("  saturated                                %6.2f     %6.2f\n", r.wetCrest, 22.2);
     std::printf ("  change                                   %+6.2f     %+6.2f\n\n",
-                 r.wetCrest - r.dryCrest, kFujiCrestChange);
+                 r.wetCrest - r.dryCrest, kSongBCrestChange);
 
     // The anti-target, checked rather than merely described.
     int warnings = 0;
 
     if (curveAsymmetry < 0.05)
     {
-        std::printf ("WARNING: the curve's asymmetry, %.3f, is near Preesh BG's %.3f. A curve this\n"
+        std::printf ("WARNING: the curve's asymmetry, %.3f, is near Saturator plug X's %.3f. A curve this\n"
                      "         close to symmetric makes almost no even-order content, and the\n"
                      "         result reads as harsh rather than warm however much high end it\n"
-                     "         adds.\n", curveAsymmetry, kPreeshAsymmetry);
+                     "         adds.\n", curveAsymmetry, kPlugXAsymmetry);
         ++warnings;
     }
 
@@ -904,9 +904,9 @@ int verify (const std::string& wavPath)
     if (highOnly)
     {
         std::printf ("WARNING: the lift is confined to the top band (%.2f dB against %.2f dB in\n"
-                     "         2.5-6 kHz), which is the Preesh BG shape -- it measured %.2f dB up\n"
+                     "         2.5-6 kHz), which is the Saturator plug X shape -- it measured %.2f dB up\n"
                      "         top and nothing anywhere else. Brighter without warmer.\n",
-                     r.bandDb[4], r.bandDb[3], kPreeshHighBandDb);
+                     r.bandDb[4], r.bandDb[3], kPlugXHighBandDb);
         ++warnings;
     }
 
@@ -1201,8 +1201,8 @@ int main (int argc, char** argv)
                 {
                     double pos = 0.0, neg = 0.0;
                     curveGains (dry, a, b, pos, neg);
-                    const auto error = std::abs (pos - kFujiPositiveGain)
-                                     + std::abs (neg - kFujiNegativeGain);
+                    const auto error = std::abs (pos - kSongBPositiveGain)
+                                     + std::abs (neg - kSongBNegativeGain);
 
                     if (error < best) { best = error; bestDrive = a; bestBias = b; }
                 }
@@ -1210,7 +1210,7 @@ int main (int argc, char** argv)
 
         double pos = 0.0, neg = 0.0;
         curveGains (dry, bestDrive, bestBias, pos, neg);
-        std::printf ("best fit to Fuji: drive %.2f, bias %.3f\n", bestDrive, bestBias);
+        std::printf ("best fit to Song B: drive %.2f, bias %.3f\n", bestDrive, bestBias);
         std::printf ("  positive %.3f  negative %.3f  asymmetry %.3f\n\n", pos, neg, std::abs (pos - neg));
 
         const auto shipped = DspCore::driveFor (defaultParams().driveAmount);
@@ -1239,10 +1239,10 @@ int main (int argc, char** argv)
         const auto dry = referenceVoice();
         const auto power = spectrum (dry);
         double total = 0.0;
-        for (int b = 0; b < 5; ++b) total += bandEnergy (power, kFuji[b].lowHz, kFuji[b].highHz);
+        for (int b = 0; b < 5; ++b) total += bandEnergy (power, kSongB[b].lowHz, kSongB[b].highHz);
         for (int b = 0; b < 5; ++b)
-            std::printf ("%-22s %7.2f dB relative to total\n", kFuji[b].name,
-                         10.0 * std::log10 (bandEnergy (power, kFuji[b].lowHz, kFuji[b].highHz) / total));
+            std::printf ("%-22s %7.2f dB relative to total\n", kSongB[b].name,
+                         10.0 * std::log10 (bandEnergy (power, kSongB[b].lowHz, kSongB[b].highHz) / total));
         return 0;
     }
 

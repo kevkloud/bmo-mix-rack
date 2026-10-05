@@ -2,16 +2,16 @@
 
 Scope: which classic hardware reverb *characters* fit a module whose core is a smooth,
 dense, mix-friendly late-1990s algorithmic reverb with a separate early-reflection (ER)
-section (call that core **REF-A**), with a modern vintage-flavoured plugin reverb
-(**REF-B**) as secondary reference. Focus throughout is **how each device makes early
-reflections**. Devices carry neutral labels; the key at the end maps them to products.
+section (call that core **Reference A**), with a modern vintage-flavoured plugin reverb
+(**Reference B**) as secondary reference. Focus throughout is **how each device makes early
+reflections**. Devices carry neutral labels; the key that maps them to products is kept outside the repository.
 
 Every claim is tagged **[DOC]** (manual, patent, spec sheet, designer publication),
 **[MEAS]** (published measurement) or **[ANEC]** (forum/press/recollection).
 
 ## 0. What the core already does
 
-REF-A splits ER from tail: an ER section with its own level, size-linked spacing and
+Reference A splits ER from tail: an ER section with its own level, size-linked spacing and
 type, feeding/parallel to a diffused tail with pre-delay, decay, diffusion, density and
 damping. Its ER are a *pattern selection* (seven spacing variations, usually linked to
 size), not a freely edited tap list **[DOC]**. LF damping knee is documented as
@@ -22,14 +22,14 @@ personality that the existing ER section can front.
 The single most useful design idea in the literature comes from the designer of HW-1/2/3:
 strong very early energy, extending roughly to 50 ms after the source stops, is what
 creates distance; isolated lateral reflections around 25–40 ms can *reduce* spatial
-impression **[DOC]**. The modern plugin-design counterpoint (REF-B's author) is that a
+impression **[DOC]**. The modern plugin-design counterpoint (Reference B's author) is that a
 few dozen discrete ray-traced taps ignore real surface diffusion, so the early section is
 better built as diffuse "Early Energy" than as taps **[DOC]**. Our module should support
 both stances.
 
 ## 1. Device notes
 
-**HW-1 — late-1970s US studio digital reverb (200-series).** Loved for lush, slightly
+**HW-1 — late-1970s US studio digital reverb.** Loved for lush, slightly
 grainy halls and its plate/room programs; the first programmable studio reverb people
 mixed *into*. ER are not a separately editable stage: the programs begin with a
 pre-delay plus a short diffused cluster ahead of the recirculating tail **[ANEC]**.
@@ -37,14 +37,14 @@ Converter/bandwidth limits (companded ~12-bit, restricted top end) are a large p
 character **[ANEC]**.
 
 **HW-2 — mid-1980s US flagship studio digital reverb.** The reference "big room". Two
-things matter for us. (i) Its **Shape** and **Spread** pair governs the *envelope* of the
-early energy: Shape sets the contour of the initial rise/plateau, Spread sets how long
+things matter for us. (i) Its pair of envelope controls governs the *envelope* of the
+early energy: one sets the contour of the initial rise/plateau, the other how long
 that early energy is smeared before the tail takes over **[DOC, manual]**. (ii) Its
 **random-delay hall** adds randomised delay modulation, which suppresses metallic
-artefacts and shortens *perceived* decay, most audibly at small Spread **[DOC]**. Its
+artefacts and shortens *perceived* decay, most audibly at a short envelope **[DOC]**. Its
 ambience program is explicitly ER-first: with reverb level at zero you hear only the early
 cluster, which stops abruptly **[DOC]**. Pre-echo/early-tap controls exist alongside
-Shape/Spread **[DOC]**.
+the envelope pair **[DOC]**.
 
 **HW-3 — 1980s–90s US rack family.** Same lineage, cheaper. Notable for exposing a small
 bank of user-set **reflect delays/levels** (discrete taps) *in addition* to the diffused
@@ -98,7 +98,7 @@ This is the purest "ER as a designed pattern library" model available.
 **HW-12 — mid-2000s US boutique processor.** Three engines: early reverberation, late tail,
 and a separate low-frequency early engine below ~80 Hz; the early section is deliberately
 *dense and diffuse* rather than sparse taps, with a selectable early pattern and level
-**[DOC/ANEC, maker interview]**. Closest modern relative of REF-A's philosophy.
+**[DOC/ANEC, maker interview]**. Closest modern relative of Reference A's philosophy.
 
 **HW-13 — early-1980s US effects processor, room algorithm.** Its **Position** control
 rebalances early vs late energy *and* changes their character, i.e. it moves the source
@@ -113,16 +113,16 @@ level and size **[DOC]**. Designer's stated weaknesses: spectral smear, modulati
 and an inability to sound truly distant because the audition taps pick up dry source as ER
 **[DOC]**.
 
-*Dropped:* HW-9's flagship predecessor and two Japanese 1980s/90s units (see key) — their
+*Dropped:* HW-9's flagship predecessor and two Japanese 1980s/90s units (HW-15 in Sources) — their
 ER structure is not publicly documented beyond marketing, and they add no character the
 above lack.
 
-## 2. Shortlist — five types alongside the REF-A core
+## 2. Shortlist — five types alongside the Reference A core
 
 Ranked by how much distinct ground each covers.
 
-1. **HW-2 (big hall, shape/spread).** Sonic: wide, slow-blooming, randomised hall that never
-   goes metallic. ER: envelope-shaped early *energy* with Shape (contour) + Spread (duration),
+1. **HW-2 (big hall, envelope contour and duration).** Sonic: wide, slow-blooming, randomised hall that never
+   goes metallic. ER: envelope-shaped early *energy* with an envelope contour and duration,
    plus a few user pre-echo taps; ER feeds the tail. This is the module's flagship.
 2. **HW-8 (pattern-density room).** Sonic: neutral-to-dark general room that morphs hall↔plate.
    ER: one continuous density control 0–9 over a diffused cluster, very long pre-delay range.
@@ -138,7 +138,7 @@ Ranked by how much distinct ground each covers.
 **Redundancies.** HW-1 ≈ HW-2 at lower fidelity — fold in as a "vintage/bandwidth" switch, not
 a type. HW-3 ≈ HW-2 minus polish; its user reflect-taps are worth stealing as a feature.
 HW-4 ≈ HW-5 for our purposes (both no-ER, fast onset) — one type covers both. HW-7 ≈ HW-12:
-both are "invisible neutral room"; HW-12 is REF-A's own lineage, so HW-7 adds little.
+both are "invisible neutral room"; HW-12 is Reference A's own lineage, so HW-7 adds little.
 HW-9 ≈ HW-14: both are sparse discrete-tap ER — implement one tap engine and vary the tap
 count/spread. HW-10's value is a *routing* idea (assemble ER + tail + delay), not a type.
 
@@ -164,12 +164,12 @@ count/spread. HW-10's value is a *routing* idea (assemble ER + tail + delay), no
 | 16 | HW-7 conversion | 16-bit with 2×/4× oversampling, wide internal word | DOC | Medium |
 | 17 | Design rule: distance cue | strong early energy out to ~50 ms past source end | DOC | High |
 | 18 | Design rule: ER hazard | lateral reflections ~25–40 ms can reduce spatial impression | DOC | High |
-| 19 | REF-A ER spacings | 7 spacing variations, usually size-linked | DOC | High |
-| 20 | REF-A LF damping knee | 16 Hz–1600 Hz | DOC | High |
+| 19 | Reference A ER spacings | 7 spacing variations, usually size-linked | DOC | High |
+| 20 | Reference A LF damping knee | 16 Hz–1600 Hz | DOC | High |
 
 ## 4. Not verified — flag before implementing
 
-- HW-2 numeric ranges for Shape, Spread, Size and pre-delay (units and end-stops) — the
+- HW-2 numeric ranges for the envelope contour and duration, size and pre-delay (units and end-stops) — the
   controls are documented, the *numbers* were not confirmed from the manual. **Blocking for
   type 1.** Needs the operating manual PDF.
 - HW-1 converter word length, sample rate and bandwidth — repeated in press, no primary spec seen.
@@ -183,29 +183,31 @@ count/spread. HW-10's value is a *routing* idea (assemble ER + tail + delay), no
   or paper located, so treat the modal claim as marketing until verified.
 - No primary ER documentation found for the dropped Japanese units.
 
-## 5. Sources and key
+## 5. Sources
 
-| Label | Device | Source |
+The key from these labels to products lives outside the repository.
+
+| Label | Note | Source |
 |---|---|---|
-| REF-A | Waves Renaissance Reverb (R-Verb) | https://assets.wavescdn.com/pdf/plugins/renaissance-reverb.pdf |
-| REF-B | Valhalla VintageVerb / ValhallaRoom (Sean Costello) | https://valhalladsp.com/2011/05/04/valhallaroom-early-reflections-versus-early-energy/ |
-| HW-1 | Lexicon 224 / 224XL | https://www.liquidsonics.com/2021/07/28/the-big-six-reverb-types/ |
-| HW-2 | Lexicon 480L (Random Hall, Ambience) | https://help.uaudio.com/hc/en-us/articles/33194625601044-Lexicon-480L-Digital-Reverb-and-Effects-Manual |
-| HW-3 | Lexicon PCM 60 / 70 / 80 / 90 | https://lexiconpro.com/en-US/product_documents/pcm70-ompdf |
-| HW-4 | EMT 250 / 251 (Blesser & Bäder, US 4,181,820) | https://www.mixonline.com/technology/1976-emt-model-250-digital-reverb-377973 |
-| HW-5 | EMT 140 plate | https://help.uaudio.com/hc/en-us/articles/33030978351892-EMT-140-Plate-Reverb-Manual |
-| HW-6 | AMS RMX16 (Ambience, NonLin2, Plate) | https://media.uaudio.com/support/manuals/dd/AMS%20RMX16%20Expanded%20Manual.pdf |
-| HW-7 | Quantec QRS Room Simulator (Buchleitner) | https://www.soundonsound.com/reviews/quantec-2496-yardstick |
-| HW-8 | Klark Teknik DN780 | https://archive.org/details/Klark_Teknik_DN780_User_Manual |
-| HW-9 | Yamaha REV1 / REV7 / SPX90 | https://theatrecrafts.com/archive/documents/yamahaspx90_manual.pdf |
-| HW-10 | Roland SRV-2000 / R-880 | https://support.roland.com/hc/en-us/articles/201920819-R-880-Technical-Specifications |
-| HW-11 | TC Electronic M5000 / System 6000 (VSS) | https://www.soundonsound.com/reviews/tc-electronic-reverb-6000 |
-| HW-12 | Bricasti M7 | https://www.bricasti.com/images/M7.pdf |
-| HW-13 | Eventide SP2016 / 2016 Stereo Room | https://www.eventideaudio.com/plug-ins/2016-stereo-room/ |
-| HW-14 | Ursa Major Space Station SST-282 (Christopher Moore) | https://valhalladsp.com/2010/05/14/stability-through-time-variation-ursa-major-space-station/ |
-| — | Dropped: Sony DRE-2000 / DPS-V77 | no primary ER documentation located |
-| — | Griesinger on early energy and spaciousness | https://www.soundonsound.com/people/david-griesinger-lexicon-creating-reverb-algorithms-surround-sound |
+| Reference A | | the maker's user guide |
+| Reference B, Reference C | developer: Developer A | a developer blog post on early reflections versus early energy |
+| HW-1 | | a plugin maker's article on classic reverb types |
+| HW-2 | | an emulation maker's manual |
+| HW-3 | | the maker's operating manual |
+| HW-4 | Blesser & Bäder, US 4,181,820 | a trade-magazine history of the unit |
+| HW-5 | | an emulation maker's manual |
+| HW-6 | | an emulation maker's expanded manual |
+| HW-7 | designer: Developer D | a magazine review |
+| HW-8 | | the maker's user manual (archived scan) |
+| HW-9 | | the maker's manual (archived scan) |
+| HW-10 | | the maker's technical specifications |
+| HW-11 | | a magazine review |
+| HW-12 | | the maker's manual |
+| HW-13 | | the maker's product page |
+| HW-14 | designer: Developer C | a developer blog post on stability through time variation |
+| HW-15 | dropped | no primary ER documentation located |
+| — | Griesinger on early energy and spaciousness | a magazine interview |
 | — | Griesinger papers index | https://www.davidgriesinger.com/ |
 
-Short quotations above are paraphrased except two attributed fragments: the DN780 manual's
-description of low-density reflections as "grainy", and ValhallaRoom's term "Early Energy".
+Short quotations above are paraphrased except two attributed fragments: the HW-8 manual's
+description of low-density reflections as "grainy", and Reference C's term "Early Energy".

@@ -5,7 +5,7 @@
 namespace bmo::tune
 {
 
-/** The latency contract (spec §0.1, §2), in one place: Live, the Waves
+/** The latency contract (spec §0.1, §2), in one place: Live, the Tuner B
     contract. The plugin reports 0 to the host and runs a hair behind -- the
     32-tap kernel's lookahead -- at rest, and up to a period later while it
     corrects.
@@ -33,12 +33,12 @@ namespace contract
         Frosty heard in round three as pops at retune 20 ms (2026-09-11, see
         testing-notes/shootout-2026-09-11.md).
 
-        Resting further back widens the window both ways. Measured on Failure
+        Resting further back widens the window both ways. Measured on Song A
         at retune 20 ms: 120 splices at 0.40 ms, 50 at 2 ms, 35 at 4 ms, 31 at
         6 -- and the correction lag falls with it, 6.21 ms mean to 5.16, 3.19,
         1.20. Frosty chose 4 ms (2026-09-11): where the splice curve flattens,
-        and level with Auto-Tune Artist's measured 6.49 ms of true latency
-        rather than merely inside Waves' 10.62 ms ceiling (the latency rule).
+        and level with Tuner A's measured 6.49 ms of true latency
+        rather than merely inside Tuner B's 10.62 ms ceiling (the latency rule).
 
         In milliseconds, not samples, so every rate rests at the same delay --
         both shoot-out takes are 44.1 kHz, not 48.
@@ -77,7 +77,7 @@ namespace contract
         total and this rest alone is 4 ms (see ClassicEngine's window).
         Predicting the pitch forward by the estimate's age costs no latency at
         all, and is the only route that helps at the top of the range. A rest
-        that tracks the period -- which is what Waves does -- is still worth
+        that tracks the period -- which is what Tuner B does -- is still worth
         doing for the bottom of it.
         testing-notes/tune-latency-review-2026-09-11.md. */
     inline constexpr double kLiveRestMs = 4.0;
@@ -92,9 +92,9 @@ namespace contract
     /** The rest as a multiple of the note's period, instead of a constant.
 
         0 keeps the constant kLiveRestMs and is what shipped until now. Any
-        other value makes the rest track the note, which is what Waves does
+        other value makes the rest track the note, which is what Tuner B does
         (its delay is about 1.68 x the period, with essentially no floor) and
-        is the only shape that can be under Waves at both ends of the range.
+        is the only shape that can be under Tuner B at both ends of the range.
 
         This only became possible on 2026-09-12. Until the correction was
         predicted forward (CorrectionLaw, b4bfc73) the rest was also what

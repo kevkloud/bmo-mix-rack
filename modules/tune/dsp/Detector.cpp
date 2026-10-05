@@ -244,7 +244,7 @@ void Detector::evaluate() noexcept
             // wandering value: without this the held period ran 421 -> 600 Hz
             // over ten evaluations at a note transition in the reference
             // stimulus. Re-reading it inside a tone-wide clamp was tried too
-            // and was worse on the takes -- Failure's splices taken while the
+            // and was worse on the takes -- Song A's splices taken while the
             // detector had lost the period went 2 of 27 to 4 of 32.
             period = heldPeriod;
 
@@ -368,7 +368,7 @@ bool Detector::coarseSearch (double& coarseLag) noexcept
     // The coarse pass's window IS the lag -- MPM's form, and what buys the
     // fast lock -- so at a short lag it spans about a millisecond, roughly one
     // cycle of a vowel's first formant, and a formant ringing in there
-    // correlates as well as a period does. On Failure at 17.409 s the list
+    // correlates as well as a period does. On Song A at 17.409 s the list
     // held ONE entry, 787.5 Hz, on a singer at 219; the real period, at 0.974,
     // was never scored. 787.5 is no harmonic of 219 -- it is 3.67x -- so
     // guard 4 could not climb back either; it steps by 2 and 3.
@@ -682,7 +682,7 @@ bool Detector::multipleOf (double base, int& factor, int& lag) const noexcept
 
         // While the pitch moves, a longer lag loses correlation to the
         // movement itself, so on a slide the true period cannot beat its own
-        // harmonic by 4x (Failure at 4.75 s: a scoop from 197 to 184 Hz read
+        // harmonic by 4x (Song A at 4.75 s: a scoop from 197 to 184 Hz read
         // at its third harmonic, on and off, for 20 ms). When the multiple is
         // the period the detector was just holding, being the more periodic
         // of the two is enough -- but only when the shorter lag is clearly
@@ -726,7 +726,7 @@ bool Detector::multipleOf (double base, int& factor, int& lag) const noexcept
     Every guard above reads the coarse NSDF, whose window IS the lag (that is
     MPM's form, and what buys the fast lock). At a short lag that window is a
     millisecond or so, and a vowel's first formant ringing inside it correlates
-    as well as a period does -- 0.96 on Failure at 17.409 s, where the voice is
+    as well as a period does -- 0.96 on Song A at 17.409 s, where the voice is
     219 Hz and the lobe sits at 787 Hz, which is no harmonic of it at all. The
     scan's early exit then ends the search before the real period is ever
     scored, and guard 4 cannot climb back because 3.67 is not 2 or 3.
@@ -773,7 +773,7 @@ void Detector::preferWholeCycle (double& period, double& clarity) noexcept
     // So on a voice whose fundamental sits well under its second harmonic, a
     // half period -- read over a window only that long -- clears the bar,
     // and nothing ever asks whether twice it is the real period. Measured on
-    // the 2026-09-11 shoot-out's Failure take: a D4 read at D5 on 8.5 % of
+    // the 2026-09-11 shoot-out's Song A take: a D4 read at D5 on 8.5 % of
     // voiced frames and a twelfth up on 2 %, the estimate swinging by a
     // semitone either way every evaluation, because a half-period window
     // sees a different half of each real cycle each time. The engine splices

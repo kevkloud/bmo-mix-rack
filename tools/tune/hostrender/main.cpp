@@ -10,10 +10,10 @@
 //                       [--setn "<parameter name>=<0..1>"] ... [--block N]
 //                       [--preroll seconds] [--stereo]
 //
-// --type picks one plugin out of a shell (WaveShell holds hundreds). --set
+// --type picks one plugin out of a shell (Shell B holds hundreds). --set
 // goes through the plugin's own text parsing, so values are typed as its UI
 // shows them; --setn sets the normalised value, for parameters whose text
-// the plugin does not parse (Auto-Tune's choices). Each is echoed back as
+// the plugin does not parse (Tuner A's choices). Each is echoed back as
 // the plugin then shows it. The output is the plugin's left channel from sample 0 of the
 // input, uncompensated: sample 0 out is what the plugin produced while
 // sample 0 went in. What the plugin *reports* is printed alongside, so the

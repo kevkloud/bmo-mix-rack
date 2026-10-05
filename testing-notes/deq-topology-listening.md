@@ -35,7 +35,7 @@ build-dsp/tools/Release/measure_deq render <source.wav> <out-folder> --blind 7
   render's peak; turn playback down if a boost case is hot.
 - Use real material, and use the same sources as earlier passes where they
   exist: continuity is most of what makes figures comparable. A vocal (the
-  Fuji render, if it has been re-bounced on this machine), a full mix, and a
+  Song B render, if it has been re-bounced on this machine), a full mix, and a
   kick-heavy loop cover the cases. A file with no low end cannot test case 1;
   one with no sibilance cannot engage case 7.
 - **Check the tool's table before listening.** "max GR 0.0" on a dynamic case

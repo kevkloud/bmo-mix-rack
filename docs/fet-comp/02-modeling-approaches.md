@@ -20,7 +20,7 @@ Cascade of linear filters and static nonlinearities (LNL), used for distortion c
 
 ## 3. Nonlinear state-space / circuit-derived white-box models
 
-Nodal DK-method and wave digital filter (WDF) derivations solve the circuit's own nonlinear equations, including the feedback loop and FET/diode elements (nodal DK: Yeh & Smith-lineage work; WDF multi-nonlinearity solvers: Werner et al., DAFx/AES papers). Closest published precedent is the Fairchild 670 tube limiter, not the FET (Raffensperger, "Toward a Wave Digital Filter Model of the Fairchild 670 Limiter," DAFx-12). *No FET-specific circuit paper found; flagged unverified/likely absent.* Port-Hamiltonian formulations are an active but less mature alternative.
+Nodal DK-method and wave digital filter (WDF) derivations solve the circuit's own nonlinear equations, including the feedback loop and FET/diode elements (nodal DK: Yeh & Smith-lineage work; WDF multi-nonlinearity solvers: Werner et al., DAFx/AES papers). Closest published precedent is the Tube limiter unit A tube limiter, not the FET (Raffensperger, "Toward a Wave Digital Filter Model of the Tube limiter unit A Limiter," DAFx-12). *No FET-specific circuit paper found; flagged unverified/likely absent.* Port-Hamiltonian formulations are an active but less mature alternative.
 
 - **Captures**: feedback topology and FET distortion by construction, including all-buttons-in if the bias network is modeled. **Misses**: unit-to-unit hardware variance unless separately calibrated.
 - **CPU**: highest of the four — per-sample nonlinear solve (Newton-Raphson/K-method). **Latency**: zero (implicit solve). **Aliasing**: significant; ADAA integrates into WDF nonlinear ports, preferable to brute oversampling for CPU cost.
@@ -28,11 +28,11 @@ Nodal DK-method and wave digital filter (WDF) derivations solve the circuit's ow
 
 ## 4. Grey-box and neural models
 
-Black-box neural models (TCN/LSTM/state-space) profile a device end-to-end from paired audio (SignalTrain: Hawley, Colburn & Mimilakis, AES 147th Convention, 2019, LA-2A dataset; Steinmetz & Reiss, "Efficient Neural Networks for Real-Time Modeling of Analog Dynamic Range Compression," 2022, causal, real-time on CPU from ~10 min of data). Grey-box work keeps a differentiable gain-computer/envelope structure, fitting/correcting it with a small network (Frontiers in Signal Processing, 2025; NablAFx, Comunità et al., 2025). A "Grey-Box Modelling of Dynamic Range Compression" paper was found by title only — *authorship unverified*. A large bus-compressor dataset (Solid-State Bus-Comp, 2025) points toward SSL/FET-adjacent hardware; nothing FET-specific confirmed.
+Black-box neural models (TCN/LSTM/state-space) profile a device end-to-end from paired audio (SignalTrain: Hawley, Colburn & Mimilakis, AES 147th Convention, 2019, Opto unit A dataset; Steinmetz & Reiss, "Efficient Neural Networks for Real-Time Modeling of Analog Dynamic Range Compression," 2022, causal, real-time on CPU from ~10 min of data). Grey-box work keeps a differentiable gain-computer/envelope structure, fitting/correcting it with a small network (Frontiers in Signal Processing, 2025; NablAFx, Comunità et al., 2025). A "Grey-Box Modelling of Dynamic Range Compression" paper was found by title only — *authorship unverified*. A large bus-compressor dataset (Solid-State Bus-Comp, 2025) points toward Vendor 8 / FET-adjacent hardware; nothing FET-specific confirmed.
 
 - **Captures**: whatever the data covers, incl. program-dependent release and FET distortion; grey-box keeps an interpretable knob map. **Misses**: generalization outside trained range; all-buttons-in needs deliberate sampling.
 - **CPU**: moderate–high (TCN/LSTM); grey-box (DSP + small residual) cheaper. **Latency**: ~0 for causal architectures. **Aliasing**: inherited from any learned nonlinearity; ADAA not standard here, oversampling more common (not verified as universal).
-- **Tuning/data**: needs paired hardware in/out across levels and switch states — heavy for fresh capture; grey-box needs less than black-box. **Risk**: moderate; strong recent LA-2A results, thinner for FET-class devices.
+- **Tuning/data**: needs paired hardware in/out across levels and switch states — heavy for fresh capture; grey-box needs less than black-box. **Risk**: moderate; strong recent Opto unit A results, thinner for FET-class devices.
 
 ## Comparison table
 
@@ -49,4 +49,4 @@ Black-box neural models (TCN/LSTM/state-space) profile a device end-to-end from 
 - Approach 3 if schematic/SPICE access and CPU headroom exist and feedback+FET fidelity is the priority.
 - Approach 4 if hardware is available for data capture and a shorter timeline is preferred.
 
-**Flagged unknowns**: no confirmed FET-specific circuit model (only the related Fairchild 670 WDF paper found); authorship of "Grey-Box Modelling of Dynamic Range Compression" unverified.
+**Flagged unknowns**: no confirmed FET-specific circuit model (only the related Tube limiter unit A WDF paper found); authorship of "Grey-Box Modelling of Dynamic Range Compression" unverified.

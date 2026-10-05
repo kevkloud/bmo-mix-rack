@@ -21,11 +21,11 @@ namespace bmo::tune::references
 {
 
 /** One tuner's delay while correcting, at one note. The latency rule compares
-    BMO with Waves, and what it compares is pitch-dependent for both of them:
-    Waves' delay tracks the period (about 1.73 x T, with almost no fixed
+    BMO with Tuner B, and what it compares is pitch-dependent for both of them:
+    Tuner B's delay tracks the period (about 1.73 x T, with almost no fixed
     floor), BMO's rest does not. So a single worst-case scalar taken at one
     note says nothing about any other, and comparing across notes gets the
-    answer wrong in both directions -- it hid BMO being later than Waves at
+    answer wrong in both directions -- it hid BMO being later than Tuner B at
     A4 and A5, and it invented a violation at the bottom of the range where
     BMO is comfortably under. Hold the rule to this curve, not to a number.
     testing-notes/tune-latency-review-2026-09-11.md. */
@@ -47,26 +47,26 @@ struct Reference
     std::array<CorrectingDelay, 6> correcting;
 };
 
-inline constexpr Reference kAntares {
-    "Antares Auto-Tune Artist", "VST3 dated 2024-10-15, as installed on AURORA",
-    "Input Type Low Male, Key C, Scale Chromatic, Retune Speed 0, Humanize 0, Natural Vibrato 0, "
-    "Flex-Tune 0, Tracking 50 (default)",
+inline constexpr Reference kTunerA {
+    "Tuner A", "VST3 dated 2024-10-15, as installed on AURORA",
+    "set for the low male voice range, key C, chromatic scale, correction speed 0, Tuner A controls 1-3 at 0, "
+    "pitch tracking at its default (50)",
     "AURORA, 2026-09-11",
     2.33, 10.74, -0.24, 1.66, 1.30,
     { { { 82.41, 10.736 }, { 110.0, 8.058 }, { 146.83, 5.920 },
         { 220.0, 5.487 }, { 440.0, 3.587 }, { 880.0, 2.956 } } } };
 
-// Speed and Note Transition bottom out at 0.1 ms: set to 0, they read 0.1.
-inline constexpr Reference kWaves {
-    "Waves Tune Real-Time (Mono)", "16.0.23.24",
-    "Speed 0.1 ms, Note Transition 0.1 ms (their minimum), Correction 100 %, Scale Chromatic, "
-    "Vibrato off, everything else default",
+// Its speed and transition-time controls bottom out at 0.1 ms: set to 0, they read 0.1.
+inline constexpr Reference kTunerB {
+    "Tuner B (Mono)", "16.0.23.24",
+    "speed 0.1 ms and transition time 0.1 ms (their minimum), correction 100 %, chromatic scale, "
+    "vibrato off, everything else default",
     "AURORA, 2026-09-11",
     0.0, 19.21, 1.32, 2.13, 1.73,
     { { { 82.41, 19.215 }, { 110.0, 13.804 }, { 146.83, 10.090 },
         { 220.0, 7.048 }, { 440.0, 3.821 }, { 880.0, 0.709 } } } };
 
-/** The latency rule's ceiling at `hz`: Waves' measured delay while
+/** The latency rule's ceiling at `hz`: Tuner B's measured delay while
     correcting, read off its curve.
 
     Interpolated in the PERIOD, which is what it is nearly linear in: 19.215
@@ -89,12 +89,12 @@ inline constexpr Reference kWaves {
         to drift a whole period, so the sweep reports ~15 ms where the window
         actually allows rest + T = 22.2 ms. The low cells understate.
 
-    Waves being almost purely proportional to the period, and BMO's rest being
+    Tuner B being almost purely proportional to the period, and BMO's rest being
     a constant, is the whole of the latency disagreement between them: BMO is
-    under Waves below C3 and over it above, by 3.9 ms at A5. */
+    under Tuner B below C3 and over it above, by 3.9 ms at A5. */
 inline double ceilingMsAt (double hz) noexcept
 {
-    const auto& c = kWaves.correcting;
+    const auto& c = kTunerB.correcting;
     const auto t = 1000.0 / hz;
     const auto periodOf = [] (double f) { return 1000.0 / f; };
 

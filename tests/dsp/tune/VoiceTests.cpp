@@ -2,8 +2,8 @@
     Voices the synthetic corpus did not have, rebuilt from what went wrong on
     real ones. Each section names the take and the moment it came from.
 
-    1. A weak fundamental (Failure, 2026-09-11 shoot-out; Frosty ranked BMO
-       last on all three Failure groups: "glitchy uneven correction, audible
+    1. A weak fundamental (Song A, 2026-09-11 shoot-out; Frosty ranked BMO
+       last on all three Song A groups: "glitchy uneven correction, audible
        pops and clicks", "hunting for pitch"). At 1.06 s the singer holds a
        D4 about 37 cents sharp, 300 Hz, on an /a/ whose first formant sits on
        the octave, and the fundamental is well under the second harmonic.
@@ -12,7 +12,7 @@
        Measured on the real take (field-audio, not committed): 8.5 % of
        voiced frames an octave up, 2.0 % a twelfth up, and the estimate
        spread 233 cents inside 10 ms on average -- against 0.4 %, 0.1 % and
-       59 cents on Fuji, where BMO ranked better.
+       59 cents on Song B, where BMO ranked better.
 
     Truth here is the synthetic contour; the output is measured with
     tools/common/Analysis.h, never with the plugin's own detector.
@@ -50,7 +50,7 @@ namespace
     }
 
     /** A vowel whose FIRST FORMANT rings between the third and fourth
-        harmonic -- the Failure 17.409 s condition. `ratio` is where F1 sits
+        harmonic -- the Song A 17.409 s condition. `ratio` is where F1 sits
         in multiples of the fundamental. */
     sig::VoiceSettings formantOnHarmonic (double hz, double ratio, double bw,
                                           double db, std::uint64_t seed)
@@ -169,7 +169,7 @@ int main()
     }
 
     //== 1. A weak fundamental: through the whole plugin ======================
-    // The Failure moment itself: D4 37 cents sharp, D major, retune 0. Held,
+    // The Song A moment itself: D4 37 cents sharp, D major, retune 0. Held,
     // the output should sit on D4 -- measured 40 ms at a time every 10 ms by
     // the ruler, kept to the voice's own octave so it cannot be fooled the
     // way the plugin was.
@@ -202,7 +202,7 @@ int main()
     }
 
     //== 2. A first formant on the fourth harmonic: the detector ==============
-    // Failure at 17.409 s, the splice Frosty timestamped. The singer is on
+    // Song A at 17.409 s, the splice Frosty timestamped. The singer is on
     // A3, about 219 Hz, and the coarse scan's candidate list holds ONE entry:
     // 787.5 Hz, which is no harmonic of 219 -- it is 3.67x. The real period,
     // at 0.974, is never scored.

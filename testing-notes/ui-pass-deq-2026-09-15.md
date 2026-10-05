@@ -2,7 +2,7 @@
 
 **On AURORA, 2026-09-15. Branch `ui-pass`, worktree `../bmo-mix-rack-333-ui`,
 off `d7aba69`.** Module 1 (LTV Comp) is in `ui-pass-2026-09-14.md` and is
-waiting on Leteveon; do not change it. The tools and the before-numbers are in
+waiting on Collaborator 3; do not change it. The tools and the before-numbers are in
 `ui-pass-render-loop.md`, the triage in `ui-pass-handoff-2026-09-14.md`.
 
 **Two defects fixed, both of them things the panel had been getting wrong since

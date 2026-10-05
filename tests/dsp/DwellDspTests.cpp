@@ -6015,8 +6015,13 @@ void testNoEventSpikesTheOutputOnAnyCharacter()
                                               ? std::max (readKernelBound (a, rate, timeMs, false),
                                                           readKernelBound (b, rate, timeMs, false))
                                               : readKernelBound (b, rate, timeMs, false);
+                            // The worst row reaches its bound exactly (1.000 of it on ICE
+                            // QUEEN), so the slack is 1e-4 of it, not 1e-6 (2026-10-04): a
+                            // float output and a double bound taken on another compiler or
+                            // maths library can part by more than 1e-6; the spike it was
+                            // written for was 6.3e5.
                             const auto bound = kernel
-                                                 * ((double) result.inputPeak + result.mainGain) * (1.0 + 1.0e-6) + 1.0e-6;
+                                                 * ((double) result.inputPeak + result.mainGain) * (1.0 + 1.0e-4) + 1.0e-6;
                             ++rows;
                             worst = std::max (worst, (double) result.peak / bound);
 
@@ -6538,11 +6543,16 @@ void testOneTimeSwitchDoesNotBurst()
     when it went off, and FX on replayed it into the loop however long after:
     the review's probe put out -23.5 dBFS 28 s after the switch, in silence
     (AMOUNT 100, FEEDBACK 35). Here, shorter and on every character and in
-    the lane: TIME 50 ms so the loop is empty -- exact zeros -- well before
-    FX comes back, a 1 s noise burst with FX on, FX off at 1 s, back on at
-    5 s. The second before must be exact zeros and so must the second after.
-    The lane takes the same stage through FX LINK, HOLD on and SEND open
-    while the burst plays. */
+    the lane: TIME 50 ms so the loop has decayed far below anything a replay
+    could hide in well before FX comes back, a 1 s noise burst with FX on, FX
+    off at 1 s, back on at 5 s. The second before and the second after must
+    both peak under -200 dBFS, 176 dB under the replay.
+
+    **Not exact zeros** (2026-10-04). Three seconds at FEEDBACK 35 and 50 ms
+    is about -870 dB, a denormal, so exact zeros held only where flush to
+    zero is in force -- on ICE QUEEN, not on every compiler, maths library
+    and target CI builds this suite with. What the fix is about is that the
+    stage's old content is not replayed, and -200 dBFS says that anywhere. */
 void testDiffuseComesBackSilent()
 {
     constexpr auto rate = 48000.0;
@@ -6598,14 +6608,18 @@ void testDiffuseComesBackSilent()
             const auto after  = std::max (peakOf (block.left, onAt, second),
                                           peakOf (block.right, onAt, second));
 
-            char buf[220];
-            std::snprintf (buf, sizeof (buf),
-                           "Diffuse back on in silence, %s on %s: the second before peaks at %.3g and the "
-                           "second after at %.3g (%.1f dBFS); both must be exact zeros",
-                           lane ? "in the lane" : "in the main loop", characterName (c),
-                           (double) before, (double) after, dbOf (after));
+            // -200 dBFS: far under the -23.5 dBFS a replay put out, and far over
+            // anything a denormal or a flushed one leaves.
+            constexpr auto bound = 1.0e-10;
 
-            check (before == 0.0f && after == 0.0f, buf);
+            char buf[260];
+            std::snprintf (buf, sizeof (buf),
+                           "Diffuse back on in silence, %s on %s: the second before peaks at %.1f dBFS and the "
+                           "second after at %.1f dBFS; both must be under -200 dBFS (a replay was -23.5)",
+                           lane ? "in the lane" : "in the main loop", characterName (c),
+                           dbOf (before), dbOf (after));
+
+            check ((double) before < bound && (double) after < bound, buf);
         }
     }
 }

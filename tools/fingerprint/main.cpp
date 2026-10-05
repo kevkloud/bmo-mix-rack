@@ -188,11 +188,16 @@ namespace
     };
 
     // The rack's module ids, as products/rack/Registry.cpp registers them, in
-    // two chains because a rack has eight slots and there are eleven modules. An
-    // id the rack does not know is dropped by the rack itself, so a module
-    // added later is simply not covered until it is listed here -- and the
-    // rack's own line then says "thru" or stays the same, which is the cue.
-    const juce::StringArray chainA { "eq", "sat", "opto", "dim", "deq", "vcomp", "util" };
+    // two chains because a rack has eight slots and there are eleven modules.
+    // The ids are the ones each module's params.h registers (kModuleId), not
+    // the folder names: LTV Comp's is "ltvcomp". Until 2026-10-04 this chain
+    // said "vcomp", an id the rack does not have, so the compressor was never
+    // in the rack's fingerprint; the rack dropped the slot then, and keeps it
+    // as an empty placeholder now, which moved the utility module one slot
+    // along and is how the mistake was seen (its seeded line came out 24 dB
+    // hotter, on another slot's lanes). A module added later is not covered
+    // until it is listed here.
+    const juce::StringArray chainA { "eq", "sat", "opto", "dim", "deq", "ltvcomp", "util" };
     const juce::StringArray chainB { "deesser", "fetcomp", "dwell", "reverb", "eq", "util" };
 
     std::vector<State> statesFor (const juce::PluginDescription& desc)

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "BypassDelay.h"
 #include "ModuleDef.h"
 #include "ModuleEngine.h"
 #include "ProductInfo.h"
@@ -19,6 +20,7 @@ namespace bmo
 class SingleModuleProcessor final : public juce::AudioProcessor,
                                     public PresetTarget,
                                     private juce::AudioProcessorValueTreeState::Listener,
+                                    private juce::AudioProcessorParameter::Listener,
                                     private juce::AsyncUpdater
 {
 public:
@@ -79,6 +81,14 @@ private:
     void parameterChanged (const juce::String&, float) override;
     void handleAsyncUpdate() override;
 
+    /// Every value a parameter's listeners are sent: only a NaN matters, which
+    /// the parameter refused but the framework still forwards (HostValueGuard).
+    void parameterValueChanged (int, float) override;
+    void parameterGestureChanged (int, bool) override {}
+
+    /// engine.process, and a parameter a host set to NaN put back afterwards.
+    void runEngine (float* const* channels, int numChannels, int numSamples, const HostTempo&);
+
     static std::vector<FactoryEntry> factoryEntries (const ModuleDef&, ParamSet&);
 
     const ModuleDef& def;
@@ -104,6 +114,21 @@ private:
     std::atomic<double> reportedTail { 0.0 };
 
     std::atomic<bool> expanded { def.isExpandable() };
+
+    // Set when listeners were sent a NaN; the message thread then sends them
+    // the value that stands. Only this flag consumes the parameters' own, so a
+    // refusal is never collected before its notification has gone out.
+    std::atomic<bool> nonFiniteSent { false };
+
+    // The host's bypass, delayed by the reported latency and fed on every
+    // processed block so that switching to it stays in step (BypassDelay.h).
+    BypassDelay bypassDelay;
+
+    // The switch into and out of bypass, and the other path's audio while it
+    // crossfades -- the engine's while bypassed, the dry one coming back.
+    // Both sized in prepare; the audio thread's.
+    BypassCrossfade bypassFade;
+    juce::AudioBuffer<float> otherPath;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SingleModuleProcessor)
 };

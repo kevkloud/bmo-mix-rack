@@ -217,6 +217,16 @@ public:
         ramp.setTarget (1.0f);
     }
 
+    /** The output has just been silent for a reason this could not fade --
+        a block the caller could not process at all -- so start from zero
+        and fade back up, as after changed(). Nothing pending afterwards. */
+    void restartFromSilence() noexcept
+    {
+        pending = false;
+        ramp.snap (0.0f);
+        ramp.setTarget (1.0f);
+    }
+
     float next() noexcept         { return ramp.next(); }
     float value() const noexcept  { return ramp.value(); }
     bool  isPending() const noexcept { return pending; }

@@ -21,12 +21,20 @@ public:
     virtual bool restoreState (const juce::XmlElement&) = 0;
 
     virtual void resetToDefaults() = 0;
+
+    /** True if every factory entry's `apply` sets the whole state by itself,
+        so a factory load can skip `resetToDefaults`. The rack's do -- a rack
+        preset is a whole chain -- and resetting first rebuilt the chain
+        twice, once empty, with audio running between the two. A module's
+        factory presets name only the values they change, so it keeps the
+        default, false. */
+    virtual bool factoryPresetsAreWhole() const { return false; }
 };
 
 struct FactoryEntry
 {
     juce::String name;
-    std::function<void()> apply;    ///< runs after resetToDefaults()
+    std::function<void()> apply;    ///< runs after resetToDefaults(), unless the target's are whole
 };
 
 /** Left in a preset folder once the copy from an older name has run. Not a

@@ -14,6 +14,7 @@
 */
 
 #include "TestUtil.h"
+#include "RackGoldenState.h"
 #include "core/product/SingleModuleProcessor.h"
 #include "core/rack/RackEditor.h"
 #include "products/rack/Product.h"
@@ -121,7 +122,7 @@ namespace
     {
         std::vector<juce::String> out;
         for (int s = 0; s < rack.getNumModules(); ++s)
-            out.push_back (rack.getModuleAt (s)->id);
+            out.push_back (rack.getModuleAt (s) != nullptr ? juce::String (rack.getModuleAt (s)->id) : juce::String ("?"));
         return out;
     }
 
@@ -227,6 +228,115 @@ namespace
                                         : nullptr)
                                   : xml.get();
         return params != nullptr ? params->getStringAttribute (bmo::kViewAttribute, "<none>") : "<none>";
+    }
+
+    //== A chain edit while audio runs =========================================
+    // Two racks fed the same signal: `edited` starts from one chain and is
+    // edited mid-stream; `reference` holds the chain the edit arrives at from
+    // the first block. A module the edit does not remove or replace keeps its
+    // engine, so once the dip is over the two must agree to the sample.
+    constexpr double kEditRate  = 48000.0;
+    constexpr int    kEditBlock = 512;
+
+    struct EditRun
+    {
+        float steadyStep = 0.0f, steadyPeak = 0.0f;   // the 20 blocks before the edit
+        float worstStep  = 0.0f, worstPeak  = 0.0f;   // every block from the edit on
+        int   settledAt  = 0;                         // samples after the edit until edited == reference for good
+        int   latencyBefore = 0, latencyAfter = 0;
+        int   nearAt = 0;                             // the same, to within 1e-4 (-80 dBFS) rather than to the bit
+    };
+
+    /** A 220 Hz sine at -18 dBFS peak, the same in both channels. With `tail`
+        it stops after 100 blocks (1.07 s), so the edit lands in the ringing of
+        a delay or a reverb rather than on a held note. */
+    EditRun runEdit (RackProcessor& edited, RackProcessor& reference,
+                     const std::function<void()>& edit, bool tail,
+                     double rate = kEditRate, int block = kEditBlock, double stallMs = 0.0)
+    {
+        // The same stretches of time at any rate and block size: 1.6 s before
+        // the edit, the last 213 ms of it steady, 427 ms after it.
+        const auto f = (rate / (double) block) / (kEditRate / (double) kEditBlock);
+        const int pre = (int) std::lround (150 * f), steadyBlocks = (int) std::lround (20 * f),
+                  post = (int) std::lround (40 * f), stopAt = (int) std::lround (100 * f);
+
+        for (auto* r : { &edited, &reference })
+        {
+            r->setPlayConfigDetails (2, 2, rate, block);
+            r->prepareToPlay (rate, block);
+        }
+
+        EditRun run;
+        run.latencyBefore = edited.getLatencySamples();
+
+        juce::AudioBuffer<float> a (2, block), b (2, block);
+        juce::MidiBuffer midi;
+        float prev[2] {};
+        long long n = 0;
+        int lastDiff = -1;
+        int lastFar = -1;
+
+        for (int k = 0; k < pre + post; ++k)
+        {
+            for (int i = 0; i < block; ++i, ++n)
+            {
+                const auto v = tail && k >= stopAt ? 0.0f
+                             : 0.125f * (float) std::sin (2.0 * juce::MathConstants<double>::pi * 220.0 * (double) n / rate);
+                for (int ch = 0; ch < 2; ++ch)
+                {
+                    a.setSample (ch, i, v);
+                    b.setSample (ch, i, v);
+                }
+            }
+
+            if (k == pre)
+            {
+                // A host may leave a gap before the block after an edit -- a
+                // loaded machine, a debugger -- and the result must not care.
+                if (stallMs > 0.0)
+                    std::this_thread::sleep_for (std::chrono::microseconds ((long long) (stallMs * 1000.0)));
+
+                edit();
+            }
+
+            edited.processBlock (a, midi);
+            reference.processBlock (b, midi);
+
+            for (int ch = 0; ch < 2; ++ch)
+            {
+                for (int i = 0; i < block; ++i)
+                {
+                    const auto x = a.getSample (ch, i);
+                    const auto step = std::abs (x - prev[ch]);
+                    prev[ch] = x;
+
+                    if (k >= pre - steadyBlocks && k < pre)
+                    {
+                        run.steadyStep = juce::jmax (run.steadyStep, step);
+                        run.steadyPeak = juce::jmax (run.steadyPeak, std::abs (x));
+                    }
+                    else if (k >= pre)
+                    {
+                        run.worstStep = juce::jmax (run.worstStep, step);
+                        run.worstPeak = juce::jmax (run.worstPeak, std::abs (x));
+
+                        if (x != b.getSample (ch, i))
+                            lastDiff = juce::jmax (lastDiff, (k - pre) * block + i);
+
+                        const auto diff = std::abs (x - b.getSample (ch, i));
+
+                        if (diff > 1.0e-4f)
+                            lastFar = juce::jmax (lastFar, (k - pre) * block + i);
+                    }
+                }
+            }
+        }
+
+        juce::MessageManager::getInstance()->runDispatchLoopUntil (20);
+        run.latencyAfter = edited.getLatencySamples();
+        run.settledAt = lastDiff + 1;
+        run.nearAt = lastFar + 1;
+        return run;
     }
 }
 
@@ -468,7 +578,8 @@ int main()
         check (rack->getSlotParameter (1, bmo::eq::Index::hpfFreq).getCurrentValueAsText() == "70 Hz",
                "the host lane reads the restored value");
 
-        // A module this build does not know is dropped and the chain closes.
+        // A module this build does not know keeps its slot, so the next
+        // module keeps its own (see "A module this build does not have" below).
         {
             juce::XmlElement future ("RACK");
             future.setAttribute ("stateVersion", 1);
@@ -483,7 +594,7 @@ int main()
 
             auto r = createRack();
             r->setStateInformation (block.getData(), (int) block.getSize());
-            check (chainIds (*r) == std::vector<juce::String> { "util" }, "an unknown module is dropped");
+            check (chainIds (*r) == std::vector<juce::String> { "?", "util" }, "an unknown module keeps its slot");
         }
     }
 
@@ -609,10 +720,16 @@ int main()
 
         checkClose (buffer.getSample (0, 511), 0.25, 0.005, "two -6 dB utils in series give -12 dB");
 
-        // An empty rack is a wire.
+        // An empty rack is a wire, once the edit that emptied it has dipped
+        // through: two blocks, down and back up (kEditDipMs each way).
         rack->clearChain();
-        juce::FloatVectorOperations::fill (buffer.getWritePointer (0), 0.7f, 512);
-        rack->processBlock (buffer, midi);
+
+        for (int b = 0; b < 3; ++b)
+        {
+            juce::FloatVectorOperations::fill (buffer.getWritePointer (0), 0.7f, 512);
+            rack->processBlock (buffer, midi);
+        }
+
         checkClose (buffer.getSample (0, 100), 0.7, 1.0e-6, "an empty rack passes audio");
     }
 
@@ -889,6 +1006,881 @@ int main()
 
         sandbox.deleteRecursively();
         bmo::PresetManager::setDirectoryForTesting ({});
+    }
+
+    //== A state capture never races a chain edit =============================
+    // A host may ask for the session from any thread. QA's probe on
+    // 2026-10-03: getStateInformation on a worker thread while the message
+    // thread made 3000 moveModule calls crashed the process. Twenty rounds of
+    // the same, and every capture must be a whole chain -- one of the four
+    // rotations a move from the first slot to the last makes -- never a torn
+    // one.
+    {
+        const std::vector<juce::String> order { "util", "eq", "sat", "dim" };
+        std::atomic<int> saves { 0 }, torn { 0 };
+
+        for (int round = 0; round < 20; ++round)
+        {
+            auto rack = createRack();
+
+            for (const auto& id : order)
+                rack->addModule (*rack->findModule (id));
+
+            std::atomic<bool> stop { false };
+
+            std::thread worker ([&]
+            {
+                while (! stop)
+                {
+                    juce::MemoryBlock block;
+                    rack->getStateInformation (block);
+                    auto xml = juce::AudioProcessor::getXmlFromBinary (block.getData(), (int) block.getSize());
+
+                    std::vector<juce::String> ids;
+
+                    if (xml != nullptr)
+                        for (auto* e : xml->getChildWithTagNameIterator (RackProcessor::kSlotTag))
+                            ids.push_back (e->getStringAttribute ("module"));
+
+                    bool whole = false;
+
+                    for (size_t r = 0; r < order.size() && ! whole && ids.size() == order.size(); ++r)
+                    {
+                        whole = true;
+
+                        for (size_t i = 0; i < order.size(); ++i)
+                            whole = whole && ids[i] == order[(i + r) % order.size()];
+                    }
+
+                    if (! whole)
+                        ++torn;
+
+                    ++saves;
+                }
+            });
+
+            for (int i = 0; i < 3000; ++i)
+                rack->moveModule (0, 3);
+
+            stop = true;
+            worker.join();
+        }
+
+        check (saves > 0, "the worker captured the state while the chain was edited");
+        check (torn == 0, juce::String (torn.load()) + " of " + juce::String (saves.load())
+                              + " captures taken during chain edits were not a whole chain");
+    }
+
+    //== A non-finite value in a saved state takes the default =================
+    // QA's probe on 2026-10-03: value="nan" on BMO Util's gain left the lane
+    // reading "nan dB" and the slot silent on every block, in the rack and
+    // standalone alike. A NaN in a session or a preset file is now the
+    // parameter's default; "inf" and "-inf" still clamp to the rails, +24 and
+    // -24 dB, as they did. Every other value in the same element still lands.
+    {
+        auto& util = bmo::util::module();
+        const auto defaultGain = util.specs[(size_t) bmo::util::Index::gain].def;
+
+        const auto params = [] (const char* gain)
+        {
+            auto p = std::make_unique<juce::XmlElement> (bmo::ParamSet::kRootTag);
+            p->setAttribute ("stateVersion", 1);
+
+            auto* g = p->createNewChildElement (bmo::ParamSet::kParamTag);
+            g->setAttribute ("id", bmo::util::kGain);
+            g->setAttribute ("value", gain);
+
+            auto* w = p->createNewChildElement (bmo::ParamSet::kParamTag);
+            w->setAttribute ("id", bmo::util::kWidth);
+            w->setAttribute ("value", 140.0);
+            return p;
+        };
+
+        const auto peakOver50Blocks = [] (juce::AudioProcessor& p)
+        {
+            p.setPlayConfigDetails (2, 2, 48000.0, 512);
+            p.prepareToPlay (48000.0, 512);
+
+            juce::AudioBuffer<float> b (2, 512);
+            juce::MidiBuffer midi;
+            float peak = 0.0f;
+
+            for (int k = 0; k < 50; ++k)
+            {
+                for (int i = 0; i < 512; ++i)
+                    for (int ch = 0; ch < 2; ++ch)
+                        b.setSample (ch, i, 0.125f * (float) std::sin (2.0 * juce::MathConstants<double>::pi * 220.0 * (k * 512 + i) / 48000.0));
+
+                p.processBlock (b, midi);
+                peak = juce::jmax (peak, b.getMagnitude (0, 512));
+            }
+
+            return peak;
+        };
+
+        const struct { const char* value; float expected; } kCases[] {
+            { "nan", defaultGain }, { "inf", 24.0f }, { "-inf", -24.0f },
+        };
+
+        for (const auto& c : kCases)
+        {
+            const juce::String what = juce::String ("gain value=\"") + c.value + "\"";
+
+            // The rack, from a session.
+            {
+                juce::XmlElement state ("RACK");
+                state.setAttribute ("stateVersion", 1);
+                auto* slot = state.createNewChildElement (RackProcessor::kSlotTag);
+                slot->setAttribute ("index", 0);
+                slot->setAttribute ("module", "util");
+                slot->setAttribute ("schema", 1);
+                slot->addChildElement (params (c.value).release());
+
+                juce::MemoryBlock block;
+                juce::AudioProcessor::copyXmlToBinary (state, block);
+
+                auto rack = createRack();
+                rack->setStateInformation (block.getData(), (int) block.getSize());
+                auto& lane = rack->getSlotParameter (0, bmo::util::Index::gain);
+
+                checkClose (rack->getEngineAt (0)->params().getReal (bmo::util::kGain), c.expected, 1.0e-4,
+                            "rack, " + what + ": the gain");
+                check (! lane.getCurrentValueAsText().containsIgnoreCase ("nan"),
+                       "rack, " + what + ": the lane reads '" + lane.getCurrentValueAsText() + "'");
+                checkClose (rack->getEngineAt (0)->params().getReal (bmo::util::kWidth), 140.0, 0.01,
+                            "rack, " + what + ": the element's other values still land");
+                check (peakOver50Blocks (*rack) > 0.005f, "rack, " + what + ": the slot passes audio");
+            }
+
+            // Standalone, from a session.
+            {
+                bmo::SingleModuleProcessor proc (util, bmo::products::rackInfo());
+                juce::MemoryBlock block;
+                juce::AudioProcessor::copyXmlToBinary (*params (c.value), block);
+                proc.setStateInformation (block.getData(), (int) block.getSize());
+
+                checkClose (proc.getEngine().params().getReal (bmo::util::kGain), c.expected, 1.0e-4,
+                            "standalone, " + what + ": the gain");
+                check (! proc.getEngine().params().param (bmo::util::Index::gain).getCurrentValueAsText().containsIgnoreCase ("nan"),
+                       "standalone, " + what + ": the parameter does not read nan");
+                checkClose (proc.getEngine().params().getReal (bmo::util::kWidth), 140.0, 0.01,
+                            "standalone, " + what + ": the element's other values still land");
+                check (peakOver50Blocks (proc) > 0.005f, "standalone, " + what + ": the module passes audio");
+            }
+        }
+    }
+
+    //== Every chain edit tells the host the session changed ===================
+    // The chain and the views are not parameters, so a host only marks a
+    // session dirty for them if it is told the non-parameter state changed.
+    // QA's probe on 2026-10-03: adding to an empty rack, removing the last
+    // module and toggling a view sent nothing of the kind -- 0 of 7 cases --
+    // and a factory rack preset rebuilt the chain twice, once empty.
+    //
+    // But only the user's edits: a restore -- a host opening a session, a
+    // rack preset -- is not a change to the session, and a host told it is
+    // marks the project modified as it opens (the review of 2026-10-03: one
+    // such notification per setStateInformation). So each edit tells the host
+    // exactly once and a restore never does.
+    {
+        struct HostSide final : juce::AudioProcessorListener
+        {
+            int nonParameterState = 0;
+            void audioProcessorParameterChanged (juce::AudioProcessor*, int, float) override {}
+            void audioProcessorChanged (juce::AudioProcessor*, const ChangeDetails& d) override
+            {
+                nonParameterState += d.nonParameterStateChanged ? 1 : 0;
+            }
+        };
+
+        struct Rebuilds final : RackProcessor::Listener
+        {
+            int count = 0;
+            void rackChainWillChange() override { ++count; }
+            void rackChainChanged() override {}
+        };
+
+        const auto sandbox = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                                 .getChildFile ("bmo-rack-notify-tests");
+        sandbox.deleteRecursively();
+        bmo::PresetManager::setDirectoryForTesting (sandbox);
+
+        auto rack = createRack();
+        HostSide host;
+        rack->addListener (&host);
+
+        const auto told = [&] (const std::function<void()>& edit)
+        {
+            host.nonParameterState = 0;
+            edit();
+            juce::MessageManager::getInstance()->runDispatchLoopUntil (20);
+            return host.nonParameterState;
+        };
+
+        const auto expectTold = [&] (const std::function<void()>& edit, const juce::String& what, int times = 1)
+        {
+            const auto n = told (edit);
+            check (n == times, what + " tells the host the non-parameter state changed "
+                                   + juce::String (times) + " time(s), told it " + juce::String (n));
+        };
+
+        expectTold ([&] { rack->addModule (*rack->findModule ("util")); }, "adding to an empty rack");
+        expectTold ([&] { rack->addModule (*rack->findModule ("eq")); }, "adding a module");
+        expectTold ([&] { rack->addModule (*rack->findModule ("deq")); }, "adding BMO DEQ");
+        expectTold ([&] { rack->moveModule (0, 2); }, "moving a module");
+        expectTold ([&] { rack->setSlotExpanded (1, ! rack->isSlotExpanded (1)); }, "toggling a slot's view");
+        expectTold ([&] { rack->setModule (0, *rack->findModule ("sat")); }, "replacing a module");
+        expectTold ([&] { rack->removeModule (0); rack->removeModule (0); }, "removing two", 2);
+        expectTold ([&] { rack->removeModule (0); }, "removing the last module");
+
+        // A factory rack preset is one rebuild, so the audio never runs an
+        // empty chain on the way to the preset's.
+        Rebuilds rebuilds;
+        rack->addRackListener (&rebuilds);
+        expectTold ([&] { rack->getPresets().loadFactory (1); }, "loading a factory rack preset", 0);
+        check (rebuilds.count == 1, "a factory rack preset rebuilds the chain once, not "
+                                        + juce::String (rebuilds.count) + " times");
+        check (rack->getNumModules() > 0, "and leaves the preset's chain");
+        rack->removeRackListener (&rebuilds);
+
+        // A host opening a session, on a fresh instance and on this one.
+        juce::MemoryBlock session;
+        rack->getStateInformation (session);
+        expectTold ([&] { rack->setStateInformation (session.getData(), (int) session.getSize()); },
+                    "restoring a session", 0);
+
+        auto fresh = createRack();
+        HostSide freshHost;
+        fresh->addListener (&freshHost);
+        fresh->setStateInformation (session.getData(), (int) session.getSize());
+        juce::MessageManager::getInstance()->runDispatchLoopUntil (20);
+        check (freshHost.nonParameterState == 0, "a fresh rack opening a session is told it changed "
+                                                     + juce::String (freshHost.nonParameterState) + " time(s), not 0");
+        fresh->removeListener (&freshHost);
+
+        rack->removeListener (&host);
+        sandbox.deleteRecursively();
+        bmo::PresetManager::setDirectoryForTesting ({});
+    }
+
+    //== A session saved before this build plays exactly as it did ============
+    // The text was written by the build at 0e4bdb0, before chain edits kept
+    // their engines (RackGoldenState.h). Restoring it must give the same chain
+    // and the same values, and saving it again must give the same text back.
+    {
+        auto golden = juce::parseXML (juce::String (golden::kRackState0e4bdb0));
+        check (golden != nullptr, "the golden session parses");
+
+        if (golden != nullptr)
+        {
+            juce::MemoryBlock block;
+            juce::AudioProcessor::copyXmlToBinary (*golden, block);
+
+            auto rack = createRack();
+            rack->setStateInformation (block.getData(), (int) block.getSize());
+            juce::MessageManager::getInstance()->runDispatchLoopUntil (50);
+
+            check (chainIds (*rack) == std::vector<juce::String> { "eq", "sat", "deq", "opto", "dwell", "fetcomp", "reverb", "util" },
+                   "the golden session restores its chain");
+            check (rack->isSlotExpanded (2), "and BMO DEQ's view");
+
+            juce::MemoryBlock again;
+            rack->getStateInformation (again);
+            auto resaved = juce::AudioProcessor::getXmlFromBinary (again.getData(), (int) again.getSize());
+            const auto format = juce::XmlElement::TextFormat().withoutHeader();
+
+            check (resaved != nullptr && resaved->toString (format) == golden->toString (format),
+                   "re-saving the golden session gives back the same text, every value included");
+        }
+    }
+
+    //== A chain edit keeps every engine it does not remove or replace =========
+    // QA's figures on 2026-10-03, before this: adding a utility module after
+    // a compressor rebuilt the compressor too, a sample step of 7.97x (FET),
+    // 12.94x (levelling) and 45.60x (LTV, a block at -0.1 dBFS against a
+    // -18 dBFS sine) the steady signal's; a delay's echoes at -21.3 dBFS and a
+    // reverb's tail were cut to digital zero. Now the untouched module runs on
+    // through the edit, the output dips to silence and back around it, and
+    // after the dip it is the sample a rack that had the new chain all along
+    // would give.
+    {
+        struct Kept
+        {
+            const char* id;
+            std::vector<std::pair<const char*, float>> settings;
+            bool tail;
+        };
+
+        const Kept kKept[] {
+            { "fetcomp", { { "input", 30.0f } }, false },
+            { "opto",    { { "crush", 90.0f } }, false },
+            { "ltvcomp", { { "amount", 80.0f } }, false },
+            { "dwell",   { { "feedback", 60.0f }, { "mix", 100.0f } }, true },
+            // On a held note: on this branch BMO Linger's late field is not
+            // in yet, so its output is the early reflections and nothing
+            // rings past them for an edit to land in.
+            { "reverb",  { { "mix", 100.0f } }, false },
+        };
+
+        struct Edit
+        {
+            const char* what;
+            std::vector<const char*> before, after;     // "K" is the kept module
+            std::function<void (RackProcessor&)> apply;
+        };
+
+        const Edit kEdits[] {
+            { "a utility module added after it", { "K" },         { "K", "util" },
+              [] (RackProcessor& r) { r.addModule (*r.findModule ("util")); } },
+            { "the utility module before it removed", { "util", "K" }, { "K" },
+              [] (RackProcessor& r) { r.removeModule (0); } },
+            { "it moved ahead of the utility module", { "util", "K" }, { "K", "util" },
+              [] (RackProcessor& r) { r.moveModule (0, 1); } },
+            { "the utility module after it replaced", { "K", "util" }, { "K", "util" },
+              [] (RackProcessor& r) { r.setModule (1, *r.findModule ("util")); } },
+            { "BMO EQ at 2x after it removed, latency and all", { "K", "eq" }, { "K" },
+              [] (RackProcessor& r) { r.removeModule (1); } },
+        };
+
+        const auto build = [&] (const Kept& kept, const std::vector<const char*>& ids)
+        {
+            auto rack = createRack();
+
+            for (int s = 0; s < (int) ids.size(); ++s)
+            {
+                const auto isKept = juce::String (ids[(size_t) s]) == "K";
+                rack->addModule (*rack->findModule (isKept ? kept.id : ids[(size_t) s]));
+
+                auto& p = rack->getEngineAt (s)->params();
+
+                if (isKept)
+                    for (const auto& [id, v] : kept.settings)
+                        p.setReal (id, v);
+                else if (juce::String (ids[(size_t) s]) == "eq")
+                    p.setReal (bmo::eq::kOversampling, 1.0f);
+            }
+
+            juce::MessageManager::getInstance()->runDispatchLoopUntil (20);
+            return rack;
+        };
+
+        const auto limit = (int) std::lround (0.030 * kEditRate);
+
+        for (const auto& kept : kKept)
+        {
+            for (const auto& e : kEdits)
+            {
+                auto edited    = build (kept, e.before);
+                auto reference = build (kept, e.after);
+                const auto run = runEdit (*edited, *reference, [&] { e.apply (*edited); }, kept.tail);
+
+                const juce::String where = juce::String (kept.id) + ", " + e.what + ": ";
+                const auto ratio = run.steadyStep > 0.0f ? run.worstStep / run.steadyStep : 0.0f;
+                const auto overDb = juce::Decibels::gainToDecibels (run.worstPeak, -240.0f)
+                                  - juce::Decibels::gainToDecibels (run.steadyPeak, -240.0f);
+
+                check (run.steadyPeak > 1.0e-3f, where + "the module is audible before the edit, peak "
+                                                     + juce::String (run.steadyPeak, 6));
+                check (ratio < 1.5f, where + "largest sample step " + juce::String (ratio, 2)
+                                         + "x the steady signal's, over the 1.5x bound");
+                check (overDb <= 1.0f, where + "a block " + juce::String (overDb, 2)
+                                           + " dB over the steady peak, over the 1 dB bound");
+                check (run.settledAt <= limit, where + "edited and never-edited racks agree only "
+                                                   + juce::String (run.settledAt) + " samples ("
+                                                   + juce::String (run.settledAt * 1000.0 / kEditRate, 1)
+                                                   + " ms) after the edit, over the 30 ms bound");
+                check (run.latencyAfter == reference->getLatencySamples(),
+                       where + "the reported latency is the new chain's sum, "
+                           + juce::String (run.latencyAfter) + " vs " + juce::String (reference->getLatencySamples()));
+            }
+        }
+    }
+
+    //== A module with latency arrives warm ====================================
+    // The review of 2026-10-03, on the commit before this: a module added or
+    // swapped in mid-play was swapped in cold, so its latency's worth of zeros
+    // ate into the fade-in and then the input jumped in. With the FET
+    // compressor kept in slot 1 on a 220 Hz sine at -18 dBFS, adding BMO EQ
+    // at 2x stepped 2.04 to 5.12x the steady signal's largest step, BMO EQ at
+    // 8x 3.18 to 7.89x, BMO Saturator at 2x 2.70 to 6.66x. Now an arriving
+    // engine runs on what its slot will be fed while the output fades out, so
+    // at the swap it is mid-stream. Add, replace and move, at two rates and
+    // two block sizes.
+    {
+        struct Arrival { const char* id; float oversampling; };
+        const Arrival kArrivals[] { { "eq", 1.0f }, { "eq", 3.0f }, { "sat", 1.0f } };
+
+        struct Edit
+        {
+            const char* what;
+            std::vector<const char*> before, after;     // "X" is the arriving module
+            std::function<void (RackProcessor&, const Arrival&)> apply;
+        };
+
+        const auto arrive = [] (RackProcessor& r, int slot, const Arrival& x)
+        {
+            r.getEngineAt (slot)->params().setReal ("oversampling", x.oversampling);
+        };
+
+        const Edit kEdits[] {
+            { "added after it", { "fetcomp" }, { "fetcomp", "X" },
+              [&] (RackProcessor& r, const Arrival& x) { r.addModule (*r.findModule (x.id)); arrive (r, 1, x); } },
+            { "swapped in for the utility module after it", { "fetcomp", "util" }, { "fetcomp", "X" },
+              [&] (RackProcessor& r, const Arrival& x) { r.setModule (1, *r.findModule (x.id)); arrive (r, 1, x); } },
+            { "moved ahead of the utility module", { "fetcomp", "util", "X" }, { "fetcomp", "X", "util" },
+              [&] (RackProcessor& r, const Arrival&) { r.moveModule (2, 1); } },
+        };
+
+        const auto build = [&] (const Arrival& x, const std::vector<const char*>& ids)
+        {
+            auto rack = createRack();
+
+            for (int s = 0; s < (int) ids.size(); ++s)
+            {
+                const auto isX = juce::String (ids[(size_t) s]) == "X";
+                rack->addModule (*rack->findModule (isX ? x.id : ids[(size_t) s]));
+
+                if (isX)
+                    arrive (*rack, s, x);
+                else if (juce::String (ids[(size_t) s]) == "fetcomp")
+                    rack->getEngineAt (s)->params().setReal ("input", 30.0f);
+            }
+
+            juce::MessageManager::getInstance()->runDispatchLoopUntil (20);
+            return rack;
+        };
+
+        for (const auto& x : kArrivals)
+            for (const auto& e : kEdits)
+                for (const auto rate : { 48000.0, 96000.0 })
+                    for (const auto block : { 32, 512 })
+                    {
+                        auto edited    = build (x, e.before);
+                        auto reference = build (x, e.after);
+                        const auto run = runEdit (*edited, *reference, [&] { e.apply (*edited, x); }, false, rate, block);
+
+                        const juce::String where = juce::String (x.id) + " at " + juce::String (1 << (int) x.oversampling)
+                                                 + "x " + e.what + ", " + juce::String (rate / 1000.0) + " kHz, block "
+                                                 + juce::String (block) + ": ";
+                        const auto ratio = run.steadyStep > 0.0f ? run.worstStep / run.steadyStep : 0.0f;
+                        const auto overDb = juce::Decibels::gainToDecibels (run.worstPeak, -240.0f)
+                                          - juce::Decibels::gainToDecibels (run.steadyPeak, -240.0f);
+                        const auto settledMs = run.settledAt * 1000.0 / rate;
+                        const auto nearMs    = run.nearAt * 1000.0 / rate;
+                        const auto moved     = e.after.size() == 3;
+
+                        check (ratio < 1.5f, where + "largest sample step " + juce::String (ratio, 2)
+                                                 + "x the steady signal's, over the 1.5x bound");
+                        check (overDb <= 1.0f, where + "a block " + juce::String (overDb, 2)
+                                                   + " dB over the steady peak, over the 1 dB bound");
+
+                        // A moved engine is the same engine, so the rack is
+                        // the never-edited one to the bit once the dip is
+                        // over. An arriving one is not: 5 ms of warming
+                        // cannot give it the history of an engine that has run
+                        // since the start, and what remains decays at the
+                        // module's own rate -- BMO EQ by about a decade per
+                        // 95 ms (1e-3 at 52 ms, 1e-4 at 191 ms, 1e-6 at
+                        // 376 ms), BMO Saturator faster. So the bound for an
+                        // arrival is agreement within 1e-4, 73 dB under the
+                        // signal, by 250 ms.
+                        if (moved)
+                            check (settledMs <= 30.0, where + "sample-exact with a never-edited rack only "
+                                                          + juce::String (settledMs, 1) + " ms after the edit, over 30 ms");
+                        else
+                            check (nearMs <= 250.0, where + "within 1e-4 of a never-edited rack only "
+                                                        + juce::String (nearMs, 1) + " ms after the edit, over 250 ms");
+                    }
+    }
+
+    //== An edit after a gap in the host's blocks still dips ===================
+    // The review of 2026-10-03: whether an edit dipped or was put in place at
+    // once depended on the wall clock -- with 250 ms between the last block
+    // and the edit, the rack decided no audio was running and swapped with no
+    // dip, 36.9x the steady step, so the suite would fail on a loaded machine.
+    // Now a rack that has had a block since its last prepare leaves the swap
+    // to the audio thread whatever the clock says, and the same edit dips.
+    {
+        const auto build = [&] (std::vector<const char*> ids)
+        {
+            auto rack = createRack();
+
+            for (int s = 0; s < (int) ids.size(); ++s)
+            {
+                rack->addModule (*rack->findModule (ids[(size_t) s]));
+
+                if (juce::String (ids[(size_t) s]) == "fetcomp")
+                    rack->getEngineAt (s)->params().setReal ("input", 30.0f);
+                else
+                    rack->getEngineAt (s)->params().setReal ("oversampling", 1.0f);
+            }
+
+            juce::MessageManager::getInstance()->runDispatchLoopUntil (20);
+            return rack;
+        };
+
+        auto edited    = build ({ "fetcomp", "eq" });
+        auto reference = build ({ "fetcomp" });
+        const auto run = runEdit (*edited, *reference, [&] { edited->removeModule (1); }, false,
+                                  kEditRate, kEditBlock, 250.0);
+        const auto ratio = run.steadyStep > 0.0f ? run.worstStep / run.steadyStep : 0.0f;
+
+        check (ratio < 1.5f, "an edit 250 ms after the last block steps " + juce::String (ratio, 2)
+                                 + "x the steady signal's: it did not dip");
+        check (run.settledAt * 1000.0 / kEditRate <= 30.0,
+               "and is over, sample-exact, within 30 ms, not " + juce::String (run.settledAt * 1000.0 / kEditRate, 1));
+    }
+
+    //== A NaN or an infinity from the host is not a value =====================
+    // The review of 2026-10-03: a host's setValue (NaN) on a rack lane was
+    // stored -- the lane read "nan dB", the slot's output was 0 for as long as
+    // it stayed, and the saved state then carried value="nan". The same on a
+    // standalone parameter. A NaN is now ignored where it comes in, on
+    // whatever thread, and the value set immediately before stands: on a rack
+    // lane, and on a standalone parameter (the framework's own class, through
+    // HostValueGuard) before setValue returns -- until 2026-10-04 that one
+    // was put back only after the next block and the message loop, so it came
+    // back as the last value a block had read, and a session saved in between
+    // left it out. An infinity goes to the rail it points at, in both.
+    {
+        const float notValues[] { std::numeric_limits<float>::quiet_NaN(),
+                                  std::numeric_limits<float>::infinity(),
+                                  -std::numeric_limits<float>::infinity() };
+
+        const auto peak = [] (juce::AudioProcessor& p, int blocks)
+        {
+            juce::AudioBuffer<float> b (2, 512);
+            juce::MidiBuffer midi;
+            float pk = 0.0f;
+
+            for (int k = 0; k < blocks; ++k)
+            {
+                for (int i = 0; i < 512; ++i)
+                    for (int ch = 0; ch < 2; ++ch)
+                        b.setSample (ch, i, 0.125f * (float) std::sin (2.0 * juce::MathConstants<double>::pi * 220.0 * (k * 512 + i) / 48000.0));
+
+                p.processBlock (b, midi);
+                pk = juce::jmax (pk, b.getMagnitude (0, 512));
+            }
+
+            return pk;
+        };
+
+        const auto savedGain = [] (juce::AudioProcessor& p, bool rack)
+        {
+            juce::MemoryBlock block;
+            p.getStateInformation (block);
+            auto xml = juce::AudioProcessor::getXmlFromBinary (block.getData(), (int) block.getSize());
+            const juce::XmlElement* params = xml.get();
+
+            if (rack && xml != nullptr)
+                if (auto* slot = xml->getChildByName (RackProcessor::kSlotTag))
+                    params = slot->getChildByName (bmo::ParamSet::kRootTag);
+
+            if (params != nullptr)
+                for (auto* e : params->getChildWithTagNameIterator (bmo::ParamSet::kParamTag))
+                    if (e->getStringAttribute ("id") == bmo::util::kGain)
+                        return e->getStringAttribute ("value");
+
+            return juce::String ("<none>");
+        };
+
+        for (const auto bad : notValues)
+        {
+            const juce::String what = juce::String ("host value ") + juce::String (bad);
+
+            // The rack.
+            {
+                auto rack = createRack();
+                rack->addModule (*rack->findModule ("util"));
+                rack->setPlayConfigDetails (2, 2, 48000.0, 512);
+                rack->prepareToPlay (48000.0, 512);
+
+                auto& lane = rack->getSlotParameter (0, bmo::util::Index::gain);
+                lane.setValue (0.25f);                  // -12 dB
+                peak (*rack, 4);
+                lane.setValue (bad);
+
+                // Since 2026-10-04 an infinity goes to the rail it points at
+                // in both products; a NaN keeps the value.
+                const auto expected = std::isnan (bad) ? 0.25f : (bad > 0.0f ? 1.0f : 0.0f);
+                checkClose (lane.getValue(), expected, 1.0e-6, "rack, " + what + ": the lane holds " + juce::String (expected));
+                check (! lane.getCurrentValueAsText().containsIgnoreCase ("nan"),
+                       "rack, " + what + ": the lane reads '" + lane.getCurrentValueAsText() + "'");
+                check (savedGain (*rack, true).getFloatValue() == lane.convertFrom0to1 (expected),
+                       "rack, " + what + ": the session saves gain " + savedGain (*rack, true));
+
+                if (std::isnan (bad))
+                    checkClose (peak (*rack, 50), 0.125 * juce::Decibels::decibelsToGain (-12.0), 0.002,
+                                "rack, " + what + ": the slot still plays at -12 dB");
+            }
+
+            // Standalone, at the moment it arrives: no block, no message loop.
+            {
+                bmo::SingleModuleProcessor proc (bmo::util::module(), bmo::products::rackInfo());
+                proc.setPlayConfigDetails (2, 2, 48000.0, 512);
+                proc.prepareToPlay (48000.0, 512);
+
+                // QA's case: a block reads +6 dB, the host sets +12 dB, then
+                // the NaN arrives before the next block. +12 dB stands.
+                auto& param = proc.getEngine().params().param (bmo::util::Index::gain);
+                param.setValue (param.convertTo0to1 (6.0f));
+                peak (proc, 1);
+                param.setValue (param.convertTo0to1 (12.0f));
+                const auto twelve = param.getValue();
+                param.setValue (bad);
+
+                const auto expected = std::isnan (bad) ? twelve : (bad > 0.0f ? 1.0f : 0.0f);
+                checkClose (param.getValue(), expected, 1.0e-6,
+                            "standalone, " + what + ": the parameter holds " + juce::String (param.convertFrom0to1 (expected)) + " dB at once");
+                check (! param.getCurrentValueAsText().containsIgnoreCase ("nan"),
+                       "standalone, " + what + ": the parameter reads '" + param.getCurrentValueAsText() + "'");
+                check (savedGain (proc, false).getFloatValue() == param.convertFrom0to1 (expected),
+                       "standalone, " + what + ": a session saved now has gain " + savedGain (proc, false));
+
+                juce::MemoryBlock block;
+                proc.getStateInformation (block);
+                auto xml = juce::AudioProcessor::getXmlFromBinary (block.getData(), (int) block.getSize());
+                check (xml != nullptr && xml->getNumChildElements() == (int) bmo::util::module().specs.size(),
+                       "standalone, " + what + ": the session carries every parameter");
+            }
+
+            // A switch and a choice, standalone: the framework stores a
+            // switch's argument as it is, so an infinity is clamped here.
+            {
+                auto registryRack = createRack();
+                bmo::SingleModuleProcessor proc (*registryRack->findModule ("deq"), bmo::products::rackInfo());
+                auto& set = proc.getEngine().params();
+
+                for (const auto kind : { bmo::ParamKind::Bool, bmo::ParamKind::Choice })
+                    for (int i = 0; i < set.size(); ++i)
+                        if (set.spec (i).kind == kind)
+                        {
+                            auto& p = set.param (i);
+                            p.setValue (1.0f);
+                            p.setValue (bad);
+
+                            // Except a choice and a NaN: the framework's choice
+                            // rounds it to an index before storing anything, and
+                            // the round gives the first choice -- a finite value
+                            // no hook can tell from a host choosing it.
+                            // Measured 2026-10-04 on ICE QUEEN; the same before
+                            // this change. A rack lane keeps its value.
+                            const auto choiceNaN = kind == bmo::ParamKind::Choice && std::isnan (bad);
+                            const auto expected = choiceNaN ? 0.0f : (std::isnan (bad) || bad > 0.0f ? 1.0f : 0.0f);
+                            checkClose (p.getValue(), expected, 1.0e-6,
+                                        "standalone " + juce::String (set.spec (i).id) + ", " + what + ": holds " + juce::String (expected));
+                            break;
+                        }
+            }
+        }
+    }
+
+    //== A listener is sent the NaN once, and then the value that stands =======
+    // The framework's notifying setter is not virtual and hands every listener
+    // its argument, so a parameter that refuses a NaN cannot stop the NaN
+    // reaching its listeners -- an editor's attachments, the host's callback.
+    // Each product then sends them the value that stands, on the message
+    // thread, so the last value every listener holds is right. A host's
+    // NaN from the message thread and from another thread.
+    {
+        struct Recorder final : juce::AudioProcessorParameter::Listener
+        {
+            void parameterValueChanged (int, float v) override
+            {
+                const juce::ScopedLock sl (lock);
+                values.push_back (v);
+            }
+
+            void parameterGestureChanged (int, bool) override {}
+
+            juce::CriticalSection lock;
+            std::vector<float> values;
+        };
+
+        const auto exercise = [] (juce::RangedAudioParameter& p, const juce::String& who)
+        {
+            Recorder recorder;
+            p.addListener (&recorder);
+            p.setValueNotifyingHost (0.25f);
+            p.setValueNotifyingHost (std::numeric_limits<float>::quiet_NaN());
+            std::thread host ([&p] { p.setValueNotifyingHost (std::numeric_limits<float>::quiet_NaN()); });
+            host.join();
+            juce::MessageManager::getInstance()->runDispatchLoopUntil (50);
+            p.removeListener (&recorder);
+
+            int nonFinite = 0;
+            for (auto v : recorder.values)
+                nonFinite += std::isfinite (v) ? 0 : 1;
+
+            check (! recorder.values.empty() && recorder.values.back() == 0.25f,
+                   who + ": the last value a listener is sent is the one that stands, got "
+                       + juce::String (recorder.values.empty() ? -1.0f : recorder.values.back()));
+            check (nonFinite <= 2, who + ": a listener is sent each NaN at most once, sent " + juce::String (nonFinite));
+            checkClose (p.getValue(), 0.25, 1.0e-6, who + ": the parameter never took it");
+        };
+
+        auto rack = createRack();
+        rack->addModule (*rack->findModule ("util"));
+        exercise (rack->getSlotParameter (0, bmo::util::Index::gain), "rack lane");
+
+        bmo::SingleModuleProcessor proc (bmo::util::module(), bmo::products::rackInfo());
+        exercise (proc.getEngine().params().param (bmo::util::Index::gain), "standalone parameter");
+    }
+
+    //== A module this build does not have keeps its place =====================
+    // A later release will add modules, and a session it saved has to survive
+    // being opened and saved again by this one. Until 2026-10-04 a SLOT naming
+    // a module this build lacks was dropped and the chain closed up: the next
+    // slot's module took over the missing one's lanes and automation, and the
+    // module was gone from the session on the next save. Now the slot keeps
+    // its position with no engine: it passes audio through, its lanes stay
+    // generic and inert, its saved element is written back verbatim, and the
+    // editor shows a remove-only placeholder naming it.
+    {
+        auto later = std::make_unique<juce::XmlElement> (RackProcessor::kSlotTag);
+        later->setAttribute ("index", 1);
+        later->setAttribute ("module", "later_module");
+        later->setAttribute ("schema", 4);
+        later->setAttribute ("flavour", "something this build has never heard of");
+        auto* laterParams = later->createNewChildElement (bmo::ParamSet::kRootTag);
+        laterParams->setAttribute ("stateVersion", 4);
+        auto* lp = laterParams->createNewChildElement (bmo::ParamSet::kParamTag);
+        lp->setAttribute ("id", "tilt");
+        lp->setAttribute ("value", "0.3");
+        later->createNewChildElement ("FUTURE")->setAttribute ("thing", "1");
+        const auto laterText = later->toString (juce::XmlElement::TextFormat().withoutHeader().singleLine());
+
+        const auto slotWith = [] (int index, const char* module, const char* param, double value)
+        {
+            auto e = std::make_unique<juce::XmlElement> (RackProcessor::kSlotTag);
+            e->setAttribute ("index", index);
+            e->setAttribute ("module", module);
+            e->setAttribute ("schema", 1);
+            auto* p = e->createNewChildElement (bmo::ParamSet::kRootTag);
+            p->setAttribute ("stateVersion", 1);
+            auto* q = p->createNewChildElement (bmo::ParamSet::kParamTag);
+            q->setAttribute ("id", param);
+            q->setAttribute ("value", value);
+            return e;
+        };
+
+        juce::XmlElement session (RackProcessor::kRootTag);
+        session.setAttribute ("stateVersion", 1);
+        session.addChildElement (slotWith (0, "eq", bmo::eq::kHfGain, 3.0).release());
+        session.addChildElement (new juce::XmlElement (*later));
+        session.addChildElement (slotWith (2, "util", bmo::util::kGain, -6.0).release());
+
+        juce::MemoryBlock block;
+        juce::AudioProcessor::copyXmlToBinary (session, block);
+
+        auto rack = createRack();
+        rack->setStateInformation (block.getData(), (int) block.getSize());
+
+        const auto unknownSaved = [] (RackProcessor& r)
+        {
+            juce::MemoryBlock saved;
+            r.getStateInformation (saved);
+            auto xml = juce::AudioProcessor::getXmlFromBinary (saved.getData(), (int) saved.getSize());
+            juce::StringArray out;
+
+            if (xml != nullptr)
+                for (auto* e : xml->getChildWithTagNameIterator (RackProcessor::kSlotTag))
+                    out.add (e->getStringAttribute ("module") == "later_module"
+                                 ? e->toString (juce::XmlElement::TextFormat().withoutHeader().singleLine())
+                                 : e->getStringAttribute ("module"));
+
+            return out;
+        };
+
+        check (chainIds (*rack) == std::vector<juce::String> { "eq", "?", "util" },
+               "the unknown module keeps slot 2, between the two this build has");
+        check (rack->getSlotParameter (1, 0).getName (64) == "Slot 2 P01",
+               "its lanes stay generic, got '" + rack->getSlotParameter (1, 0).getName (64) + "'");
+        check (rack->getSlotParameter (2, 0).getName (64) == "3: Gain",
+               "and the module after it keeps its own lanes, got '" + rack->getSlotParameter (2, 0).getName (64) + "'");
+        check (rack->getSlotParameter (2, 0).getCurrentValueAsText() == "-6.0 dB",
+               "with its saved value, got '" + rack->getSlotParameter (2, 0).getCurrentValueAsText() + "'");
+
+        const auto saved = unknownSaved (*rack);
+        check (saved.size() == 3 && saved[0] == "eq" && saved[1] == laterText && saved[2] == "util",
+               "saving writes the unknown slot back in place, verbatim");
+
+        // Audio passes through it untouched: the rack is the same rack
+        // without it, to the bit.
+        {
+            auto without = createRack();
+            juce::XmlElement two (RackProcessor::kRootTag);
+            two.setAttribute ("stateVersion", 1);
+            two.addChildElement (slotWith (0, "eq", bmo::eq::kHfGain, 3.0).release());
+            two.addChildElement (slotWith (1, "util", bmo::util::kGain, -6.0).release());
+            juce::MemoryBlock twoBlock;
+            juce::AudioProcessor::copyXmlToBinary (two, twoBlock);
+            without->setStateInformation (twoBlock.getData(), (int) twoBlock.getSize());
+
+            float worst = 0.0f;
+
+            for (auto* r : { rack.get(), without.get() })
+            {
+                r->setPlayConfigDetails (2, 2, 48000.0, 512);
+                r->prepareToPlay (48000.0, 512);
+            }
+
+            juce::AudioBuffer<float> a (2, 512), b (2, 512);
+            juce::MidiBuffer midi;
+
+            for (int k = 0; k < 20; ++k)
+            {
+                for (int i = 0; i < 512; ++i)
+                    for (int ch = 0; ch < 2; ++ch)
+                    {
+                        const auto v = 0.125f * (float) std::sin (2.0 * juce::MathConstants<double>::pi * 220.0 * (k * 512 + i) / 48000.0);
+                        a.setSample (ch, i, v);
+                        b.setSample (ch, i, v);
+                    }
+
+                rack->processBlock (a, midi);
+                without->processBlock (b, midi);
+
+                for (int ch = 0; ch < 2; ++ch)
+                    for (int i = 0; i < 512; ++i)
+                        worst = juce::jmax (worst, std::abs (a.getSample (ch, i) - b.getSample (ch, i)));
+            }
+
+            check (worst == 0.0f, "audio passes through the unknown slot bit for bit, worst " + juce::String (worst));
+        }
+
+        // The editor shows it, by name, with nothing to do but remove it.
+        {
+            std::unique_ptr<juce::AudioProcessorEditor> editor (rack->createEditor());
+            int naming = 0;
+            std::function<void (juce::Component&)> walk = [&] (juce::Component& c)
+            {
+                if (auto* b = dynamic_cast<juce::Button*> (&c))
+                    if (b->getButtonText().contains ("later_module"))
+                        naming += b->isEnabled() ? 100 : 1;
+
+                for (auto* child : c.getChildren())
+                    walk (*child);
+            };
+            walk (*editor);
+            check (naming == 1, "the editor names the unknown module on a placeholder that offers nothing but remove");
+        }
+
+        // A chain edit around it keeps it.
+        rack->moveModule (2, 0);
+        check (chainIds (*rack) == std::vector<juce::String> { "util", "eq", "?" },
+               "moving another module past it keeps it, now in slot 3");
+        const auto afterMove = unknownSaved (*rack);
+        check (afterMove.size() == 3 && afterMove[2] == laterText, "and still saves it verbatim");
+        rack->addModule (*rack->findModule ("sat"));
+        check (chainIds (*rack) == std::vector<juce::String> { "util", "eq", "?", "sat" }, "adding after it keeps it");
+
+        // Removing it is a normal remove.
+        rack->removeModule (2);
+        check (chainIds (*rack) == std::vector<juce::String> { "util", "eq", "sat" }, "removing the placeholder closes the chain");
+        check (rack->getSlotParameter (2, 0).getName (64) == "3: Input",
+               "and the module after it takes its lanes, as any remove does, got '" + rack->getSlotParameter (2, 0).getName (64) + "'");
     }
 
     return finish ("BMO Mix Rack");

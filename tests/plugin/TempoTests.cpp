@@ -554,11 +554,13 @@ int main()
             rack->setPlayHead (nullptr);
         }
 
-        // A chain edit mid-session. `rebuild` gives EVERY slot a new engine
-        // and a new DSP, the slots the edit did not touch included, so
-        // whatever an old DSP remembered is gone -- which ModuleDsp::setTempo
-        // warns a module about. What the plumbing owes it is that the new DSP
-        // is handed the tempo before its first process, not one block later.
+        // A chain edit mid-session. An edit keeps the engine -- and so the
+        // DSP, and whatever it remembers -- of every module it does not remove
+        // or replace, moved or not; only a module it adds gets a new one. What
+        // the plumbing owes a new DSP is the tempo before its first process,
+        // not one block later; what it owes a kept one is the tempo on every
+        // block, through the edit's dip as before and after it; and a DSP the
+        // edit took out runs only until the dip's swap, never after.
         {
             const auto& util = [&]() -> const bmo::ModuleDef&
             {
@@ -580,86 +582,128 @@ int main()
             playHead.set (120.0, true);
             oneBlock (*rack);
 
-            /** After an edit, every probe that was alive before it is silent,
-                and every probe made by it -- `expected` of them -- was handed
-                exactly one tempo, with these values, before its first
-                process. The log is cleared BEFORE the edit, so the new DSPs'
-                whole lives are in it, prepare's setParams included. */
-            const auto expectFreshAndHanded = [&] (const std::function<void()>& edit, int expected,
-                                                   double bpm, bool valid, bool playing,
-                                                   const juce::String& where)
+            const auto processedIn = [] (const std::vector<Event>& block)
             {
+                std::vector<int> ids;
+
+                for (const auto& e : block)
+                    if (e.call == Call::process && std::find (ids.begin(), ids.end(), e.probe) == ids.end())
+                        ids.push_back (e.probe);
+
+                return ids;
+            };
+
+            /** Runs one block, makes the edit, runs three more -- the dip's
+                way down, its way up, and one clear of it -- and checks the
+                edit made `made` probe DSPs, kept `kept` of the ones running
+                before it, and handed every one running after it the tempo. */
+            const auto expectEdit = [&] (const std::function<void()>& edit, int made, int kept,
+                                         double bpm, bool valid, bool playing,
+                                         const juce::String& where)
+            {
+                oneBlock (*rack);
+                const auto before = processedIn (events);
                 const auto firstNew = probesMade;
 
-                events.clear();
                 edit();
 
-                juce::AudioBuffer<float> buffer (2, kBlock);
-                buffer.clear();
-                juce::MidiBuffer midi;
-                rack->processBlock (buffer, midi);
+                std::vector<std::vector<Event>> blocks;
 
-                expect (probesMade - firstNew == expected,
-                        where + ": the edit made " + juce::String (expected) + " new probe DSPs, made "
+                for (int b = 0; b < 3; ++b)
+                {
+                    oneBlock (*rack);
+                    blocks.push_back (events);
+                }
+
+                expect (probesMade - firstNew == made,
+                        where + ": the edit made " + juce::String (made) + " new probe DSPs, made "
                             + juce::String (probesMade - firstNew));
 
-                for (const auto& e : events)
-                    expect (e.probe >= firstNew,
-                            where + ": no call reaches probe " + juce::String (e.probe)
-                                + ", which the rebuild destroyed");
+                const auto after = processedIn (blocks.back());
+                int keptNow = 0;
 
-                for (int id = firstNew; id < probesMade; ++id)
+                for (const auto id : after)
+                    if (id < firstNew && std::find (before.begin(), before.end(), id) != before.end())
+                        ++keptNow;
+
+                expect ((int) after.size() == made + kept,
+                        where + ": " + juce::String (made + kept) + " probes run once the dip is over, "
+                            + juce::String ((int) after.size()) + " do");
+                expect (keptNow == kept,
+                        where + ": " + juce::String (kept) + " probes run on through the edit, "
+                            + juce::String (keptNow) + " do");
+
+                // Every probe that runs after the edit, kept or new, was handed
+                // this tempo on every block it processed, before processing it.
+                for (const auto id : after)
                 {
-                    int tempos = 0;
+                    int tempos = 0, processes = 0;
                     bool processedBeforeTempo = false;
-                    bool processed = false;
 
-                    for (const auto& e : events)
+                    for (const auto& block : blocks)
                     {
-                        if (e.probe != id)
-                            continue;
-
-                        if (e.call == Call::process)
+                        for (const auto& e : block)
                         {
-                            processedBeforeTempo = processedBeforeTempo || tempos == 0;
-                            processed = true;
-                        }
+                            if (e.probe != id)
+                                continue;
 
-                        if (e.call == Call::tempo)
-                        {
-                            ++tempos;
-                            expect (e.bpm == bpm && e.valid == valid && e.playing == playing,
-                                    where + ": new probe " + juce::String (id) + " was handed bpm "
-                                        + juce::String (bpm) + (valid ? ", valid" : ", invalid")
-                                        + (playing ? ", playing" : ", stopped"));
+                            if (e.call == Call::process)
+                            {
+                                processedBeforeTempo = processedBeforeTempo || tempos == processes;
+                                ++processes;
+                            }
+
+                            if (e.call == Call::tempo)
+                            {
+                                ++tempos;
+                                expect (e.bpm == bpm && e.valid == valid && e.playing == playing,
+                                        where + ": probe " + juce::String (id) + " was handed bpm "
+                                            + juce::String (bpm) + (valid ? ", valid" : ", invalid")
+                                            + (playing ? ", playing" : ", stopped"));
+                            }
                         }
                     }
 
-                    expect (processed, where + ": new probe " + juce::String (id) + " processed the block");
-                    expect (tempos == 1, where + ": new probe " + juce::String (id)
-                                             + " was handed one tempo, got " + juce::String (tempos));
+                    expect (processes > 0, where + ": probe " + juce::String (id) + " processed");
+                    expect (tempos == processes,
+                            where + ": probe " + juce::String (id) + " was handed one tempo per block, "
+                                + juce::String (tempos) + " for " + juce::String (processes));
                     expect (! processedBeforeTempo,
-                            where + ": new probe " + juce::String (id) + " had its tempo before its first process");
+                            where + ": probe " + juce::String (id) + " had each block's tempo before processing it");
+
+                    if (id < firstNew)
+                        expect (processes == 3, where + ": kept probe " + juce::String (id)
+                                                    + " processed every block of the edit, "
+                                                    + juce::String (processes) + " of 3");
                 }
+
+                // A probe that ran before the edit and not after it was taken
+                // out, and is not called once the swap is behind it.
+                for (const auto& e : blocks.back())
+                    expect (std::find (after.begin(), after.end(), e.probe) != after.end(),
+                            where + ": probe " + juce::String (e.probe) + ", which the edit took out, is still called");
             };
 
-            // Add a third probe: all three slots are new engines, the two the
-            // edit did not touch as well as the one it added.
-            expectFreshAndHanded ([&] { rack->addModule (probe); }, 3,
-                                  120.0, true, true, "adding a module");
+            // Add a third probe: the two the edit did not touch keep theirs.
+            expectEdit ([&] { rack->addModule (probe); }, 1, 2,
+                        120.0, true, true, "adding a module");
 
             // Swap the middle one for BMO Util, at a new tempo: the probes
-            // either side of it are rebuilt again and hear the new figure.
+            // either side of it run on and hear the new figure.
             playHead.set (97.5, false);
-            expectFreshAndHanded ([&] { rack->setModule (1, util); }, 2,
-                                  97.5, true, false, "swapping a module");
+            expectEdit ([&] { rack->setModule (1, util); }, 0, 2,
+                        97.5, true, false, "swapping a module out");
 
-            // Move one, with the host's tempo gone: the new DSPs are handed
-            // "no tempo" before they process, never nothing and never the
-            // figure the destroyed DSPs last heard.
+            // And back: a new probe in the middle, handed the tempo first.
+            expectEdit ([&] { rack->setModule (1, probe); }, 1, 2,
+                        97.5, true, false, "swapping a module in");
+
+            // Move one, with the host's tempo gone: the moved probe is the same
+            // DSP in its new slot, and every probe is handed "no tempo", never
+            // nothing and never the figure it last heard.
             playHead.set ({}, true);
-            expectFreshAndHanded ([&] { rack->moveModule (0, 2); }, 2,
-                                  0.0, false, false, "moving a module, tempo invalid");
+            expectEdit ([&] { rack->moveModule (0, 2); }, 0, 3,
+                        0.0, false, false, "moving a module, tempo invalid");
 
             rack->setPlayHead (nullptr);
         }

@@ -463,9 +463,22 @@ const bmo::ModuleDef& blowUpModule()
 //== The rack's own boundary ===================================================
 /** Halves its input: a slot whose work is visible, so a block that passed
     through without reaching it can be told from one it processed. */
+std::atomic<bool> holdNextCreate { false }, holdNextPrepare { false };
+juce::WaitableEvent lockHeld, audioDone;
+
 struct HalfDsp final : bmo::ModuleDsp
 {
-    void prepare (double, int, int) override {}
+    // The prepare hook: RackProcessor::prepareToPlay prepares every engine
+    // with the chain lock held, which is the one place a test can hold it.
+    void prepare (double, int, int) override
+    {
+        if (holdNextPrepare.exchange (false))
+        {
+            lockHeld.signal();
+            audioDone.wait (10000);
+        }
+    }
+
     void reset() override {}
     void setParams (const float*, int) override {}
 
@@ -479,13 +492,12 @@ struct HalfDsp final : bmo::ModuleDsp
     int latencyForParams (const float*, int) const override { return 0; }
 };
 
-/** Set, the next `holdModule` DSP to be made signals `lockHeld` and then
-    waits for `audioDone` -- from inside `RackProcessor::rebuild`, which makes
-    every slot's DSP with the chain lock held. That is how a test gets the
-    audio thread's try-lock to fail on purpose rather than by luck. */
-std::atomic<bool> holdNextCreate { false };
-juce::WaitableEvent lockHeld, audioDone;
-
+/** Set, the next half-probe DSP to be made signals `lockHeld` and then waits
+    for `audioDone` -- from inside `RackProcessor::rebuild`, mid-edit, which is
+    how a test runs an audio block while an edit is half made. Set
+    `holdNextPrepare` instead and it waits inside prepareToPlay, holding the
+    chain lock, which is how a test gets the audio thread's try-lock to fail
+    on purpose rather than by luck. */
 const bmo::ModuleDef& halfModule()
 {
     static const bmo::ParamSpecs specs { bmo::ParamSpec::floatParam ("unused", "Unused", 0.0f, 1.0f, 0.0f, 1.0f) };
@@ -516,7 +528,18 @@ struct OneBlock
     bool finite    = true;
     bool untouched = true;
     bool halved    = true;
+    bool silent    = true;
 };
+
+/** One bypassed block of silence, so the 5 ms crossfade into bypass is over
+    and the block measured after it is the bypass alone (BypassCrossfade). */
+void settleIntoBypass (juce::AudioProcessor& p)
+{
+    juce::AudioBuffer<float> buffer (2, kBlock);
+    juce::MidiBuffer midi;
+    buffer.clear();
+    p.processBlockBypassed (buffer, midi);
+}
 
 OneBlock oneBlock (float bad, const std::function<void (juce::AudioBuffer<float>&)>& process)
 {
@@ -543,6 +566,7 @@ OneBlock oneBlock (float bad, const std::function<void (juce::AudioBuffer<float>
 
             r.untouched = r.untouched && o == x;
             r.halved    = r.halved && o == 0.5f * x;
+            r.silent    = r.silent && o == 0.0f;
         }
 
     return r;
@@ -913,9 +937,8 @@ int main()
     //== Every path out of a processor, the ones that skip the engines =========
     //
     // The engines' guard covers what reaches a module. A processor also has
-    // paths that hand the host its own buffer back without one: an empty rack,
-    // a block the rack's try-lock skips while a chain edit holds the lock, and
-    // a host's bypass, which JUCE answers by passing the input through. None
+    // paths that hand the host something without one: an empty rack, a block
+    // the rack's try-lock skips, and a host's bypass. None
     // of them can latch, having no state, but none of them may hand a host a
     // non-finite sample either.
     for (const auto bad : { kNaN, kInf, -kInf, 1.0e12f, -1.0e12f })
@@ -939,24 +962,59 @@ int main()
             expectClean (oneBlock (bad, [&] (auto& b) { rack->processBlock (b, midi); }), "an empty rack", true);
         }
 
-        // A rack whose try-lock fails: the message thread is inside rebuild,
-        // holding the chain lock, while the audio thread asks for a block.
+        // A block that arrives while the message thread is half way through
+        // a chain edit. Since 2026-10-03 an edit never locks the audio thread
+        // out: the block runs the chain it had, on held values, so the one
+        // slot still halves it.
         {
             auto rack = bmo::products::createRack();
             rack->addModule (halfModule());
             rack->setPlayConfigDetails (2, 2, kRate, kBlock);
             rack->prepareToPlay (kRate, kBlock);
 
-            // The control: with the lock free the slot does its work.
+            // The control: with no edit under way the slot does its work.
             expectClean (oneBlock (bad, [&] (auto& b) { rack->processBlock (b, midi); }),
-                         "a rack holding one slot, lock free", false);
+                         "a rack holding one slot, no edit", false);
+
+            OneBlock during;
+            bool audioRan = false;
+
+            lockHeld.reset();
+            audioDone.reset();
+            holdNextCreate = true;
+
+            std::thread audio ([&]
+            {
+                if (lockHeld.wait (10000))
+                {
+                    during = oneBlock (bad, [&] (auto& b) { rack->processBlock (b, midi); });
+                    audioRan = true;
+                }
+
+                audioDone.signal();
+            });
+
+            rack->addModule (halfModule());     // returns once the audio block has run
+            audio.join();
+
+            expect (audioRan, "the mid-edit case ran its block while the edit was half made");
+            expectClean (during, "a rack mid-edit", false);
+        }
+
+        // A rack whose try-lock fails: prepareToPlay holds the chain lock
+        // while the audio thread asks for a block. That block goes out silent,
+        // never as the input, which would be dry and early by the latency.
+        {
+            auto rack = bmo::products::createRack();
+            rack->addModule (halfModule());
+            rack->setPlayConfigDetails (2, 2, kRate, kBlock);
 
             OneBlock locked;
             bool audioRan = false;
 
             lockHeld.reset();
             audioDone.reset();
-            holdNextCreate = true;
+            holdNextPrepare = true;
 
             std::thread audio ([&]
             {
@@ -969,11 +1027,41 @@ int main()
                 audioDone.signal();
             });
 
-            rack->addModule (halfModule());     // returns once the audio block has run
+            rack->prepareToPlay (kRate, kBlock);    // returns once the audio block has run
             audio.join();
 
             expect (audioRan, "the try-lock case ran its block while the chain lock was held");
-            expectClean (locked, "a rack whose try-lock failed", true);
+            expect (locked.finite, "a rack whose try-lock failed, one " + what + " in: every sample out is finite");
+            expect (locked.silent, "a rack whose try-lock failed, one " + what + " in: the block goes out silent");
+
+            // And the silence ends through the edit dip's fade-in, not as a
+            // step: the review of 2026-10-03 measured 15 to 34x the steady
+            // step on the way out. 0.5 in, halved by the slot: the first
+            // sample after the silence is near zero, and the output reaches
+            // 0.25 in a straight line over kEditDipMs.
+            {
+                juce::AudioBuffer<float> after (2, kBlock);
+                juce::MidiBuffer m;
+
+                for (int ch = 0; ch < 2; ++ch)
+                    juce::FloatVectorOperations::fill (after.getWritePointer (ch), 0.5f, kBlock);
+
+                rack->processBlock (after, m);
+
+                const auto dipLength = (int) std::lround (kRate * RackProcessor::kEditDipMs * 0.001);
+                float worstRise = 0.0f;
+
+                for (int i = 1; i < kBlock; ++i)
+                    worstRise = juce::jmax (worstRise, after.getSample (0, i) - after.getSample (0, i - 1));
+
+                expect (after.getSample (0, 0) <= 0.25f * 2.0f / (float) dipLength,
+                        "after a failed try-lock, the first sample is " + juce::String (after.getSample (0, 0))
+                            + ", not faded in from silence");
+                expect (worstRise <= 0.25f * 1.5f / (float) dipLength,
+                        "after a failed try-lock, the output rises by at most a dip's slope, rose "
+                            + juce::String (worstRise) + " in a sample");
+                expect (after.getSample (0, kBlock - 1) == 0.25f, "and arrives at the processed 0.25");
+            }
         }
 
         // The host's bypass, standalone and in the rack.
@@ -981,6 +1069,7 @@ int main()
             auto proc = makeProduct (named ("util"));
             proc->setPlayConfigDetails (2, 2, kRate, kBlock);
             proc->prepareToPlay (kRate, kBlock);
+            settleIntoBypass (*proc);
             expectClean (oneBlock (bad, [&] (auto& b) { proc->processBlockBypassed (b, midi); }),
                          "a module bypassed by the host", true);
 
@@ -988,6 +1077,7 @@ int main()
             rack->addModule (halfModule());
             rack->setPlayConfigDetails (2, 2, kRate, kBlock);
             rack->prepareToPlay (kRate, kBlock);
+            settleIntoBypass (*rack);
             expectClean (oneBlock (bad, [&] (auto& b) { rack->processBlockBypassed (b, midi); }),
                          "a rack bypassed by the host", true);
         }

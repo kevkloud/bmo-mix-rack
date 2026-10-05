@@ -33,7 +33,10 @@ class ParamSet;
 
     **Message thread.** Created and destroyed with the engine, which is a
     message-thread operation in both products (`RackProcessor::rebuild` says so
-    for the rack), and every write a link makes must reach the parameters from
+    for the rack) -- and in the rack also dropped and made again on the new
+    slot's lanes when a chain edit moves the module (`ModuleEngine::rebind`),
+    so a link must hold nothing a fresh one built on the same values would not
+    -- and every write a link makes must reach the parameters from
     there too -- a parameter written from the audio thread is a host's problem
     and not a small one. `juce::ParameterAttachment` is the tool for that and is
     what the one implementation uses. */

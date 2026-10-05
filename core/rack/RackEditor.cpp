@@ -43,6 +43,19 @@ RackEditor::SlotBar::SlotBar (RackEditor& o, int s) : owner (o), slot (s)
 
     left .setEnabled (slot > 0);
     right.setEnabled (slot + 1 < owner.proc.getNumModules());
+
+    // A module this build does not have: its name, and nothing to do but
+    // remove it. Moving or replacing it is left to the release that has it;
+    // the modules either side can still move past it.
+    const auto unknownId = owner.proc.getUnknownModuleIdAt (slot);
+
+    if (unknownId.isNotEmpty())
+    {
+        name.setButtonText ("Not in this build: " + unknownId);
+        name.setEnabled (false);
+        left.setEnabled (false);
+        right.setEnabled (false);
+    }
 }
 
 void RackEditor::SlotBar::showMenu()
@@ -174,7 +187,30 @@ void RackEditor::refit (float scale)
 
 int RackEditor::slotWidth (int slot) const
 {
-    return proc.getModuleAt (slot)->widthFor (proc.isSlotExpanded (slot));
+    if (auto* def = proc.getModuleAt (slot))
+        return def->widthFor (proc.isSlotExpanded (slot));
+
+    return kUnknownWidth;
+}
+
+namespace
+{
+    /** Where a panel would be, for a module this build does not have. */
+    struct UnknownPanel final : juce::Component
+    {
+        explicit UnknownPanel (juce::String id) : moduleId (std::move (id)) {}
+
+        void paint (juce::Graphics& g) override
+        {
+            const auto& t = ui::tokens();
+            g.fillAll (t.well);
+            g.setColour (t.text1);
+            g.drawFittedText (moduleId + "\n\nnot in this build:\npasses audio through,\nkept in the session",
+                              getLocalBounds().reduced (8), juce::Justification::centred, 6);
+        }
+
+        const juce::String moduleId;
+    };
 }
 
 void RackEditor::toggleSlotView (int slot)
@@ -197,7 +233,10 @@ void RackEditor::rebuildViews()
     {
         SlotView view;
         view.bar   = std::make_unique<SlotBar> (*this, s);
-        view.panel = proc.getModuleAt (s)->createPanel (proc.makeContext (s));
+        if (auto* def = proc.getModuleAt (s))
+            view.panel = def->createPanel (proc.makeContext (s));
+        else
+            view.panel = std::make_unique<UnknownPanel> (proc.getUnknownModuleIdAt (s));
 
         plate.addAndMakeVisible (*view.bar);
         plate.addAndMakeVisible (*view.panel);

@@ -53,8 +53,8 @@ rack/     SlotParameter (one generic host parameter, remapped live),
   all change the sound), and the panel lays itself out from the width it is
   given. The view is saved with the session as a `view` attribute on the
   module's PARAMS element, written by `getStateInformation` only: never by
-  `captureState`, which preset files are also made from. In the rack it rides
-  on the module's own carried state, so it follows the module through chain
+  `captureState`, which preset files are also made from. In the rack it
+  travels with the module's engine, so it follows the module through chain
   edits. `RackTests` holds all of this.
 - **Knobs carry no numbers** unless a module opts in with
   `PlainKnob::setShowsValue` (only BMO DEQ does, by Frosty's call). The text
@@ -101,20 +101,125 @@ rack/     SlotParameter (one generic host parameter, remapped live),
   into both channels, never cleared. The flag is the last field in
   `ModuleDef` and false for every other module, which keeps each of them on
   exactly the layouts it had before; `bus_tests` holds the table per product.
+- **A host's bypass is the processed path with the modules taken out**
+  (2026-10-03), in both processors: the input widened exactly as
+  `processBlock` widens it, delayed by the latency the host was last told
+  (`product/BypassDelay.h`, sized in prepare), then scrubbed. `processBlock`
+  feeds the same line every block, so the switch into bypass is in step with
+  what the processed path was producing. JUCE's default handed the input
+  back undelayed and cleared the right channel on mono in / stereo out;
+  never fall back to it. `bus_tests` holds both, for several chains and
+  oversampling settings and across a latency change while bypassed.
+  **While bypassed the engines keep running, unheard**, on the input they
+  would have had (`BypassCrossfade`, same file), so both paths exist at both
+  switches and each switch is a 5 ms crossfade between two time-aligned
+  signals: no stale audio from the moment bypass began, no dip, settled
+  bit-exact on either path. The cost is the modules' processing while
+  bypassed, the same as while not; a host that wants the CPU back
+  deactivates the plugin. **So the plugin's own bypass returns no CPU**
+  (measured on ICE QUEEN, 2026-10-04, eight modules at 192 kHz / 32: 156 us
+  a block bypassed against 157 us processing), and that is the price of the
+  clean switch back: an engine stopped while bypassed would come back
+  holding the moment it stopped. A block larger than prepare promised is
+  outside what a host may send; it is handled anyway, but it cuts instead
+  of fading -- measured 6.84x the steady signal's sample-to-sample step out
+  of bypass and 3.75x into it. In the rack such a block also runs without
+  the edit warming, so an engine an edit brings in starts cold; and while
+  bypassed the chain is not run for it at all, so an edit waiting to be
+  swapped in waits for the next block that fits. `bus_tests` holds both directions, both products, for BMO EQ at
+  2x and 8x, BMO Util at +6 dB, the FET compressor and the delay.
+- **A module this build does not have keeps its slot** (2026-10-04), so a
+  session saved by a later release with a new module survives being opened
+  and saved here. On restore its SLOT element is kept (`Slot::unknown`); the
+  slot has no def and no engine, passes audio through bit for bit, keeps its
+  lanes generic and inert, and so the modules after it keep their lanes and
+  automation. `captureState` writes the element back verbatim, every
+  original attribute kept, its own `index` included -- which a restore
+  ignores, since a slot's position is its order among the SLOT elements, so
+  an `index` that disagrees with that order is harmless; a chain edit around it carries it; removing it
+  is a normal remove; the editor shows a remove-only placeholder naming the
+  id. `getModuleAt` is null for it and `getNumModules` counts it, so any
+  code walking the chain must check. No tag, attribute or lane changed, and
+  a session without one saves byte-identical to before (`RackTests`, the
+  golden session).
 - `SlotParameter::assign` keeps a pointer into the module's static
   `specs()` vector. Never hand it a temporary.
 - A slot's `SlotOverflow` is an `AudioProcessor` only so that its
   parameters have an index; JUCE asserts on a gesture without one. Never add
-  it to a host, a graph or an editor. It is created and destroyed in
-  `rebuild`, after the slot's engine has gone, and a slot's `overflow` member
-  is declared before `engine` for the same reason.
-- Anything that changes a `ModuleEngine` in the rack goes through
-  `RackProcessor::rebuild`, which calls `rackChainWillChange` before and
-  `rackChainChanged` after, synchronously, so the editor drops its panels
-  before their engines die. Keep it that way.
-- `processBlock` in the rack takes a `ScopedTryLock` and passes audio
-  through if the message thread is mid-rebuild. Never block the audio
-  thread on the chain lock.
+  it to a host, a graph or an editor. `rebuild` makes one for a module
+  arriving in a slot, new or moved there, because its parameters are named
+  for the slot; it is destroyed after its engine, and a slot's `overflow`
+  member is declared before `engine` for that reason.
+- **A chain edit keeps every engine it does not remove or replace**
+  (2026-10-03). Add, remove, move and replace build only the modules they
+  bring in; every other module keeps its `ModuleEngine` -- DSP state, tail,
+  values, overflow, view -- and a moved one takes it to its new slot, where
+  `ModuleEngine::rebind` points it at that slot's lanes after its values are
+  copied across. A restore and a rack preset still build every engine new.
+  **What a module may now rely on:** an edit that leaves it in the chain
+  never calls its `prepare` or `reset`, never rebuilds its DSP, and hands it
+  every block, with the host's tempo, through the edit. What it may not: its slot number, which an edit
+  changes, or its link object, which a move rebuilds on the new lanes.
+- **An edit reaches the audio through a dip, and the audio thread never
+  waits for it** (`RackProcessor::rebuild` has the whole design). The
+  message thread builds the new chain at once and publishes it as a list of
+  engine pointers; until the audio thread swaps to it, every block runs the
+  chain it has on held values (`ModuleEngine::processHeld`), so nothing it
+  reads moves under it. The output fades to zero over `kEditDipMs` (5 ms)
+  with the bottom on a block's last sample, the next block swaps at its first
+  sample, and fades back up: 10 ms and one sample of zero, at any block size.
+  Removed engines are retired, not destroyed, until the audio thread has
+  finished a block without them -- and then only when the message thread
+  next looks, which is at the next edit, the next parameter change (the
+  async update) or the next prepare or release; nothing polls, so a retired
+  engine and its memory can outlive its last block by as long as the user
+  leaves the rack alone. Likewise **an edit made just before the host stops
+  calling stays pending**: the new chain is what every message-thread
+  caller sees, but the audio thread keeps the old one, held, until blocks
+  resume -- then dips and swaps as usual -- unless a prepare or release, or
+  the backlog rule below, puts it in place first. **An engine the edit brings in arrives
+  warm** (`RackProcessor::runWarming`): while the output fades out, it runs
+  unheard on what its slot will be fed -- the running chain's output at that
+  point, kept per engine -- so at the swap a module with latency is
+  mid-stream rather than handing out its latency's worth of zeros. That
+  costs the arriving engines' processing for the 5 ms: at 192 kHz / 32 with
+  every one of eight slots replaced, about 150 us a block against 100 us
+  steady and a 167 us period. A block larger than prepare promised skips
+  the warming. `RackTests` holds an untouched compressor, delay and reverb
+  sample-exact with a never-edited rack after the dip for add, remove, move
+  and replace; and for BMO EQ at 2x and 8x and BMO Saturator at 2x added,
+  swapped in or moved at 48 and 96 kHz and blocks of 32 and 512, the step
+  under 1.5x, no block 1 dB over, a move sample-exact within 30 ms and an
+  arrival within 1e-4 of a never-edited rack by 250 ms -- not to the bit,
+  because 5 ms of warming is not an engine's whole history and the rest
+  decays at the module's own rate.
+- Everything that changes the chain goes through `rebuild`, which calls
+  `rackChainWillChange` before and `rackChainChanged` after, synchronously.
+  An engine an edit takes out is destroyed some time after the first call,
+  never before it, so a listener that drops every panel there is safe; a
+  kept engine is the same object afterwards. Keep it that way. A user's
+  edit, and a view toggle, also tell the host the non-parameter state
+  changed, so it marks the session modified; a restore or a rack preset
+  never does, or a host would mark a project modified as it opens it.
+- The audio thread takes the rack's `chainLock` only as a try-lock, and only
+  prepare, release and an edit the audio thread will not swap in ever hold
+  it; a block that meets it goes out silent, never dry. Which edits those
+  are is not a matter of the clock: a rack never prepared, or with no block
+  since its last prepare or release, swaps at once; one that has had a block
+  leaves the swap to the audio thread however long ago that block was,
+  unless a backlog has built up -- a rack's worth of retired engines, or
+  more than 32 queued chains -- and no block has come for 200 ms or four
+  blocks (`audioIsRunning`). So RackTests' edit cases dip on a loaded
+  machine too. **A silent block's start cannot be faded and need not be**:
+  the lock is held only where no block should be running -- prepare and
+  release, which a host must not overlap with a block, and the swaps above,
+  made only before audio starts or after the host has stopped calling -- so
+  the block that meets it is the first of a resumed stream, after the
+  host's own silence. Its end is faded: the next block comes back up
+  through the edit dip (`Dip::restartFromSilence`), and `finite_tests`
+  holds that. Everything else that reads or changes the chain off the audio thread
+  serialises on `editLock`, which the audio thread never takes. Never block
+  the audio thread on either.
 - **No processor hands a host, and no module's DSP is ever handed, a NaN,
   an infinity or a sample at or over +192.7 dBFS** (2026-10-03;
   `finite::kCeiling`, whose comment has the measurements: one finite
@@ -123,8 +228,8 @@ rack/     SlotParameter (one generic host parameter, remapped live),
   and BMO Tune RT go through, replaces each such input sample with zero,
   and resets a module that produces one and silences that block, so it
   runs again from the next. The processors scrub the paths
-  that skip an engine: the rack at its input, which covers an empty chain
-  and a block the try-lock skips, and both processors'
+  that skip an engine: the rack at its input, which covers an empty chain,
+  and both processors'
   `processBlockBypassed`. On audio under the ceiling all of it only reads,
   so the output is bit-identical (about 90 ns a stereo 512 block per
   engine). **So a module needs no guard of its own and must not add one**:
@@ -132,7 +237,26 @@ rack/     SlotParameter (one generic host parameter, remapped live),
   Dwell, BMO Tune RT, BMO FET (`FetCell.h`) and BMO DEQ (`Dynamics.h`)
   carry checks from before it; they are redundant, not a pattern.
   `finite_tests` walks the registry, Tune included, and the processors'
-  bypass and skip paths, and holds all of this.
+  bypass and skip paths, and holds all of this. **The same for a parameter
+  value a host sends** (2026-10-04): a NaN is refused where it arrives, on
+  whatever thread, and the value set immediately before stands -- by a rack
+  lane (`SlotParameter::setValue`) and by a standalone parameter, which is
+  the framework's class made to refuse it (`HostValueGuard` in
+  `state/Parameters.h`, from inside `setValue` through `valueChanged`). An
+  infinity goes to the rail it points at in both products; until 2026-10-04
+  a lane ignored one and a standalone parameter clamped it. One exception: a
+  standalone **choice** rounds a NaN to an index inside the framework before
+  anything is stored, and that gives its first choice, a finite value no
+  hook can tell from a host choosing it (as before; a rack lane keeps its
+  value). `ParamSet::toXml`
+  always writes every parameter. **A listener is still sent the NaN once**:
+  the framework's notifying setter is not virtual and hands listeners its
+  argument, not the stored value, so each processor then sends every
+  listener of a parameter that refused one the value that stands, on the
+  message thread, queued after what an editor's attachments queued.
+  `ModuleEngine`'s hold on the last finite value and the standalone put-back
+  stay as a backstop for the instant between a store and its refusal.
+  `RackTests` holds both products, a switch and a choice included.
 - **Every module is handed the host's tempo, once per block**
   (`ModuleDsp::setTempo`), so a module can sync to it without either
   processor knowing which modules care. Both processors read the playhead at
@@ -155,11 +279,13 @@ rack/     SlotParameter (one generic host parameter, remapped live),
   its bpm, with valid true and playing false. Holding the last tempo,
   falling back to a time parameter and not flushing on stop are the
   module's policy, never the plumbing's, which is why nothing here
-  remembers a tempo. **What a module must not assume:** that a held tempo
-  survives a chain edit (`rebuild` gives every slot a new engine, touched
-  or not, and the new one is handed the tempo again on its first block --
-  which matters only while the host's tempo is invalid); or that `prepare`
-  comes with a tempo (the first `setTempo` comes with the first block).
+  remembers a tempo. A held tempo survives a chain edit that keeps the
+  module, moved or not, since the DSP is the same object (2026-10-03).
+  **What a module must not assume:** that it survives a restore, a rack
+  preset or a replace, which build a new engine that is handed the tempo
+  again on its first block -- which matters only while the host's tempo is
+  invalid; or that `prepare` comes with a tempo (the first `setTempo` comes
+  with the first block).
   The default does nothing, and `tempo_tests` holds every registered module
   byte-identical with and without a playhead. Position, time signature and
   loop points are deliberately not carried; a beat-anchored module gets its

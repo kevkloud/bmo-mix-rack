@@ -3,6 +3,8 @@
 #include "core/product/BusLayouts.h"
 
 #include <algorithm>
+#include <thread>
+#include <utility>
 
 namespace bmo
 {
@@ -30,6 +32,11 @@ RackProcessor::RackProcessor (std::vector<const ModuleDef*> reg, ProductInfo i,
 
         addParameterGroup (std::move (group));
     }
+
+    // The empty chain, generation 0, which the audio thread starts on.
+    chains.push_back (std::make_unique<Chain>());
+    live = chains.back().get();
+    pending.store (live, std::memory_order_release);
 }
 
 RackProcessor::~RackProcessor()
@@ -55,8 +62,10 @@ int RackProcessor::getNumModules() const noexcept
 {
     int n = 0;
 
+    // A slot holding a module this build does not have counts: it keeps its
+    // place in the chain, and the slots after it keep theirs.
     for (const auto& s : slots)
-        if (s.def != nullptr)
+        if (s.occupied())
             ++n;
 
     return n;
@@ -65,6 +74,14 @@ int RackProcessor::getNumModules() const noexcept
 const ModuleDef* RackProcessor::getModuleAt (int slot) const noexcept
 {
     return slot >= 0 && slot < kSlots ? slots[(size_t) slot].def : nullptr;
+}
+
+juce::String RackProcessor::getUnknownModuleIdAt (int slot) const
+{
+    if (slot < 0 || slot >= kSlots || slots[(size_t) slot].unknown == nullptr)
+        return {};
+
+    return slots[(size_t) slot].unknown->getStringAttribute ("module");
 }
 
 ModuleEngine* RackProcessor::getEngineAt (int slot) noexcept
@@ -93,58 +110,220 @@ bool RackProcessor::isSlotExpanded (int slot) const noexcept
     return slot >= 0 && slot < kSlots && slots[(size_t) slot].expanded;
 }
 
-void RackProcessor::setSlotExpanded (int slot, bool shouldBe) noexcept
+void RackProcessor::setSlotExpanded (int slot, bool shouldBe)
 {
-    if (slot >= 0 && slot < kSlots)
+    if (slot < 0 || slot >= kSlots)
+        return;
+
+    bool changed = false;
+
     {
+        // Under the edit lock because a capture on another thread reads it.
+        const juce::ScopedLock edit (editLock);
         auto& s = slots[(size_t) slot];
-        s.expanded = shouldBe && s.def != nullptr && s.def->isExpandable();
+        const auto next = shouldBe && s.def != nullptr && s.def->isExpandable();
+        changed = next != s.expanded;
+        s.expanded = next;
     }
+
+    // The view is saved with the session, so a host is told it changed.
+    if (changed)
+        updateHostDisplay (ChangeDetails().withNonParameterStateChanged (true));
 }
 
 //==============================================================================
-std::vector<std::pair<const ModuleDef*, std::unique_ptr<juce::XmlElement>>> RackProcessor::snapshot()
+std::vector<RackProcessor::Entry> RackProcessor::currentChain() const
 {
-    std::vector<std::pair<const ModuleDef*, std::unique_ptr<juce::XmlElement>>> chain;
+    std::vector<Entry> chain;
 
-    // The view rides on the module's own state, so a chain edit that moves the
-    // module takes its view with it, the same way it takes its settings.
-    for (auto& s : slots)
-        if (s.def != nullptr && s.engine != nullptr)
-        {
-            auto state = s.engine->params().toXml (s.def->schemaVersion);
-
-            if (s.expanded)
-                state->setAttribute (kViewAttribute, kViewExpanded);
-
-            chain.emplace_back (s.def, std::move (state));
-        }
+    for (int s = 0; s < kSlots; ++s)
+        if (slots[(size_t) s].occupied())
+            chain.push_back ({ slots[(size_t) s].def, s, nullptr, nullptr });
 
     return chain;
 }
 
-void RackProcessor::rebuild (std::vector<std::pair<const ModuleDef*, std::unique_ptr<juce::XmlElement>>> chain)
+std::uint64_t RackProcessor::holdAudioReads()
 {
-    jassert (juce::MessageManager::getInstance()->isThisTheMessageThread());
+    // Half of a two-flag handshake; processBlock has the other half. Both
+    // sides store their own flag and then load the other's, all sequentially
+    // consistent, so at least one of them sees the other: either the block
+    // starting now sees the new generation and runs on held values, or this
+    // sees the block in progress and waits for it to end. Either way no
+    // block reads a lane or a ParamSet while `rebuild` is changing it.
+    const auto generation = editGeneration.fetch_add (1) + 1;
+
+    while (inBlock.load())
+        std::this_thread::yield();
+
+    return generation;
+}
+
+bool RackProcessor::audioIsRunning() const
+{
+    const auto last = lastBlockMs.load (std::memory_order_relaxed);
+
+    // Never prepared, or no block since the last prepare or release: nothing
+    // will run a block until the host prepares again, which completes the
+    // swap anyway, so it is made now.
+    if (! prepared || last == 0)
+        return false;
+
+    // Otherwise the swap is the audio thread's, however long ago the last
+    // block was. It used to be decided by the clock -- 200 ms without a block
+    // and the swap was made here, with no dip -- which a loaded machine or a
+    // debugger could trip on an edit made while audio was running. The clock
+    // now only bounds what a host that has stopped calling leaves pending:
+    // once a run of edits has retired a whole rack's worth of engines, or
+    // queued more chains than that, and no block has come for four blocks or
+    // 200 ms, the swap is made here and the backlog destroyed.
+    const auto backlog = retired.size() >= (size_t) kSlots || chains.size() > (size_t) (4 * kSlots);
+
+    if (! backlog)
+        return true;
+
+    const auto blockMs = currentRate > 0.0 ? 1000.0 * (double) currentBlock / currentRate : 0.0;
+    const auto patience = (juce::uint32) std::max (200.0, 4.0 * blockMs);
+
+    return juce::Time::getMillisecondCounter() - last < patience;
+}
+
+void RackProcessor::completeSwap()
+{
+    const juce::ScopedLock audio (chainLock);
+
+    live = pending.load (std::memory_order_acquire);
+    audioGeneration.store (live->generation, std::memory_order_release);
+    editDip.reset();
+    dipDownLeft = 0;
+}
+
+void RackProcessor::collectRetired()
+{
+    const auto done = audioGeneration.load (std::memory_order_acquire);
+
+    // An engine first missing from chain `generation` is unreachable once the
+    // audio thread has finished a block on that chain or a later one; so is
+    // every chain older than the one it is on. Destroyed here, off the audio
+    // thread, engine before overflow (Retired's member order).
+    retired.erase (std::remove_if (retired.begin(), retired.end(),
+                                   [done] (const Retired& r) { return r.generation <= done; }),
+                   retired.end());
+
+    chains.erase (std::remove_if (chains.begin(), chains.end(),
+                                  [done] (const std::unique_ptr<Chain>& c) { return c->generation < done; }),
+                  chains.end());
+}
+
+/*  How an edit reaches the audio without a click, a burst or a lock.
+
+    The message thread builds the new chain at once -- lanes re-assigned, new
+    engines made, restored and prepared, a moved engine re-pointed at its new
+    slot's lanes -- so everything that asks the rack about its chain sees the
+    edit as soon as the call returns. What the audio thread runs is a separate,
+    published `Chain` of engine pointers, and it changes over at its own pace:
+
+      1. `holdAudioReads` makes every block from now on run the chain it has
+         on the values its engines already hold, so nothing below is read
+         while it moves.
+      2. The new chain is published. The next block sees it and fades its
+         output to zero over `kEditDipMs`, placed so that the bottom lands on
+         the block's last sample; the block after swaps chains at its first
+         sample and fades back up. An engine the edit kept is in both chains
+         and runs every block of the edit, so its state never misses a sample;
+         one the edit brings in runs unheard alongside (`runWarming`), so it
+         is mid-stream at the swap.
+      3. What the edit took out is retired, not destroyed, until the audio
+         thread has finished a block without it (`collectRetired`).
+
+    The audio thread waits on nothing. The message thread waits at most for
+    the block in progress, in step 1. If no audio is running, the swap is made
+    here instead, under `chainLock`, so nothing is left waiting for a block. */
+void RackProcessor::rebuild (std::vector<Entry> chain, Origin origin)
+{
+    jassert (juce::MessageManager::getInstance()->currentThreadHasLockedMessageManager());
     jassert ((int) chain.size() <= kSlots);
 
     listeners.call ([] (Listener& l) { l.rackChainWillChange(); });
 
     {
-        const juce::ScopedLock lock (chainLock);
+        const juce::ScopedLock edit (editLock);
+
+        collectRetired();
+        const auto generation = holdAudioReads();
+
+        std::array<Slot, kSlots> old;
+
+        for (int s = 0; s < kSlots; ++s)
+            old[(size_t) s] = std::move (slots[(size_t) s]);
+
+        // Where each engine goes: its new slot, or -1 if the edit takes it out.
+        std::array<int, kSlots> to;
+        to.fill (-1);
+
+        for (int j = 0; j < (int) chain.size(); ++j)
+        {
+            const auto from = chain[(size_t) j].from;
+            jassert (from < 0 || (old[(size_t) from].occupied() && old[(size_t) from].def == chain[(size_t) j].def));
+
+            if (from >= 0)
+                to[(size_t) from] = j;
+        }
+
+        // Every engine that does not stay where it is lets go of its link
+        // before any lane changes hands, and one that moves has its values read
+        // off its old lanes now, while they are still its own. Normalised, so
+        // the copy onto the same specs in the new slot is exact.
+        std::array<std::vector<float>, kSlots> carried;
+
+        for (int s = 0; s < kSlots; ++s)
+        {
+            auto& o = old[(size_t) s];
+
+            if (o.engine == nullptr || to[(size_t) s] == s)
+                continue;
+
+            o.engine->dropLink();
+
+            if (to[(size_t) s] >= 0)
+            {
+                auto& p = o.engine->params();
+                carried[(size_t) s].resize ((size_t) p.size());
+
+                for (int i = 0; i < p.size(); ++i)
+                    carried[(size_t) s][(size_t) i] = p.param (i).getValue();
+            }
+        }
+
+        // What leaves the chain is retired with its overflow. A moving engine's
+        // overflow stays behind, retired on its own, because its parameters
+        // are named and numbered for the slot it is leaving; the engine gets a
+        // new one below.
+        for (int s = 0; s < kSlots; ++s)
+        {
+            auto& o = old[(size_t) s];
+
+            if (o.engine != nullptr && to[(size_t) s] < 0)
+                retired.push_back ({ std::move (o.overflow), std::move (o.engine), generation });
+            else if (to[(size_t) s] >= 0 && to[(size_t) s] != s && o.overflow != nullptr)
+                retired.push_back ({ std::move (o.overflow), nullptr, generation });
+        }
 
         for (int s = 0; s < kSlots; ++s)
         {
             auto& slot = slots[(size_t) s];
-            slot.engine.reset();
-            slot.overflow.reset();
-            slot.def = s < (int) chain.size() ? chain[(size_t) s].first : nullptr;
+            auto* entry = s < (int) chain.size() ? &chain[(size_t) s] : nullptr;
 
-            // Compact unless the module's state says otherwise: a module newly
-            // added, a preset's chain and an old session all arrive compact.
-            const auto* carried = s < (int) chain.size() ? chain[(size_t) s].second.get() : nullptr;
-            slot.expanded = slot.def != nullptr && slot.def->isExpandable() && carried != nullptr
-                         && carried->getStringAttribute (kViewAttribute) == kViewExpanded;
+            // Untouched: the same engine in the same slot keeps its lanes, its
+            // overflow, its link and its view exactly as they are.
+            if (entry != nullptr && entry->from == s)
+            {
+                slot = std::move (old[(size_t) s]);
+                continue;
+            }
+
+            slot.def = entry != nullptr ? entry->def : nullptr;
+            slot.expanded = false;
 
             // Not a ternary with a temporary on one side: the specs have to
             // be the module's own static list, because the parameters keep
@@ -176,21 +355,75 @@ void RackProcessor::rebuild (std::vector<std::pair<const ModuleDef*, std::unique
                     assigned.push_back (param);
             }
 
+            // A module this build does not have: no engine, generic lanes (just
+            // assigned above), and its saved element, carried or restored.
+            if (entry != nullptr && entry->def == nullptr)
+            {
+                slot.unknown = entry->from >= 0 ? std::move (old[(size_t) entry->from].unknown)
+                                                : std::move (entry->unknown);
+                continue;
+            }
+
             if (slot.def == nullptr)
                 continue;
 
+            if (entry->from >= 0)
+            {
+                // Moved: the engine itself, its DSP state and its view come
+                // along; its values go onto this slot's lanes, the host is told
+                // as it would be for a restore, and then the engine reads them.
+                auto& from = old[(size_t) entry->from];
+                const auto& values = carried[(size_t) entry->from];
+
+                for (size_t i = 0; i < assigned.size(); ++i)
+                    assigned[i]->setValueNotifyingHost (values[i]);
+
+                slot.engine   = std::move (from.engine);
+                slot.expanded = from.expanded;
+                slot.engine->rebind (std::move (assigned));
+                continue;
+            }
+
+            // New: compact unless its state says otherwise -- a module newly
+            // added, a preset's chain and an old session all arrive compact.
+            const auto* state = entry->state.get();
+            slot.expanded = slot.def->isExpandable() && state != nullptr
+                         && state->getStringAttribute (kViewAttribute) == kViewExpanded;
+
             slot.engine = std::make_unique<ModuleEngine> (*slot.def, ParamSet (slot.def->specs, assigned));
 
-            if (auto* state = chain[(size_t) s].second.get())
+            if (state != nullptr)
                 slot.engine->restoreState (*state);
 
             if (prepared)
                 slot.engine->prepare (currentRate, currentBlock, currentChannels);
         }
+
+        auto next = std::make_unique<Chain>();
+        next->generation = generation;
+
+        for (auto& s : slots)
+            if (s.engine != nullptr)
+                next->engines[(size_t) next->size++] = s.engine.get();
+
+        pending.store (next.get(), std::memory_order_release);
+        chains.push_back (std::move (next));
+
+        if (! audioIsRunning())
+        {
+            completeSwap();
+            collectRetired();
+        }
     }
 
-    // Names, ranges and steps of up to 256 parameters just changed.
-    updateHostDisplay (ChangeDetails().withParameterInfoChanged (true));
+    // Names, ranges and steps of up to 256 parameters just changed. And for a
+    // user's edit, so did the session: the chain is session state but no
+    // parameter's value, so without the second flag a host need not mark the
+    // session dirty -- adding to an empty rack or removing the last module
+    // changes no value at all. Never for a restore: a host opening a session,
+    // told it changed, marks the project modified as it opens.
+    updateHostDisplay (ChangeDetails().withParameterInfoChanged (true)
+                                      .withNonParameterStateChanged (origin == Origin::user));
     triggerAsyncUpdate();
 
     listeners.call ([] (Listener& l) { l.rackChainChanged(); });
@@ -201,43 +434,43 @@ bool RackProcessor::addModule (const ModuleDef& def)
     if (getNumModules() >= kSlots)
         return false;
 
-    auto chain = snapshot();
-    chain.emplace_back (&def, nullptr);
-    rebuild (std::move (chain));
+    auto chain = currentChain();
+    chain.push_back ({ &def, -1, nullptr });
+    rebuild (std::move (chain), Origin::user);
     presets.noteChange();
     return true;
 }
 
 void RackProcessor::setModule (int slot, const ModuleDef& def)
 {
-    auto chain = snapshot();
+    auto chain = currentChain();
 
     if (slot >= 0 && slot < (int) chain.size())
-        chain[(size_t) slot] = { &def, nullptr };
+        chain[(size_t) slot] = { &def, -1, nullptr };
     else if ((int) chain.size() < kSlots)
-        chain.emplace_back (&def, nullptr);
+        chain.push_back ({ &def, -1, nullptr });
     else
         return;
 
-    rebuild (std::move (chain));
+    rebuild (std::move (chain), Origin::user);
     presets.noteChange();
 }
 
 void RackProcessor::removeModule (int slot)
 {
-    auto chain = snapshot();
+    auto chain = currentChain();
 
     if (slot < 0 || slot >= (int) chain.size())
         return;
 
     chain.erase (chain.begin() + slot);
-    rebuild (std::move (chain));
+    rebuild (std::move (chain), Origin::user);
     presets.noteChange();
 }
 
 void RackProcessor::moveModule (int from, int to)
 {
-    auto chain = snapshot();
+    auto chain = currentChain();
     const auto n = (int) chain.size();
 
     if (from < 0 || from >= n || to < 0 || to >= n || from == to)
@@ -246,18 +479,25 @@ void RackProcessor::moveModule (int from, int to)
     auto item = std::move (chain[(size_t) from]);
     chain.erase (chain.begin() + from);
     chain.insert (chain.begin() + to, std::move (item));
-    rebuild (std::move (chain));
+    rebuild (std::move (chain), Origin::user);
     presets.noteChange();
 }
 
 void RackProcessor::clearChain()
 {
-    rebuild ({});
+    rebuild ({}, Origin::user);
 }
 
 //==============================================================================
 std::unique_ptr<juce::XmlElement> RackProcessor::captureState()
 {
+    // A host may ask for the state from any thread, while the message thread
+    // is in the middle of an edit: before this lock, a worker saving during a
+    // run of moves read slots being emptied and refilled and crashed. The
+    // edit lock is the one the audio thread never takes, so a capture can
+    // wait for an edit, never the other way round with audio involved.
+    const juce::ScopedLock edit (editLock);
+
     auto xml = std::make_unique<juce::XmlElement> (kRootTag);
     xml->setAttribute ("stateVersion", info.stateVersion);
 
@@ -265,6 +505,17 @@ std::unique_ptr<juce::XmlElement> RackProcessor::captureState()
 
     for (auto& s : slots)
     {
+        // A module this build does not have goes back exactly as it came,
+        // its own index attribute included, so a session from a later release
+        // survives being opened and saved here. It still takes its place in
+        // the count, so the slots after it are numbered where they are.
+        if (s.unknown != nullptr)
+        {
+            xml->addChildElement (new juce::XmlElement (*s.unknown));
+            ++index;
+            continue;
+        }
+
         if (s.def == nullptr || s.engine == nullptr)
             continue;
 
@@ -283,36 +534,48 @@ bool RackProcessor::restoreState (const juce::XmlElement& xml)
     if (! xml.hasTagName (kRootTag))
         return false;
 
-    std::vector<std::pair<const ModuleDef*, std::unique_ptr<juce::XmlElement>>> chain;
+    std::vector<Entry> chain;
 
     for (auto* e : xml.getChildWithTagNameIterator (kSlotTag))
     {
-        // A module this build does not have is dropped, and the chain closes
-        // up. Future schema versions migrate here, keyed off "schema".
+        if ((int) chain.size() >= kSlots)
+            break;
+
+        // A module this build does not have keeps its slot, with its element
+        // to save back verbatim, so the modules after it keep their lanes and
+        // their automation. Until 2026-10-04 it was dropped and the chain
+        // closed up under it. Future schema versions migrate here, keyed off
+        // "schema".
         auto* def = findModule (e->getStringAttribute ("module"));
 
-        if (def == nullptr || (int) chain.size() >= kSlots)
+        if (def == nullptr)
+        {
+            chain.push_back ({ nullptr, -1, nullptr, std::make_unique<juce::XmlElement> (*e) });
             continue;
+        }
 
         std::unique_ptr<juce::XmlElement> state;
 
         if (auto* p = e->getChildByName (ParamSet::kRootTag))
             state = std::make_unique<juce::XmlElement> (*p);
 
-        chain.emplace_back (def, std::move (state));
+        chain.push_back ({ def, -1, std::move (state) });
     }
 
-    rebuild (std::move (chain));
+    rebuild (std::move (chain), Origin::restore);
     return true;
 }
 
 void RackProcessor::resetToDefaults()
 {
-    clearChain();
+    rebuild ({}, Origin::restore);
 }
 
 void RackProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
+    // Held across the capture and the views, so both come from one chain.
+    const juce::ScopedLock edit (editLock);
+
     if (auto xml = captureState())
     {
         // Views go in the session and not in captureState, which rack preset
@@ -322,7 +585,7 @@ void RackProcessor::getStateInformation (juce::MemoryBlock& destData)
 
         for (auto* e : xml->getChildWithTagNameIterator (kSlotTag))
         {
-            while (s < kSlots && (slots[(size_t) s].def == nullptr || slots[(size_t) s].engine == nullptr))
+            while (s < kSlots && ! slots[(size_t) s].occupied())
                 ++s;
 
             if (s < kSlots && slots[(size_t) s].expanded)
@@ -366,7 +629,7 @@ std::vector<FactoryEntry> RackProcessor::factoryEntries (std::vector<RackPreset>
 
 void RackProcessor::applyPreset (const RackPreset& preset)
 {
-    std::vector<std::pair<const ModuleDef*, std::unique_ptr<juce::XmlElement>>> chain;
+    std::vector<Entry> chain;
 
     for (const auto& entry : preset.chain)
     {
@@ -386,15 +649,21 @@ void RackProcessor::applyPreset (const RackPreset& preset)
             e->setAttribute ("value", (double) s.value);
         }
 
-        chain.emplace_back (def, std::move (state));
+        chain.push_back ({ def, -1, std::move (state) });
     }
 
-    rebuild (std::move (chain));
+    rebuild (std::move (chain), Origin::restore);
 }
 
 //==============================================================================
-void RackProcessor::parameterValueChanged (int, float)
+void RackProcessor::parameterValueChanged (int, float value)
 {
+    // The rack is the first listener every lane has, so the framework calls
+    // it after an editor's attachments for the same notification: the value
+    // sent back below is queued after what they queued.
+    if (std::isnan (value))
+        nonFiniteSent.store (true, std::memory_order_release);
+
     presets.noteChange();
     triggerAsyncUpdate();
 }
@@ -430,6 +699,33 @@ double RackProcessor::totalTail() const
 
 void RackProcessor::handleAsyncUpdate()
 {
+    // Also the moment to let go of what the last edit retired, if the audio
+    // thread has moved on from it by now.
+    {
+        const juce::ScopedLock edit (editLock);
+        collectRetired();
+
+        // A lane refused a NaN, and the framework sent it to the lane's
+        // listeners anyway: they are sent the value that stands.
+        if (nonFiniteSent.exchange (false, std::memory_order_acq_rel))
+        {
+            const auto putRight = [] (SlotParameter& p)
+            {
+                if (p.takeRefused())
+                    p.sendValueChangedMessageToListeners (p.getValue());
+            };
+
+            for (auto& lanes : params)
+                for (auto* p : lanes)
+                    putRight (*p);
+
+            for (auto& s : slots)
+                if (s.overflow != nullptr)
+                    for (auto* p : s.overflow->parameters())
+                        putRight (*p);
+        }
+    }
+
     const auto latency = totalLatency();
 
     if (reportedLatency.exchange (latency, std::memory_order_relaxed) != latency)
@@ -441,16 +737,40 @@ void RackProcessor::handleAsyncUpdate()
 //==============================================================================
 void RackProcessor::prepareToPlay (double sampleRate, int maximumExpectedSamplesPerBlock)
 {
-    const juce::ScopedLock lock (chainLock);
+    const juce::ScopedLock edit (editLock);
 
-    currentRate     = sampleRate;
-    currentBlock    = maximumExpectedSamplesPerBlock;
-    currentChannels = getTotalNumOutputChannels();
-    prepared        = true;
+    // No block runs during a prepare, so an edit still waiting for one is put
+    // in place now and every engine prepared below is one the audio will run.
+    completeSwap();
+    collectRetired();
 
-    for (auto& s : slots)
-        if (s.engine != nullptr)
-            s.engine->prepare (currentRate, currentBlock, currentChannels);
+    {
+        const juce::ScopedLock audio (chainLock);
+
+        currentRate     = sampleRate;
+        currentBlock    = maximumExpectedSamplesPerBlock;
+        currentChannels = getTotalNumOutputChannels();
+        prepared        = true;
+
+        for (auto& s : slots)
+            if (s.engine != nullptr)
+                s.engine->prepare (currentRate, currentBlock, currentChannels);
+
+        bypassDelay.prepare (currentChannels);
+        bypassFade.prepare (currentRate);
+
+        // One group of channels per slot for the taps, one for the chain an
+        // edit is warming up (runWarming), one spare. Sized here, never in a
+        // block.
+        workChannels = std::max (currentChannels, 1);
+        workspace.setSize (workChannels * (kSlots + 2), std::max (currentBlock, 1));
+        workspace.clear();
+
+        editDip.prepare (currentRate, kEditDipMs);
+        dipLength   = std::max (1, (int) std::lround (std::max (currentRate, 0.0) * kEditDipMs * 0.001));
+        dipDownLeft = 0;
+        lastBlockMs.store (0, std::memory_order_relaxed);
+    }
 
     const auto latency = totalLatency();
     reportedLatency.store (latency, std::memory_order_relaxed);
@@ -461,7 +781,13 @@ void RackProcessor::prepareToPlay (double sampleRate, int maximumExpectedSamples
 
 void RackProcessor::releaseResources()
 {
-    const juce::ScopedLock lock (chainLock);
+    const juce::ScopedLock edit (editLock);
+
+    completeSwap();
+    collectRetired();
+
+    const juce::ScopedLock audio (chainLock);
+    lastBlockMs.store (0, std::memory_order_relaxed);
 
     for (auto& s : slots)
         if (s.engine != nullptr)
@@ -497,7 +823,8 @@ void RackProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
     // The host's tempo, read ONCE for the whole chain: every slot below is
     // handed this same value, so two modules synced to the tempo cannot
     // disagree within a block. A block the try-lock skips gets no tempo, as it
-    // gets no processing.
+    // gets no processing. A block on held values during an edit gets it as
+    // usual: the tempo is the host's, not a parameter.
     const auto tempo = readHostTempo (getPlayHead());
 
     const auto numSamples = buffer.getNumSamples();
@@ -510,31 +837,259 @@ void RackProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBu
 
     // The host's own bad samples (NaN, infinity, and anything at or over
     // finite::kCeiling) are stopped here, at the rack's edge, and not only in
-    // slot 1's engine: an empty chain and a block the try-lock skips both hand
-    // the host this buffer back without any engine seeing it. On entry is
-    // enough for every path out, because every engine already guarantees a
-    // finite output (ModuleEngine::process). A clean block is only read.
+    // slot 1's engine: an empty chain hands the host this buffer back without
+    // any engine seeing it. On entry is enough for every path out, because
+    // every engine already guarantees a finite output (ModuleEngine::process)
+    // and the edit dip only scales. A clean block is only read.
     finite::scrub (buffer.getArrayOfWritePointers(), numOut, numSamples);
 
-    const juce::ScopedTryLock lock (chainLock);
+    auto* const* channels = buffer.getArrayOfWritePointers();
 
-    if (! lock.isLocked())
+    if (bypassFade.restsAt (0.0f) || ! canHoldTwoPaths (numOut, numSamples))
+    {
+        // Not switching (or a block too big to hold two paths, which cuts).
+        // The input as the chain gets it is kept for the host's bypass: the
+        // moment it switches, the bypass carries on from where the chain's
+        // output was.
+        bypassFade.snap (0.0f);
+        bypassDelay.push (channels, numOut, numSamples);
+        runChain (channels, numOut, numSamples, tempo);
         return;
+    }
 
-    for (auto& s : slots)
-        if (s.engine != nullptr)
-            s.engine->process (buffer.getArrayOfWritePointers(), numOut, numSamples, tempo);
+    // Just out of bypass: the dry path runs on beside the chain, which was
+    // kept running unheard, and the output crossfades back to the chain.
+    auto* const* dry = workspace.getArrayOfWritePointers() + (kSlots + 1) * workChannels;
+
+    for (int ch = 0; ch < numOut; ++ch)
+        juce::FloatVectorOperations::copy (dry[ch], channels[ch], numSamples);
+
+    bypassDelay.delay (dry, numOut, numSamples, juce::jmax (0, reportedLatency.load (std::memory_order_relaxed)));
+    runChain (channels, numOut, numSamples, tempo);
+    bypassFade.apply (channels, channels, dry, numOut, numSamples, 0.0f);
 }
 
-void RackProcessor::processBlockBypassed (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
+bool RackProcessor::canHoldTwoPaths (int numChannels, int numSamples) const noexcept
 {
-    // A host's bypass is JUCE's pass-through, which hands the host its own
-    // buffer back and so its own bad samples with it. Scrubbed after, so the
-    // pass-through itself is JUCE's, unchanged.
-    AudioProcessor::processBlockBypassed (buffer, midi);
-    finite::scrub (buffer.getArrayOfWritePointers(),
-                   juce::jmin (buffer.getNumChannels(), getTotalNumOutputChannels()),
-                   buffer.getNumSamples());
+    return numSamples <= workspace.getNumSamples() && numChannels <= workChannels;
+}
+
+void RackProcessor::runChain (float* const* channels, int numOut, int numSamples, const HostTempo& tempo)
+{
+    const juce::ScopedTryLock lock (chainLock);
+
+    // Only prepare, release and an edit the audio thread will not swap in take
+    // this lock (audioIsRunning), so a block meets it only when the host
+    // breaks the rule that prepare and release never overlap a block, or as
+    // the first block after the host has started calling again -- after
+    // silence of its own, so going silent here has nothing audible to cut.
+    // It goes out silent: never the input, which would be the dry signal and
+    // early by the chain's latency.
+    if (! lock.isLocked())
+    {
+        for (int ch = 0; ch < numOut; ++ch)
+            juce::FloatVectorOperations::clear (channels[ch], numSamples);
+
+        lockedOut = true;
+        return;
+    }
+
+    // The other half of holdAudioReads' handshake: say a block is running,
+    // then look for an edit.
+    inBlock.store (true);
+
+    // Coming out of a silence the try-lock imposed, fade back up through the
+    // edit dip rather than stepping straight back to the chain's output.
+    if (std::exchange (lockedOut, false))
+        editDip.restartFromSilence();
+    const auto edit = editGeneration.load();
+    auto* const newest = pending.load (std::memory_order_acquire);
+
+    // At the bottom of the dip, swap to the newest chain if its edit is
+    // finished -- if another has started since, wait there for that one.
+    if (newest != live && editDip.ready() && newest->generation == edit)
+    {
+        live = newest;
+        editDip.changed();
+    }
+
+    // A chain newer than the one running: fade out, from wherever the gain
+    // is, ready to swap at the next block's first sample.
+    if (newest != live && ! editDip.isPending())
+    {
+        editDip.request();
+        dipDownLeft = editDip.ready() ? 0 : dipLength;
+    }
+
+    // While an edit is being made or waits to be swapped in, the chain runs
+    // on what its engines already hold; see ModuleEngine::processHeld.
+    const auto held = live->generation != edit;
+
+    if (newest != live)
+        runWarming (*newest, channels, numOut, numSamples, tempo, held, newest->generation != edit);
+    else
+        for (int s = 0; s < live->size; ++s)
+            runEngine (*live->engines[(size_t) s], channels, numOut, numSamples, tempo, held);
+
+    applyDip (channels, numOut, numSamples);
+
+    audioGeneration.store (live->generation, std::memory_order_release);
+    lastBlockMs.store (std::max (1u, juce::Time::getMillisecondCounter()), std::memory_order_relaxed);
+    inBlock.store (false);
+}
+
+void RackProcessor::runEngine (ModuleEngine& engine, float* const* channels, int numChannels, int numSamples,
+                               const HostTempo& tempo, bool held)
+{
+    if (held)
+        engine.processHeld (channels, numChannels, numSamples, tempo);
+    else
+        engine.process (channels, numChannels, numSamples, tempo);
+}
+
+void RackProcessor::runWarming (const Chain& next, float* const* channels, int numChannels, int numSamples,
+                                const HostTempo& tempo, bool held, bool nextHeld)
+{
+    const auto liveIndexOf = [this] (const ModuleEngine* e)
+    {
+        for (int s = 0; s < live->size; ++s)
+            if (live->engines[(size_t) s] == e)
+                return s;
+
+        return -1;
+    };
+
+    bool anyArriving = false;
+
+    for (int j = 0; j < next.size; ++j)
+        anyArriving = anyArriving || liveIndexOf (next.engines[(size_t) j]) < 0;
+
+    // Nothing arriving (a remove, a move), or a block larger than the host
+    // promised at prepare, which the workspace was sized for: the running
+    // chain alone. An engine that then arrives in the swap starts cold.
+    if (! anyArriving || numSamples > workspace.getNumSamples() || numChannels > workChannels)
+    {
+        for (int s = 0; s < live->size; ++s)
+            runEngine (*live->engines[(size_t) s], channels, numChannels, numSamples, tempo, held);
+
+        return;
+    }
+
+    const auto group = [this] (int g) { return workspace.getArrayOfWritePointers() + g * workChannels; };
+    const auto copy  = [numChannels, numSamples] (float* const* to, const float* const* from)
+    {
+        for (int ch = 0; ch < numChannels; ++ch)
+            juce::FloatVectorOperations::copy (to[ch], from[ch], numSamples);
+    };
+
+    // The running chain as usual, with what each engine hands on kept.
+    auto* const* warm = group (kSlots);
+    copy (warm, channels);
+
+    for (int s = 0; s < live->size; ++s)
+    {
+        runEngine (*live->engines[(size_t) s], channels, numChannels, numSamples, tempo, held);
+        copy (group (s), channels);
+    }
+
+    // Then the next chain in its own order, unheard, so that every engine it
+    // brings in is fed what its slot will be fed and is mid-stream when the
+    // swap comes: a kept engine is not run twice -- its output from the
+    // running chain stands in for it -- and an arriving one runs on the
+    // signal that reaches it. Exact wherever the engines before the arriving
+    // one are in the same order in both chains, which is every add and every
+    // replace; after a move as well, what is fed is the nearest the running
+    // chain has.
+    for (int j = 0; j < next.size; ++j)
+    {
+        auto* engine = next.engines[(size_t) j];
+        const auto k = liveIndexOf (engine);
+
+        if (k >= 0)
+            copy (warm, group (k));
+        else
+            runEngine (*engine, warm, numChannels, numSamples, tempo, nextHeld);
+    }
+}
+
+void RackProcessor::applyDip (float* const* channels, int numChannels, int numSamples) noexcept
+{
+    // Bit-exact while no edit is in flight: nothing is multiplied at all.
+    if (editDip.isIdle())
+        return;
+
+    for (int i = 0; i < numSamples; ++i)
+    {
+        float gain;
+
+        if (editDip.isPending() && numSamples - i > dipDownLeft)
+        {
+            // Going down, with more of the block left than of the fade: hold
+            // the gain where it is, so the fade ends on the block's last
+            // sample and the swap can happen on the next one's first. However
+            // long the host's blocks, the silence at the bottom is one sample.
+            gain = editDip.value();
+        }
+        else
+        {
+            gain = editDip.next();
+
+            if (dipDownLeft > 0 && editDip.isPending())
+                --dipDownLeft;
+        }
+
+        for (int ch = 0; ch < numChannels; ++ch)
+            channels[ch][i] *= gain;
+    }
+}
+
+void RackProcessor::processBlockBypassed (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
+{
+    // Not JUCE's pass-through, which handed the input back undelayed -- early
+    // by the latency the host is compensating for, 80 samples with BMO EQ and
+    // BMO Saturator at 2x -- and cleared the right channel on mono in / stereo
+    // out. The bypass is the processed path with the chain taken out: the
+    // input widened exactly as processBlock widens it, then delayed by the
+    // latency the host was last told (BypassDelay.h).
+    juce::ScopedNoDenormals noDenormals;
+    const auto tempo = readHostTempo (getPlayHead());
+
+    const auto numSamples = buffer.getNumSamples();
+    const auto numOut     = juce::jmin (buffer.getNumChannels(), getTotalNumOutputChannels());
+    auto* const* channels = buffer.getArrayOfWritePointers();
+    const auto canBlend   = canHoldTwoPaths (numOut, numSamples);
+
+    buses::spreadInputAcrossOutputs (buffer, getTotalNumInputChannels(), numOut);
+
+    // The chain keeps running, unheard, on the input it would have had -- edits
+    // and their dips included -- so that the switch back is a crossfade onto
+    // warm engines rather than onto ones still holding the moment bypass
+    // began (BypassCrossfade). Its input is scrubbed as processBlock's is.
+    auto* const* processed = workspace.getArrayOfWritePointers() + (kSlots + 1) * workChannels;
+
+    if (canBlend)
+    {
+        for (int ch = 0; ch < numOut; ++ch)
+            juce::FloatVectorOperations::copy (processed[ch], channels[ch], numSamples);
+
+        finite::scrub (processed, numOut, numSamples);
+    }
+
+    bypassDelay.delay (channels, numOut, numSamples, juce::jmax (0, reportedLatency.load (std::memory_order_relaxed)));
+
+    if (canBlend)
+    {
+        runChain (processed, numOut, numSamples, tempo);
+        bypassFade.apply (channels, processed, channels, numOut, numSamples, 1.0f);
+    }
+    else
+    {
+        bypassFade.snap (1.0f);
+    }
+
+    // The host's own bad samples come back out of the delay a latency later;
+    // scrubbed here, on the way out, as they always were.
+    finite::scrub (channels, numOut, numSamples);
 }
 
 juce::AudioProcessorEditor* RackProcessor::createEditor()

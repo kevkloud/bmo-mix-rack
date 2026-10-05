@@ -31,6 +31,7 @@ public:
     static constexpr int kSlotBar   = 24;
     static constexpr int kAddStrip  = 40;
     static constexpr int kMinWidth  = 300;   ///< room for the header when empty
+    static constexpr int kUnknownWidth = 160;   ///< a slot holding a module this build does not have
     static constexpr int kDesignHeight = kHeader + kSlotBar + ui::ModulePanel::kContentHeight;
 
 private:
@@ -85,7 +86,7 @@ private:
     struct SlotView
     {
         std::unique_ptr<SlotBar> bar;
-        std::unique_ptr<ui::ModulePanel> panel;
+        std::unique_ptr<juce::Component> panel;     ///< the module's panel, or a placeholder
     };
 
     void rackChainWillChange() override;

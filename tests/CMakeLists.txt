@@ -183,6 +183,9 @@ add_test(NAME rack COMMAND rack_tests)
 # nothing. Linked like rack_tests because it walks the registry.
 bmo_add_tool(bus_tests plugin/BusTests.cpp ${BMO_ROOT}/products/rack/Registry.cpp)
 target_link_libraries(bus_tests PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp bmo_deesser bmo_fetcomp bmo_dwell bmo_reverb)
+# The host-bypass checks change a latency and need the message loop to deliver
+# it, as a host's would.
+target_compile_definitions(bus_tests PRIVATE JUCE_MODAL_LOOPS_PERMITTED=1)
 add_test(NAME bus COMMAND bus_tests)
 
 # Sessions saved by a shipped release restore in this build: the blobs a release

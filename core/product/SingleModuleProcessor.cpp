@@ -17,6 +17,12 @@ SingleModuleProcessor::SingleModuleProcessor (const ModuleDef& d, ProductInfo i)
     for (const auto& s : def.specs)
         apvts.addParameterListener (s.id, this);
 
+    // Added before any editor's attachments, so the framework calls this
+    // after them for the same notification, and the value sent back below is
+    // queued after what they queued.
+    for (int i = 0; i < engine.params().size(); ++i)
+        engine.params().param (i).addListener (this);
+
     // Answer honestly before the first prepareToPlay: a host is entitled to
     // ask an instance it has only just constructed, and for BMO Linger the
     // default schema is already several seconds of tail.
@@ -32,6 +38,9 @@ SingleModuleProcessor::~SingleModuleProcessor()
 {
     for (const auto& s : def.specs)
         apvts.removeParameterListener (s.id, this);
+
+    for (int i = 0; i < engine.params().size(); ++i)
+        engine.params().param (i).removeListener (this);
 
     cancelPendingUpdate();
 }
@@ -55,8 +64,51 @@ void SingleModuleProcessor::parameterChanged (const juce::String&, float)
     triggerAsyncUpdate();
 }
 
+void SingleModuleProcessor::runEngine (float* const* channels, int numChannels, int numSamples, const HostTempo& tempo)
+{
+    engine.process (channels, numChannels, numSamples, tempo);
+
+    // A host set a parameter to something that is not a number. The engine
+    // is already holding that parameter's last finite value; the parameter
+    // itself -- the framework's class, which stores what it is given -- is put
+    // back to it on the message thread (handleAsyncUpdate).
+    if (engine.takeNonFiniteSeen())
+        triggerAsyncUpdate();
+}
+
+void SingleModuleProcessor::parameterValueChanged (int, float value)
+{
+    // The parameter has already refused it (HostValueGuard); the listeners
+    // the framework handed it to are put right on the message thread.
+    if (std::isnan (value))
+    {
+        nonFiniteSent.store (true, std::memory_order_release);
+        triggerAsyncUpdate();
+    }
+}
+
 void SingleModuleProcessor::handleAsyncUpdate()
 {
+    auto& params = engine.params();
+
+    // Every listener that was sent a NaN is sent the value that stands.
+    if (nonFiniteSent.exchange (false, std::memory_order_acq_rel))
+        for (int i = 0; i < params.size(); ++i)
+            if (auto* guarded = dynamic_cast<HostValueGuard*> (&params.param (i)))
+                if (guarded->takeRefused())
+                    params.param (i).sendValueChangedMessageToListeners (params.param (i).getValue());
+
+    // A parameter refuses a NaN as it arrives, so this finds one only if a
+    // block read it in the moment between the store and the refusal; kept as
+    // the backstop it was.
+    for (int i = 0; i < params.size(); ++i)
+    {
+        auto& p = params.param (i);
+
+        if (! std::isfinite (p.getValue()))
+            p.setValueNotifyingHost (p.convertTo0to1 (engine.heldValue (i)));
+    }
+
     const auto latency = engine.latency();
 
     if (reportedLatency.exchange (latency, std::memory_order_relaxed) != latency)
@@ -71,6 +123,10 @@ void SingleModuleProcessor::handleAsyncUpdate()
 void SingleModuleProcessor::prepareToPlay (double sampleRate, int maximumExpectedSamplesPerBlock)
 {
     engine.prepare (sampleRate, maximumExpectedSamplesPerBlock, getTotalNumOutputChannels());
+    bypassDelay.prepare (getTotalNumOutputChannels());
+    bypassFade.prepare (sampleRate);
+    otherPath.setSize (juce::jmax (1, getTotalNumOutputChannels()), juce::jmax (1, maximumExpectedSamplesPerBlock));
+    otherPath.clear();
 
     const auto latency = engine.latency();
     reportedLatency.store (latency, std::memory_order_relaxed);
@@ -110,21 +166,79 @@ void SingleModuleProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce
     // one channel and silence. BusLayouts.h says why at length.
     buses::spreadInputAcrossOutputs (buffer, numIn, numOut);
 
+    auto* const* channels = buffer.getArrayOfWritePointers();
+    const auto canBlend = numSamples <= otherPath.getNumSamples() && numOut <= otherPath.getNumChannels();
+
     // Every block goes through the engine, which guarantees a finite output;
     // there is no early return here, and none should be added without the
     // scrub RackProcessor::processBlock does at its own edge.
-    engine.process (buffer.getArrayOfWritePointers(), numOut, numSamples, tempo);
+    if (bypassFade.restsAt (0.0f) || ! canBlend)
+    {
+        // Not switching (or a block too big to hold two paths, which cuts).
+        // The input as the module gets it is kept for the host's bypass: the
+        // moment it switches, the bypass carries on from where the module's
+        // output was.
+        bypassFade.snap (0.0f);
+        bypassDelay.push (channels, numOut, numSamples);
+        runEngine (channels, numOut, numSamples, tempo);
+        return;
+    }
+
+    // Just out of bypass: the dry path runs on beside the module's, which was
+    // kept running unheard, and the output crossfades back to the module.
+    auto* const* dry = otherPath.getArrayOfWritePointers();
+
+    for (int ch = 0; ch < numOut; ++ch)
+        juce::FloatVectorOperations::copy (dry[ch], channels[ch], numSamples);
+
+    bypassDelay.delay (dry, numOut, numSamples, juce::jmax (0, reportedLatency.load (std::memory_order_relaxed)));
+    finite::scrub (dry, numOut, numSamples);
+    runEngine (channels, numOut, numSamples, tempo);
+    bypassFade.apply (channels, channels, dry, numOut, numSamples, 0.0f);
 }
 
-void SingleModuleProcessor::processBlockBypassed (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
+void SingleModuleProcessor::processBlockBypassed (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&)
 {
-    // A host's bypass is JUCE's pass-through, which hands the host its own
-    // buffer back and so its own bad samples with it. Scrubbed after, so the
-    // pass-through itself is JUCE's, unchanged.
-    AudioProcessor::processBlockBypassed (buffer, midi);
-    finite::scrub (buffer.getArrayOfWritePointers(),
-                   juce::jmin (buffer.getNumChannels(), getTotalNumOutputChannels()),
-                   buffer.getNumSamples());
+    // Not JUCE's pass-through, which handed the input back undelayed -- early
+    // by the latency the host is compensating for, 40 samples with BMO EQ at
+    // 2x -- and cleared the right channel on mono in / stereo out. The bypass
+    // is the processed path with the module taken out: the input widened
+    // exactly as processBlock widens it, then delayed by the latency the host
+    // was last told (BypassDelay.h).
+    juce::ScopedNoDenormals noDenormals;
+    const auto tempo = readHostTempo (getPlayHead());
+
+    const auto numSamples = buffer.getNumSamples();
+    const auto numOut     = juce::jmin (buffer.getNumChannels(), getTotalNumOutputChannels());
+    auto* const* channels = buffer.getArrayOfWritePointers();
+    const auto canBlend   = numSamples <= otherPath.getNumSamples() && numOut <= otherPath.getNumChannels();
+
+    buses::spreadInputAcrossOutputs (buffer, getTotalNumInputChannels(), numOut);
+
+    // The module keeps running, unheard, on the input it would have had, so
+    // that the switch back is a crossfade onto a warm engine rather than onto
+    // one still holding the moment bypass began (BypassCrossfade).
+    auto* const* processed = otherPath.getArrayOfWritePointers();
+
+    if (canBlend)
+        for (int ch = 0; ch < numOut; ++ch)
+            juce::FloatVectorOperations::copy (processed[ch], channels[ch], numSamples);
+
+    bypassDelay.delay (channels, numOut, numSamples, juce::jmax (0, reportedLatency.load (std::memory_order_relaxed)));
+
+    if (canBlend)
+    {
+        runEngine (processed, numOut, numSamples, tempo);
+        bypassFade.apply (channels, processed, channels, numOut, numSamples, 1.0f);
+    }
+    else
+    {
+        bypassFade.snap (1.0f);
+    }
+
+    // The host's own bad samples come back out of the delay a latency later;
+    // scrubbed here, on the way out, as they always were.
+    finite::scrub (channels, numOut, numSamples);
 }
 
 //==============================================================================

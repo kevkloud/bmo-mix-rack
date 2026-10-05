@@ -190,6 +190,22 @@ hold after it.
   FEEDBACK and rate to it; the default run is a subset, and
   `dwell_dsp_tests --long` runs all 360 rows (26 min in Release on ICE
   QUEEN). **Any second read blended into the loop takes the same law.**
+- **Every discrete switch is a fade, and is judged off the beat**
+  (2026-10-04). The probe's own conditions -- TIME 375 ms, a whole number of
+  cycles of its 440 Hz tone, the switch on a round block edge -- hid steps up
+  to 13.4x. `testEverySwitchIsAFade` judges every switch at TIME 375.013 and
+  13.7 ms, eight moments a cycle, 48 and 96 kHz, blocks 512 and 441,
+  FEEDBACK 60 and 95, tone and noise, with both echoes (`--grid` runs it
+  alone; 12 288 cells, 1 848 failing on a265b41, none now). The mechanisms,
+  all 20 ms and all the shared equal-gain law: CHARACTER fades the chain's
+  mode filters **and the read** (each character's modulation law and
+  interpolator); STEREO fades the read (dual offset's 2/3 D on the right
+  line) and the ping-pong matrix's writes; FX fades the stage, the
+  incoming one weighted at its input. Pan/Tremolo's stepped position now
+  moves in 5 ms, which changes its held output. **Open**: an FX TYPE change
+  on a tone at FEEDBACK 95 overshoots the louder held level by up to
+  3.5 dB, the same with the switch taken in one sample, so it is the
+  loop's transient and not the fade; it is printed, not bounded.
 - **Never compare a host's value with `==` at the centre of a range that
   crosses zero** (2026-10-02, macOS CI). The snap `start + interval . n` is a
   fused multiply-add on macOS arm64, so LANE GAIN's 0 comes back as 1.5e-6

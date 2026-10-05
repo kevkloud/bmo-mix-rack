@@ -464,7 +464,9 @@ public:
         heldCount.fill (0);
 
         lfoPhase = 0.0;
-        lfoValue = 1.0;
+        lfoValue = lfoTarget = 1.0;
+        lfoSlope = 0.0;
+        glideLeft = 0;
         stepCounter = 0;
     }
 
@@ -549,9 +551,28 @@ public:
             if (lfoPhase >= 2.0 * kPiD)
                 lfoPhase -= 2.0 * kPiD;
 
-            lfoValue = std::cos (lfoPhase);
+            // **The position moves in 5 ms, not in one sample** (2026-10-04).
+            // Stepped outright, a pan at AMOUNT 100 took a channel from full
+            // to nothing between two samples of whatever was sounding: a
+            // click every repeat, held or switched (the switch grid found
+            // FX on at 4.15 times a 440 Hz tone's own step, FEEDBACK 95, on
+            // ICE QUEEN). A straight line over
+            // `kPanGlideSeconds` (never longer than the repeat) keeps each
+            // repeat on its own position and takes the step out.
+            const auto glide = std::max (1, std::min (period, (int) std::lround (kPanGlideSeconds * sampleRate)));
+            lfoTarget = std::cos (lfoPhase);
+            lfoSlope = (lfoTarget - lfoValue) / (double) glide;
+            glideLeft = glide;
+        }
+
+        if (glideLeft > 0)
+        {
+            lfoValue = --glideLeft == 0 ? lfoTarget : lfoValue + lfoSlope;
         }
     }
+
+    /** How long the stepped LFO takes to move to its next position. */
+    static constexpr double kPanGlideSeconds = 0.005;
 
     double process (int ch, int type, double x, double amount, int numChannels) noexcept
     {
@@ -770,8 +791,8 @@ private:
     std::array<int, kMaxChannels> heldCount {};
 
     double amountAtBlock = 0.0;
-    double lfoPhase = 0.0, lfoValue = 1.0;
-    int stepCounter = 0;
+    double lfoPhase = 0.0, lfoValue = 1.0, lfoTarget = 1.0, lfoSlope = 0.0;
+    int stepCounter = 0, glideLeft = 0;
 };
 
 //==============================================================================
@@ -1129,7 +1150,7 @@ public:
         samplesSinceCompanding = ringSize();
 
         wowPhase = flutterPhase = 0.0;
-        noiseA = noiseB = 0.0;
+        noiseA = noiseB = lastNoise = 0.0;
         noiseState = kNoiseSeed;
     }
 
@@ -1299,8 +1320,10 @@ public:
 
         // 10 §8's mono bus rule: with one line there is no second output to
         // alternate into, so ping-pong collapses to plain stereo. Dual offset
-        // collapses too -- `lineRatio` only ever moves line 1.
-        const auto pingPong = params.stereoMode == kPingPong && nch >= 2;
+        // collapses too -- `lineRatioFor` only ever moves line 1. Which mode
+        // is the matrix is decided a sample at a time, because a STEREO
+        // switch fades from one matrix to the other (`beginSwitches`).
+        const auto twoLines = nch >= 2;
 
         for (int n = 0; n < numSamples; ++n)
         {
@@ -1379,34 +1402,37 @@ public:
                 // 10 §8's dual offset: line 1 reads two thirds of the way
                 // along the same steered delay, so §2's law and §5's
                 // modulation carry over untouched.
-                const auto ratio = lineRatio (ch);
-                const auto readCurrent = readPosition (delayCurrent * ratio, modulated);
-                const auto readNext    = fading ? readPosition (delayNext * ratio, modulated)
-                                                : readCurrent;
+                //
+                // **A CHARACTER or STEREO switch fades the read too**
+                // (2026-10-04). A character brings its own modulation law --
+                // tape's floor moves the read up to about nine samples at
+                // 375 ms, clean's none -- and its own interpolator, and a
+                // stereo mode into or out of dual offset moves line 1's read
+                // from D to 2/3 D: taken in one sample, each jumped the read,
+                // and the step went out and into the ring at once. For the
+                // switch's 20 ms both reads are taken and blended by the
+                // shared equal-gain law, as the chain is (`beginSwitches`).
+                // Held, it is the one read it always was.
+                const auto ratioTo = lineRatioFor (stereoTo, ch);
+                const auto ratioFrom = lineRatioFor (stereoFrom, ch);
+                const auto stereoReads = stereoFade >= 0 && ratioFrom != ratioTo;
 
-                const auto* line = ring[(size_t) ch].data();
-
-                double y;
-
-                if (expand)
+                const auto readUnder = [&] (int law, double mod)
                 {
-                    // **The exact reciprocal of each tap, then the kernel**
-                    // (10 §4) -- see `readExpanded`. A crossfade's two reads
-                    // are each expanded before they are mixed, for the same
-                    // reason.
-                    const auto* gains = gainRing[(size_t) ch].data();
-                    y = readExpanded (line, gains, readCurrent);
+                    const auto r = readLine (ch, law, ratioTo, mod, expand, fading, fadeOld, fadeNew);
 
-                    if (fading)
-                        y = fadeOld * y + fadeNew * readExpanded (line, gains, readNext);
-                }
-                else
-                {
-                    y = readAt (line, readCurrent);
+                    if (! stereoReads)
+                        return r;
 
-                    if (fading)
-                        y = fadeOld * y + fadeNew * readAt (line, readNext);
-                }
+                    return (1.0 - stereoMix) * readLine (ch, law, ratioFrom, mod, expand, fading, fadeOld, fadeNew)
+                         + stereoMix * r;
+                };
+
+                auto y = readUnder (modeTo, modeTo == params.character ? modulated
+                                                                       : modulationFor (modeTo));
+
+                if (modeFade >= 0)
+                    y = (1.0 - modeMix) * readUnder (modeFrom, modulationFor (modeFrom)) + modeMix * y;
 
                 output[ch][n] = (float) y;
 
@@ -1420,7 +1446,17 @@ public:
             // matrix changes is *which* line a sample is injected into and
             // *which* line's chain output feeds it back, never whether the
             // input arrives.
-            for (int ch = 0; ch < nch; ++ch)
+            // **A STEREO switch into or out of ping-pong fades the matrix**
+            // (2026-10-04): the two lines' writes under the old matrix and the
+            // new are blended by the shared equal-gain law for the switch's
+            // 20 ms. Swapped in one sample, what each line was fed jumped, and
+            // the step came back a TIME later -- 3.2 times the signal's own,
+            // measured on ICE QUEEN at TIME 375.013 ms.
+            const auto pingPongTo   = twoLines && stereoTo == kPingPong;
+            const auto pingPongFrom = twoLines && stereoFrom == kPingPong;
+            const auto matrixFade   = stereoFade >= 0 && pingPongFrom != pingPongTo;
+
+            const auto inject = [&] (bool pingPong, int ch)
             {
                 double u = 0.0;
                 double back = 0.0;
@@ -1444,7 +1480,15 @@ public:
                     back = gain * chain[(size_t) ch];
                 }
 
-                auto v = u + back;
+                return u + back;
+            };
+
+            for (int ch = 0; ch < nch; ++ch)
+            {
+                auto v = inject (pingPongTo, ch);
+
+                if (matrixFade)
+                    v = (1.0 - stereoMix) * inject (pingPongFrom, ch) + stereoMix * v;
 
                 // A NaN that reached the ring would circulate for ever, so it
                 // is stopped at the write rather than at the output.
@@ -1492,6 +1536,12 @@ public:
                 fxFrom = fxTo;
             }
 
+            if (stereoFade >= 0 && ++stereoFade >= switchFadeLength)
+            {
+                stereoFade = -1;
+                stereoFrom = stereoTo;
+            }
+
             if (fading && ++fadeCounter >= fadeLength)
             {
                 fadeCounter  = -1;
@@ -1526,9 +1576,46 @@ private:
 
     /** How far along the steered delay this line reads, as a fraction of it.
         1 everywhere except dual offset's right line (10 §8). */
-    double lineRatio (int ch) const noexcept
+    static double lineRatioFor (int stereoMode, int ch) noexcept
     {
-        return (params.stereoMode == kDualOffset && ch == 1) ? kDualOffsetRatio : 1.0;
+        return (stereoMode == kDualOffset && ch == 1) ? kDualOffsetRatio : 1.0;
+    }
+
+    /** One line's read under one character's law -- its modulation and its
+        interpolator -- at one stereo ratio, with §2's TIME crossfade in it.
+        Held, `process` asks for exactly one of these a line; across a
+        CHARACTER or STEREO switch it asks for two and blends them. */
+    double readLine (int ch, int law, double ratio, double modulated, bool expand,
+                     bool fading, double fadeOld, double fadeNew) const noexcept
+    {
+        const auto readCurrent = readPosition (delayCurrent * ratio, modulated, law);
+        const auto readNext    = fading ? readPosition (delayNext * ratio, modulated, law)
+                                        : readCurrent;
+
+        const auto* line = ring[(size_t) ch].data();
+
+        double y;
+
+        if (expand)
+        {
+            // **The exact reciprocal of each tap, then the kernel** (10 §4)
+            // -- see `readExpanded`. A crossfade's two reads are each
+            // expanded before they are mixed, for the same reason.
+            const auto* gains = gainRing[(size_t) ch].data();
+            y = readExpanded (line, gains, readCurrent, law);
+
+            if (fading)
+                y = fadeOld * y + fadeNew * readExpanded (line, gains, readNext, law);
+        }
+        else
+        {
+            y = readAt (line, readCurrent, law);
+
+            if (fading)
+                y = fadeOld * y + fadeNew * readAt (line, readNext, law);
+        }
+
+        return y;
     }
 
     /** 10 §4's loop order: LOW CUT -> HIGH CUT -> mode filters -> (FX, 2c) ->
@@ -1713,7 +1800,15 @@ private:
             engageFx (fxTo);
         }
 
+        if (stereoFade < 0 && stereoTo != params.stereoMode)
+        {
+            stereoFrom = stereoTo;
+            stereoTo = params.stereoMode;
+            stereoFade = 0;
+        }
+
         modeMix = modeFade >= 0 ? (double) modeFade / (double) switchFadeLength : 1.0;
+        stereoMix = stereoFade >= 0 ? (double) stereoFade / (double) switchFadeLength : 1.0;
         fxMix   = fxFade   >= 0 ? (double) fxFade   / (double) switchFadeLength : 1.0;
     }
 
@@ -1727,9 +1822,10 @@ private:
             engageFx (fxWanted);
 
         modeFrom = modeTo = params.character;
+        stereoFrom = stereoTo = params.stereoMode;
         fxFrom = fxTo = fxWanted;
-        modeFade = fxFade = -1;
-        modeMix = fxMix = 1.0;
+        modeFade = fxFade = stereoFade = -1;
+        modeMix = fxMix = stereoMix = 1.0;
     }
 
     int fxTarget() const noexcept { return params.fx ? params.fxType : kFxOut; }
@@ -1760,15 +1856,15 @@ private:
     /** Where the read lands this sample: §2's steered delay with §5's
         modulation on top of it, clamped so that a deep wow can never walk the
         read past the write or past the ring's end. */
-    double readPosition (double delay, double modulated) const noexcept
+    double readPosition (double delay, double modulated, int law) const noexcept
     {
-        const auto d = params.character == kClean ? delay + modulated
-                                                  : delay * (1.0 + modulated);
+        const auto d = law == kClean ? delay + modulated
+                                     : delay * (1.0 + modulated);
 
         return std::clamp (d, kMinDelaySamples, (double) std::max (maxDelay, 3));
     }
 
-    double readAt (const float* line, double delay) const noexcept
+    double readAt (const float* line, double delay, int law) const noexcept
     {
         const auto pos = (double) writeIdx - delay;
 
@@ -1778,7 +1874,7 @@ private:
         // accumulates no phase-dependent HF loss. Tape and bucket-brigade take
         // 4-point 3rd-order Hermite instead, where the per-repeat HF loss is
         // *wanted*; so does clean below the sinc's headroom.
-        if (usesSinc() && delay >= (double) kSincFloor)
+        if (law == kClean && delay >= (double) kSincFloor)
             return (double) sinc.read (line, mask, pos);
 
         return hermite (pos, [line, this] (int k) noexcept
@@ -1814,7 +1910,7 @@ private:
         divide by zero. Clean's sinc reads the expanded taps out of a small
         stack copy, laid out at the same indices modulo its size, so the table
         in `modules/tune` is used as it is. */
-    double readExpanded (const float* line, const float* gains, double delay) const noexcept
+    double readExpanded (const float* line, const float* gains, double delay, int law) const noexcept
     {
         const auto pos = (double) writeIdx - delay;
 
@@ -1824,7 +1920,7 @@ private:
             return (double) line[j] / std::max ((double) gains[j], 1.0e-6);
         };
 
-        if (usesSinc() && delay >= (double) kSincFloor)
+        if (law == kClean && delay >= (double) kSincFloor)
         {
             std::array<float, kExpandScratch> taps {};
             const auto base = (int) (long long) std::floor (pos) - Sinc::kHalf + 1;
@@ -2070,8 +2166,6 @@ private:
         what `11` §4k's block-size invariance is really testing. */
     double advanceModulation() noexcept
     {
-        const auto knob = std::clamp ((double) params.modDepthPct * 0.01, 0.0, 1.0);
-
         // 01: on a transport both rate and depth scale with time.
         const auto timeScale = params.character == kClean
                              ? 1.0
@@ -2085,9 +2179,24 @@ private:
         flutterPhase += 2.0 * kPiD * kFlutterHz / sampleRate;
         if (flutterPhase >= 2.0 * kPiD) flutterPhase -= 2.0 * kPiD;
 
-        const auto noise = advanceNoise();
+        lastNoise = advanceNoise();
 
-        if (params.character == kClean)
+        return modulationFor (params.character);
+    }
+
+    /** What §5's oscillators, as they stand this sample, put on one
+        character's read: its law, its floor, its flutter. `advanceModulation`
+        turns them; this is also asked for the character a CHARACTER switch is
+        fading out of (`beginSwitches`), whose read runs alongside for 20 ms. */
+    double modulationFor (int which) const noexcept
+    {
+        const auto knob = std::clamp ((double) params.modDepthPct * 0.01, 0.0, 1.0);
+
+        const auto timeScale = which == kClean
+                             ? 1.0
+                             : std::clamp ((double) params.timeMs / 300.0, 0.5, 2.0);
+
+        if (which == kClean)
         {
             // Clean has no floor, no flutter and no wear noise: §5 gives it
             // the wow sine alone, in milliseconds.
@@ -2098,7 +2207,7 @@ private:
         // The character floor sums into the depth rather than replacing it, so
         // MOD DEPTH 0 is the floor and 100 % is the floor plus §5's full
         // 0.5 %. Bucket-brigade's floor is zero by decision, not by omission.
-        const auto floorDepth = params.character == kTape ? kTapeWowFloor : 0.0;
+        const auto floorDepth = which == kTape ? kTapeWowFloor : 0.0;
         const auto depth = (knob * kModDepthFraction + floorDepth) * timeScale;
 
         if (depth <= 0.0)
@@ -2110,10 +2219,10 @@ private:
         // one). Its 11.7 Hz is a mechanical resonance rather than the MOD RATE
         // knob, so it is **not** scaled by TIME the way the wow rate is. §5
         // does not say either way; the reading is recorded rather than hidden.
-        if (params.character == kTape)
+        if (which == kTape)
             m += kFlutterRatio * std::sin (flutterPhase);
 
-        m += kModNoiseRatio * noise;
+        m += kModNoiseRatio * lastNoise;
 
         return depth * m;
     }
@@ -2360,7 +2469,8 @@ private:
     int modeFrom = kClean, modeTo = kClean, modeFade = -1;
     int fxFrom = kFxOut, fxTo = kFxOut, fxFade = -1;
     int switchFadeLength = 1;
-    double modeMix = 1.0, fxMix = 1.0;
+    int stereoFrom = kStereoIndependent, stereoTo = kStereoIndependent, stereoFade = -1;
+    double modeMix = 1.0, fxMix = 1.0, stereoMix = 1.0;
 
     /** Writes since the last companded one, capped at the ring's length: below
         it the gain ring may still hold a compressor gain the read has to
@@ -2372,6 +2482,7 @@ private:
 
     double wowPhase = 0.0, flutterPhase = 0.0;
     double noiseA = 0.0, noiseB = 0.0, noiseCoeff = 1.0, noiseNorm = 1.0;
+    double lastNoise = 0.0;   ///< the wear noise this sample, for `modulationFor`
     std::uint32_t noiseState = kNoiseSeed;
 
     std::vector<double> gridOmega, gridHz, filterMagnitude, kernelMagnitude;

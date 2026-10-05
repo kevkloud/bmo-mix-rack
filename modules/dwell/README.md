@@ -77,3 +77,8 @@ installs them over whatever is in this machine's VST3 folder.
   which is its own pull request. **One SYNC governs both engines** and each has
   its own division — and the two defaults are chosen so that enabling SYNC at
   120 BPM is inaudible (`docs/delay/10` §11.7).
+- **Switching Diffuse on or off costs a held loop about 1 to 2 dB each
+  time** (2026-10-04): what the stage holds leaves the loop when it goes
+  out, and a frozen lane has nothing to make it back from. On clean, a
+  toggle and back costs 1.60 dB of a frozen lane and 1.55 dB at FEEDBACK
+  95, measured on ICE QUEEN; `AGENTS.md` has the rest and why it is kept.

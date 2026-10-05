@@ -109,6 +109,10 @@ public:
         return current;
     }
 
+    /** Puts the value on its target now: what a reset wants of a ramp in
+        flight. */
+    void land() noexcept { current = target; }
+
     float value() const noexcept { return current; }
 
 private:
@@ -168,17 +172,20 @@ public:
 
     double coeff() const noexcept { return gCoeff; }
 
-    /** |H(e^jw)| of the low-pass built from `g`. */
-    static double lowPassMagnitude (double g, double omega) noexcept
+    /** |H(e^jw)| of the low-pass built from `g`, at `z = e^-jw`.
+
+        All three magnitudes take `z` rather than `w` so that the sweep can
+        hand them the `std::polar (1, -w)` it cached at `prepare`: the same
+        call on the same argument, so the same bits, without a sine and a
+        cosine per grid point per stage on every TIME move. */
+    static double lowPassMagnitude (double g, std::complex<double> z) noexcept
     {
-        const auto z = std::polar (1.0, -omega);
         return std::abs ((g * (1.0 + z)) / ((1.0 + g) + (g - 1.0) * z));
     }
 
     /** |H(e^jw)| of the high-pass built from `g`, i.e. 1 - the low-pass. */
-    static double highPassMagnitude (double g, double omega) noexcept
+    static double highPassMagnitude (double g, std::complex<double> z) noexcept
     {
-        const auto z = std::polar (1.0, -omega);
         return std::abs ((1.0 - z) / ((1.0 + g) + (g - 1.0) * z));
     }
 
@@ -188,9 +195,8 @@ public:
         This is the one stage in the loop whose magnitude is allowed above
         unity (10 §4), so it is also the one whose closed form has to be
         right: `P_tape` is this number and almost nothing else. */
-    static double lowShelfMagnitude (double g, double gain, double omega) noexcept
+    static double lowShelfMagnitude (double g, double gain, std::complex<double> z) noexcept
     {
-        const auto z = std::polar (1.0, -omega);
         const auto gg = gain * g;
         return std::abs (((gg + 1.0) + (gg - 1.0) * z) / ((1.0 + g) + (g - 1.0) * z));
     }
@@ -242,10 +248,10 @@ public:
     double damping() const noexcept { return kCoeff; }
 
     /** g^2 (1 + z)^2 / ((1 + kg + g^2) + (2g^2 - 2) z + (1 - kg + g^2) z^2),
-        the bilinear transform of 1/(s^2 + k s + 1) at the prewarped `g`. */
-    static double magnitude (double g, double k, double omega) noexcept
+        the bilinear transform of 1/(s^2 + k s + 1) at the prewarped `g`,
+        at `z = e^-jw` (see `TptOnePole::lowPassMagnitude` for why `z`). */
+    static double magnitude (double g, double k, std::complex<double> z) noexcept
     {
-        const auto z = std::polar (1.0, -omega);
         const auto gg = g * g;
         const auto num = gg * (1.0 + z) * (1.0 + z);
         const auto den = (1.0 + k * g + gg) + (2.0 * gg - 2.0) * z + (1.0 - k * g + gg) * z * z;
@@ -458,22 +464,50 @@ public:
         heldCount.fill (0);
 
         lfoPhase = 0.0;
-        lfoValue = 1.0;
+        lfoValue = lfoTarget = 1.0;
+        lfoSlope = 0.0;
+        glideLeft = 0;
         stepCounter = 0;
     }
 
     /** Crush coming back into the loop -- FX on again, or the type moved to
         Crush -- starts its hold from nothing. The stage is skipped while it is
         out, so without this its running sum and its hold were picked up again
-        from before it went out (sixth round, 2026-10-02). The other types'
-        state is left alone: an allpass picked up where it was left is a
-        smear, not a level. */
+        from before it went out (sixth round, 2026-10-02). */
     void engageCrush() noexcept
     {
         held.fill (0.0);
         holdCounter.fill (0);
         heldSum.fill (0.0);
         heldCount.fill (0);
+    }
+
+    /** **Diffuse coming back into the loop starts from silence** (2026-10-03).
+
+        Its allpass lines are skipped while it is out, so they kept whatever
+        they held when it went out, and switching it back on replayed that
+        into the loop however long it had been: measured on ICE QUEEN, AMOUNT
+        100 switched off after a noise burst and on again 28 s later, in
+        silence, put out -23.5 dBFS. Until then this stage was left alone on
+        the reading that an allpass picked up where it was left is a smear;
+        it is a smear of audio the user had stopped hearing.
+
+        Cleared rather than kept running, because a stage that ran while off
+        would break §11a's "off is skipped, not run at zero" -- `11` §4l
+        asserts it -- and cost six allpasses a sample a channel on every
+        engine with FX off. The clear is a fill of the six lines, once, when
+        the type comes in: about 34 800 floats a channel at 192 kHz (each line
+        a power of two over its longest delay), 9 000 at 48 kHz.
+
+        Pan/Tremolo holds no audio -- only its stepped LFO's position -- so it
+        has nothing to replay and is left as it was. */
+    void engageDiffuse() noexcept
+    {
+        for (auto& ch : lines)
+            for (auto& line : ch)
+                std::fill (line.begin(), line.end(), 0.0f);
+
+        writeIdx.fill (0);
     }
 
     /** The allpass lengths, taken from AMOUNT **once per block**.
@@ -517,9 +551,28 @@ public:
             if (lfoPhase >= 2.0 * kPiD)
                 lfoPhase -= 2.0 * kPiD;
 
-            lfoValue = std::cos (lfoPhase);
+            // **The position moves in 5 ms, not in one sample** (2026-10-04).
+            // Stepped outright, a pan at AMOUNT 100 took a channel from full
+            // to nothing between two samples of whatever was sounding: a
+            // click every repeat, held or switched (the switch grid found
+            // FX on at 4.15 times a 440 Hz tone's own step, FEEDBACK 95, on
+            // ICE QUEEN). A straight line over
+            // `kPanGlideSeconds` (never longer than the repeat) keeps each
+            // repeat on its own position and takes the step out.
+            const auto glide = std::max (1, std::min (period, (int) std::lround (kPanGlideSeconds * sampleRate)));
+            lfoTarget = std::cos (lfoPhase);
+            lfoSlope = (lfoTarget - lfoValue) / (double) glide;
+            glideLeft = glide;
+        }
+
+        if (glideLeft > 0)
+        {
+            lfoValue = --glideLeft == 0 ? lfoTarget : lfoValue + lfoSlope;
         }
     }
+
+    /** How long the stepped LFO takes to move to its next position. */
+    static constexpr double kPanGlideSeconds = 0.005;
 
     double process (int ch, int type, double x, double amount, int numChannels) noexcept
     {
@@ -738,8 +791,8 @@ private:
     std::array<int, kMaxChannels> heldCount {};
 
     double amountAtBlock = 0.0;
-    double lfoPhase = 0.0, lfoValue = 1.0;
-    int stepCounter = 0;
+    double lfoPhase = 0.0, lfoValue = 1.0, lfoTarget = 1.0, lfoSlope = 0.0;
+    int stepCounter = 0, glideLeft = 0;
 };
 
 //==============================================================================
@@ -987,13 +1040,31 @@ public:
         for (auto& line : gainRing)
             line.assign ((size_t) size, 1.0f);
 
+        ringsClear = true;
+
         sinc.build (1.0, 8.0);
         probe.assign ((size_t) kProbeSize, 0.0f);
 
         gridOmega.assign ((size_t) kSweepPoints, 0.0);
+        gridZ.assign ((size_t) kSweepPoints, std::complex<double> { 1.0, 0.0 });
         gridHz.assign ((size_t) kSweepPoints, 0.0);
-        filterMagnitude.assign ((size_t) kSweepPoints, 1.0);
-        kernelMagnitude.assign ((size_t) kSweepPoints, 1.0);
+        referenceMagnitude.assign ((size_t) kSweepPoints, 1.0);
+        referenceBuiltFor = { -1.0, -1.0, -1.0 };
+
+        // A new grid: every kept half was built on the old one.
+        for (auto& s : filterSweeps)
+        {
+            s.magnitude.assign ((size_t) kSweepPoints, 1.0);
+            s.builtFrom.fill (-1.0);
+        }
+
+        for (auto& s : kernelSweeps)
+        {
+            s.magnitude.assign ((size_t) kSweepPoints, 1.0);
+            s.builtFor = -1.0;
+        }
+
+        peakFilterSweep = peakKernelSweep = -1;
 
         const auto lo = 10.0;
         const auto hi = std::max (0.45 * sampleRate, lo * 2.0);
@@ -1003,9 +1074,11 @@ public:
             const auto f = lo * std::pow (hi / lo, (double) i / (double) (kSweepPoints - 1));
             gridHz[(size_t) i]    = f;
             gridOmega[(size_t) i] = 2.0 * kPiD * f / sampleRate;
+            gridZ[(size_t) i]     = std::polar (1.0, -gridOmega[(size_t) i]);
         }
 
         fadeLength = std::max (1, (int) std::lround (sampleRate * kCrossfadeSeconds));
+        switchFadeLength = std::max (1, (int) std::lround (sampleRate * kSwitchFadeSeconds));
         glideAlpha = 1.0 - std::exp (-1.0 / (kGlideTauSeconds * sampleRate));
 
         // 30 ms on the feedback gain and on DRIVE, 10 §9. TIME is not smoothed
@@ -1035,20 +1108,60 @@ public:
         applyDrive (true);
         applyFx (true);
         applyTime (params.timeMs, true);
+        prepareSweeps();
         reset();
+    }
+
+    /** Builds every character's half of the sweep, and both interpolators',
+        at the TIME and phase this engine holds now, so that the snap after a
+        `reset` and a CHARACTER switch at a held TIME find theirs already built
+        (`refreshLoopPeak`). Five 1024-point builds at most, so it belongs where
+        slow work is allowed: `prepare`, and `DspCore::prepare` once the
+        session's parameters are in. It never rebuilds the halves `P_c` was
+        scanned from -- those are already at these inputs -- so `P_c` cannot
+        move here. */
+    void prepareSweeps() noexcept
+    {
+        buildFilterSweep (kCleanSweep, 0.0, 0.0, 0.0);
+        buildFilterSweep (kTapeSweep, filters[0].tapeLowPass.coeff(),
+                          filters[0].headBump.coeff(), headBumpGain);
+
+        TptSvfLowPass bbd;
+        bbd.set (bbdCutoffFor (params.timeMs), sampleRate, kButterworthQ);
+        buildFilterSweep (kBbdSweep, bbd.coeff(), bbd.damping(), 0.0);
+
+        // At the phase the kept kernel was built at, not at the target's: a
+        // TIME move under 1/256 of a sample leaves the two apart, and the
+        // kernel `P_c` was scanned from must not be rebuilt under it.
+        const auto phase = phaseOf (kernelDelay);
+        buildKernelSweep (kSincSweep, phase);
+        buildKernelSweep (kHermiteSweep, phase);
     }
 
     /** Clears audio state and leaves the coefficients, `P_c` and the targets
         alone: a reset is a silence, not a re-tune. */
     void reset() noexcept
     {
-        for (auto& line : ring)
-            std::fill (line.begin(), line.end(), 0.0f);
+        // **Rings nothing has written since they were last cleared are not
+        // cleared again** (2026-10-04). Four lines of the fixed maximum is up
+        // to 8 MB an engine at 192 kHz, and `DspCore` clears the lane -- this
+        // reset -- on the snap that the first parameter set after its own
+        // `reset` or `prepare` makes, which put 14 us at 48 kHz and 60 us at
+        // 192 kHz on the audio thread's first block, measured on ICE QUEEN,
+        // to write what was already there.
+        if (! ringsClear)
+        {
+            for (auto& line : ring)
+                std::fill (line.begin(), line.end(), 0.0f);
 
-        // 1.0, not 0: the expander divides by what it reads here, and a zeroed
-        // control ring would be a division by nothing.
-        for (auto& line : gainRing)
-            std::fill (line.begin(), line.end(), 1.0f);
+            // 1.0, not 0: the expander divides by what it reads here, and a
+            // zeroed control ring would be a division by nothing.
+            for (auto& line : gainRing)
+                std::fill (line.begin(), line.end(), 1.0f);
+
+            ringsClear = true;
+            ++ringClears;
+        }
 
         for (auto& f : filters)
         {
@@ -1073,11 +1186,26 @@ public:
         fadeCounter = -1;
         delayCurrent = delayNext = delayTarget;
 
+        // Nothing is circulating, so a switch in flight has nothing left to
+        // fade: the chain takes the parameters' character and FX now.
+        snapSwitches();
+
+        // **And nothing ramps** (2026-10-03): FEEDBACK, DRIVE and FX AMOUNT
+        // land on their targets, as a fresh instance starts on them. Left
+        // mid-ramp, a reset straight after a move kept gliding out of a value
+        // that no longer had anything to protect. `DspCore::reset` snaps the
+        // next parameter set as well; this is for a host that processes
+        // before it sets anything.
+        feedback.land();
+        driveBlend.land();
+        driveCurve.land();
+        fxAmount.land();
+
         // The gain ring is all 1.0 again, so there is nothing to expand.
         samplesSinceCompanding = ringSize();
 
         wowPhase = flutterPhase = 0.0;
-        noiseA = noiseB = 0.0;
+        noiseA = noiseB = lastNoise = 0.0;
         noiseState = kNoiseSeed;
     }
 
@@ -1100,18 +1228,16 @@ public:
         const auto cutsMoved = (p.lowCutHz != params.lowCutHz) || (p.highCutHz != params.highCutHz);
         const auto timeMoved = (p.timeMs != params.timeMs);
 
-        // Crush coming (back) into the loop starts from nothing; see
-        // `FxStage::engageCrush`.
-        const auto crushIn = p.fx && p.fxType == kCrush;
-        const auto crushWasIn = params.fx && params.fxType == kCrush;
-
-        if (crushIn && ! crushWasIn)
-            fx.engageCrush();
-
         params = p;
 
+        // A CHARACTER or FX change is not taken here: `process` fades the
+        // character chain across it (`beginSwitches`). Only a snap takes it
+        // at once.
         if (snapNow)
+        {
             primed = false;
+            snapSwitches();
+        }
 
         if (characterMoved || cutsMoved)
             buildUserFilters();
@@ -1170,6 +1296,15 @@ public:
         frequency the unity claim is about (10 §3: "unity means the loudest
         band neither grows nor decays"). */
     double referencePeakHz() const noexcept { return loopPeakHz; }
+
+    /** How many halves of the sweep this engine has built -- a 1024-point
+        reference-chain or interpolator magnitude, each -- since it was made.
+        For the test that holds the audio thread's first block to building
+        none (`testTheFirstBlockSweepsNothing`). */
+    int sweepCount() const noexcept { return sweepsTaken; }
+
+    /** How many times `reset` has cleared the rings, for the same test. */
+    int ringClearCount() const noexcept { return ringClears; }
 
     /** The ring's length in samples: a power of two, sized from the fixed
         maximum. */
@@ -1230,6 +1365,9 @@ public:
         if (mask <= 0 || numSamples <= 0 || numChannels <= 0)
             return;
 
+        // Every call writes the rings, so from here `reset` has to clear them.
+        ringsClear = false;
+
         const auto nch = std::min (numChannels, channels);
         const auto glide = usesGlide();
         const auto compand = usesCompander();
@@ -1249,8 +1387,10 @@ public:
 
         // 10 §8's mono bus rule: with one line there is no second output to
         // alternate into, so ping-pong collapses to plain stereo. Dual offset
-        // collapses too -- `lineRatio` only ever moves line 1.
-        const auto pingPong = params.stereoMode == kPingPong && nch >= 2;
+        // collapses too -- `lineRatioFor` only ever moves line 1. Which mode
+        // is the matrix is decided a sample at a time, because a STEREO
+        // switch fades from one matrix to the other (`beginSwitches`).
+        const auto twoLines = nch >= 2;
 
         for (int n = 0; n < numSamples; ++n)
         {
@@ -1264,14 +1404,16 @@ public:
             const auto fxDepth = (double) fxAmount.tickLanding();
 
             advanceTime (glide);
+            beginSwitches();
 
             // The FX stage's one piece of per-engine shared state: a pan wants
             // **one** position that the two channels read opposite ends of, so
             // the LFO turns once a sample for the engine rather than once a
             // sample per channel. It is stepped at the delay period, so each
-            // repeat gets its own place (10 §11a). Turned only when FX is on,
-            // which is what `11` §4l's state signature measures.
-            if (params.fx)
+            // repeat gets its own place (10 §11a). Turned only while the stage
+            // is in the loop -- on, or fading out -- which is what `11` §4l's
+            // state signature measures.
+            if (fxTo != kFxOut || fxFade >= 0)
                 fx.advance (delayCurrent);
 
             // §5's modulation follows §2's law and is never limited by it, so
@@ -1279,14 +1421,42 @@ public:
             // crossfade rather than to the delay the law is steering.
             const auto modulated = advanceModulation();
 
+            // **§2's clean crossfade is equal gain, `(1 - u, u)`, and it sits
+            // inside the loop** (2026-10-03). The read it blends is what the
+            // loop feeds back, so its weights are a gain on every lap. They
+            // were equal power, `(cos, sin)`, which sum to sqrt(2) at the
+            // midpoint: two reads of a correlated signal -- a tone, or a TIME
+            // that moved a few samples -- came back up to 3 dB louder, and a
+            // TIME moved every block chained one such fade into the next.
+            // Measured on ICE QUEEN at 48 kHz, TIME drawn as a slow ramp
+            // 375 -> 380 ms over 60 s on a 2 s noise burst: the 52-62 s
+            // window peaked at -4.0 dBFS at FEEDBACK 85 against -257.0 held,
+            // and at +1.3 dBFS at FEEDBACK 95.
+            //
+            // **Why these weights can never lift the loop**: both are in
+            // [0, 1] and they sum to 1, so the blend is a convex combination
+            // of two reads and |y| <= max(|a|, |b|) sample by sample; at every
+            // frequency its response is at most the larger of the two reads'
+            // own, which is the bound a TIME held at either of them would have
+            // had (`P_c` moves under 1e-4 across the sinc's read phases at
+            // 44.1, 48 and 192 kHz). Equal power puts no such bound on it.
+            // That holds for whichever two reads are blended -- any TIME,
+            // NOTE or tempo step, either line of any
+            // stereo mode (dual offset scales both reads by the same ratio),
+            // the expanded and the plain read alike, and the lane, which is
+            // this same engine. It is the shared switch law in
+            // core/dsp/SwitchFade.h, for that file's reason: the two sides
+            // are the same signal through two paths. What it costs is a dip,
+            // never a rise: two reads that do not correlate lose up to 3 dB
+            // at the midpoint for the fade's 20 ms.
             const auto fading = ! glide && fadeCounter >= 0;
             auto fadeOld = 1.0, fadeNew = 0.0;
 
             if (fading)
             {
                 const auto u = (double) fadeCounter / (double) fadeLength;
-                fadeOld = std::cos (0.5 * kPiD * u);
-                fadeNew = std::sin (0.5 * kPiD * u);
+                fadeNew = u;
+                fadeOld = 1.0 - u;
             }
 
             // Pass one: read every line, publish the tap, and run the
@@ -1299,34 +1469,37 @@ public:
                 // 10 §8's dual offset: line 1 reads two thirds of the way
                 // along the same steered delay, so §2's law and §5's
                 // modulation carry over untouched.
-                const auto ratio = lineRatio (ch);
-                const auto readCurrent = readPosition (delayCurrent * ratio, modulated);
-                const auto readNext    = fading ? readPosition (delayNext * ratio, modulated)
-                                                : readCurrent;
+                //
+                // **A CHARACTER or STEREO switch fades the read too**
+                // (2026-10-04). A character brings its own modulation law --
+                // tape's floor moves the read up to about nine samples at
+                // 375 ms, clean's none -- and its own interpolator, and a
+                // stereo mode into or out of dual offset moves line 1's read
+                // from D to 2/3 D: taken in one sample, each jumped the read,
+                // and the step went out and into the ring at once. For the
+                // switch's 20 ms both reads are taken and blended by the
+                // shared equal-gain law, as the chain is (`beginSwitches`).
+                // Held, it is the one read it always was.
+                const auto ratioTo = lineRatioFor (stereoTo, ch);
+                const auto ratioFrom = lineRatioFor (stereoFrom, ch);
+                const auto stereoReads = stereoFade >= 0 && ratioFrom != ratioTo;
 
-                const auto* line = ring[(size_t) ch].data();
-
-                double y;
-
-                if (expand)
+                const auto readUnder = [&] (int law, double mod)
                 {
-                    // **The exact reciprocal of each tap, then the kernel**
-                    // (10 §4) -- see `readExpanded`. A crossfade's two reads
-                    // are each expanded before they are mixed, for the same
-                    // reason.
-                    const auto* gains = gainRing[(size_t) ch].data();
-                    y = readExpanded (line, gains, readCurrent);
+                    const auto r = readLine (ch, law, ratioTo, mod, expand, fading, fadeOld, fadeNew);
 
-                    if (fading)
-                        y = fadeOld * y + fadeNew * readExpanded (line, gains, readNext);
-                }
-                else
-                {
-                    y = readAt (line, readCurrent);
+                    if (! stereoReads)
+                        return r;
 
-                    if (fading)
-                        y = fadeOld * y + fadeNew * readAt (line, readNext);
-                }
+                    return (1.0 - stereoMix) * readLine (ch, law, ratioFrom, mod, expand, fading, fadeOld, fadeNew)
+                         + stereoMix * r;
+                };
+
+                auto y = readUnder (modeTo, modeTo == params.character ? modulated
+                                                                       : modulationFor (modeTo));
+
+                if (modeFade >= 0)
+                    y = (1.0 - modeMix) * readUnder (modeFrom, modulationFor (modeFrom)) + modeMix * y;
 
                 output[ch][n] = (float) y;
 
@@ -1340,7 +1513,17 @@ public:
             // matrix changes is *which* line a sample is injected into and
             // *which* line's chain output feeds it back, never whether the
             // input arrives.
-            for (int ch = 0; ch < nch; ++ch)
+            // **A STEREO switch into or out of ping-pong fades the matrix**
+            // (2026-10-04): the two lines' writes under the old matrix and the
+            // new are blended by the shared equal-gain law for the switch's
+            // 20 ms. Swapped in one sample, what each line was fed jumped, and
+            // the step came back a TIME later -- 3.2 times the signal's own,
+            // measured on ICE QUEEN at TIME 375.013 ms.
+            const auto pingPongTo   = twoLines && stereoTo == kPingPong;
+            const auto pingPongFrom = twoLines && stereoFrom == kPingPong;
+            const auto matrixFade   = stereoFade >= 0 && pingPongFrom != pingPongTo;
+
+            const auto inject = [&] (bool pingPong, int ch)
             {
                 double u = 0.0;
                 double back = 0.0;
@@ -1364,7 +1547,15 @@ public:
                     back = gain * chain[(size_t) ch];
                 }
 
-                auto v = u + back;
+                return u + back;
+            };
+
+            for (int ch = 0; ch < nch; ++ch)
+            {
+                auto v = inject (pingPongTo, ch);
+
+                if (matrixFade)
+                    v = (1.0 - stereoMix) * inject (pingPongFrom, ch) + stereoMix * v;
 
                 // A NaN that reached the ring would circulate for ever, so it
                 // is stopped at the write rather than at the output.
@@ -1400,6 +1591,24 @@ public:
             else if (samplesSinceCompanding < ringSize())
                 ++samplesSinceCompanding;
 
+            if (modeFade >= 0 && ++modeFade >= switchFadeLength)
+            {
+                modeFade = -1;
+                modeFrom = modeTo;
+            }
+
+            if (fxFade >= 0 && ++fxFade >= switchFadeLength)
+            {
+                fxFade = -1;
+                fxFrom = fxTo;
+            }
+
+            if (stereoFade >= 0 && ++stereoFade >= switchFadeLength)
+            {
+                stereoFade = -1;
+                stereoFrom = stereoTo;
+            }
+
             if (fading && ++fadeCounter >= fadeLength)
             {
                 fadeCounter  = -1;
@@ -1434,9 +1643,46 @@ private:
 
     /** How far along the steered delay this line reads, as a fraction of it.
         1 everywhere except dual offset's right line (10 §8). */
-    double lineRatio (int ch) const noexcept
+    static double lineRatioFor (int stereoMode, int ch) noexcept
     {
-        return (params.stereoMode == kDualOffset && ch == 1) ? kDualOffsetRatio : 1.0;
+        return (stereoMode == kDualOffset && ch == 1) ? kDualOffsetRatio : 1.0;
+    }
+
+    /** One line's read under one character's law -- its modulation and its
+        interpolator -- at one stereo ratio, with §2's TIME crossfade in it.
+        Held, `process` asks for exactly one of these a line; across a
+        CHARACTER or STEREO switch it asks for two and blends them. */
+    double readLine (int ch, int law, double ratio, double modulated, bool expand,
+                     bool fading, double fadeOld, double fadeNew) const noexcept
+    {
+        const auto readCurrent = readPosition (delayCurrent * ratio, modulated, law);
+        const auto readNext    = fading ? readPosition (delayNext * ratio, modulated, law)
+                                        : readCurrent;
+
+        const auto* line = ring[(size_t) ch].data();
+
+        double y;
+
+        if (expand)
+        {
+            // **The exact reciprocal of each tap, then the kernel** (10 §4)
+            // -- see `readExpanded`. A crossfade's two reads are each
+            // expanded before they are mixed, for the same reason.
+            const auto* gains = gainRing[(size_t) ch].data();
+            y = readExpanded (line, gains, readCurrent, law);
+
+            if (fading)
+                y = fadeOld * y + fadeNew * readExpanded (line, gains, readNext, law);
+        }
+        else
+        {
+            y = readAt (line, readCurrent, law);
+
+            if (fading)
+                y = fadeOld * y + fadeNew * readAt (line, readNext, law);
+        }
+
+        return y;
     }
 
     /** 10 §4's loop order: LOW CUT -> HIGH CUT -> mode filters -> (FX, 2c) ->
@@ -1473,16 +1719,12 @@ private:
         auto c = f.lowCut.highPass (y);
         c = f.highCut.lowPass (c);
 
-        if (params.character == kTape)
-        {
-            c = f.tapeLowPass.lowPass (c);
-            c = f.headBump.lowShelf (c, headBumpGain);
-        }
-        else if (params.character == kBucketBrigade)
-        {
-            c = f.bbdAntiAlias.process (c);
-            c = f.bbdReconstruct.process (c);
-        }
+        // The mode filters, or -- for the 20 ms after a CHARACTER move -- both
+        // characters' filters run side by side and blended (`beginSwitches`).
+        if (modeFade >= 0)
+            c = (1.0 - modeMix) * modeStage (f, modeFrom, c) + modeMix * modeStage (f, modeTo, c);
+        else
+            c = modeStage (f, modeTo, c);
 
         // **10 §11a's FX stage: after the mode filters, before the shaper, and
         // skipped outright when off.** The position is the whole of what makes
@@ -1495,8 +1737,27 @@ private:
         // that FX off is bit-identical to the loop without it -- and because
         // each engine holds its own `FxStage`, that identity holds **per path**
         // without anything here knowing which path it is on.
-        if (params.fx)
-            c = fx.process (ch, params.fxType, c, fxDepth, nch);
+        //
+        // For the 20 ms after FX is switched or its type moved, the stage
+        // going out and the one coming in run side by side and are blended,
+        // "out" being the wire (`beginSwitches`). **The stage going out is
+        // faded at its output and the one coming in at its input**: an
+        // incoming Diffuse starts from cleared lines, and fed the whole
+        // signal at once, each line's first sample arrived 7-37 ms later as
+        // a step; fed a ramp, its lines fill from nothing. The outgoing one
+        // still holds a tail, so its output is what has to reach zero before
+        // it stops running.
+        if (fxFade >= 0)
+        {
+            const auto from = fxFrom == kFxOut ? c : fx.process (ch, fxFrom, c, fxDepth, nch);
+            const auto in   = fxMix * c;
+            const auto to   = fxTo   == kFxOut ? in : fx.process (ch, fxTo, in, fxDepth, nch);
+            c = (1.0 - fxMix) * from + to;
+        }
+        else if (fxTo != kFxOut)
+        {
+            c = fx.process (ch, fxTo, c, fxDepth, nch);
+        }
 
         if (blend > 0.0)
         {
@@ -1534,19 +1795,143 @@ private:
         return std::tanh (c);
     }
 
+    /** One character's mode filters: tape's rolloff and head bump,
+        bucket-brigade's clock pair, nothing on clean. */
+    double modeStage (ChannelFilters& f, int which, double c) noexcept
+    {
+        if (which == kTape)
+        {
+            c = f.tapeLowPass.lowPass (c);
+            return f.headBump.lowShelf (c, headBumpGain);
+        }
+
+        if (which == kBucketBrigade)
+        {
+            c = f.bbdAntiAlias.process (c);
+            return f.bbdReconstruct.process (c);
+        }
+
+        return c;
+    }
+
+    //==========================================================================
+    /** **A switch inside the loop is a fade, not a step** (2026-10-03).
+
+        CHARACTER swaps the mode filters and FX swaps a stage in or out, and
+        both sit in the character chain, inside the loop. Taken in one sample,
+        the chain's output stepped wherever the two paths disagreed, the step
+        went into the ring, and came out one TIME later: measured on ICE QUEEN
+        with a 440 Hz sine at FEEDBACK 60, MIX 50, bucket-brigade to clean
+        stepped 2.79 times the signal's own largest sample step, and Diffuse
+        switched off 2.42 times, against the house bound of 1.5.
+
+        So for `kSwitchFadeSeconds` after either moves, the chain runs the
+        path going out and the path coming in side by side and blends them
+        `(1 - u, u)` -- the shared switch law: the weights are in [0, 1] and
+        sum to 1, so the fade cannot add level to the loop. (An incoming FX
+        stage takes its weight at its input rather than its output, so that
+        its delay lines fill from nothing; see `character`.) The two paths
+        are the same signal through two filters, so they correlate; where
+        their phases part they dip through the fade (a 20 ms dip in one lap,
+        which the loop replays at the loop's own gain), never rise.
+
+        **What comes in starts clean.** The incoming character's filters are
+        reset, and an incoming Crush or Diffuse is cleared
+        (`FxStage::engageCrush`, `engageDiffuse`): neither has run while it
+        was out, so its state is from whenever it last ran. Pan/Tremolo holds
+        no audio. A move that arrives mid-fade waits for the fade in flight
+        and then fades from where that one landed, as §2's TIME fade does, so
+        no more than two paths ever run. Everything else a CHARACTER move
+        changes -- the time law, the interpolator, the compander, tape's
+        character floor on the read -- is not in the chain and is handed over
+        as before. */
+    void beginSwitches() noexcept
+    {
+        if (modeFade < 0 && modeTo != params.character)
+        {
+            modeFrom = modeTo;
+            modeTo = params.character;
+            modeFade = 0;
+
+            for (auto& f : filters)
+                resetModeFilters (f, modeTo);
+        }
+
+        const auto fxWanted = fxTarget();
+
+        if (fxFade < 0 && fxTo != fxWanted)
+        {
+            fxFrom = fxTo;
+            fxTo = fxWanted;
+            fxFade = 0;
+            engageFx (fxTo);
+        }
+
+        if (stereoFade < 0 && stereoTo != params.stereoMode)
+        {
+            stereoFrom = stereoTo;
+            stereoTo = params.stereoMode;
+            stereoFade = 0;
+        }
+
+        modeMix = modeFade >= 0 ? (double) modeFade / (double) switchFadeLength : 1.0;
+        stereoMix = stereoFade >= 0 ? (double) stereoFade / (double) switchFadeLength : 1.0;
+        fxMix   = fxFade   >= 0 ? (double) fxFade   / (double) switchFadeLength : 1.0;
+    }
+
+    /** The chain takes the parameters' character and FX at once: on
+        `prepare`, a snap and a `reset`, where nothing is circulating. */
+    void snapSwitches() noexcept
+    {
+        const auto fxWanted = fxTarget();
+
+        if (fxWanted != fxTo)
+            engageFx (fxWanted);
+
+        modeFrom = modeTo = params.character;
+        stereoFrom = stereoTo = params.stereoMode;
+        fxFrom = fxTo = fxWanted;
+        modeFade = fxFade = stereoFade = -1;
+        modeMix = fxMix = stereoMix = 1.0;
+    }
+
+    int fxTarget() const noexcept { return params.fx ? params.fxType : kFxOut; }
+
+    void engageFx (int type) noexcept
+    {
+        if (type == kCrush)
+            fx.engageCrush();
+        else if (type == kDiffuse)
+            fx.engageDiffuse();
+    }
+
+    static void resetModeFilters (ChannelFilters& f, int which) noexcept
+    {
+        if (which == kTape)
+        {
+            f.tapeLowPass.reset();
+            f.headBump.reset();
+        }
+        else if (which == kBucketBrigade)
+        {
+            f.bbdAntiAlias.reset();
+            f.bbdReconstruct.reset();
+        }
+    }
+
     //==========================================================================
     /** Where the read lands this sample: §2's steered delay with §5's
         modulation on top of it, clamped so that a deep wow can never walk the
         read past the write or past the ring's end. */
-    double readPosition (double delay, double modulated) const noexcept
+    double readPosition (double delay, double modulated, int law) const noexcept
     {
-        const auto d = params.character == kClean ? delay + modulated
-                                                  : delay * (1.0 + modulated);
+        const auto d = law == kClean ? delay + modulated
+                                     : delay * (1.0 + modulated);
 
         return std::clamp (d, kMinDelaySamples, (double) std::max (maxDelay, 3));
     }
 
-    double readAt (const float* line, double delay) const noexcept
+    double readAt (const float* line, double delay, int law) const noexcept
     {
         const auto pos = (double) writeIdx - delay;
 
@@ -1556,7 +1941,7 @@ private:
         // accumulates no phase-dependent HF loss. Tape and bucket-brigade take
         // 4-point 3rd-order Hermite instead, where the per-repeat HF loss is
         // *wanted*; so does clean below the sinc's headroom.
-        if (usesSinc() && delay >= (double) kSincFloor)
+        if (law == kClean && delay >= (double) kSincFloor)
             return (double) sinc.read (line, mask, pos);
 
         return hermite (pos, [line, this] (int k) noexcept
@@ -1592,7 +1977,7 @@ private:
         divide by zero. Clean's sinc reads the expanded taps out of a small
         stack copy, laid out at the same indices modulo its size, so the table
         in `modules/tune` is used as it is. */
-    double readExpanded (const float* line, const float* gains, double delay) const noexcept
+    double readExpanded (const float* line, const float* gains, double delay, int law) const noexcept
     {
         const auto pos = (double) writeIdx - delay;
 
@@ -1602,7 +1987,7 @@ private:
             return (double) line[j] / std::max ((double) gains[j], 1.0e-6);
         };
 
-        if (usesSinc() && delay >= (double) kSincFloor)
+        if (law == kClean && delay >= (double) kSincFloor)
         {
             std::array<float, kExpandScratch> taps {};
             const auto base = (int) (long long) std::floor (pos) - Sinc::kHalf + 1;
@@ -1698,12 +2083,7 @@ private:
 
         if (params.character == kBucketBrigade)
         {
-            const auto seconds = std::max ((double) params.timeMs, 1.0) * 0.001;
-            const auto clockHz = kBbdStages / (2.0 * seconds);
-
-            bbdCutoffHz = std::clamp (kBbdCutoffFactor * clockHz * 0.5,
-                                      kBbdCutoffMinHz, kBbdCutoffMaxHz);
-            bbdCutoffHz = std::min (bbdCutoffHz, 0.45 * sampleRate);
+            bbdCutoffHz = bbdCutoffFor (params.timeMs);
 
             for (auto& f : filters)
             {
@@ -1715,6 +2095,18 @@ private:
         {
             bbdCutoffHz = 0.0;
         }
+    }
+
+    /** Bucket-brigade's corner at `timeMs`: the one formula both the mode
+        filters and `prepareSweeps` take it from. */
+    double bbdCutoffFor (float timeMs) const noexcept
+    {
+        const auto seconds = std::max ((double) timeMs, 1.0) * 0.001;
+        const auto clockHz = kBbdStages / (2.0 * seconds);
+
+        const auto cutoff = std::clamp (kBbdCutoffFactor * clockHz * 0.5,
+                                        kBbdCutoffMinHz, kBbdCutoffMaxHz);
+        return std::min (cutoff, 0.45 * sampleRate);
     }
 
     /** DRIVE, as a blend and a curve. The curve reuses `modules/sat`'s own
@@ -1801,7 +2193,7 @@ private:
             delayTarget = target;
 
             // §2's clean law: the old tap freezes, a new one starts at the
-            // target, equal-power raised cosine across it. Tape and
+            // target, an equal-gain crossfade across it (see `process`). Tape and
             // bucket-brigade glide instead, per sample, in `advanceTime`.
             if (! usesGlide() && fadeCounter < 0)
             {
@@ -1848,8 +2240,6 @@ private:
         what `11` §4k's block-size invariance is really testing. */
     double advanceModulation() noexcept
     {
-        const auto knob = std::clamp ((double) params.modDepthPct * 0.01, 0.0, 1.0);
-
         // 01: on a transport both rate and depth scale with time.
         const auto timeScale = params.character == kClean
                              ? 1.0
@@ -1863,9 +2253,24 @@ private:
         flutterPhase += 2.0 * kPiD * kFlutterHz / sampleRate;
         if (flutterPhase >= 2.0 * kPiD) flutterPhase -= 2.0 * kPiD;
 
-        const auto noise = advanceNoise();
+        lastNoise = advanceNoise();
 
-        if (params.character == kClean)
+        return modulationFor (params.character);
+    }
+
+    /** What §5's oscillators, as they stand this sample, put on one
+        character's read: its law, its floor, its flutter. `advanceModulation`
+        turns them; this is also asked for the character a CHARACTER switch is
+        fading out of (`beginSwitches`), whose read runs alongside for 20 ms. */
+    double modulationFor (int which) const noexcept
+    {
+        const auto knob = std::clamp ((double) params.modDepthPct * 0.01, 0.0, 1.0);
+
+        const auto timeScale = which == kClean
+                             ? 1.0
+                             : std::clamp ((double) params.timeMs / 300.0, 0.5, 2.0);
+
+        if (which == kClean)
         {
             // Clean has no floor, no flutter and no wear noise: §5 gives it
             // the wow sine alone, in milliseconds.
@@ -1876,7 +2281,7 @@ private:
         // The character floor sums into the depth rather than replacing it, so
         // MOD DEPTH 0 is the floor and 100 % is the floor plus §5's full
         // 0.5 %. Bucket-brigade's floor is zero by decision, not by omission.
-        const auto floorDepth = params.character == kTape ? kTapeWowFloor : 0.0;
+        const auto floorDepth = which == kTape ? kTapeWowFloor : 0.0;
         const auto depth = (knob * kModDepthFraction + floorDepth) * timeScale;
 
         if (depth <= 0.0)
@@ -1888,10 +2293,10 @@ private:
         // one). Its 11.7 Hz is a mechanical resonance rather than the MOD RATE
         // knob, so it is **not** scaled by TIME the way the wow rate is. §5
         // does not say either way; the reading is recorded rather than hidden.
-        if (params.character == kTape)
+        if (which == kTape)
             m += kFlutterRatio * std::sin (flutterPhase);
 
-        m += kModNoiseRatio * noise;
+        m += kModNoiseRatio * lastNoise;
 
         return depth * m;
     }
@@ -1943,14 +2348,33 @@ private:
         thread, so the two grids it reads are cached and only the part that
         actually moved is rebuilt. The interpolator's part is rebuilt only once
         the read phase has moved by more than the table's own 1/256-sample
-        quantisation, below which there is nothing new to measure. */
+        quantisation, below which there is nothing new to measure.
+
+        **Each half is kept against what it was built from** (2026-10-04),
+        one copy per character and one per interpolator, and is rebuilt only
+        when that has moved. The snap that the first parameter set after a
+        `prepare` or `reset` makes used to rebuild both halves in both engines
+        although nothing had moved -- 60 to 150 us of the audio thread's first
+        block, measured on ICE QUEEN, which in a rack is the block a chain edit
+        or a host reset brings the module in on. A half is a function of its
+        inputs and of the grid alone, so a kept one is bit for bit the one a
+        rebuild would make, and the peak scanned from the same two halves is
+        the same peak. */
     void refreshLoopPeak (bool filtersMoved) noexcept
     {
         if (filtersMoved)
-            buildFilterMagnitudes();
+            filterSweep = buildFilterMagnitudes();
 
         if (filtersMoved || std::abs (delayTarget - kernelDelay) > (1.0 / 256.0))
-            buildKernelMagnitudes (delayTarget);
+            kernelSweep = buildKernelMagnitudes (delayTarget);
+
+        // Neither half the peak was scanned from has moved, so a scan would
+        // land on the figure already held.
+        if (filterSweep == peakFilterSweep && kernelSweep == peakKernelSweep)
+            return;
+
+        const auto& filterMagnitude = filterSweeps[(size_t) filterSweep].magnitude;
+        const auto& kernelMagnitude = kernelSweeps[(size_t) kernelSweep].magnitude;
 
         auto peak = 0.0;
         auto peakHz = gridHz.empty() ? 0.0 : gridHz[0];
@@ -1968,37 +2392,89 @@ private:
 
         loopPeak   = std::max (peak, 1.0e-6);
         loopPeakHz = peakHz;
+        peakFilterSweep = filterSweep;
+        peakKernelSweep = kernelSweep;
     }
 
     /** The reference chain of §3: the cuts at their neutral limits, the
         blocker, and **the character's own mode filters**, which are not user
         stages and so appear at their working values. The compander is unity by
-        construction and so contributes exactly 1 and is not swept. */
-    void buildFilterMagnitudes() noexcept
+        construction and so contributes exactly 1 and is not swept. Returns
+        which of `filterSweeps` holds it. */
+    int buildFilterMagnitudes() noexcept
     {
-        for (int i = 0; i < (int) filterMagnitude.size(); ++i)
+        if (params.character == kTape)
+            return buildFilterSweep (kTapeSweep, filters[0].tapeLowPass.coeff(),
+                                     filters[0].headBump.coeff(), headBumpGain);
+
+        if (params.character == kBucketBrigade)
+            return buildFilterSweep (kBbdSweep, filters[0].bbdAntiAlias.coeff(),
+                                     filters[0].bbdAntiAlias.damping(), 0.0);
+
+        return buildFilterSweep (kCleanSweep, 0.0, 0.0, 0.0);
+    }
+
+    /** One character's half, from the mode filters' coefficients `a`, `b`
+        and `c` -- tape's low-pass, head bump and bump gain; bucket-brigade's
+        `g` and damping; none on clean -- unless it already holds them. */
+    int buildFilterSweep (int slot, double a, double b, double c) noexcept
+    {
+        auto& sweep = filterSweeps[(size_t) slot];
+        const std::array<double, 6> builtFrom { referenceLowCut, referenceHighCut, referenceBlocker, a, b, c };
+
+        if (builtFrom == sweep.builtFrom)
+            return slot;
+
+        ++sweepsTaken;
+        sweep.builtFrom = builtFrom;
+
+        if (slot == peakFilterSweep)
+            peakFilterSweep = -1;
+
+        // **The reference cuts and the blocker are cached** (2026-10-03).
+        // They sit at fixed corners -- 20 Hz, the cap, 10 Hz -- so their
+        // product moves only with the sample rate, yet it was rebuilt, three
+        // complex divisions and three sines and cosines a point, on every
+        // bucket-brigade TIME move, where the clock filters do move. The
+        // product is the same three factors multiplied in the same order, so
+        // `m` comes out bit for bit what it was.
+        const std::array<double, 3> reference { referenceLowCut, referenceHighCut, referenceBlocker };
+
+        if (reference != referenceBuiltFor)
         {
-            const auto w = gridOmega[(size_t) i];
-
-            auto m = TptOnePole::highPassMagnitude (referenceLowCut,  w)
-                   * TptOnePole::lowPassMagnitude  (referenceHighCut, w)
-                   * TptOnePole::highPassMagnitude (referenceBlocker, w);
-
-            if (params.character == kTape)
+            for (int i = 0; i < (int) referenceMagnitude.size(); ++i)
             {
-                m *= TptOnePole::lowPassMagnitude (filters[0].tapeLowPass.coeff(), w);
-                m *= TptOnePole::lowShelfMagnitude (filters[0].headBump.coeff(), headBumpGain, w);
+                const auto z = gridZ[(size_t) i];
+
+                referenceMagnitude[(size_t) i] = TptOnePole::highPassMagnitude (referenceLowCut,  z)
+                                               * TptOnePole::lowPassMagnitude  (referenceHighCut, z)
+                                               * TptOnePole::highPassMagnitude (referenceBlocker, z);
             }
-            else if (params.character == kBucketBrigade)
+
+            referenceBuiltFor = reference;
+        }
+
+        for (int i = 0; i < (int) sweep.magnitude.size(); ++i)
+        {
+            const auto z = gridZ[(size_t) i];
+
+            auto m = referenceMagnitude[(size_t) i];
+
+            if (slot == kTapeSweep)
             {
-                const auto g = filters[0].bbdAntiAlias.coeff();
-                const auto k = filters[0].bbdAntiAlias.damping();
-                const auto one = TptSvfLowPass::magnitude (g, k, w);
+                m *= TptOnePole::lowPassMagnitude (a, z);
+                m *= TptOnePole::lowShelfMagnitude (b, c, z);
+            }
+            else if (slot == kBbdSweep)
+            {
+                const auto one = TptSvfLowPass::magnitude (a, b, z);
                 m *= one * one;
             }
 
-            filterMagnitude[(size_t) i] = m;
+            sweep.magnitude[(size_t) i] = m;
         }
+
+        return slot;
     }
 
     /** |I(e^jw)| for the interpolator **as built**, not as specified.
@@ -2010,20 +2486,43 @@ private:
         sweeping a second copy of the formula that built it.
 
         Which interpolator is swept follows the character, because which one
-        the loop runs does (10 §1). */
-    void buildKernelMagnitudes (double delay) noexcept
+        the loop runs does (10 §1). Returns which of `kernelSweeps` holds it. */
+    int buildKernelMagnitudes (double delay) noexcept
     {
         kernelDelay = delay;
 
-        // The read position is `writeIdx - delay` and writeIdx is an integer,
-        // so the phase the table sees is the fraction of -delay.
+        return buildKernelSweep (usesSinc() && delay >= (double) kSincFloor ? kSincSweep : kHermiteSweep,
+                                 phaseOf (delay));
+    }
+
+    /** The read position is `writeIdx - delay` and writeIdx is an integer,
+        so the phase the table sees is the fraction of -delay. */
+    static double phaseOf (double delay) noexcept
+    {
         const auto negative = -delay;
-        const auto phase = negative - std::floor (negative);
+        return negative - std::floor (negative);
+    }
+
+    /** One interpolator's half at `phase`, unless it already holds it. The
+        kernel is a function of the phase alone, so the phase is the whole of
+        what it was built from. */
+    int buildKernelSweep (int slot, double phase) noexcept
+    {
+        auto& sweep = kernelSweeps[(size_t) slot];
+
+        if (phase == sweep.builtFor)
+            return slot;
+
+        ++sweepsTaken;
+        sweep.builtFor = phase;
+
+        if (slot == peakKernelSweep)
+            peakKernelSweep = -1;
 
         std::array<double, Sinc::kTaps> kernel {};
         int taps = 0;
 
-        if (usesSinc() && delay >= (double) kSincFloor)
+        if (slot == kSincSweep)
         {
             taps = Sinc::kTaps;
 
@@ -2043,9 +2542,10 @@ private:
             hermiteKernel (phase, kernel.data());
         }
 
-        for (int i = 0; i < (int) kernelMagnitude.size(); ++i)
+        // `step` is the cached `std::polar (1, -w)`; see `gridZ`.
+        for (int i = 0; i < (int) sweep.magnitude.size(); ++i)
         {
-            const auto step = std::polar (1.0, -gridOmega[(size_t) i]);
+            const auto step = gridZ[(size_t) i];
             std::complex<double> power { 1.0, 0.0 };
             std::complex<double> acc { 0.0, 0.0 };
 
@@ -2055,8 +2555,10 @@ private:
                 power *= step;
             }
 
-            kernelMagnitude[(size_t) i] = std::abs (acc);
+            sweep.magnitude[(size_t) i] = std::abs (acc);
         }
+
+        return slot;
     }
 
     //==========================================================================
@@ -2073,6 +2575,10 @@ private:
 
     /** 20 ms, 10 §12's clean crossfade. */
     static constexpr double kCrossfadeSeconds = 0.020;
+
+    /** 20 ms, the fade a CHARACTER or FX switch takes inside the loop
+        (`beginSwitches`): the same length as the clean crossfade. */
+    static constexpr double kSwitchFadeSeconds = 0.020;
 
     /** The wear noise is deterministic on purpose: `11` §4k's block-size
         invariance compares two renders of the same settings sample for sample,
@@ -2104,6 +2610,17 @@ private:
     double delayCurrent = 0.0, delayNext = 0.0, delayTarget = 0.0;
     int fadeCounter = -1, fadeLength = 1;
 
+    /** The character chain across a switch (`beginSwitches`): the character
+        whose mode filters run and the FX type in the loop (`kFxOut` for
+        none), from and to, and how far through its fade each is (-1 for
+        none). */
+    static constexpr int kFxOut = -1;
+    int modeFrom = kClean, modeTo = kClean, modeFade = -1;
+    int fxFrom = kFxOut, fxTo = kFxOut, fxFade = -1;
+    int switchFadeLength = 1;
+    int stereoFrom = kStereoIndependent, stereoTo = kStereoIndependent, stereoFade = -1;
+    double modeMix = 1.0, fxMix = 1.0, stereoMix = 1.0;
+
     /** Writes since the last companded one, capped at the ring's length: below
         it the gain ring may still hold a compressor gain the read has to
         divide out (see `process`). */
@@ -2114,12 +2631,53 @@ private:
 
     double wowPhase = 0.0, flutterPhase = 0.0;
     double noiseA = 0.0, noiseB = 0.0, noiseCoeff = 1.0, noiseNorm = 1.0;
+    double lastNoise = 0.0;   ///< the wear noise this sample, for `modulationFor`
     std::uint32_t noiseState = kNoiseSeed;
 
-    std::vector<double> gridOmega, gridHz, filterMagnitude, kernelMagnitude;
+    std::vector<double> gridOmega, gridHz;
+
+    /** The sweep's two halves, one copy per character and one per
+        interpolator, each beside what it was built from (`refreshLoopPeak`).
+        -1 is a key no coefficient or phase can take: built from nothing yet. */
+    static constexpr int kCleanSweep = 0, kTapeSweep = 1, kBbdSweep = 2;
+    static constexpr int kSincSweep = 0, kHermiteSweep = 1;
+
+    struct FilterSweep
+    {
+        std::vector<double> magnitude;
+        std::array<double, 6> builtFrom { -1.0, -1.0, -1.0, -1.0, -1.0, -1.0 };
+    };
+
+    struct KernelSweep
+    {
+        std::vector<double> magnitude;
+        double builtFor = -1.0;
+    };
+
+    std::array<FilterSweep, 3> filterSweeps;
+    std::array<KernelSweep, 2> kernelSweeps;
+
+    /** The halves the sweep reads now, and the two `loopPeak` was scanned
+        from (-1: not scanned, or the half has been rebuilt since). */
+    int filterSweep = kCleanSweep, kernelSweep = kSincSweep;
+    int peakFilterSweep = -1, peakKernelSweep = -1;
+
+    /** `e^-jw` at every grid point, taken once at `prepare`, and the
+        reference cuts' and blocker's magnitude product with the three
+        coefficients it was built for: the parts of the sweep that do not
+        move with TIME (`buildFilterMagnitudes`). */
+    std::vector<std::complex<double>> gridZ;
+    std::vector<double> referenceMagnitude;
+    std::array<double, 3> referenceBuiltFor { -1.0, -1.0, -1.0 };
     double referenceLowCut = 0.0, referenceHighCut = 0.0, referenceBlocker = 0.0;
     double kernelDelay = -1.0;
     double loopPeak = 1.0, loopPeakHz = 0.0;
+    int sweepsTaken = 0;
+
+    /** Whether `ring` and `gainRing` hold nothing but their cleared values:
+        set where they are filled, dropped by every `process`. */
+    bool ringsClear = false;
+    int ringClears = 0;
 };
 
 } // namespace bmo::dwell

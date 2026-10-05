@@ -6963,6 +6963,13 @@ std::vector<GridCell> gridDefaultCells()
         { "FX TYPE Diffuse -> Pan/Tremolo", false, 2, 96000.0, 512, 95.0f, false },    //  1.59x
         { "HOLD off", true, 0, 48000.0, 441, 60.0f, false },
         { "SYNC off", false, 5, 96000.0, 512, 60.0f, true },
+
+        // The only witnesses of the 2026-10-03 defects (2026-10-04): the
+        // review's conditions -- 48 kHz / 512, FEEDBACK 60, the tone --
+        // at the moment each was worst on c07af6d, before the chain fade.
+        { "FX off, Diffuse", false, 4, 48000.0, 512, 60.0f, false },                   //  2.92x
+        { "CHARACTER bucket-brigade -> clean", false, 6, 48000.0, 512, 60.0f, false }, //  3.09x
+        { "FX on, Diffuse", false, 0, 48000.0, 512, 60.0f, false },                    //  2.75x
     };
 
     std::vector<GridCell> cells;
@@ -7005,7 +7012,8 @@ void testEverySwitchIsAFade (bool printWorst = false)
     else
     {
         // The worst cells the full grid found on a265b41, one a family that
-        // failed, and the families that did not at their worst.
+        // failed, the families that did not at their worst, and the cells
+        // that were the only witness of a defect fixed on 2026-10-03.
         cells = gridDefaultCells();
     }
 

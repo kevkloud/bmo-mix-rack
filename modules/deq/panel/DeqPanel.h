@@ -66,10 +66,12 @@ private:
     void layoutExpanded (juce::Rectangle<int> area);
     void refreshEnablement();
 
-    /** A shelf asked for more Q than it runs at (kShelfMaxQ) is written back
-        down to it, so the knob reads what the band is doing. The engine and
-        the curve already cap it (params.h, effectiveQ); this is the panel
-        telling the truth about it.
+    /** A shelf or a cut asked for more Q than it runs at (kShelfMaxQ,
+        kCutMaxQ) is written back down to it, so the knob reads what the band
+        is doing. The engine and the curve already cap it (params.h,
+        effectiveQ); this is the panel telling the truth about it. Not a dim:
+        below its cap the knob still sets the band's Q, so it is never a
+        control a mode has left doing nothing (modules/AGENTS.md).
 
         Only after the user has done something here -- chosen a shelf, turned
         Q, wheeled the curve -- and only once the mouse is up, so it never

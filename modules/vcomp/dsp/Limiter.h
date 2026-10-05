@@ -82,6 +82,16 @@ public:
         reset();
     }
 
+    /** Holding nothing back and handed a peak under the knee: process() would
+        return exactly 1 and change nothing, so a caller may skip it and the
+        log10 it costs. The knee's lower edge is 0.6 dB under full scale; the
+        line is drawn 0.01 dB below that, far more than the rounding of the
+        level in dB. A NaN is not under anything, so it still goes through. */
+    bool isIdleFor (float peakLin) const noexcept
+    {
+        return reductionDb == 0.0f && peakLin < kIdleBelowLin;
+    }
+
     void reset() noexcept { reductionDb = 0.0f; }
 
     /** The gain to apply to this sample, from the peak the sample would have
@@ -110,6 +120,10 @@ public:
         today -- the GR bar is the compressor's and folding this into it would
         say the compressor was working when it was not. */
     float currentReductionDb() const noexcept { return reductionDb; }
+
+    /** 10^((kLimiterCeilingDb - kLimiterKneeDb / 2 - 0.01) / 20), i.e. -0.61
+        dBFS; VcompDspTests checks it against those constants. */
+    static constexpr float kIdleBelowLin = 0.93217f;
 
 private:
     float releasePole = 0.0f;

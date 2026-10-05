@@ -65,13 +65,18 @@ if(NOT BMO_DSP_ONLY)
         set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "" FORCE)
     endif()
 
-    # Only development builds install into the user's plugin folders. A
-    # Release build is for packaging and must not clobber what is being tested.
-    if(CMAKE_BUILD_TYPE STREQUAL "Release")
-        set(BMO_INSTALL_AFTER_BUILD FALSE)
-    else()
-        set(BMO_INSTALL_AFTER_BUILD TRUE)
-    endif()
+    # Copying a built plugin into the user's plugin folders is opt-in:
+    # -DBMO_INSTALL_AFTER_BUILD=ON, or scripts/build.sh --install.
+    #
+    # Until 2026-10-03 it followed the build type: everything but Release
+    # installed. A multi-config generator defeats that test, because Visual
+    # Studio and Xcode leave CMAKE_BUILD_TYPE empty, so every build of every
+    # tree, Release included, copied itself over whatever was being tested.
+    # On ICE QUEEN that day twelve installed bundles turned out to be the
+    # last review tree's products rather than the release that had been
+    # installed for listening; only a SHA-256 showed it. What is installed is
+    # the record of what was heard, so nothing overwrites it unasked.
+    option(BMO_INSTALL_AFTER_BUILD "Copy each built plugin into the user's plugin folders" OFF)
 
     if(MSVC)
         # Static runtime, so a plugin does not depend on a redistributable
@@ -161,9 +166,9 @@ if(NOT BMO_DSP_ONLY)
         set(multi CATEGORIES SOURCES LIBRARIES)
         cmake_parse_arguments(ARG "" "${one}" "${multi}" ${ARGN})
 
-        # A product may opt out of the development install, which is what
-        # BMO Tune RT does while its builds are compared by ear against the
-        # installed one. Everything else takes the suite's rule above.
+        # A product may refuse the install even when it is asked for, which is
+        # what BMO Tune RT does while its builds are compared by ear against
+        # the installed one. Everything else takes the suite's option above.
         if(NOT DEFINED ARG_INSTALL_AFTER_BUILD)
             set(ARG_INSTALL_AFTER_BUILD ${BMO_INSTALL_AFTER_BUILD})
         endif()

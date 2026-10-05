@@ -6,23 +6,29 @@
 namespace bmo::vcomp
 {
 
-/** **None of these set MAKEUP, and that is the point.**
+/** **Every preset but Init sets MAKEUP, and it is set so the preset comes out
+    at its input's loudness** (Frosty, 2026-10-03).
 
-    modules/AGENTS.md asks that every preset come out at the level it went in,
-    and the plugin tests check it. Every other module in the suite pays for
-    that with a hand-solved makeup figure per preset, re-solved by CI whenever
-    the curve moves -- modules/opto/presets/FactoryPresets.h is four screens of
-    exactly that, twice re-derived.
+    Until then none of them set it, on the reasoning that AMOUNT carries its own
+    static makeup (autoMakeupDb, Detector.h) and so a preset that moved AMOUNT
+    alone was level-matched by construction. That held on the suite's voice
+    only because the limiter was taking 1.0 to 10.3 dB off it, unmetered. A
+    first re-solve set MAKEUP to keep that voice off the limiter altogether,
+    and left every preset 0.4 to 7.2 dB quieter than it went in; the owner's
+    decision was loudness, not a limiter figure.
 
-    This module gets it for nothing. AMOUNT carries its own static makeup
-    (autoMakeupDb, Detector.h), so a preset that moves AMOUNT and nothing else
-    is level-matched by construction, at every setting, and cannot drift when
-    the curve is revoiced. The level-matching test is still worth having as a
-    tripwire on the auto makeup itself; it just has no numbers here to keep up
-    to date.
+    So each MAKEUP below is the figure, to 0.1 dB, that brings the preset's
+    output RMS to its input's on the house track level: the suite's voice
+    held to -18 dBFS RMS and -12 dBFS peak, 12 s at 48 kHz. All come out within
+    0.05 dB of it. Only MAKEUP is set -- AMOUNT and everything that shapes the
+    compression are as they were.
 
-    So a preset that wants to be louder should say so with MAKEUP, deliberately,
-    and none of these do.
+    On that voice only In Front reaches the limiter: 5.3 dB at most, more than
+    0.5 dB for 2.4 % of the time. Nothing is capped or traded off against that;
+    the figures are the owner's to judge. A source with a higher crest than
+    the house voice -- the suite's own, peaking at -3.85 dBFS -- reaches it on
+    more of them. Re-solve these if the curve or the makeup reference is
+    revoiced; tests/plugin/VcompTests.cpp pins the level each one comes out at.
 
     **Nor do any of them set GATE.** A gate threshold is an absolute level, and
     the right one depends entirely on how loud the track was recorded and how
@@ -48,19 +54,19 @@ inline const std::vector<FactoryPreset>& factory()
         { "Init", {} },
 
         // Standard mode: one number each.
-        { "Lift",     { { kAmount, 25.0f } } },   // levelling, barely a sound of its own
-        { "Forward",  { { kAmount, 55.0f } } },   // the vocal sits up; the working setting
-        { "In Front", { { kAmount, 80.0f } } },   // dense and modern, consonants held down
+        { "Lift",     { { kAmount, 25.0f }, { kOutput, -0.5f } } },   // levelling, barely a sound of its own
+        { "Forward",  { { kAmount, 55.0f }, { kOutput, -2.0f } } },   // the vocal sits up; the working setting
+        { "In Front", { { kAmount, 80.0f }, { kOutput, -2.6f } } },   // dense and modern, consonants held down
 
         // Complex mode, each saying what it is for by which controls it moves
         // away from the standard-mode figures.
         { "Fast Vocal", { { kComplex, 1.0f }, { kAmount, 65.0f },
                           { kAttack, 0.8f }, { kRelease, 90.0f },
-                          { kSidechain, 120.0f } } },   // catches consonants, lets go quickly
+                          { kSidechain, 120.0f }, { kOutput, -3.9f } } },   // catches consonants, lets go quickly
 
         { "Smooth Lead", { { kComplex, 1.0f }, { kAmount, 45.0f },
                            { kAttack, 20.0f }, { kRelease, 400.0f },
-                           { kSidechain, 70.0f } } },   // lets the transient through, rides the body
+                           { kSidechain, 70.0f }, { kOutput, -1.3f } } },   // lets the transient through, rides the body
 
         // The two that use the band split, which is the thing this module has
         // that a one-knob vocal compressor normally does not.
@@ -73,7 +79,7 @@ inline const std::vector<FactoryPreset>& factory()
         // feature works rather than where it is most obvious -- and how far
         // that is, is the open question in AGENTS.md.
         { "Keep The Chest", { { kComplex, 1.0f }, { kAmount, 35.0f },
-                              { kLowThru, 160.0f } } },   // body levelled, weight left alone
+                              { kLowThru, 160.0f }, { kOutput, -3.9f } } },   // body levelled, weight left alone
 
         // Same figure as Keep The Chest and for the same reason: at 70 the thru
         // band takes 19 dB of makeup uncompressed, which on a real vocal is a
@@ -81,13 +87,14 @@ inline const std::vector<FactoryPreset>& factory()
         // test never saw it because the harness voice has almost no energy
         // above 6 kHz (0.2.4 review, 2026-09-14).
         { "Keep The Air", { { kComplex, 1.0f }, { kAmount, 35.0f },
-                            { kHighThru, 6000.0f } } },   // top stays open over a held-down body
+                            { kHighThru, 6000.0f }, { kOutput, -1.1f } } },   // top stays open over a held-down body
 
         // ARC off is the one preset that hands the release back to the number
         // on the knob, which is what you want under a performance that is
         // already even and does not need the detector second-guessing it.
         { "Manual", { { kComplex, 1.0f }, { kAmount, 50.0f }, { kArc, 0.0f },
-                      { kAttack, 5.0f }, { kRelease, 150.0f } } },
+                      { kAttack, 5.0f }, { kRelease, 150.0f },
+                      { kOutput, -1.5f } } },
     };
 
     return presets;

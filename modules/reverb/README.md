@@ -6,10 +6,11 @@ Two spaces in one module — the early reflections that tell you where you are,
 and the tail that tells you how big it is — each with its own fader, so you can
 have one without the other. No latency.
 
-> **Not finished.** The panel, the parameters, the display and the early
-> reflections are real; the tail is not built yet, so REVERB's fader moves a
-> silent bus and the EQ page's curve is not yet in the sound. Nothing here has
-> been heard. See `AGENTS.md` and `docs/reverb/`.
+> **Not finished.** The panel, the parameters, the display, the early
+> reflections and the tail are real, and the early reflections and the tail
+> have been heard. The EQ page's curve and DARKEN are not yet in the sound,
+> the tail has no modulation yet, and only Room's voicing is worked out. See
+> `AGENTS.md` and `docs/reverb/`.
 
 ## The shape of it
 
@@ -147,7 +148,7 @@ audio; EARLY and TAIL are drawn from the controls alone and cost nothing.
 | **ER HI-CUT** | Takes the top off the reflections. **This is the boxiness control.** |
 | **VARIATION** | Seven different reflection patterns, narrow to wide — and the screen fans open and shut as you turn it. **Var 6 is the widest — and the reflections disappear completely if the track is summed to mono.** Every other position survives a mono sum. |
 | **SOURCE** | What feeds the tail: the dry signal at one end, the early reflections at the other. Turn it up and the tail inherits the room's own timing and colour. |
-| **SIZE** | How big the space is, 0.5 to 80 m. It moves the reflections apart and the tail with them; it does not glide, so a held note does not bend while you turn it. It is on this page because it is what the picture's own ruler is made of. |
+| **SIZE** | How big the space is, 0.5 to 80 m. It moves the reflections apart and the tail with them; it does not glide, so a held note does not bend while you turn it. It is on this page because it is what the picture's own ruler is made of. **Set it and leave it.** A SIZE you have set costs the tail nothing, but every change while the tail is ringing takes some of it away for good — one move from 80 to 12 m leaves a 5 s tail about 11 dB quieter than either size would have — so automating SIZE thins the tail, and the faster it moves the thinner it gets. That is the behaviour for 0.2.6 (Frosty, 2026-10-03). |
 
 ## TAIL — how it behaves once it is there
 

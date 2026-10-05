@@ -27,7 +27,8 @@ namespace bmo::dim
     append-only, and a host session that automated them must still load.
 
     Built on BMO Opto's panel rather than on BMO EQ's: blocks placed from the
-    top on one derived gap, and no input or output section reserved. It had no
+    top on one derived gap. No input section; since 2026-10-03 the suite's
+    output section, for OUTPUT, under a bare rule on the shared line. It had no
     rules either, on the argument that it was one idea. Frosty's legends settled
     that it is two -- make width, then shape it -- and the legends sit in gaps
     the rhythm already left, so adding them moved no control.
@@ -41,7 +42,8 @@ namespace bmo::dim
     it is permanent and because it is what a host's automation list shows. The
     two are independent and each is right for the list it is in.
 
-    DIMENSION is the hero, at 148 px where Opto puts its meter; everything else
+    DIMENSION is the hero, at 132 px (148 until OUTPUT took the foot);
+    everything else
     is paired at 64, the size the rest of the suite's paired knobs use. BELOW
     is the one knob here that prints its value -- it is a crossover, and "below
     what" is the question its caption raises -- and BLOOM keeps a blank line to
@@ -87,13 +89,31 @@ public:
 private:
     void paintPanel (juce::Graphics&) override;
 
+    /** Dims every knob the DSP ignores where GENERATE, DIMENSION, BLOOM and
+        TURN stand (modules/AGENTS.md: a control a mode makes inert is
+        dimmed). It asks the functions beside DspCore -- `centsIsLive` and
+        its siblings -- so the panel and the audio cannot disagree, and it
+        only ever calls `setKnobEnabled`: the value is never written, still
+        automates, and comes back live when the mode is left. */
+    void refreshDims();
+
     // The three knob pairs, as laid out, so paintPanel can group them.
     std::array<juce::Rectangle<int>, 3> pairBoxes;
 
     ui::PlainKnob width, shuffle, shuffleFreq, cents, diffuse,
                   rotation, asymmetry;
 
+    /** OUTPUT, 2026-10-03: the suite's trim knob, in the suite's output
+        section. */
+    ui::PlainKnob output;
+
     ui::SwitchButton detuneOn;
+
+    /** One per control that decides a dim. A host lane, a preset recall or
+        a rack slot moves these without a click, and the dims have to follow
+        it, so they are driven from the parameters rather than from the
+        controls. */
+    std::array<std::unique_ptr<juce::ParameterAttachment>, 4> dimAttachments;
 };
 
 } // namespace bmo::dim

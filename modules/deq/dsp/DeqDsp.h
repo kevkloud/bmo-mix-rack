@@ -28,9 +28,12 @@ namespace bmo::deq
       own smoothing, so switching it or dragging a band glides.
     - **Output** is a trim after the bands, smoothed like BMO Util's gain.
 
-    A shelf's Q is capped at kShelfMaxQ here (params.h, effectiveQ), so
-    automation or an old session asking for a resonant shelf gets the widest
-    one the design is good for.
+    A shelf's Q is capped at kShelfMaxQ and a cut's at kCutMaxQ (params.h)
+    by every design the engine makes (designQ, Settings), so automation or an
+    old session asking for a resonant shelf gets the widest one the design is
+    good for, and one asking for a resonant cut gets one that does not boost.
+    The engine is handed the knob's own Q, so the band's Q does not move when
+    only its shape does.
 */
 class DeqDsp final : public ModuleDsp
 {
@@ -38,10 +41,22 @@ public:
     void prepare (double sampleRate, int maxBlockSize, int numChannels) override
     {
         core.prepare (sampleRate, maxBlockSize, numChannels);
+        prepared = true;
         grid = DesignGrid::make (sampleRate);
         const auto tau = 0.005;
         smoothCoeff = 1.0 - std::exp (-1.0 / (std::max (sampleRate, 1.0) * tau));
         autoDirty = true;
+
+        // AUTO is worked out from the settings, not from the input, so it can
+        // be known before the first sample. ModuleEngine calls setParams
+        // before prepare(), when there was no rate to design with, and AUTO
+        // used to start at unity and glide to its level over the first blocks
+        // -- 13 dB too loud for the first 10 ms behind a +24 dB shelf. Now
+        // the settings already given are designed here, and reset() starts
+        // the output at that level.
+        if (primed)
+            updateTarget();
+
         reset();
     }
 
@@ -58,6 +73,13 @@ public:
 
         const auto active = v[kActive] > 0.5f;
 
+        // The product's twelve keep their detectors listening while they are
+        // off once they have been on; the engine's spare bands, and any band
+        // never switched on, cost nothing (Settings::bandCount).
+        settings.bandCount = kBands;
+        settings.cutMaxQ = kCutMaxQ;
+        settings.shelfMaxQ = kShelfMaxQ;
+
         for (int b = 0; b < kBands; ++b)
         {
             auto at = [v, b] (Control c) { return v[indexOf (b, c)]; };
@@ -69,7 +91,7 @@ public:
             band.enabled     = active && at (Control::on) > 0.5f;
             band.shape       = shapeFor (shapeChoice);
             band.frequencyHz = at (Control::freq);
-            band.q           = effectiveQ (shapeChoice, at (Control::q));
+            band.q           = at (Control::q);   // the knob's: each design caps it (designQ)
             band.gainDb      = at (Control::gain);
             band.placement   = placementFor ((int) std::lround (at (Control::place)));
             band.msAmount    = 1.0;
@@ -92,18 +114,9 @@ public:
 
         core.setSettings (settings);
 
-        const auto autoOn = v[kAutoGain] > 0.5f;
-
-        if (autoOn && autoDirty && grid.sampleRate > 0.0)
-        {
-            // Clamped, so a curve that is nearly all cut (a pair of steep
-            // filters closing on each other) cannot ask for 40 dB of makeup.
-            const auto mean = staticBroadbandGain (settings, grid);
-            autoGain = std::clamp (1.0 / std::max (mean, 1.0e-6), kAutoMin, kAutoMax);
-            autoDirty = false;
-        }
-
-        gainTarget = std::pow (10.0, (double) v[kOutput] / 20.0) * (autoOn ? autoGain : 1.0);
+        autoOn = v[kAutoGain] > 0.5f;
+        outputDb = (double) v[kOutput];
+        updateTarget();
 
         if (! primed)
         {
@@ -114,6 +127,11 @@ public:
 
     void process (float* const* channels, int numChannels, int numSamples) override
     {
+        // A wire until prepare(): the engine passes the signal through, and so
+        // does the output stage rather than applying a trim at no known rate.
+        if (! prepared)
+            return;
+
         core.process (channels, numChannels, numSamples);
 
         const auto used = std::min (numChannels, 2);
@@ -165,11 +183,28 @@ public:
     }
 
 private:
+    /** The output's target: the trim, times AUTO when it is on. AUTO is
+        redesigned only when a static setting has moved, and only once there
+        is a rate to design at. */
+    void updateTarget() noexcept
+    {
+        if (autoOn && autoDirty && grid.sampleRate > 0.0)
+        {
+            // Clamped, so a curve that is nearly all cut (a pair of steep
+            // filters closing on each other) cannot ask for 40 dB of makeup.
+            const auto mean = staticBroadbandGain (settings, grid);
+            autoGain = std::clamp (1.0 / std::max (mean, 1.0e-6), kAutoMin, kAutoMax);
+            autoDirty = false;
+        }
+
+        gainTarget = std::pow (10.0, outputDb / 20.0) * (autoOn ? autoGain : 1.0);
+    }
+
     DspCore core;
     Settings settings;
     DesignGrid grid;
-    double smoothCoeff = 1.0, gainTarget = 1.0, gainNow = 1.0, autoGain = 1.0;
-    bool primed = false, autoDirty = true;
+    double smoothCoeff = 1.0, gainTarget = 1.0, gainNow = 1.0, autoGain = 1.0, outputDb = 0.0;
+    bool primed = false, autoDirty = true, autoOn = false, prepared = false;
 };
 
 inline std::unique_ptr<ModuleDsp> createDsp() { return std::make_unique<DeqDsp>(); }

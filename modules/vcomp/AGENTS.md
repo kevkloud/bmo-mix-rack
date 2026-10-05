@@ -52,10 +52,14 @@ worst at the *bottom* of the knob where the makeup is smallest but the peaks are
 reduced just as hard. The suite's `voice()` source is normalised to -18 dBFS RMS
 and peaks at -3.6 (a 14.4 dB crest), so the makeup was compensating for a signal
 6 dB quieter than the detector was hearing. At -7 dBFS every factory preset
-lands inside 2.5 dB.
+landed inside 2.5 dB -- with the limiter taking 1 to 10 dB off the peaks to get
+them there, which nothing showed until 2026-10-03. The presets now set MAKEUP
+to stay off the limiter and come out 0.6 to 6.4 dB under the voice's level, by
+the owner's decision (presets/FactoryPresets.h has the figures).
 
 This is the failure mode to watch for in any revoicing: it does not announce
-itself, and only `VcompTests`' level-matching check holds it.
+itself, and only `VcompTests`' preset-level check holds it, now against each
+preset's pinned level rather than against the input's.
 
 ### ARC's slow branch is programme-dependent because of its *attack*
 
@@ -74,6 +78,14 @@ it is the branch that decides the recovery.
 after a 3 s hit at the same level, and checks that the ARC-off control case
 recovers identically after both. A weaker test -- "the release is slow" -- would
 pass the broken version.
+
+**All three branches run whatever ARC is set to** (2026-10-03). The slow one
+used to stop while ARC was off, so ARC back on -- or the Manual preset followed
+by any other -- released a reduction held from whenever ARC went off: 12-14 dB
+low on a quiet tone 10 s later. Clearing it would be wrong the other way, since
+an instance with ARC on all along still holds part of a phrase that ended a
+second ago. Keeping all three listening costs about 0.3 ns a sample; a change
+of ARC crosses over in 10 ms. `vcomp_switch_tests` section 1 holds both.
 
 ### The gate is an expander, and it is first for a reason
 
@@ -301,8 +313,41 @@ Two things this changed that are worth knowing:
 - **`kThruBodyOffsetDb` is 6 dB, and that one *is* a number somebody picked.**
   It says how far under the peaks the detector reads the chest and the air
   actually sit. Larger means more thru lift, smaller means less.
-- **The band-split crossfade.** Unchanged by this: engaging the split still
-  switches the crossover in rather than fading it.
+- **A knob brings a side of the split in and out without a step or a dip**
+  (2026-10-03). A side enters with its crossover parked at the edge of its
+  range -- 5 Hz for LOW THRU, 0.98 of Nyquist for HIGH THRU -- where its
+  allpass is a wire across the audio band; it runs there unheard until its
+  start-up transient dies (250 ms low, 5 ms high), fades in (30 ms low, 10
+  ms high), then glides to its setting; going out it glides back to the edge
+  and fades there. The
+  first version faded from the dry signal to the allpass where the side
+  stood, and half way through the two are in anti-phase at the crossover: a
+  tone there cancelled completely. Glides move the crossover's period in a
+  straight line, 2.5 of its own cycles per octave, because how far a tone's
+  level wobbles while an allpass sweeps past it depends only on that figure
+  (half a cycle: -3.1 / +5.1 dB; 2.5: under 1 dB). So the low side takes up
+  to 0.97 s to come all the way in (LOW THRU 500) and the high side 35 ms and
+  a glide of at least 20 ms. Worst pole radius on the way: 0.999884, at the
+  5 Hz edge and 192 kHz. `vcomp_switch_tests` sections 3, 5, 6 and 11 hold
+  steps and level, at AMOUNT 0 and 55.
+- **COMPLEX is a switch, and switches through a dip** (Frosty, 2026-10-03).
+  Taken the knobs' way, both sides in by their edges and a glide, the band in
+  transit sat at the wrong gain for up to a second (+8.4 dB on the voice).
+  Now the output fades to nothing over 14 ms while the sides the switch
+  brings in run unheard on the input at their settings, the split and the
+  detector change at the bottom, and the output fades back over 14 ms. The
+  glide is for knobs only, including a knob leaving or reaching its rail.
+  What the split is *running* decides, not the new knobs: a preset recall
+  moves COMPLEX and the knobs in one block, and everything lands at the
+  bottom of one dip. A side brought in or out together with other settings
+  (a recall, COMPLEX unchanged) dips too; a crossover knob moved on its own
+  glides. With no side running and none wanted COMPLEX moves only the
+  detector and switches at once. `vcomp_switch_tests` sections 10 and 12
+  (all 72 preset-to-preset recalls under `--long`) hold it.
+
+`vcomp_switch_tests` runs a subset of every section's grid by default, which
+is what ctest runs (six of the 72 recalls, for one); `vcomp_switch_tests
+--long` runs every row. Run `--long` before merging any change to `dsp/`.
 - **A separate limiter on the thru path** was the third candidate and is not
   needed now. It only bit near full scale, and the thru band no longer gets
   anywhere near it.
@@ -322,7 +367,8 @@ comparison.
 Still open, having been heard once:
 
 - **The curve's three sweeps** are round numbers at a shape, not tuned figures.
-- **The eight factory presets** are AMOUNT positions with names on them.
+- **The eight factory presets** are AMOUNT positions with names on them, and
+  since 2026-10-03 a MAKEUP each, solved to keep the voice off the limiter.
 - **`kArcFastScale` / `kArcChargeScale` / `kArcSlowScale`** (0.35 / 1.2 / 10 x
   RELEASE since the ear pass; they were 0.35 / 2 / 5 and could not be heard).
   The charge scale decides how much material counts as "sustained" and is the

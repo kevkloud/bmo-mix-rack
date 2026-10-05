@@ -77,7 +77,7 @@ public:
 
     /** The panel's GR meter reads this through ModuleEngine. Signed, positive =
         gain taken away, and it is the **peak band reduction** rather than a
-        wideband figure; the placeholder core reports a flat zero. */
+        wideband figure. */
     float currentGainReductionDb() const noexcept override { return core.currentGainReductionDb(); }
 
     /** Momentary listen, straight through. -1 clears it. */

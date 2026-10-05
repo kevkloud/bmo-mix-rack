@@ -3,9 +3,12 @@
 #include "modules/deq/dsp/Filters.h"
 #include "modules/deq/dsp/Dynamics.h"
 #include "core/dsp/AnalyserTap.h"
+#include "core/dsp/SwitchFade.h"
 #include <array>
+#include <cstdint>
 #include <atomic>
 #include <memory>
+#include <vector>
 #include <complex>
 
 namespace bmo::deq
@@ -25,6 +28,74 @@ inline constexpr int kControlInterval = 8;
 
 /** Static parameters glide to a new value over roughly this long. */
 inline constexpr double kSmoothingMs = 10.0;
+
+/** A switch -- placement, DYN, direction, solo -- crosses over in this long
+    rather than stepping (core/dsp/SwitchFade.h, and the house rule in
+    core/AGENTS.md: under 1.5x the steady signal's largest step). A change
+    asked for while one is in progress waits for it, then crosses over from
+    there: the latest choice wins, at most one crossover late. DYN and
+    direction blend two gain laws rather than two filters, so they simply
+    turn round from where they are. A change of shape is not a crossover at
+    all; see kShapeFadeOutMs. */
+inline constexpr double kSwitchFadeMs = 10.0;
+
+/** A change of shape dips the output through silence (Band): it fades out
+    over kShapeFadeOutMs while the shape arriving warms up on the band's own
+    input, the band takes the arriving shape at the bottom, and the output
+    fades back in over kShapeFadeInMs -- 28 ms in all.
+
+    The owner's rule for a discrete switch (2026-10-03): it may pass through
+    a short dip; it may not click, burst or linger. Every crossover tried
+    here broke one of those. A blend of the two shapes' outputs cancels where
+    they are out of phase (a full null for Low Cut against High Cut at one
+    corner); two shapes half applied in series go over both (14 dB for two
+    Q 0.1 cuts); and either way the shape arriving has to start from some
+    state, and the leaving shape's -- a +24 dB bell at Q 40 and 30 Hz holds
+    seconds of resonance -- burst 30 dB over the louder level. A dip cannot
+    go over either level, and the fade out is the shape arriving's warm-up,
+    so it comes in already settled on what the band is hearing. The fade in
+    is the shorter, because the slower a fade the smaller its step and at
+    30 Hz 8 ms is already under 1.2x. */
+inline constexpr double kShapeFadeOutMs = 20.0;
+inline constexpr double kShapeFadeInMs = 8.0;
+
+/** The shape arriving warms up on the band's own input as recorded, from rest
+    this many of its slowest time constants back, so that it comes in settled
+    to within e^-6 (-52 dB) of what it would be had it always been there. An
+    attenuating filter cannot attenuate a tone it has not heard for its own
+    time constant -- a -24 dB bell at Q 40 and 30 Hz needs 107 ms of it --
+    and the 28 ms of a change is not long enough to hear it live. It works
+    through the record faster than real time during the fade out. */
+inline constexpr double kWarmTimeConstants = 6.0;
+
+/** How much of each band's input is kept for that: enough for six time
+    constants of anything slower than a 30 Hz Q 40 cut (107 ms), and capped
+    there; slower still, a shape arrives less than fully settled. Kept for the
+    product's bands only (Settings::bandCount, at most kShapeHistoryBands), as
+    floats, allocated in prepare(): 12 bands take 2.95 MB at 48 kHz and
+    11.8 MB at 192 kHz. */
+inline constexpr double kShapeHistoryMs = 640.0;
+inline constexpr int kShapeHistoryBands = 16;
+
+/** How much catching up the shapes arriving may do between them, in bands'
+    worth: one band's whole record heard over the fade out, 32 filter steps a
+    sample beyond the one each band changing takes to keep pace. A band
+    changing alone has all of it. Bands that begin a change together share it,
+    the ones that need least taking their need first and the rest an equal
+    part, and a band's look-back is shortened from its oldest end, because
+    the nearest past is what a filter's state is mostly made of: twelve slow
+    bands at once look back 40 to 60 ms each. A band that begins while others
+    are still catching up has what they leave, which may be nothing: it then
+    warms up on the 20 ms of the fade out alone. The dip is the same either
+    way; only how settled the arriving shape is at its bottom changes.
+
+    Round 4 of the review (2026-10-03): without it, twelve bands changing in
+    one block (Low Shelves to Bells, 30-46.5 Hz, Q 40) each caught up on all
+    of their record, 396 steps a sample, 53.6 % of a 192 kHz / 32-sample
+    block at its 99th percentile; with it, 44 steps and 16.7 %. Three bands'
+    worth measured 23.2 % and still left the twelve-band case outside the
+    switch criteria (modules/deq/AGENTS.md has the figures). */
+inline constexpr int kShapeWarmBudget = 1;
 
 /** A dynamic band is only redesigned when its gain offset has moved by more
     than this since the last design. Static settings are always followed
@@ -88,7 +159,46 @@ struct Settings
 {
     Topology topology = Topology::serial;
     std::array<BandSettings, kMaxBands> bands {};
+
+    /** How many of `bands` the product has: BMO DEQ's twelve. A band inside
+        it that has been live since reset() keeps its detector listening while
+        the band is off or its dynamics are, so dynamics coming back into use
+        carry on from where a band that never left would be, rather than from
+        whatever they last heard (see DspCore::Band). A band never switched on,
+        or one past this count while it is off, costs nothing. */
+    int bandCount = kMaxBands;
+
+    /** The most resonant a Low Cut or High Cut is designed, applied to the Q
+        each design actually uses -- while Q glides and through a change of
+        shape -- not only to the target: BMO DEQ sets its kCutMaxQ (params.h)
+        so a cut never has a resonant peak at any instant. A Q within 0.005
+        over it is left alone, the same half knob step of slack effectiveQ
+        allows, so the knob's own 0.71 runs as itself. The default leaves
+        cuts alone. */
+    double cutMaxQ = DesignLimits::kMaxQ;
+
+    /** The widest a Low Shelf or High Shelf is designed (BMO DEQ: kShelfMaxQ,
+        params.h). The cap lives here, applied by every design (designQ),
+        rather than in the Q handed over, so that the band's Q -- one glide
+        whatever the shape -- stays the knob's when the shape changes: a band
+        toggled between a bell at Q 2 and a cut used to see its Q pulled
+        toward the cut's 0.71 and back, and stepped 1.6x doing it. */
+    double shelfMaxQ = DesignLimits::kMaxQ;
 };
+
+/** The Q a design of `shape` runs at: the band's own, or its shape's cap. A
+    cut is compared with half a knob step of slack, so the knob's own 0.71 --
+    0.71000004 once a host has snapped it -- runs as itself. */
+inline double designQ (const Settings& s, Shape shape, double q) noexcept
+{
+    if ((shape == Shape::lowShelf || shape == Shape::highShelf) && q > s.shelfMaxQ)
+        return s.shelfMaxQ;
+
+    if ((shape == Shape::lowCut || shape == Shape::highCut) && q > s.cutMaxQ + 0.005)
+        return s.cutMaxQ;
+
+    return q;
+}
 
 //==============================================================================
 /** The zero-latency dynamic EQ, JUCE-free. A ModuleDsp adapter maps a params.h
@@ -180,6 +290,32 @@ public:
     double bandEnvelope (int band) const noexcept   { return bands[(size_t) band].detector.envelope(); }
     double bandGainDb (int band) const noexcept     { return bands[(size_t) band].appliedGainDb; }
 
+    /** How many samples this band's detector has heard since construction:
+        a band that has never been switched on hears none. */
+    std::uint64_t detectorTicks (int band) const noexcept { return bands[(size_t) band].listened; }
+
+    /** The coefficients a band is running this sample, or with `arriving`
+        those of the shape it is changing to while it warms up (which stay
+        where they were once a change is over). */
+    SvfCoeffs bandCoefficients (int band, bool arriving = false) const noexcept
+    {
+        return arriving ? bands[(size_t) band].arriveCoeffs : bands[(size_t) band].cur;
+    }
+
+    /** The most filter steps the shapes arriving have taken in any one
+        sample since prepare() or reset(), all bands together: one a sample
+        for each band changing shape, to keep pace, and the rest catching up
+        on its record (kShapeWarmBudget). */
+    int peakWarmSteps() const noexcept { return warmPeak; }
+
+    /** How far back in its record, samples, the band's latest change of
+        shape started the shape arriving (kWarmTimeConstants), as granted. */
+    int shapeLookBack (int band) const noexcept { return bands[(size_t) band].lookBack; }
+
+    /** How many catch-up steps a sample the shapes arriving may take
+        together, beyond one each (kShapeWarmBudget). */
+    int shapeWarmBudget() const noexcept { return warmBudget; }
+
     /** No subnormal anywhere in filter or detector state. */
     bool allStateNormal() const noexcept;
 
@@ -202,6 +338,27 @@ private:
         }
     };
 
+    /** One band, in two halves with two lifetimes.
+
+        **The listener** -- frequency, Q and placement glides, the sidechain
+        filter, the detector and the gain offset it asks for -- starts the
+        first time a band inside Settings::bandCount is live, then runs
+        whether or not the band is on and whether or not its dynamics are,
+        and only reset() stops it. A band never switched on has nothing that
+        could be stale and does no work (round 2 of the review: all twelve
+        listening at the defaults cost 0.72 % -> 2.70 % of a 192 kHz / 32
+        block). Until the 2026-10-03 review it ran only while the dynamics
+        were in use, so it stood still while they were not and came back with
+        a stale envelope: a -12 dB cut lasting 3.5 s at release 2000 ms on a
+        signal that had gone quiet meanwhile. Listening costs the sidechain
+        and the detector for a band that has been used and is now off, and
+        buys a band whose dynamics, coming back by any route, are where they
+        would be had they never left. It never reaches the audio of a band
+        whose dynamics are off.
+
+        **The band itself** -- its filter, its design and its fades -- runs
+        only while the band is on or fading out, and a band that has faded
+        out completely starts again from rest. */
     struct Band
     {
         Glide logHz, logQ, gainDb, beta, enable;
@@ -217,6 +374,41 @@ private:
 
         double offsetDb = 0.0, appliedGainDb = 0.0;
         bool   live = false;         // enabled, or still fading out
+        bool   hearing = false;      // the listener is running
+        std::uint64_t listened = 0;  // samples the detector has heard (detectorTicks)
+
+        // The listener's switches. dynMix is how far the dynamics are in use
+        // and dirMix how far toward Below, both read at control rate; each
+        // blends two offsets, so either turns round from where it is.
+        // placeMix crosses from `fromPlacement` to `placement`, per sample,
+        // for the detector's input and the band's output alike.
+        dsp::Ramp dynMix, dirMix, placeMix;
+        Placement placement = Placement::stereo, fromPlacement = Placement::stereo;
+
+        // A change of shape (kShapeFadeOutMs): the output fades through
+        // silence while the shape arriving runs in its own filter, on the
+        // band's input, from rest -- or from the running filter's state when
+        // the two have the same poles (a Low Cut and a High Cut at one corner
+        // and Q), where that state is exactly its own -- and the band takes it
+        // at the bottom. The shape leaving keeps its state to the end, so its
+        // fade is its own sound getting quieter and nothing else.
+        dsp::Ramp shapeFade;               // the band's output gain through a change
+        bool      changing = false;        // a shape is arriving
+        Shape     shape = Shape::bell;     // the shape the band is running
+        Shape     arriving = Shape::bell;  // and the one it is changing to
+        SvfCoeffs arriveCoeffs;
+        SvfState  arriveM, arriveS;
+        double    arriveHz = 1000.0, arriveQ = 0.707, arriveStatic = 0.0, arriveOffset = 0.0;  // what it was designed from
+        bool      arriveInit = false;      // its state is still to be set
+        int       behind = 0;              // recorded samples it has still to hear
+        int       warmStep = 1;            // how many it hears per sample, catching up
+        int       lookBack = 0;            // how far back it started (shapeLookBack)
+        bool      warmPending = false;     // its share of kShapeWarmBudget is still to be given
+
+        // The band's own input, M and S, the last kShapeHistoryMs of it, for
+        // a shape arriving to warm up on. Allocated in prepare().
+        std::vector<float> histM, histS;
+        int       histPos = 0, histFilled = 0;
 
         // What `next` was designed from, so a static band is not redesigned.
         Shape  designedShape = Shape::bell;
@@ -229,7 +421,17 @@ private:
     void processImpl (Sample* const* channels, int numChannels, int numSamples) noexcept;
 
     void controlTick() noexcept;
-    void resetBand (Band& b) noexcept;
+
+    /** Shares what kShapeWarmBudget has left among the bands that began a
+        change of shape this tick, shortening their look-backs to fit. */
+    void shareWarmUp() noexcept;
+
+    /** The design of `shape` at these settings, its Q capped where it is a
+        cut (designQ). */
+    SvfCoeffs designFor (Shape shape, double hz, double q, double gainDb) const noexcept;
+
+    /** Back to rest: the band's filter always, its listener too when asked. */
+    void resetBand (Band& b, bool listenerToo) noexcept;
 
     /** What the panel and the audio thread share. Held behind a pointer for
         one reason: an atomic is neither copyable nor movable, and an engine is
@@ -246,8 +448,15 @@ private:
     DesignGrid grid;
     std::unique_ptr<Shared> shared = std::make_unique<Shared>();
     double rate = 48000.0, tickAlpha = 0.0;
-    int tickPhase = 0;
-    bool primed = false;
+    int tickPhase = 0, bandsInUse = 0, shapeWarmSamples = 1;
+    int warmBudget = 0, warmPeak = 0;
+    bool primed = false, prepared = false, warmAsked = false;
+
+    // Solo crosses over from what was being heard (-1: the whole EQ) to what
+    // is asked for. The first block after prepare()/reset() takes it as it is.
+    dsp::Ramp soloMix;
+    int soloFrom = -1, soloTo = -1;
+    bool soloPrimed = false;
 };
 
 } // namespace bmo::deq

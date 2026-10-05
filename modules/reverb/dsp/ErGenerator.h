@@ -480,7 +480,18 @@ private:
     {
         float z = 0.0f;
         void  reset() noexcept { z = 0.0f; }
-        float process (float x, float coef) noexcept { z += coef * (x - z); return z; }
+        // **Flushed below 1e-15, 300 dB down**, as everything the late network
+        // keeps is. Decaying geometrically in float, the state reaches the
+        // denormal range and then sticks there -- z (1 - c) rounds back to the
+        // same smallest value -- so a silent instance went on emitting 1e-45
+        // for good with FTZ off (QA's long run, 2026-10-03). 11 section 6 asks
+        // for a tail that reaches exactly 0.0f.
+        float process (float x, float coef) noexcept
+        {
+            z += coef * (x - z);
+            if (std::abs (z) < 1.0e-15f) z = 0.0f;
+            return z;
+        }
     };
 
     struct RtTap

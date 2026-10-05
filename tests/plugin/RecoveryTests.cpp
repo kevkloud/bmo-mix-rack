@@ -27,12 +27,20 @@
     measured, in the form the rows below are written in. A module added to
     the registry without a row fails until it has one.
 
-    BMO Tune RT is the one module whose difference never comes inside
-    -60 dBFS, at any level: it settles at about -48 dBFS and stays there,
-    without decaying, for the rest of the render, while its output level is
-    unchanged (the same holds after a NaN in finite_tests, at -74 dBFS). Its
-    row records "never" (-1) and the level the difference settles at, which
-    is asserted instead.
+    BMO Tune RT is judged on LEVEL, not on the sample difference. Its
+    difference from the clean render never comes inside -60 dBFS: it
+    settles at about -48 dBFS and stays there, without decaying, while the
+    output level is unchanged. That is read-position drift, not damage: a
+    tuner reads its delay line at a position it chooses cycle by cycle, and
+    after any disturbance it may settle a fraction of a sample from where an
+    undisturbed instance reads (192.17 against 192.58 samples, 220 Hz, +60
+    dBFS), which is a legitimate place to be and differs from the clean
+    render in every sample from then on. What a spike must not do is leave
+    the level wrong or latch anything, so its row records the time until
+    the output's level over 10 ms windows, from the bad sample, is within
+    `kLevelToleranceDb` of the clean render's on both channels, and stays
+    there for `kStaySeconds`. Until 2026-10-03 the row recorded "never" and
+    the -47.9 dBFS the difference settled at.
 */
 
 #include "TestUtil.h"
@@ -87,7 +95,13 @@ struct Recorded
     const char* id;
     double seconds[kNumLevels];
     double settledDb;
+    bool   byLevel = false;     // judged on the 10 ms level, not the sample difference
 };
+
+/** For a row judged on level: the window, and how far its level may be from
+    the clean render's. */
+constexpr int    kLevelWindow      = 480;     // 10 ms at kRate
+constexpr double kLevelToleranceDb = 1.0;
 
 // Measured on ICE QUEEN, 2026-10-03, at 3d62316, with `recovery_tests --print`.
 // Seconds from the bad sample to the last sample outside -60 dBFS of the
@@ -97,6 +111,21 @@ struct Recorded
 // where a spike no longer charges the cell: 2.35, 7.67, 18.22 and 61.64 s
 // became the figures below, and the bound was tightened with them, as this
 // test's header asks when a module's recovery improves.
+//
+// The tuner's row is the level measure (see the header), re-measured on ICE
+// QUEEN on 2026-10-03 after a stereo instance began feeding its core
+// (L + R) / 2, so the spike, in the left only, reaches the core at half its
+// size: back within 1 dB of the clean render's 10 ms level 30 ms after the
+// bad sample at every level, nothing latched. Its bound is the suite's usual
+// 1.25 x + 0.25 s, 0.29 s.
+//
+// BMO Linger's row was re-measured on ICE QUEEN, 2026-10-04, on the merge of
+// main into the tail's branch (M3a). It had been recorded at 0.06 s at every
+// level, when the module was early reflections only. With the late network a
+// hot sample rings in the tail and leaves at the tail's own rate, DECAY 1.8 s
+// at the defaults: 1.76, 2.18, 3.05 and 6.40 s, longer the hotter the sample
+// and nothing latched. That is a reverb with a huge sample in it, not a
+// failure to recover, so the row records it rather than the old figure.
 constexpr Recorded kRecorded[] {
     //                 +60      +72      +96      4e9       settled
     { "util",    { 0.00,    0.00,    0.00,    0.00  }, 0.0 },
@@ -109,8 +138,8 @@ constexpr Recorded kRecorded[] {
     { "deesser", { 0.00,    0.00,    0.00,    0.00  }, 0.0 },
     { "fetcomp", { 1.17,    1.28,    2.93,    12.97 }, 0.0 },
     { "dwell",   { 1.88,    1.88,    1.90,    1.90  }, 0.0 },
-    { "reverb",  { 0.06,    0.06,    0.06,    0.06  }, 0.0 },
-    { "tune",    { -1,      -1,      -1,      -1    }, -47.9 },
+    { "reverb",  { 1.76,    2.18,    3.05,    6.40  }, 0.0 },
+    { "tune",    { 0.03,    0.03,    0.03,    0.03  }, 0.0, true },
 };
 
 int checksMade = 0;
@@ -240,6 +269,78 @@ Measured measure (const bmo::ModuleDef& def, CleanRender& clean, float level)
     return m;
 }
 
+/** For a row judged on level: seconds from the bad sample to the end of the
+    last 10 ms window, counted from the bad sample, whose RMS on either
+    channel is further than kLevelToleranceDb from the clean render's, once
+    kStaySeconds of windows inside it follow. */
+Measured measureLevel (const bmo::ModuleDef& def, CleanRender& clean, float level)
+{
+    auto proc = makeProduct (def);
+    juce::AudioBuffer<float> buffer (2, kBlock);
+    juce::MidiBuffer midi;
+
+    const auto stayWindows = (int) std::ceil (kStaySeconds * kRate / kLevelWindow);
+    const auto lastBlock   = (int) std::ceil ((kCapSeconds + kStaySeconds) * kRate / kBlock) + kBadBlock;
+
+    double sumOut[2] {}, sumRef[2] {};
+    int filled = 0, window = 0, lastOutside = -1;
+    Measured m;
+
+    for (int b = 0; b <= lastBlock; ++b)
+    {
+        for (int c = 0; c < 2; ++c)
+            for (int i = 0; i < kBlock; ++i)
+                buffer.setSample (c, i, sineAt ((long long) b * kBlock + i));
+
+        if (b == kBadBlock)
+            buffer.setSample (0, kBadOffset, level);
+
+        proc->processBlock (buffer, midi);
+
+        for (int i = 0; i < kBlock; ++i)
+        {
+            for (int c = 0; c < 2; ++c)
+            {
+                const auto out = buffer.getSample (c, i);
+                if (! std::isfinite (out) || std::abs (out) >= bmo::finite::kCeiling)
+                    m.allAudio = false;
+            }
+
+            if ((long long) b * kBlock + i < kBadAt)
+                continue;
+
+            for (int c = 0; c < 2; ++c)
+            {
+                const auto out = (double) buffer.getSample (c, i), ref = (double) clean.block (b, c)[i];
+                sumOut[c] += out * out;
+                sumRef[c] += ref * ref;
+            }
+
+            if (++filled < kLevelWindow)
+                continue;
+
+            for (int c = 0; c < 2; ++c)
+            {
+                const auto db = 10.0 * std::log10 ((sumOut[c] + 1.0e-30) / (sumRef[c] + 1.0e-30));
+                if (std::abs (db) > kLevelToleranceDb)
+                    lastOutside = window;
+                sumOut[c] = sumRef[c] = 0.0;
+            }
+
+            filled = 0;
+            ++window;
+
+            if (window - (lastOutside + 1) >= stayWindows)
+            {
+                m.seconds = (double) (lastOutside + 1) * kLevelWindow / kRate;
+                return m;
+            }
+        }
+    }
+
+    return m;
+}
+
 const Recorded* rowFor (const char* id)
 {
     for (const auto& r : kRecorded)
@@ -284,8 +385,11 @@ int main (int argc, char** argv)
         CleanRender clean (*def);
         Measured got[kNumLevels];
 
+        const auto* recordedRow = rowFor (def->id);
+        const auto byLevel = recordedRow != nullptr && recordedRow->byLevel;
+
         for (int l = 0; l < kNumLevels; ++l)
-            got[l] = measure (*def, clean, kLevels[l]);
+            got[l] = byLevel ? measureLevel (*def, clean, kLevels[l]) : measure (*def, clean, kLevels[l]);
 
         double settled = -400.0;
 
@@ -304,7 +408,8 @@ int main (int argc, char** argv)
             for (int l = 0; l < kNumLevels; ++l)
                 std::cout << (got[l].seconds < 0.0 ? juce::String ("-1") : juce::String (got[l].seconds, 2)).toStdString()
                           << (l + 1 < kNumLevels ? ", " : " }, ");
-            std::cout << (settled > -400.0 ? juce::String (settled, 1) : juce::String ("0.0")).toStdString() << " },\n";
+            std::cout << (settled > -400.0 ? juce::String (settled, 1) : juce::String ("0.0")).toStdString()
+                      << (byLevel ? ", true" : "") << " },\n";
             continue;
         }
 
@@ -332,7 +437,9 @@ int main (int argc, char** argv)
 
             const auto bound = recorded * kMarginFactor + kMarginSeconds;
             expect (got[l].seconds >= 0.0 && got[l].seconds <= bound,
-                    where + ": back within " + juce::String (kToleranceDb) + " dBFS of the clean render in "
+                    where + ": back within "
+                        + (row->byLevel ? juce::String (kLevelToleranceDb) + " dB of the clean render's 10 ms level in "
+                                        : juce::String (kToleranceDb) + " dBFS of the clean render in ")
                         + seconds (got[l].seconds) + ", recorded " + seconds (recorded) + ", bound "
                         + juce::String (bound, 2) + " s");
         }

@@ -183,8 +183,77 @@ int main()
             dsp.process (ch, 2, n);
         }
 
-        check (left == right, "the adapter processes mono and copies it to every channel");
+        check (left == right, "the adapter writes one result to every channel");
         check (dsp.latencyForParams (v.data(), (int) v.size()) == 0, "and reports 0 latency: Live is the only contract");
+    }
+
+    // Stereo in: the core is fed (L + R) / 2 and the result goes to both
+    // outputs (the owner's decision, 2026-10-03). Until then the left was
+    // processed alone, so a voice on the right only came out as silence.
+    // Each case is compared bit for bit with a bare TuneCore fed the mono
+    // signal the adapter should hand it, on a correcting voice (228 Hz, 38 c
+    // under A#3, chromatic hard tune) at 48 kHz in 256-sample blocks.
+    {
+        const auto params = TuneParams::fromValues (v.data(), (int) v.size());
+        const auto voice = signals::voice (signals::steady (228.0, 1.0, 48000.0), 48000.0).samples;
+        const auto silent = std::vector<float> (voice.size(), 0.0f);
+
+        const auto viaCore = [&] (std::vector<float> mono)
+        {
+            TuneCore core;
+            core.setParams (params);
+            core.prepare (48000.0, 256);
+            for (size_t at = 0; at < mono.size(); at += 256)
+            {
+                core.setParams (params);
+                core.process (mono.data() + at, (int) std::min<size_t> (256, mono.size() - at));
+            }
+            return mono;
+        };
+
+        struct Out { std::vector<float> l, r; };
+        const auto viaAdapter = [&] (std::vector<float> l, std::vector<float> r, int channels)
+        {
+            TuneDsp dsp;
+            dsp.setParams (v.data(), (int) v.size());
+            dsp.prepare (48000.0, 256, channels);
+            for (size_t at = 0; at < l.size(); at += 256)
+            {
+                float* ch[2] { l.data() + at, r.data() + at };
+                dsp.setParams (v.data(), (int) v.size());
+                dsp.process (ch, channels, (int) std::min<size_t> (256, l.size() - at));
+            }
+            return Out { l, r };
+        };
+
+        const auto half = [] (std::vector<float> x) { for (auto& s : x) s *= 0.5f; return x; };
+        const auto peak = [] (const std::vector<float>& x) { float p = 0.0f; for (auto s : x) p = std::max (p, std::abs (s)); return p; };
+
+        // Dual mono and a mono instance: the same bits as the core on that
+        // one channel, which is what the adapter played before the change.
+        const auto alone = viaCore (voice);
+        const auto dual = viaAdapter (voice, voice, 2);
+        check (dual.l == alone && dual.r == alone, "dual mono (L == R) plays bit for bit what the core alone plays");
+        check (viaAdapter (voice, silent, 1).l == alone, "a mono instance plays bit for bit what the core alone plays");
+
+        // One side only: the voice at half amplitude, tuned, on both.
+        const auto halfTuned = viaCore (half (voice));
+        const auto rightOnly = viaAdapter (silent, voice, 2);
+        check (rightOnly.l == halfTuned && rightOnly.r == halfTuned,
+               "a voice on the right only is tuned at half amplitude on both outputs (peak "
+                   + std::to_string (peak (rightOnly.r)) + ", in " + std::to_string (peak (voice)) + ")");
+        check (peak (rightOnly.r) > 0.25f * peak (voice), "and is not silence");
+
+        const auto leftOnly = viaAdapter (voice, silent, 2);
+        check (leftOnly.l == halfTuned && leftOnly.r == halfTuned,
+               "a voice on the left only is tuned at half amplitude on both outputs");
+
+        // Opposite polarity cancels before the core.
+        std::vector<float> inverted (voice.size());
+        for (size_t i = 0; i < voice.size(); ++i)
+            inverted[i] = -voice[i];
+        const auto opposed = viaAdapter (voice, inverted, 2);
+        check (peak (opposed.l) == 0.0f && peak (opposed.r) == 0.0f, "L == -R gives silence");
     }
 
     return finish ("schema");

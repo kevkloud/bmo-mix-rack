@@ -1,4 +1,5 @@
 #include "DimPanel.h"
+#include "modules/dim/dsp/DspCore.h"
 #include "modules/dim/params.h"
 
 namespace bmo::dim
@@ -6,14 +7,17 @@ namespace bmo::dim
 
 namespace
 {
-    // DIMENSION, the hero. 148 px against the pairs' 64 -- Frosty, 2026-09-17,
-    // from a ladder of 92 (Opto's size, what it was), 132, 148 and 156. 156
-    // began to crowd the WIDTH legend above it.
+    // DIMENSION, the hero. 132 px against the pairs' 64. It was 148 --
+    // Frosty, 2026-09-17, from a ladder of 92 (Opto's size, what it was), 132,
+    // 148 and 156; 156 began to crowd the WIDTH legend above it -- until
+    // OUTPUT arrived. Frosty, 2026-10-03, from two renders: OUTPUT gets the
+    // suite's whole output section, and the 16 px it costs comes out of the
+    // hero, back to the next rung down the same ladder.
     //
     // Its box is the knob plus 30 px, where it had been the knob plus 58: the
     // caption takes about 22, and the other 36 of the old allowance was bare
     // plate under it. Growing the knob alone left that band where it was.
-    constexpr int kBigKnobSide   = 148;
+    constexpr int kBigKnobSide   = 132;
     constexpr int kBigKnobHeight = kBigKnobSide + 30;
 
     // Between GENERATE and the pair under it. The suite's switch gap rather
@@ -78,6 +82,10 @@ DimPanel::DimPanel (ui::ModuleContext ctx)
       asymmetry   (context.params.param (Index::asymmetry),   "TILT",
                    ui::Knob::Style::character, 0.62f, context.def.accent),
 
+      // A trim, so the suite's trim knob: utility style, as BMO EQ's and the
+      // Saturator's OUTPUT are.
+      output      (context.params.param (Index::output),      "OUTPUT"),
+
       // Not a bypass, not mono, not polarity -- so `switchAlt`, per the table
       // in modules/AGENTS.md. GENERATE rather than DETUNE: the switch turns on
       // the one stage that makes width from nothing, and a mono source needs
@@ -113,16 +121,71 @@ DimPanel::DimPanel (ui::ModuleContext ctx)
     for (auto* k : { &rotation, &asymmetry })
         k->setEndMarks (ui::Knob::EndMarks::leftRight);
 
+    // One-piece in the Textured surface whatever its size, as every input,
+    // output and volume knob is (Frosty, 2026-09-25), and the one trim size.
+    output.setTexturedForm (ui::Knob::TexturedForm::onePiece);
+    styleTrimKnob (output);
+
     for (auto* c : std::initializer_list<juce::Component*> {
              &detuneOn, &cents, &diffuse, &width,
-             &shuffle, &shuffleFreq, &rotation, &asymmetry })
+             &shuffle, &shuffleFreq, &rotation, &asymmetry, &output })
         addAndMakeVisible (c);
+
+    // The four controls a dim depends on. GENERATE, DIMENSION and TURN are
+    // never dimmed themselves -- GENERATE is the way back in, and DIMENSION
+    // and TURN reach the output in every state.
+    const int deciders[] { Index::detuneOn, Index::width, Index::shuffle, Index::rotation };
+
+    for (size_t i = 0; i < dimAttachments.size(); ++i)
+        dimAttachments[i] = std::make_unique<juce::ParameterAttachment> (
+            context.params.param (deciders[i]), [this] (float) { refreshDims(); });
+
+    // Whatever the parameters already say, so a render and a reopened editor
+    // come up dimmed the way the session left them.
+    refreshDims();
+}
+
+void DimPanel::refreshDims()
+{
+    const auto& p = context.params;
+
+    const auto generate = p.getReal (Index::detuneOn) > 0.5f;
+    const auto widthPc  = p.getReal (Index::width);
+
+    // GENERATE itself is never touched here, in any state -- Frosty,
+    // 2026-10-03: "don't dim the generate button if it is active". At
+    // DIMENSION 0 it is still on, just not heard, so it stays lit; switched
+    // off it simply looks off. It is the way back into the stage, so a dim
+    // there would hide the one control that undoes the others' dims.
+    cents      .setKnobEnabled (centsIsLive (generate, widthPc));
+    diffuse    .setKnobEnabled (diffuseIsLive (widthPc));
+    shuffle    .setKnobEnabled (shuffleIsLive (widthPc));
+    shuffleFreq.setKnobEnabled (shuffleFreqIsLive (widthPc, p.getReal (Index::shuffle)));
+    asymmetry  .setKnobEnabled (asymmetryIsLive (widthPc, p.getReal (Index::rotation)));
 }
 
 void DimPanel::resized()
 {
     auto area = getLocalBounds().reduced (kPad, 4);
     clearRules();
+
+    // OUTPUT, in the suite's output section, off the foot first -- Frosty,
+    // 2026-10-03, who chose it over a bare rule straight above the knob. The
+    // rule lands on the line every module's lower rule is on (566) and the
+    // knob on the output row (602..679), so both line up across a rack. The
+    // switch row between them is empty: this module has no output switches,
+    // and the row is kept rather than closed up because keeping it is what
+    // puts the knob on the shared row.
+    //
+    // The rule is bare, as every module's output rule is. SOURCE and WIDTH
+    // name their sections because each holds several controls that need a
+    // word to hold them together; this one holds a single knob whose caption
+    // already says OUTPUT, and a legend would print the word twice.
+    {
+        const auto out = takeOutputSection (area);
+        addRule (out.rule, {});
+        output.setBounds (out.knob);
+    }
 
     // Two legends, set in the gaps the rhythm below already leaves, so no
     // control moves for them. SOURCE over what makes width from a mono
@@ -147,11 +210,20 @@ void DimPanel::resized()
     };
 
     // Opto's rhythm: every block placed from the top on one derived gap, with a
-    // margin above the first and below the last, so the spacing stays even if a
-    // block's height changes later. Five blocks and five derived gaps -- the
-    // sixth, inside SOURCE, is the fixed kSourceGap.
+    // margin above the first, so the spacing stays even if a block's height
+    // changes later. Four derived gaps -- the fixed kSourceGap is inside
+    // SOURCE. There were five, the fifth a margin under the last block, until
+    // the output section took the foot on 2026-10-03: its rule's own
+    // half-height is that margin now.
+    //
+    // **Every gap is at its floor.** The section takes 126 px, the blocks
+    // need 522, and 554 is left, so the four gaps share 32 px and each is
+    // kSwitchGap. A legend's row is 16 px, twice that, so SOURCE starts at
+    // the top of the panel: 10 px nearer the preset bar than it sat before
+    // OUTPUT, and WIDTH reaches 4 px into the blocks either side of it.
+    // Getting the old spacing back means 20 px out of a control.
     const auto content = kSwitchHeight + kSourceGap + kPairKnobHeight * 3 + kValueRow + kBigKnobHeight;
-    const auto gap     = juce::jmax (kSwitchGap, (area.getHeight() - content) / 5);
+    const auto gap     = juce::jmax (kSwitchGap, (area.getHeight() - content) / 4);
 
     legendIn (area.removeFromTop (gap), "SOURCE");
 

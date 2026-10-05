@@ -46,6 +46,10 @@ bmo_add_dsp_tool(vcomp_dsp_tests dsp/VcompDspTests.cpp)
 target_link_libraries(vcomp_dsp_tests PRIVATE bmo_vcomp_dsp)
 add_test(NAME vcomp_dsp COMMAND vcomp_dsp_tests)
 
+bmo_add_dsp_tool(vcomp_switch_tests dsp/VcompSwitchTests.cpp)
+target_link_libraries(vcomp_switch_tests PRIVATE bmo_vcomp_dsp)
+add_test(NAME vcomp_switch COMMAND vcomp_switch_tests)
+
 bmo_add_dsp_tool(deesser_dsp_tests dsp/DeesserDspTests.cpp)
 target_link_libraries(deesser_dsp_tests PRIVATE bmo_deesser_dsp)
 add_test(NAME deesser_dsp COMMAND deesser_dsp_tests)
@@ -59,6 +63,21 @@ add_test(NAME dwell_dsp COMMAND dwell_dsp_tests)
 bmo_add_dsp_tool(reverb_dsp_tests dsp/ReverbDspTests.cpp)
 target_link_libraries(reverb_dsp_tests PRIVATE bmo_reverb_dsp)
 add_test(NAME reverb_dsp COMMAND reverb_dsp_tests)
+# A regression that hangs has to fail here, not stall the job until the
+# runner gives up: reset() before prepare() spun forever on 6067809 and only
+# a probe run by hand found it. (ctest's own default is 1500 s.)
+#
+# **The fence is set by the Debug build**, because scripts/build.sh tests
+# that one. On ICE QUEEN (2026-10-03) the default run takes 40 to 67 s in
+# Release and 271 to 447 s in Debug -- most of the spread is other builds
+# sharing the machine -- so the fence is 1350 s, three times the slowest.
+# Of a 387 s Debug run, 250 s is "the tail never grows, at the rates where
+# it did" (96 and 192 kHz, 20 s each); the kept-moving rows are 21 s. It
+# was 300 s while the kept-moving test ran all 43 rows by default, which
+# took 374 to 404 s in Debug and timed the suite out; those rows are behind
+# --long now, which ctest does not pass. A run that reaches the fence still
+# fails, as a timeout.
+set_tests_properties(reverb_dsp PROPERTIES TIMEOUT 1350)
 
 endif()
 
@@ -149,6 +168,8 @@ target_link_libraries(reverb_tests PRIVATE bmo_reverb)
 # into the executable itself, so the define is consistent across it.
 target_compile_definitions(reverb_tests PRIVATE JUCE_MODAL_LOOPS_PERMITTED=1)
 add_test(NAME reverb COMMAND reverb_tests)
+# The same fence as reverb_dsp, for the same reason; this one takes seconds.
+set_tests_properties(reverb PROPERTIES TIMEOUT 300)
 
 bmo_add_tool(rack_tests plugin/RackTests.cpp ${BMO_ROOT}/products/rack/Registry.cpp)
 target_link_libraries(rack_tests PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp bmo_deesser bmo_fetcomp bmo_dwell bmo_reverb)
@@ -166,6 +187,21 @@ target_link_libraries(bus_tests PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim
 # it, as a host's would.
 target_compile_definitions(bus_tests PRIVATE JUCE_MODAL_LOOPS_PERMITTED=1)
 add_test(NAME bus COMMAND bus_tests)
+
+# Sessions saved by a shipped release restore in this build: the blobs a release
+# wrote, restored into every product it shipped. Linked like rack_tests because
+# the rack restores through the registry, and with the tuner where it is built,
+# since a release shipped that too. The off-thread pass needs a message loop,
+# as rack_tests does. plugin/SESSION-COMPAT.md says how to add a release.
+bmo_add_tool(session_compat_tests plugin/SessionCompatTests.cpp ${BMO_ROOT}/products/rack/Registry.cpp)
+target_link_libraries(session_compat_tests PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp bmo_deesser bmo_fetcomp bmo_dwell bmo_reverb)
+target_compile_definitions(session_compat_tests PRIVATE JUCE_MODAL_LOOPS_PERMITTED=1)
+if(BMO_BUILD_TUNE)
+    target_include_directories(session_compat_tests PRIVATE ${BMO_ROOT})
+    target_link_libraries(session_compat_tests PRIVATE bmo_tune)
+    target_compile_definitions(session_compat_tests PRIVATE BMO_SESSION_COMPAT_TUNE=1)
+endif()
+add_test(NAME session_compat COMMAND session_compat_tests)
 
 # Tail-length reporting, across every product at once: the exact zero every
 # shipped module is required to report, BMO Linger's own stated figures, and

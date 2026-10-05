@@ -117,10 +117,33 @@ public:
         level of the raw input, both channels linked. */
     float process (float detectDb) noexcept
     {
+        // At its rail the gate is off, and an off gate holds nothing. The
+        // hold used to stop counting where it was instead, so a gate moved
+        // back off its rail in the quiet after a loud passage stayed open for
+        // up to kGateHoldMs before it began to close, which a gate moved there
+        // without that history does not. The envelope is not kept for later
+        // either: it depends on the threshold, and at the rail there is none.
+        //
+        // **A gate that was shut when it reached the rail opens at its own
+        // opening rate**, the same kGateOpenMs it opens at when a signal
+        // crosses its threshold, rather than in one sample. It used to drop
+        // its envelope at once: 19.6 dB in a sample, 144x the steady signal's
+        // own largest step at 1 kHz and 1062x at 150 Hz. Once open it is
+        // exactly inert again, so a gate that stays at its rail costs the same
+        // as ever and passes the signal bit for bit.
         if (! active)
         {
-            attenuationDb = 0.0f;
-            return 1.0f;
+            held = 0;
+
+            if (attenuationDb <= 0.0f)
+                return 1.0f;
+
+            attenuationDb *= openPole;
+
+            if (attenuationDb < kEnvelopeFloorDb)
+                attenuationDb = 0.0f;
+
+            return std::pow (10.0f, -attenuationDb / 20.0f);
         }
 
         const auto target = gateAttenuationDb (detectDb, threshold);
@@ -145,6 +168,11 @@ public:
 
         return std::pow (10.0f, -attenuationDb / 20.0f);
     }
+
+    /** At its rail, all the way open and holding nothing: process() would
+        return exactly 1 and change nothing, whatever it was handed, so a
+        caller may skip it and the level it would have been handed. */
+    bool isIdle() const noexcept { return ! active && attenuationDb <= 0.0f && held == 0; }
 
     float currentAttenuationDb() const noexcept { return attenuationDb; }
 

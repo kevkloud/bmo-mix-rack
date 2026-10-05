@@ -19,7 +19,7 @@
     sum of two written-down parts rather than "the sum of whatever the slots
     say".
 
-    **The rack clamps its total at thirty seconds too**, as of 2026-09-21, so
+    **The rack clamps its total at forty seconds too** (thirty until 2026-10-02), as of 2026-09-21, so
     the product has one rule instead of two. The sum is still what a chain
     under the ceiling reports -- the 8.5675 s two-slot figure is asserted after
     the clamp as well as before it -- and what the clamp stops is the case the
@@ -69,7 +69,7 @@ bool rings (const char* id)
 //== BMO Linger's stated figures ==============================================
 //
 // T_tail = preDelay + T_mid * max(1, r_lo, r_hi) + t_ER,max + 0.05 s, clamped
-// to 30 s (docs/reverb/10-dsp-spec.md 5). t_ER,max is the last reference tap,
+// to 40 s (docs/reverb/10-dsp-spec.md 5; 30 s until 2026-10-02). t_ER,max is the last reference tap,
 // 60.849 ms for Room -- the last row of its image-source table, quoted at the
 // 12 m reference size and scaling with SIZE -- so
 // t_ER,max(S) = 60.849 * S / 12 ms. (It was 79.1 ms while the table was a
@@ -96,11 +96,13 @@ constexpr double kDarkTail = 3.110849;
 
 /** The ceiling, and **it is now the rack's as well as the module's**. 250 ms +
     20 s decay at a 2.0 multiplier + 80 m of early reflections is 40.827 s of
-    honest arithmetic, and the host is told 30 -- and a rack of eight of those
-    is told 30 too, rather than four minutes. Written out here as the seconds
+    honest arithmetic, and the host is told 40 -- and a rack of eight of those
+    is told 40 too, rather than five minutes. (The ceiling was 30 s until
+    2026-10-02, when Frosty raised it so a 20 s decay at 2.0x is reported
+    nearly in full.) Written out here as the seconds
     it is, and checked against `bmo::kMaxTailSeconds` at the foot of the rack
     section so this suite cannot quietly disagree with the code. */
-constexpr double kClampedTail = 30.0;
+constexpr double kClampedTail = 40.0;
 
 /** Two occupied slots, in series: the rack adds them.
     A MAXIMUM would report 6.296698 here, so the two answers cannot be confused,
@@ -318,7 +320,7 @@ int main()
         checkClose (tailAt (kDark), kDarkTail, 1.0e-4,
                     "damping under unity is floored at 1.00x, not allowed to shorten the tail");
         checkClose (tailAt (kWorst), kClampedTail, 1.0e-4,
-                    "40.8 s of arithmetic is reported as the 30 s ceiling");
+                    "40.8 s of arithmetic is reported as the 40 s ceiling");
 
         // The clamp is a ceiling and not a fixed answer: a setting just under
         // it has to still be reported as itself.
@@ -415,7 +417,7 @@ int main()
         // are in series. That is still true of the arithmetic and is no longer
         // what a host is told: `addModule` counts slots and never looks for
         // duplicates, so eight BMO Lingers is a legal chain and eight honest
-        // thirties is a four-minute tail -- which an offline bounce renders
+        // forties is a five-minute tail -- which an offline bounce renders
         // onto the end of every export. Frosty approved the rack clamp.
         rack->clearChain();
         rack->addModule (reverb);
@@ -424,7 +426,7 @@ int main()
         apply (rack->getEngineAt (1)->params(), kWorst);
         rack->prepareToPlay (kRate, kBlock);
         checkClose (rack->getTailLengthSeconds(), kClampedTail, 1.0e-4,
-                    "two maxed reverbs are clamped to the 30 s ceiling, not summed to 60");
+                    "two maxed reverbs are clamped to the 40 s ceiling, not summed to 80");
 
         // Eight of them, which is the chain the clamp was actually written
         // for: the slot limit is the only thing stopping this growing, and it
@@ -442,7 +444,7 @@ int main()
                     "a rack of eight maxed reverbs reports the ceiling, not four minutes");
 
         // **The clamp is a ceiling and not a fixed answer**, which is the half
-        // of it a `return 30.0` would also pass. The two-slot sum is below the
+        // of it a `return 40.0` would also pass. The two-slot sum is below the
         // ceiling and has to come back in full, unaltered by the change above.
         rack->clearChain();
         rack->addModule (reverb);
@@ -454,7 +456,7 @@ int main()
                     "8.5675 s is under the ceiling and is still reported as the sum");
 
         // And the rack's ceiling is the module's ceiling, read from the one
-        // place it is decided rather than from a second 30.0 written here.
+        // place it is decided rather than from a second 40.0 written here.
         checkClose (kClampedTail, bmo::kMaxTailSeconds, 1.0e-12,
                     "the figure this suite writes down is the suite's own constant");
     }

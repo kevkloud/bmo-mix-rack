@@ -12,6 +12,12 @@ a plan, so the things that would make it possible are kept: the DSP is
 JUCE-free behind `ModuleDsp`, and the schema stays within a slot's 32
 parameters.
 
+On a stereo channel `TuneDsp` feeds the mono core `L + (R - L) / 2` and writes
+the result to every output (the owner's decision, 2026-10-03; before it, the
+left channel alone). That form hands the core exactly `L` when `L == R`, so
+dual mono is bit-identical to a mono instance; `tests/dsp/tune/SchemaTests.cpp`
+asserts that along with right-only, left-only and `L == -R`.
+
 Either side builds without the other, which is what keeps that true:
 
 ```

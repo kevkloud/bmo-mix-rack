@@ -3,24 +3,45 @@
 #
 #   scripts/build.sh              build + test
 #   scripts/build.sh --snapshots  also render every panel into snapshots/
+#   scripts/build.sh --install    also copy each built plugin into the user's
+#                                 plugin folders (it does not, unless asked)
 #
-# Live holds plugin bundles open while it runs, so the copy-after-build step
-# can fail quietly and leave you auditioning a stale binary. Quit Live first.
+# The options may be combined, in either order.
+#
+# --install puts a Debug build over whatever is installed, and what is
+# installed is the record of what was heard: ask for it only when that is what
+# you mean. Live holds plugin bundles open while it runs, so the copy can fail
+# quietly and leave you auditioning a stale binary. Quit Live first.
 
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 config=Debug
+install=OFF
+snapshots=
+
+for arg in "$@"; do
+    case $arg in
+        --install)   install=ON ;;
+        --snapshots) snapshots=yes ;;
+        *) echo "build.sh: unknown option '$arg'" >&2; exit 2 ;;
+    esac
+done
 
 if [[ ! -f build/CMakeCache.txt ]]; then
     # CMAKE_OSX_ARCHITECTURES only means anything to the Apple toolchain, and
     # CMAKE_BUILD_TYPE only to a single-config generator. Both are harmless
     # elsewhere, but passing them where they do nothing is how a script starts
     # looking like it knows something it does not.
-    args=(-DCMAKE_BUILD_TYPE="$config")
+    args=(-DCMAKE_BUILD_TYPE="$config" -DBMO_INSTALL_AFTER_BUILD="$install")
     [[ $OSTYPE == darwin* ]] && args+=(-DCMAKE_OSX_ARCHITECTURES=arm64)
 
     cmake -B build "${args[@]}"
+elif ! grep -q "^BMO_INSTALL_AFTER_BUILD:BOOL=$install\$" build/CMakeCache.txt; then
+    # The choice lives in the cache, so it is set on every run that differs
+    # from it and not only on the first: a tree configured with --install once
+    # would otherwise go on installing after the flag was dropped.
+    cmake -B build -DBMO_INSTALL_AFTER_BUILD="$install"
 fi
 
 # Visual Studio and Xcode are multi-config: they ignore CMAKE_BUILD_TYPE, want
@@ -48,7 +69,7 @@ cmake --build build "${build_args[@]}"
 # -C is required on a multi-config build and ignored on a single-config one.
 ctest --test-dir build -C "$config" --output-on-failure
 
-if [[ ${1:-} == --snapshots ]]; then
+if [[ -n $snapshots ]]; then
     snapshot=
     for candidate in "build/tools/$config/snapshot.exe" "build/tools/$config/snapshot" \
                      "build/tools/snapshot.exe"        "build/tools/snapshot"; do

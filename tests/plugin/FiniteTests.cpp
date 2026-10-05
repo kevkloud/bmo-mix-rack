@@ -109,10 +109,20 @@ constexpr int kBadAt      = kBadBlock * kBlock + kBadOffset;
     chain is under -107 dBFS by 0.05 s -- and at -33 after a block silenced
     mid-chain; both are under -126 by 0.5 s. The settles are not padded
     beyond the next round figure, so a module that starts recovering more
-    slowly shows up here. */
-constexpr double kToleranceDb       = -60.0;
-constexpr double kSettleSeconds     = 0.25;
-constexpr double kRackSettleSeconds = 0.5;
+    slowly shows up here.
+
+    **A block silenced mid-chain gets a second**, since 2026-10-04, when BMO
+    Linger's tail (M3a) met this suite: the chain ends in the reverb, and the
+    10.7 ms hole a silenced block leaves rings out of its late network at the
+    tail's own rate. Measured on ICE QUEEN on that merge, the difference from
+    0.05, 0.25, 0.5, 1, 1.5 and 2 s after the block is -29.2, -44.8, -54.7,
+    -70.8, -85.4 and -103.5 dBFS: a steady decay, 10.8 dB inside the bound at
+    one second. A bad sample at the rack's INPUT is one zeroed sample and
+    still settles in half a second (-79.4 dBFS at 0.5 s). */
+constexpr double kToleranceDb               = -60.0;
+constexpr double kSettleSeconds             = 0.25;
+constexpr double kRackSettleSeconds         = 0.5;
+constexpr double kRackMidChainSettleSeconds = 1.0;
 
 /** The modules that may take longer, each with its reason. **BMO Dwell is a
     delay with feedback**: the gap it was handed comes back at every repeat,
@@ -914,9 +924,10 @@ int main()
 
                 // The probe's block is silenced from its first sample, 100
                 // before `kBadAt`, which the settle is measured from: 2 ms
-                // against a settle of half a second.
+                // against a settle of a second (the reverb's tail carries
+                // the hole; see kRackMidChainSettleSeconds).
                 expectRecovered ("rack (mid-chain)", nameOf (bad), clean, hit,
-                                 kRackSettleSeconds, kToleranceDb);
+                                 kRackMidChainSettleSeconds, kToleranceDb);
             }
 
             blowUpAt = -1;

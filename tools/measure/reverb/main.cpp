@@ -499,20 +499,33 @@ void renderWav (const std::string& inPath, const std::string& outPath, const std
         if (eq == std::string::npos) { std::printf ("bad override %s (want id=value)\n", o.c_str()); return; }
         const auto id = o.substr (0, eq);
         const auto value = (float) std::atof (o.c_str() + eq + 1);
+        // **`type=` selects a type the way the panel does**: it stamps that
+        // type's voicing (`typeSettings`) first, then the index, so a Hall
+        // render is Hall's SIZE, SOURCE, levels and the rest, not Room's
+        // with Hall's tables. Overrides after it on the line still win.
+        if (id == "type")
+            for (const auto& s : typeSettings ((int) value))
+                if (const auto index = indexOfParam (specs(), s.id); index >= 0)
+                    v[(size_t) index] = s.value;
+
         bool found = false;
         for (size_t i = 0; i < specs().size(); ++i)
             if (id == specs()[i].id) { v[i] = value; found = true; }
         if (! found) { std::printf ("no parameter id %s (see schema)\n", id.c_str()); return; }
     }
 
-    const auto n = in[0].size();
-    std::vector<std::vector<float>> ch (2, std::vector<float> (n, 0.0f));
-    ch[0] = in[0];
-    ch[1] = in.size() > 1 ? in[1] : in[0];
-
     ReverbDsp dsp;
     dsp.prepare (rate, 512, 2);
     dsp.setParams (v.data(), (int) v.size());
+
+    // **The tail is rendered, not cut at the clip's last sample**: silence
+    // is appended for the tail the host would be told, up to 20 s.
+    const auto tail = std::min (20.0, dsp.tailSecondsForParams (v.data(), (int) v.size()));
+    const auto n = in[0].size() + (size_t) (tail * rate);
+    std::vector<std::vector<float>> ch (2, std::vector<float> (n, 0.0f));
+    std::copy (in[0].begin(), in[0].end(), ch[0].begin());
+    const auto& right = in.size() > 1 ? in[1] : in[0];
+    std::copy (right.begin(), right.end(), ch[1].begin());
 
     std::vector<float> zl (512, 0.0f), zr (512, 0.0f);
     for (int k = 0; k < (int) (0.2 * rate) / 512; ++k)

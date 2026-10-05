@@ -7,6 +7,8 @@
 #include "modules/vcomp/presets/FactoryPresets.h"
 #include "products/vcomp/Product.h"
 
+#include <map>
+
 using namespace test;
 namespace P = bmo::vcomp;
 
@@ -214,21 +216,62 @@ int main()
         bmo::PresetManager::setDirectoryForTesting ({});
     }
 
-    //== Every preset comes out near the level it went in ======================
-    // Unlike every other module's, this is not a check on hand-picked makeup
-    // figures -- no preset here sets OUTPUT at all. It is a check on the
-    // automatic makeup itself (autoMakeupDb, Detector.h), which is what makes
-    // AMOUNT buy density rather than level. If this drifts, the auto makeup
-    // has drifted, not a preset.
+    //== Every preset comes out at its input's loudness =========================
+    // On the house track level -- the suite's voice held to -18 dBFS RMS and
+    // -12 dBFS peak -- which is what the presets' MAKEUP is solved against
+    // (Frosty, 2026-10-03; modules/vcomp/presets/FactoryPresets.h). Until that
+    // day this used the voice as it comes, peaking at -3.85 dBFS, and every
+    // preset passed only because the limiter was taking 1 to 10 dB off it.
+    // Each figure is what the preset measured here on ICE QUEEN when it was
+    // solved, held at the same 3 dB tolerance: it trips if the automatic makeup
+    // (autoMakeupDb, Detector.h) or a preset's MAKEUP drifts. Print the figures
+    // with BMO_PRINT_PRESET_LEVELS=1.
+    //
+    // They are not all 0, and the presets are: each comes out within 0.05 dB
+    // of its input on a fresh instance over 12 s. Here the presets are loaded
+    // one after another into one processor, whose reset() is the base
+    // AudioProcessor's and does nothing to the DSP, over 3 s with one phrase
+    // in it, so each figure carries the move from the preset before it -- 2.3
+    // dB for Fast Vocal (after In Front's AMOUNT, which ARC remembers), 1.4
+    // for Keep The Chest (whose LOW THRU comes in through the recall's dip
+    // since 2026-10-03, and by its knob's slow way before, at -2.3).
     {
         auto proc = createVcomp();
         proc->setPlayConfigDetails (2, 2, 48000.0, 512);
         proc->prepareToPlay (48000.0, 512);
 
-        const auto source = voice (512 * 300);
-        const auto sourceDb = rmsDb (source);
+        // The suite's voice, held to the house level: scaled and clipped so it
+        // sits at -18 dBFS RMS and peaks at -12.
+        const auto source = [&]
+        {
+            const auto raw = voice (512 * 300);
+            std::vector<float> held (raw.size());
+            const auto ceiling = juce::Decibels::decibelsToGain (-12.0);
+            double low = 0.1, high = 50.0;
+
+            for (int step = 0; step < 60; ++step)
+            {
+                const auto gain = std::sqrt (low * high);
+
+                for (size_t i = 0; i < raw.size(); ++i)
+                    held[i] = (float) juce::jlimit (-ceiling, ceiling, (double) raw[i] * gain);
+
+                (rmsDb (held) < -18.0 ? low : high) = gain;
+            }
+
+            return held;
+        }();
+        // Over the same blocks outputDb() measures, past the 20 it skips.
+        const auto sourceDb = rmsDb (source, 512 * 20);
         const auto& factory = proc->getPresets().getFactory();
         const bool print = std::getenv ("BMO_PRINT_PRESET_LEVELS") != nullptr;
+
+        // Output RMS against the source's, dB, per preset, Init excepted.
+        const std::map<juce::String, double> expected {
+            { "Lift",           -0.13 }, { "Forward",     -0.62 }, { "In Front", -0.71 },
+            { "Fast Vocal",     -2.34 }, { "Smooth Lead",  0.00 },
+            { "Keep The Chest", -1.35 }, { "Keep The Air", -0.40 }, { "Manual",   -0.20 },
+        };
 
         for (int index = 1; index < (int) factory.size(); ++index)
         {
@@ -240,8 +283,14 @@ int main()
             if (print)
                 std::cout << factory[(size_t) index].name << ": " << (outDb - sourceDb) << " dB\n";
 
-            checkClose (outDb - sourceDb, 0.0, 3.0,
-                        juce::String ("preset '") + factory[(size_t) index].name + "' comes out near the level it went in");
+            const auto name = juce::String (factory[(size_t) index].name);
+            const auto pinned = expected.find (name);
+
+            check (pinned != expected.end(), "preset '" + name + "' has a pinned level");
+
+            if (pinned != expected.end())
+                checkClose (outDb - sourceDb, pinned->second, 3.0,
+                            "preset '" + name + "' comes out at its input's loudness, as solved");
         }
     }
 

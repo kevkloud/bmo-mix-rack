@@ -904,8 +904,34 @@ void testLimiterIsInertBelowItsKnee()
                "a tone just below the limiter's knee passes through untouched");
 }
 
+/** The line under which the limiter may be skipped really is under its knee.
+    DspCore skips Limiter::process() for a peak below kIdleBelowLin while
+    the limiter holds nothing back, which is only the same thing as running
+    it if a peak there asks for no reduction at all. A constant rather than
+    a computed figure, so it is checked against the ceiling and the knee it
+    was worked out from: under the knee, and by no more than 0.02 dB. */
+void testLimiterIdleLineIsUnderItsKnee()
+{
+    const auto line = Limiter::kIdleBelowLin;
+    const auto kneeEdgeDb = (double) kLimiterCeilingDb - 0.5 * (double) kLimiterKneeDb;
+
+    check (limiterReductionDb (levelDbOf (line)) == 0.0f,
+           "a peak at the limiter's idle line asks for no reduction");
+    checkNear (linToDb ((double) line), kneeEdgeDb - 0.01, 0.01,
+               "the idle line sits just under the knee's lower edge");
+}
+
 /** Nothing blows up, goes NaN or sticks, over a level sweep that crosses the
-    whole curve at the most aggressive setting. */
+    whole curve at the most aggressive setting.
+
+    Each of the three is asserted, because the version of this test that
+    checked only that the output was finite would have passed a module stuck
+    at full reduction for ever. "Blows up" is the ceiling: with OUTPUT +12 on
+    top of AMOUNT 100 the sweep drives the limiter hard, and no sample may
+    come out above it. "Sticks" is the recovery: after the sweep a steady
+    tone has to come out where a fresh instance puts it, within 0.1 dB once
+    the slowest release in play (ARC's slow branch, 10 x the 20 ms RELEASE)
+    has had ten time constants. */
 void testStability()
 {
     std::vector<float> in ((size_t) (4.0 * kSampleRate));
@@ -917,6 +943,10 @@ void testStability()
         in[i] = (float) (envelope * std::sin (2.0 * kPi * 220.0 * t));
     }
 
+    const auto tail = sine (220.0, 3.0, dbToLin (-20.0));
+    const auto sweepEnd = in.size();
+    in.insert (in.end(), tail.begin(), tail.end());
+
     auto p = standard (100.0f, 12.0f);
     p.complex = true;
     p.attackMs = 0.1f;
@@ -925,25 +955,110 @@ void testStability()
     const auto out = render (in, p);
 
     auto finite = true;
+    auto peak = 0.0;
 
     for (const auto v : out)
+    {
         finite = finite && std::isfinite (v);
+        peak = std::max (peak, (double) std::abs (v));
+    }
 
     check (finite, "a 4 s level sweep at the most aggressive settings stays finite");
+    check (peak <= dbToLin ((double) kLimiterCeilingDb) * 1.0001,
+           "and never comes out above the ceiling (peak " + std::to_string (linToDb (peak)) + " dBFS)");
+
+    // Recovery, judged on the last second of the tone against the same tone
+    // through a fresh instance.
+    const auto fresh = render (tail, p);
+    const auto from = (double) sweepEnd / kSampleRate;
+    const auto after = linToDb (rmsBetween (out, from + 2.0, from + 3.0));
+    const auto clean = linToDb (rmsBetween (fresh, 2.0, 3.0));
+
+    checkNear (after, clean, 0.1, "and does not stick: a tone after the sweep comes out where a fresh instance puts it");
 }
 
-/** Zero latency, at every setting -- no lookahead and no oversampling. */
+/** Zero latency, at every setting -- no lookahead and no oversampling.
+
+    Measured, not just read back: latencyForParams() is a constant, so
+    asking it is a tautology, and what the claim is about is the audio. An
+    impulse goes in and the response has to start on the impulse's own
+    sample, in every mode the module has. Without the band split the whole
+    impulse comes out there; with it, the crossover is IIR and costs phase,
+    not samples (Crossover.h), so the response starts on that sample and
+    spreads after it -- at least a quarter of the impulse is on the sample
+    itself at every setting here. The impulse is quiet enough to stay under
+    every threshold, so what comes out is the signal path and nothing the
+    detector did. And the figure the host is told has to be that same zero. */
 void testLatencyIsAlwaysZero()
 {
-    VcompDsp dsp;
-    std::vector<float> values (Index::count, 0.0f);
+    struct Setting { const char* name; DspCore::Params p; bool split; };
 
-    values[amount] = 100.0f;
-    values[complex] = 1.0f;
-    values[attack] = 0.1f;
+    auto gated = standard (55.0f);
+    gated.gateDb = -40.0f;   // above the impulse, so the gate is closing on it
 
-    check (dsp.latencyForParams (values.data(), (int) values.size()) == 0,
-           "latency is zero whatever the parameters say");
+    auto cx = [] (float lowHz, float highHz)
+    {
+        auto p = standard (55.0f);
+        p.complex = true;
+        p.attackMs = 0.1f;
+        p.lowThruHz = lowHz;
+        p.highThruHz = highHz;
+        return p;
+    };
+
+    const Setting settings[] {
+        { "AMOUNT 0",                  standard (0.0f),                   false },
+        { "AMOUNT 100, OUTPUT +24",    standard (100.0f, 24.0f),          false },
+        { "GATE -40",                  gated,                             false },
+        { "COMPLEX, ATTACK 0.1",       cx (kLowThruOffHz, kHighThruOffHz), false },
+        { "LOW THRU 160",              cx (160.0f, kHighThruOffHz),       true },
+        { "HIGH THRU 6000",            cx (kLowThruOffHz, 6000.0f),       true },
+        { "HIGH THRU 2000",            cx (kLowThruOffHz, 2000.0f),       true },
+        { "LOW THRU 160, HIGH THRU 6000", cx (160.0f, 6000.0f),           true },
+    };
+
+    for (const auto& s : settings)
+    {
+        constexpr size_t at = 1000;
+        constexpr float impulse = 0.001f;   // -60 dBFS
+
+        std::vector<float> in ((size_t) (0.1 * kSampleRate), 0.0f);
+        in[at] = impulse;
+
+        const auto out = render (in, s.p);
+
+        auto largestAt = at;
+        for (size_t i = 0; i < out.size(); ++i)
+            if (std::abs (out[i]) > std::abs (out[largestAt]))
+                largestAt = i;
+
+        // The gate is shut until the impulse opens it, so it comes out of a
+        // gated render smaller; what matters is where, not how much.
+        const auto minimum = s.split ? 0.25 * impulse : s.p.gateDb > kGateOffDb ? 1.0e-6 : 0.9 * impulse;
+
+        check (std::abs (out[at]) >= minimum,
+               std::string (s.name) + ": the impulse comes out on the sample it went in ("
+                   + std::to_string (out[at] / impulse) + " of it)");
+
+        if (! s.split)
+            check (largestAt == at, std::string (s.name) + ": and nowhere later is it larger");
+
+        VcompDsp dsp;
+        std::vector<float> values (Index::count, 0.0f);
+        values[amount]    = s.p.amountPercent;
+        values[gate]      = s.p.gateDb;
+        values[output]    = s.p.outputDb;
+        values[complex]   = s.p.complex ? 1.0f : 0.0f;
+        values[attack]    = s.p.attackMs;
+        values[release]   = s.p.releaseMs;
+        values[arc]       = s.p.arc ? 1.0f : 0.0f;
+        values[sidechain] = s.p.sidechainHz;
+        values[lowThru]   = s.p.lowThruHz;
+        values[highThru]  = s.p.highThruHz;
+
+        check (dsp.latencyForParams (values.data(), (int) values.size()) == 0,
+               std::string (s.name) + ": and the host is told zero");
+    }
 }
 
 } // namespace
@@ -974,6 +1089,7 @@ int main()
     testRailsAreExactlyOff();
     testLimiterHoldsTheCeiling();
     testLimiterIsInertBelowItsKnee();
+    testLimiterIdleLineIsUnderItsKnee();
     testStability();
     testLatencyIsAlwaysZero();
 

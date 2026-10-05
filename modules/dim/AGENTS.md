@@ -42,7 +42,17 @@ writing into `mid`, stop: you are about to spend the reason this module exists.
 **Two exceptions are deliberate**, both identity at their defaults:
 
 - **Rotation** turns the whole soundfield, so it moves centre material off
-  centre. It is meant to.
+  centre. It is meant to. **At either end of TURN it also cancels material
+  outright**, and that is the one real exception to the mono promise. The
+  range is ±45°, a 45° rotation of the mid/side pair -- not the "quarter
+  turn" `params.h` used to call it. At −45 (the L end) the output is
+  `L = (L + R)/√2`, `R = (R − L)/√2`: a centre source lands hard left and
+  3.01 dB down in the mono sum, a source hard-panned **left** comes out in
+  anti-phase and **vanishes from the mono sum (−180.4 dB, measured)**, and a
+  hard-right one comes up 3.01 dB. +45 is the mirror image. Everywhere else
+  in the module the mid is preserved to −143.5 dBFS at worst (every other
+  control at its maximum, on a chorused source). The range stays, by the
+  owner's call on 2026-10-03; the docs say what it does instead.
 - **Asymmetry** does not move the centre. A source with no side content passes
   it untouched; only material already off centre changes level. The mono sum
   moves for *that* reason, not because the centre moved.
@@ -97,6 +107,41 @@ The mono guard is the early return at the top of `DspCore::process`. **A stereo
 imager on a mono bus has to be left as a wire** — `isBusesLayoutSupported`
 accepts mono, and folding L into R gives a signal whose side is zero by
 definition.
+
+## What the panel dims, and why
+
+The suite rule (`modules/AGENTS.md`): a control a mode makes inert is dimmed,
+never locked or written. Four controls decide it here, and the panel asks
+the functions beside `DspCore` in `dsp/DspCore.h` rather than restating them:
+
+| knob | dead when | function |
+|---|---|---|
+| DETUNE | GENERATE off, or DIMENSION 0 | `centsIsLive` |
+| DRIFT | DIMENSION 0 | `diffuseIsLive` |
+| BLOOM | DIMENSION 0 | `shuffleIsLive` |
+| BELOW | DIMENSION 0, or BLOOM 1.0 | `shuffleFreqIsLive` |
+| TILT | DIMENSION 0 **and** TURN 0 | `asymmetryIsLive` |
+
+DIMENSION multiplies the side after generate, diffuse and the shuffler, so
+at 0 they are all dead. TURN comes after it and turns mid into side, so TURN
+is never dead, and TILT, which reads the side after TURN, comes back to life
+the moment TURN leaves 0. DRIFT is **not** dead with GENERATE off: it works
+on any side content, and a stereo source has some. GENERATE is a switch and
+is never dimmed -- it is the way back in -- even at DIMENSION 0, where it
+too reaches nothing; that one is the owner's to decide.
+
+At the defaults GENERATE is off and BLOOM is 1.0, so **DETUNE and BELOW
+come up dimmed on a fresh instance.** That is the rule applied, not a
+side effect.
+
+`dim_dsp` renders every knob at both ends of its range in all sixteen
+combinations of the four deciders: where the function says dead the two
+renders are the same bits, and where it says live they differ. **BELOW at
+BLOOM 1.0 is the one exception**: dead to float rounding, not bit for bit,
+because the shuffler's `z * 1 + (s - z)` is not always exactly `s`. Measured
+at 5.96e-8, one float step at 0.5. Making it exact would move the default
+output, which is held bit-identical. `ui_layout_tests` holds the panel to a
+table written out by hand, standalone and in a rack.
 
 ## Asymmetry is a shear, and the fallback is named
 
@@ -166,8 +211,9 @@ claim on the colour** — accents are allocated in `products/AGENTS.md` now.
   drifted before — *thirteen at once*, BMO Opto's three and all ten of the
   Saturator's (`testing-notes/opto-0.2.1-handoff.md` §4) — and the check
   that was skipped is whether any preset jumps in level against Init at the
-  same settings, or puts True Peak over the ceiling. Dimension has **no output
-  trim** and up to +15.5 dB is reachable, so nothing downstream catches it.
+  same settings, or puts True Peak over the ceiling. Up to +15.3 dB of side
+  gain is reachable, and OUTPUT (2026-10-03) is a hand-set trim, not a catch: no
+  preset sets it, so nothing pulls a loud preset back on its own.
   **Audition all seven before this is called finished**, and treat a level
   jump as a preset bug rather than a voicing choice.
 
@@ -184,13 +230,25 @@ claim on the colour** — accents are allocated in `products/AGENTS.md` now.
   correctly and predicted the wrong cost.
 - **WIDTH at 0 silently disables everything above it**, DETUNE included, since
   WIDTH is downstream of generate. Measured: peak side 0.00000.
-- **No output trim, and up to +15.5 dB available.** Every other module has an
-  output stage.
+- ~~No output trim, and up to +15.3 dB available~~ **Settled 2026-10-03 (the
+  owner): OUTPUT, ±24 dB in 0.1 dB steps, default 0, appended as the
+  eleventh parameter and rack lane 11.** At the extremes the module reaches
+  +7.2 dBFS peak and +15.3 dB of side gain (DIMENSION 200 %, BLOOM 3, measured
+  on a 200 Hz side tone; the bound, deep in the bass, is 20 log10 6 = +15.6).
+  It is the equaliser's trim --
+  per sample, in dB, landing exactly -- copied into `dsp/DspCore.h` because
+  modules do not include one another, and at 0 dB with nothing moving it is
+  out of the path, so everything saved before it plays bit for bit as it
+  did. It applies on a mono instance too: it is a level, not imaging. An
+  automatic level match was considered and not chosen: it needs a detector,
+  and "matched" is ambiguous for a widener -- in the mono sum, which this
+  module leaves alone, or in the stereo power it exists to change.
 - ~~RATE and DEPTH are dead at the DIFFUSE 0 % default~~ **Settled 2026-09-09:
   neither was audible enough to earn its space, so both lost their controls and
   are fixed at their defaults.** The parameters stay in `params.h` — IDs are
   permanent and append-only, and a session that automated them must still load.
-  A stronger answer than `setKnobEnabled` dimming, which is still unused.
+  A stronger answer than `setKnobEnabled` dimming, which the panel uses for
+  the controls above that a mode leaves dead.
 - ~~ROTATE +30° moves the image left~~ **Settled 2026-09-09: the sign is
   negated in `setParams`, so + moves the image right like a pan knob.**
   Confirmed backwards by ear on a stereo source before the change.

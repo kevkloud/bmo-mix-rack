@@ -1,14 +1,11 @@
 /*
     Tests for BMO Defang's DSP core. No JUCE, no host.
 
-    **The core is still the placeholder** -- see modules/deesser/dsp/DspCore.h
-    -- so this file asserts the frame rather than the de-esser: the adapter's
+    It began against the placeholder core, asserting the frame -- the adapter's
     unpacking of the flat parameter array, the latency contract, the listen
-    hook's lifecycle, and that the placeholder really is inert where it claims
-    to be.
-
-    Everything here should still pass once the detector and the band land. What
-    the real suite adds -- detection over a 24 dB level sweep, the two absolute
+    hook's lifecycle -- and those tests still stand. The de-esser itself is
+    tested below them, and the review fixes of 2026-10-03 at the end. What
+    the full suite asks for -- detection over a 24 dB level sweep, the two absolute
     gates and the `S` clamp, level independence at three values of the internal
     blend, the static curve and its depth, the fixed timings, the slow branch
     and the hold, HF pumping, transparency, shelf mode, modulation, aliasing,
@@ -28,6 +25,8 @@
 #include <string>
 #include <vector>
 #include <cstdint>
+#include <cstring>
+#include <functional>
 
 using namespace bmo::deesser;
 
@@ -824,8 +823,761 @@ void testThePitchEstimateFindsTheBand()
     }
 }
 
+//==============================================================================
+// Review fixes, 2026-10-03. Each test below failed on the code it was written
+// against; the commit that carries it says by how much.
+
+/** `essTest` at any rate: the same vowel, and a burst of noise through the
+    detector's own bandpass at 6.5 kHz, from the half-way point to seven
+    tenths. Fixed-seed, so two instances fed it compare sample for sample. */
+std::vector<float> essAt (double rate, double seconds, double burstGain = 1.6)
+{
+    const auto n = (size_t) (seconds * rate);
+    std::vector<float> out (n, 0.0f);
+
+    for (size_t i = 0; i < n; ++i)
+    {
+        const auto t = (double) i / rate;
+        out[i] = (float) (0.35 * std::sin (2.0 * kPi * 200.0 * t)
+                        + 0.20 * std::sin (2.0 * kPi * 400.0 * t)
+                        + 0.10 * std::sin (2.0 * kPi * 800.0 * t));
+    }
+
+    const auto coeffs = bmo::dsp::SvfCoeffs::fromBiquad (
+        detectorDesign (Shape::bell, 6500.0, 3.0, rate));
+    const auto taps = bmo::dsp::SvfTaps::of (coeffs.g, coeffs.k);
+
+    bmo::dsp::SvfState filter;
+    uint32_t seed = 0x5EEDu;
+
+    const auto first = (size_t) (0.5 * (double) n);
+    const auto last  = (size_t) (0.7 * (double) n);
+
+    for (size_t i = 0; i < n; ++i)
+    {
+        seed = seed * 1664525u + 1013904223u;
+        const auto white = (double) (int32_t) (seed >> 8) / 8388608.0 - 1.0;
+        const auto band  = filter.process (taps, coeffs, white);
+
+        if (i < first || i >= last)
+            continue;
+
+        const auto at = (double) (i - first) / (double) (last - first);
+        auto gain = 1.0;
+        if (at < 0.08)       gain = 0.5 - 0.5 * std::cos (kPi * at / 0.08);
+        else if (at > 0.92)  gain = 0.5 - 0.5 * std::cos (kPi * (1.0 - at) / 0.08);
+
+        out[i] += (float) (burstGain * gain * band);
+    }
+
+    return out;
+}
+
+/** How many samples of two renders differ at all. */
+size_t differingSamples (const std::vector<float>& a, const std::vector<float>& b)
+{
+    size_t count = a.size() == b.size() ? 0 : std::max (a.size(), b.size());
+
+    for (size_t i = 0; i < std::min (a.size(), b.size()); ++i)
+        if (std::memcmp (&a[i], &b[i], sizeof (float)) != 0)
+            ++count;
+
+    return count;
+}
+
+/** **A re-prepare at another rate is a fresh instance at that rate, bit for
+    bit.** A host re-prepares on a rate change without destroying the plugin,
+    and every design this module caches has to come back for the new rate.
+
+    The sidechain cached its design on shape, frequency and Q but not on the
+    rate, and prepare() did not clear it: after 96 kHz -> 48 kHz the detector
+    went on listening through a 96 kHz design and the reduction on a sibilant
+    burst was 0.00 dB where a fresh instance gave 4.89; after 48 -> 96 it
+    listened at 13 kHz instead of 6.5. The cut cached the same way, which
+    showed less because the depth moves and redesigns it -- but a band at rest
+    kept the old rate's coefficients and ran its state through them.
+
+    Every ordered pair of the four rates, the same rate included, with the
+    settings held and with a parameter change after the re-prepare. */
+void testRePrepareMatchesAFreshInstance()
+{
+    const double rates[] { 44100.0, 48000.0, 96000.0, 192000.0 };
+
+    auto v = defaults();
+    v[range] = 12.0f;
+
+    auto moved = v;
+    moved[freq] = 5000.0f;
+    moved[q] = 4.0f;
+
+    for (const auto from : rates)
+        for (const auto to : rates)
+            for (const auto change : { false, true })
+            {
+                DeesserDsp reused;
+                reused.prepare (from, 512, 2);
+                reused.setParams (v.data(), (int) v.size());
+                run (reused, essAt (from, 0.4));
+
+                reused.prepare (to, 512, 2);
+                const auto& after = change ? moved : v;
+                reused.setParams (after.data(), (int) after.size());
+                const auto a = run (reused, essAt (to, 0.4));
+
+                DeesserDsp fresh;
+                fresh.prepare (to, 512, 2);
+                fresh.setParams (after.data(), (int) after.size());
+                const auto b = run (fresh, essAt (to, 0.4));
+
+                const auto differ = differingSamples (a, b);
+
+                check (differ == 0,
+                       "a re-prepare from " + std::to_string ((int) from) + " to "
+                           + std::to_string ((int) to)
+                           + (change ? " with a parameter change" : " with the settings held")
+                           + " is a fresh instance, " + std::to_string (differ)
+                           + " samples differ");
+            }
+}
+
+/** **reset() leaves no stale design**, in each cache the band keeps.
+
+    The cut and the sidechain each remember what they were last designed from,
+    so that a band nobody is moving is not redesigned 6000 times a second.
+    Neither remembered the rate, so a reset followed by a design at another
+    rate with the same settings found nothing to do and kept the old one. One
+    row per cache, plus the followers' time constants, which prepare() sets
+    and which are pinned here so that a cache added to them later is caught. */
+void testResetLeavesNoStaleDesign()
+{
+    const auto gridA = bmo::dsp::DesignGrid::make (96000.0);
+    const auto gridB = bmo::dsp::DesignGrid::make (48000.0);
+
+    // The cut, at a depth that will not move between the two designs.
+    {
+        Band band;
+        band.design (Shape::bell, 6500.0, 2.5, 6.0, gridA, 8, true);
+        band.reset();
+        band.design (Shape::bell, 6500.0, 2.5, 6.0, gridB, 8, true);
+
+        Band fresh;
+        fresh.design (Shape::bell, 6500.0, 2.5, 6.0, gridB, 8, true);
+
+        check (std::memcmp (&band.cur, &fresh.cur, sizeof (band.cur)) == 0
+                   && std::memcmp (&band.next, &fresh.next, sizeof (band.next)) == 0,
+               "the cut is designed for the new rate after a reset");
+    }
+
+    // The sidechain, which does not follow the depth at all.
+    {
+        Band band;
+        band.designSide (Shape::bell, 6500.0, 2.5, 96000.0);
+        band.reset();
+        band.designSide (Shape::bell, 6500.0, 2.5, 48000.0);
+
+        Band fresh;
+        fresh.designSide (Shape::bell, 6500.0, 2.5, 48000.0);
+
+        check (std::memcmp (&band.sideCoeffs, &fresh.sideCoeffs, sizeof (band.sideCoeffs)) == 0,
+               "the sidechain is designed for the new rate after a reset");
+    }
+
+    // The sidechain again without a reset: a design asked for at another rate
+    // is a different design, whatever else is the same.
+    {
+        Band band;
+        band.designSide (Shape::bell, 6500.0, 2.5, 96000.0);
+        band.designSide (Shape::bell, 6500.0, 2.5, 48000.0);
+
+        Band fresh;
+        fresh.designSide (Shape::bell, 6500.0, 2.5, 48000.0);
+
+        check (std::memcmp (&band.sideCoeffs, &fresh.sideCoeffs, sizeof (band.sideCoeffs)) == 0,
+               "the sidechain's cache is keyed on the rate");
+    }
+
+    // The followers: prepared at one rate and then another, they are the
+    // followers of the second.
+    {
+        Prominence::Config pc;
+        Prominence reused, fresh;
+        reused.prepare (pc, 96000.0);
+        reused.process (0.3, 0.5);
+        reused.prepare (pc, 48000.0);
+        fresh.prepare (pc, 48000.0);
+
+        Reduction::Config rc;
+        Reduction reusedR, freshR;
+        reusedR.prepare (rc, 96000.0);
+        reusedR.process (8.0);
+        reusedR.prepare (rc, 48000.0);
+        freshR.prepare (rc, 48000.0);
+
+        auto same = true;
+
+        for (int i = 0; i < 4800; ++i)
+        {
+            const auto level = i < 2400 ? 0.3 : 0.01;
+            same = same && reused.process (level, 0.5) == fresh.process (level, 0.5);
+            same = same && reusedR.process (i < 2400 ? 8.0 : 0.0) == freshR.process (i < 2400 ? 8.0 : 0.0);
+        }
+
+        check (same, "the followers' time constants are the new rate's after a re-prepare");
+    }
+}
+
+/** The largest rise above unity and the deepest cut of a design, in dB, over
+    20 Hz to 20 kHz on a fine log grid. */
+void extremesOf (const bmo::dsp::Biquad& b, double rate, double& boostDb, double& deepestDb)
+{
+    boostDb = -1000.0;
+    deepestDb = 0.0;
+
+    for (auto f = 20.0; f <= 20000.0; f *= 1.002)
+    {
+        const auto m = b.magnitudeDbAt (f, rate);
+        boostDb = std::max (boostDb, m);
+        deepestDb = std::max (deepestDb, -m);
+    }
+}
+
+/** **In SHELF shape there is no boost, and the cut never goes past RANGE**
+    (the owner, 2026-10-03).
+
+    The shelf ran at its knob's Q up to a cap of 2, and a shelf that resonant
+    rises above unity below its corner and dips past its depth above it. At
+    6.5 kHz and 48 kHz, RANGE 8 rose +3.53 dB at 4.5 kHz and cut 11.49 dB;
+    RANGE 18 rose +5.41 dB and cut 23.25. A de-esser that turns the presence
+    region up while it works, and cuts 5 dB deeper than the control that
+    claims to be the ceiling, is doing neither job it says it is.
+
+    Every corner from 2 to 10 kHz, every depth to 18 dB, the four rates, and
+    the knob at its minimum, its default and its maximum. */
+void testTheShelfNeverBoosts()
+{
+    auto worstBoost = -1000.0, worstPast = -1000.0;
+    std::string where;
+
+    for (const auto rate : { 44100.0, 48000.0, 96000.0, 192000.0 })
+    {
+        const auto grid = bmo::dsp::DesignGrid::make (rate);
+
+        for (auto hz = 2000.0; hz <= 10001.0; hz *= 1.25)
+            for (auto depth = 0.5; depth <= 18.01; depth += 0.5)
+                for (const auto knob : { 0.7, 2.5, 6.0 })
+                {
+                    double boost, deepest;
+                    extremesOf (cutDesign (Shape::highShelf, std::min (hz, 0.45 * rate), knob, depth, grid),
+                                rate, boost, deepest);
+
+                    if (boost > worstBoost)
+                    {
+                        worstBoost = boost;
+                        where = std::to_string ((int) rate) + " Hz, corner " + std::to_string ((int) hz)
+                              + ", depth " + std::to_string (depth) + ", Q " + std::to_string (knob);
+                    }
+
+                    worstPast = std::max (worstPast, deepest - depth);
+                }
+    }
+
+    check (worstBoost <= 0.05, "the shelf cut never rises above unity by more than 0.05 dB, worst "
+                                   + std::to_string (worstBoost) + " dB at " + where);
+    check (worstPast <= 0.05, "the shelf never cuts more than 0.05 dB past its depth, worst "
+                                  + std::to_string (worstPast) + " dB");
+}
+
+/** **The meter reads the cut the shelf actually makes.** The meter reports
+    the applied depth, and a resonant shelf cut deeper than that -- the
+    reviewer saw it read 18 where the cut was 23.3. Driven to RANGE by a steady
+    tone above the corner, the deepest point of the shelf the engine is running at
+    that moment is the meter's figure, at every rate. */
+void testTheShelfMeterReadsTheCut()
+{
+    for (const auto rate : { 44100.0, 48000.0, 96000.0, 192000.0 })
+        for (const auto range_ : { 8.0f, 18.0f })
+        {
+            DeesserDsp dsp;
+            dsp.prepare (rate, 512, 2);
+
+            auto v = defaults();
+            v[thresh] = -24.0f;
+            v[range]  = range_;
+            v[shape]  = (float) highShelf;
+            dsp.setParams (v.data(), (int) v.size());
+
+            std::vector<float> tone ((size_t) rate);
+            for (size_t i = 0; i < tone.size(); ++i)
+                tone[i] = (float) (0.18 * std::sin (2.0 * kPi * 10000.0 * (double) i / rate));
+
+            run (dsp, tone);
+
+            const auto meter = (double) dsp.currentGainReductionDb();
+            double boost, deepest;
+            extremesOf (cutDesign (Shape::highShelf, 6500.0, (double) v[q], meter,
+                                   bmo::dsp::DesignGrid::make (rate)),
+                        rate, boost, deepest);
+
+            const auto tag = std::to_string ((int) rate) + " Hz, RANGE " + std::to_string ((int) range_)
+                           + ": meter " + std::to_string (meter) + ", deepest cut " + std::to_string (deepest);
+
+            checkNear (meter, range_, 0.01, "a steady tone above the corner drives the shelf to RANGE, " + tag);
+            check (deepest <= meter + 0.05, "the shelf cuts no deeper than the meter says, " + tag);
+            check (deepest >= meter - 0.5, "and the meter does not overstate the cut, " + tag);
+        }
+}
+
+/** **The shelf's detector does not resonate either.** It listened through a
+    high-pass at the knob's raw Q, not the shelf's, so at the default Q of 2.5
+    it peaked +7.96 dB at the corner and at Q 6 +15.56 -- a detector that heard
+    the band around the corner several times louder than the shelf it drives
+    would ever treat it. It now runs at the shelf's own Q. Gain read by
+    driving tones through the band's sidechain as the engine designs it. */
+void testTheShelfDetectorDoesNotResonate()
+{
+    for (const auto knob : { 0.7, 2.5, 6.0 })
+    {
+        Band band;
+        band.designSide (Shape::highShelf, 6500.0, knob, kSampleRate);
+
+        auto loudest = -1000.0;
+
+        for (const auto ratio : { 0.75, 1.0, 1.25, 1.5, 2.0, 3.0 })
+        {
+            bmo::dsp::SvfState s;
+            auto peak = 0.0;
+
+            for (int i = 0; i < (int) kSampleRate; ++i)
+            {
+                const auto y = s.process (band.sideTaps, band.sideCoeffs,
+                                          std::sin (2.0 * kPi * 6500.0 * ratio * i / kSampleRate));
+                if (i > (int) kSampleRate / 2)
+                    peak = std::max (peak, std::abs (y));
+            }
+
+            loudest = std::max (loudest, 20.0 * std::log10 (peak));
+        }
+
+        check (loudest <= 0.05, "the shelf's detector has no resonant peak at knob Q "
+                                    + std::to_string (knob) + ", loudest " + std::to_string (loudest) + " dB");
+    }
+}
+
+/** **Why Q dims in SHELF: there it does nothing at all.** The same sibilant
+    material, the knob at both ends of its travel, renders bit-identically in
+    shelf shape at three rates -- and differently in bell shape, so the
+    comparison is one that could have failed. The panel dims Q on `qIsLive`,
+    the function `effectiveQ` itself asks, so the two cannot disagree. */
+void testQIsInertInShelfShape()
+{
+    for (const auto rate : { 44100.0, 48000.0, 96000.0 })
+        for (const auto shapeChoice : { (int) highShelf, (int) bell })
+        {
+            const auto renderAt = [&] (float qValue)
+            {
+                DeesserDsp dsp;
+                dsp.prepare (rate, 512, 2);
+
+                auto v = defaults();
+                v[thresh] = -6.0f;
+                v[range]  = 12.0f;
+                v[shape]  = (float) shapeChoice;
+                v[q]      = qValue;
+                dsp.setParams (v.data(), (int) v.size());
+
+                return run (dsp, essAt (rate, 0.5));
+            };
+
+            const auto differ = differingSamples (renderAt (0.7f), renderAt (6.0f));
+            const auto tag = std::to_string ((int) rate) + " Hz, " + std::to_string (differ) + " samples differ";
+
+            if (shapeChoice == highShelf)
+                check (differ == 0, "in shelf shape Q 0.7 and Q 6 render identically, " + tag);
+            else
+                check (differ > 0, "in bell shape Q 0.7 and Q 6 do not, " + tag);
+        }
+
+    check (! qIsLive (highShelf) && qIsLive (bell), "qIsLive says the same as the renders");
+}
+
+/** The largest sample-to-sample step in [from, to). */
+double largestStep (const std::vector<float>& v, size_t from, size_t to)
+{
+    auto worst = 0.0;
+
+    for (auto i = std::max<size_t> (from, 1); i < std::min (to, v.size()); ++i)
+        worst = std::max (worst, (double) std::abs (v[i] - v[i - 1]));
+
+    return worst;
+}
+
+/** Renders `source` in blocks of `block`, calling `before` at the start of
+    every block with the index of its first sample -- which is where a host
+    moves a parameter or a panel sets the listen flag. */
+std::vector<float> renderWith (double rate, const std::vector<float>& source, std::vector<float> v,
+                               int block, const std::function<void (size_t, std::vector<float>&, DeesserDsp&)>& before)
+{
+    DeesserDsp dsp;
+    dsp.prepare (rate, block, 2);
+    dsp.setParams (v.data(), (int) v.size());
+
+    auto left = source, right = source;
+
+    for (size_t n = 0; n < source.size(); n += (size_t) block)
+    {
+        if (before)
+            before (n, v, dsp);
+
+        dsp.setParams (v.data(), (int) v.size());
+
+        const auto count = (int) std::min ((size_t) block, source.size() - n);
+        float* ch[2] { left.data() + n, right.data() + n };
+        dsp.process (ch, 2, count);
+    }
+
+    return left;
+}
+
+/** **LISTEN crosses over in 10 ms instead of switching.** It went from the
+    whole signal to `H(x) - x` in one sample, which put a step the size of the
+    signal itself into the output: 7.1 times the steady signal's own largest
+    step switching on and 6.6 switching off, at 48 kHz on a 1 kHz tone, and
+    12.7 / 13.2 at 96 kHz. The bound is 1.5 times the larger of the two steady
+    states' own largest steps, on a sustained tone with nothing being taken
+    out (so listen is silence), on one with the cut at RANGE, and inside a
+    sibilant burst, at three rates. Once the fade has finished, listen off is
+    still bit-identical to never having listened. */
+void testListenCrossesOverWithoutAStep()
+{
+    const auto block = 64;
+
+    for (const auto rate : { 44100.0, 48000.0, 96000.0 })
+    {
+        const auto ms = [rate] (double m) { return (size_t) std::lround (m * 1.0e-3 * rate); };
+        const auto onBlock = [rate, block] (double seconds) { return (size_t) block * ((size_t) (seconds * rate / block) + 1); };
+
+        struct Case { const char* name; std::vector<float> source; std::vector<float> v; size_t on, off; bool burst; };
+        std::vector<Case> cases;
+
+        const auto tone = [rate] (double hz)
+        {
+            std::vector<float> out ((size_t) (1.5 * rate));
+            for (size_t i = 0; i < out.size(); ++i)
+                out[i] = (float) (0.18 * std::sin (2.0 * kPi * hz * (double) i / rate));
+            return out;
+        };
+
+        auto eager = defaults();
+        eager[thresh] = -24.0f;
+        eager[range]  = 18.0f;
+
+        cases.push_back ({ "a 1 kHz tone at defaults", tone (1000.0), defaults(), onBlock (0.5), onBlock (1.0), false });
+        cases.push_back ({ "a 6.5 kHz tone cut to RANGE", tone (6500.0), eager, onBlock (0.5), onBlock (1.0), false });
+        cases.push_back ({ "a sibilant burst", essAt (rate, 1.0), defaults(), onBlock (0.56), onBlock (0.64), true });
+
+        for (const auto& c : cases)
+        {
+            const auto y = renderWith (rate, c.source, c.v, block, [&c] (size_t n, std::vector<float>&, DeesserDsp& d)
+            {
+                if (n == c.on)  d.setSolo (0);
+                if (n == c.off) d.setSolo (-1);
+            });
+
+            // Steady references either side of each switch, after any fade.
+            const auto beforeOn  = c.burst ? largestStep (y, ms (520), c.on) : largestStep (y, c.on - ms (100), c.on);
+            const auto during    = largestStep (y, c.on + ms (12), c.off);
+            const auto afterOff  = c.burst ? largestStep (y, c.off + ms (12), ms (680)) : largestStep (y, c.off + ms (12), c.off + ms (112));
+
+            const auto onRatio  = largestStep (y, c.on,  c.on  + ms (12)) / std::max ({ beforeOn, during, 1.0e-30 });
+            const auto offRatio = largestStep (y, c.off, c.off + ms (12)) / std::max ({ during, afterOff, 1.0e-30 });
+
+            const auto tag = std::string (c.name) + " at " + std::to_string ((int) rate) + " Hz";
+
+            check (onRatio < 1.5, "listen on steps " + std::to_string (onRatio) + "x on " + tag);
+            check (offRatio < 1.5, "listen off steps " + std::to_string (offRatio) + "x on " + tag);
+
+            // After the fade out, exactly as if listen had never been pressed.
+            if (! c.burst)
+            {
+                const auto plain = renderWith (rate, c.source, c.v, block, {});
+                auto same = true;
+
+                for (auto i = c.off + ms (11); i < y.size(); ++i)
+                    same = same && std::memcmp (&y[i], &plain[i], sizeof (float)) == 0;
+
+                check (same, "once listen has faded out the output is bit-identical to never listening, " + tag);
+            }
+        }
+    }
+}
+
+/** **Every parameter glides, in real time, and a choice crosses over.**
+    Nothing was smoothed: a host's jump reached the next control tick whole,
+    and under an engaged cut the reviewer measured steps of 4.2x the steady
+    signal's own (FREQ), 5.9x (Q) and 2.6x (SHAPE). 11 section 3's smooth
+    column asks for 20 ms in the log domain on FREQ and Q, 10 ms on THRESHOLD
+    and RANGE, and a 20 ms crossfade on SHAPE.
+
+    Each parameter jumped end to end, both ways, under a tone the module is
+    cutting to RANGE, at three rates and three tone frequencies: the largest
+    step in the 80 ms after the jump, over the larger of the two steady
+    states' own largest steps either side, stays under 1.5. */
+void testEveryParameterGlides()
+{
+    struct Jump { const char* name; int index; float a, b; };
+    const Jump jumps[] { { "freq", freq, 2000.0f, 10000.0f }, { "freq", freq, 4000.0f, 6500.0f },
+                         { "q", q, 0.7f, 6.0f }, { "range", range, 1.0f, 18.0f },
+                         { "thresh", thresh, -24.0f, 24.0f }, { "shape", shape, 0.0f, 1.0f } };
+
+    const auto block = 64;
+
+    for (const auto rate : { 44100.0, 48000.0, 96000.0 })
+    {
+        const auto ms = [rate] (double m) { return (size_t) std::lround (m * 1.0e-3 * rate); };
+        const auto at = (size_t) block * ((size_t) (0.6 * rate / block) + 1);
+
+        for (const auto hz : { 1000.0, 5000.0, 7000.0 })
+        {
+            std::vector<float> tone ((size_t) (1.0 * rate));
+            for (size_t i = 0; i < tone.size(); ++i)
+                tone[i] = (float) (0.18 * std::sin (2.0 * kPi * hz * (double) i / rate));
+
+            for (const auto& j : jumps)
+                for (const auto upward : { true, false })
+                {
+                    auto v = defaults();
+                    v[thresh] = -24.0f;
+                    v[range]  = 18.0f;
+                    v[(size_t) j.index] = upward ? j.a : j.b;
+
+                    const auto y = renderWith (rate, tone, v, block, [&] (size_t n, std::vector<float>& p, DeesserDsp&)
+                    {
+                        if (n == at)
+                            p[(size_t) j.index] = upward ? j.b : j.a;
+                    });
+
+                    const auto steady = std::max ({ largestStep (y, at - ms (100), at),
+                                                    largestStep (y, at + ms (150), at + ms (250)), 1.0e-30 });
+                    const auto ratio = largestStep (y, at, at + ms (80)) / steady;
+
+                    check (ratio < 1.5, std::string (j.name) + " " + std::to_string (upward ? j.a : j.b) + " -> "
+                                            + std::to_string (upward ? j.b : j.a) + " steps " + std::to_string (ratio)
+                                            + "x under a " + std::to_string ((int) hz) + " Hz tone at "
+                                            + std::to_string ((int) rate) + " Hz");
+                }
+        }
+    }
+}
+
+/** **A glide lands exactly, and then does no more work.** Every control moved
+    at once, and the shape with them: 30 ms later -- past the longest glide --
+    nothing is still moving, and the band in use was last designed from the
+    settings themselves, bit for bit, so the design caches see nothing move
+    and the core is back to doing what it did before there were glides. */
+void testGlidesLandExactly()
+{
+    for (const auto rate : { 44100.0, 48000.0, 96000.0 })
+    {
+        const auto block = 64;
+        const auto at = (size_t) block * ((size_t) (0.3 * rate / block) + 1);
+
+        auto v = defaults();
+        v[thresh] = -24.0f;
+        v[range]  = 18.0f;
+
+        DeesserDsp dsp;
+        dsp.prepare (rate, block, 2);
+
+        std::vector<float> tone ((size_t) (0.5 * rate));
+        for (size_t i = 0; i < tone.size(); ++i)
+            tone[i] = (float) (0.18 * std::sin (2.0 * kPi * 7000.0 * (double) i / rate));
+
+        auto left = tone, right = tone;
+        auto glidingAfter = true;
+
+        for (size_t n = 0; n < tone.size(); n += (size_t) block)
+        {
+            if (n == at)
+            {
+                v[freq] = 3000.0f;  v[q] = 5.0f;  v[thresh] = -10.0f;  v[range] = 14.0f;
+                v[shape] = (float) highShelf;
+            }
+
+            dsp.setParams (v.data(), (int) v.size());
+
+            const auto count = (int) std::min ((size_t) block, tone.size() - n);
+            float* ch[2] { left.data() + n, right.data() + n };
+            dsp.process (ch, 2, count);
+
+            if (n + (size_t) count >= at + (size_t) (0.03 * rate) && n < at + (size_t) (0.03 * rate))
+                glidingAfter = dsp.getCore().isGliding();
+        }
+
+        const auto tag = " at " + std::to_string ((int) rate) + " Hz";
+        const auto& band = dsp.getCore().getBand();
+
+        check (! glidingAfter, "every glide has landed 30 ms after the move" + tag);
+        check (band.designedHz == 3000.0 && band.sideHz == 3000.0, "FREQ lands on its setting exactly" + tag);
+        check (band.designedQ == (double) 5.0f && band.sideQ == (double) 5.0f, "Q lands on its setting exactly" + tag);
+        check (band.designedShape == Shape::highShelf && band.sideShape == Shape::highShelf,
+               "the shape has crossed over completely" + tag);
+    }
+}
+
+/** **The same automation renders the same at any block size**, bit for bit:
+    every control and the shape moved, and listen engaged, at one sample, and
+    moved back at another, both on a boundary that blocks of 1, 7, 32, 441 and
+    512 share. The glides move a sample at a time and their targets change
+    only where a host moves them, so where the host splits its blocks cannot
+    show in the output. */
+void testAutomationIsBlockSizeInvariant()
+{
+    const size_t first = 225792, second = 2 * 225792;   // lcm of 7, 32, 441 and 512, twice
+    const auto source = essAt (kSampleRate, 10.0);
+
+    const auto renderAt = [&] (int block)
+    {
+        return renderWith (kSampleRate, source, defaults(), block, [&] (size_t n, std::vector<float>& p, DeesserDsp& d)
+        {
+            if (n == first)
+            {
+                p[freq] = 4000.0f;  p[q] = 1.2f;  p[thresh] = -6.0f;  p[range] = 14.0f;
+                p[shape] = (float) highShelf;
+                d.setSolo (0);
+            }
+
+            if (n == second)
+            {
+                p[freq] = 7000.0f;  p[q] = 4.0f;  p[thresh] = 2.0f;  p[range] = 3.0f;
+                p[shape] = (float) bell;
+                d.setSolo (-1);
+            }
+        });
+    };
+
+    const auto reference = renderAt (1);
+
+    for (const auto block : { 7, 32, 441, 512 })
+    {
+        const auto differ = differingSamples (renderAt (block), reference);
+        check (differ == 0, "automation at block " + std::to_string (block) + " renders as at block 1, "
+                                + std::to_string (differ) + " samples differ");
+    }
+}
+
+/** The meter's peak over [from, to), read after every block of 16. */
+double peakReduction (double rate, const std::vector<float>& source, const std::vector<float>& v,
+                      size_t from, size_t to)
+{
+    DeesserDsp dsp;
+    dsp.prepare (rate, 16, 2);
+    dsp.setParams (v.data(), (int) v.size());
+
+    auto left = source, right = source;
+    auto peak = 0.0;
+
+    for (size_t n = 0; n < source.size(); n += 16)
+    {
+        const auto count = (int) std::min ((size_t) 16, source.size() - n);
+        float* ch[2] { left.data() + n, right.data() + n };
+        dsp.process (ch, 2, count);
+
+        if (n >= from && n < to)
+            peak = std::max (peak, (double) dsp.currentGainReductionDb());
+    }
+
+    return peak;
+}
+
+/** **One huge sample cannot switch the de-esser off for seconds.** A single
+    sample at +60 dBFS charged the band's slow 500 ms memory so far above
+    anything real that every ess for 5.8 s after it read as unremarkable
+    (7.4 s at +72, 10.2 s at +96), and the fast envelopes took a quarter of a
+    second to come down from it as well. A sample more than 40 dB over the
+    programme now reaches the detector clamped to that line, and the slow
+    memory sits out it and its ring-out (DspCore, `kSpikeOverDb`), so the next
+    sibilant burst, 250 ms later, is reduced within 1 dB of a run that never
+    had the spike -- in both shapes. */
+void testOneHugeSampleDoesNotDeafenTheDetector()
+{
+    for (const auto rate : { 44100.0, 48000.0, 96000.0 })
+        for (const auto shapeChoice : { (int) bell, (int) highShelf })
+        {
+            // essAt (2 s) bursts from 1.0 s; the spike is 250 ms before it.
+            const auto clean = essAt (rate, 2.0);
+            const auto burstFrom = (size_t) (1.0 * rate), burstTo = (size_t) (1.1 * rate);
+            const auto spikeAt = (size_t) (0.75 * rate);
+
+            auto v = defaults();
+            v[shape] = (float) shapeChoice;
+
+            const auto reference = peakReduction (rate, clean, v, burstFrom, burstTo);
+            const auto where = std::string (shapeChoice == bell ? "bell" : "shelf") + " at "
+                             + std::to_string ((int) rate) + " Hz";
+
+            check (reference > 3.0, "the burst is reduced in the clean run, "
+                                        + std::to_string (reference) + " dB, " + where);
+
+            for (const auto dbfs : { 60.0, 72.0, 96.0 })
+            {
+                auto spiked = clean;
+                spiked[spikeAt] = (float) std::pow (10.0, dbfs / 20.0);
+
+                const auto got = peakReduction (rate, spiked, v, burstFrom, burstTo);
+
+                checkNear (got, reference, 1.0, "the burst 250 ms after one sample at +" + std::to_string ((int) dbfs)
+                                                    + " dBFS is reduced as if it had not happened, " + where);
+            }
+        }
+}
+
+/** **What the spike line costs real material: nothing.** It never sits
+    below +20 dBFS, so a signal that peaks anywhere up to there reaches the
+    detector unclamped, and the detector is level-independent exactly as it
+    was: the same take 30 dB louder, peaking near +12, takes the same
+    reduction on its ess to within a hundredth of a dB. */
+void testLoudMaterialIsUnchangedByTheCeiling()
+{
+    const auto source = essAt (kSampleRate, 1.0);
+
+    auto loud = source;
+    auto peakIn = 0.0;
+
+    for (auto& s : loud)
+    {
+        s = (float) (s * std::pow (10.0, 30.0 / 20.0) * 0.2);
+        peakIn = std::max (peakIn, (double) std::abs (s));
+    }
+
+    auto quiet = source;
+    for (auto& s : quiet)
+        s = (float) (s * 0.2);
+
+    const auto v = defaults();
+    const auto from = (size_t) (0.5 * kSampleRate), to = (size_t) (0.7 * kSampleRate);
+    const auto atQuiet = peakReduction (kSampleRate, quiet, v, from, to);
+    const auto atLoud  = peakReduction (kSampleRate, loud,  v, from, to);
+
+    check (20.0 * std::log10 (peakIn) > 6.0 && 20.0 * std::log10 (peakIn) < 24.0,
+           "the loud take peaks between +6 and +24 dBFS, " + std::to_string (20.0 * std::log10 (peakIn)));
+    checkNear (atLoud, atQuiet, 0.01, "a take 30 dB louder takes the same reduction on its ess");
+}
+
 int main()
 {
+    testOneHugeSampleDoesNotDeafenTheDetector();
+    testLoudMaterialIsUnchangedByTheCeiling();
+    testEveryParameterGlides();
+    testGlidesLandExactly();
+    testAutomationIsBlockSizeInvariant();
+    testListenCrossesOverWithoutAStep();
+    testRePrepareMatchesAFreshInstance();
+    testResetLeavesNoStaleDesign();
+    testTheShelfNeverBoosts();
+    testTheShelfMeterReadsTheCut();
+    testTheShelfDetectorDoesNotResonate();
+    testQIsInertInShelfShape();
+
     testLatencyIsZeroEverywhere();
     testQuietMaterialIsUntouched();
     testSibilanceIsReduced();

@@ -206,6 +206,21 @@ hold after it.
   on a tone at FEEDBACK 95 overshoots the louder held level by up to
   3.5 dB, the same with the switch taken in one sample, so it is the
   loop's transient and not the fade; it is printed, not bounded.
+  **The grid now reaches further** (2026-10-04, 19 200 cells under
+  `--long`): the third echo, MOD 50 and 100 (judged against the held renders
+  over a whole MOD cycle, not one instant), a second switch 5 ms into the
+  fade and every block, and FX switches on tape and bucket-brigade at
+  FEEDBACK 95. Every cell keeps the step bound (worst 1.44x). **Open, and
+  the owner's call**: their level overruns the burst and linger bounds on a
+  tone at FEEDBACK 95, and no fade of 30 ms or less fixes it. Measured on
+  ICE QUEEN (20 ms fade / one sample / 200 ms): STEREO ping-pong <-> stereo
+  on bucket-brigade at 375.013 ms, third echo, +1.50 / +1.50 / +0.28 dB
+  and a 43.8 / 58.8 / 0 ms dip; FX on, Diffuse on bucket-brigade +5.57 /
+  +5.42 / +5.52 dB; STEREO stereo -> ping-pong on bucket-brigade at MOD 50
+  +1.85 / +1.89 / +1.15 dB; stereo <-> ping-pong every block at 7.3 ms
+  +3.80 / +7.15 / +0.32 dB (+1.33 at 30 ms). The options are a longer
+  STEREO fade (100-200 ms), which settles the STEREO cells and not the FX
+  ones, or accepting the loop's own transient as the FX TYPE one is.
 - **Never compare a host's value with `==` at the centre of a range that
   crosses zero** (2026-10-02, macOS CI). The snap `start + interval . n` is a
   fused multiply-add on macOS arm64, so LANE GAIN's 0 comes back as 1.5e-6

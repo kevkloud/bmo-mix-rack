@@ -6630,8 +6630,8 @@ void testDiffuseComesBackSilent()
     sample step over 1.5 times the signal's own largest), burst (over 1 dB
     above the louder steady level) or linger (a dip held past about 30 ms).
     A switch that changes what is inside the loop changes what the ring
-    holds, so its echo returns a TIME later and again two TIMEs later, and
-    both are judged as well as the switch.
+    holds, so its echo returns a TIME later, two TIMEs later and three, and
+    those are judged as well as the switch (the third from 2026-10-04).
 
     **The grid is built not to be blind.** The 2026-10-03 test took the
     review's probe as it was -- TIME 375 ms, a whole 165 cycles of its
@@ -6649,14 +6649,15 @@ void testDiffuseComesBackSilent()
     old state (A) and in the new (B), on the same input: the loop at a
     high FEEDBACK takes seconds to settle, so a steady level before and after
     would be measuring the settling. Over the window from 30 ms before the
-    switch to 60 ms past its second echo:
+    switch to 60 ms past its third echo (the levels to 60 ms past the
+    second, as below):
 
     - **step**: in each 5 ms window (20 ms on noise, whose 5 ms level
       wanders by itself) the largest sample step over the window's level,
       the loudest of the three -- a loop moved to a louder state steps more in
       proportion, and that is level -- is under 1.5 times the signal's own:
       the same quantity for A, for B, and for the switched render itself
-      before the switch and past the second echo's 30 ms, so that a stage
+      before the switch and past the third echo's 30 ms, so that a stage
       that steps by design (Crush's hold) is measured against its own steps;
     - **burst**: no window more than 1 dB above the louder of A and B;
     - **linger**: no run of windows more than 1 dB under the quieter of A and
@@ -6678,8 +6679,27 @@ void testDiffuseComesBackSilent()
     where it starts). Those are open and in the 2026-10-04 notes, not closed
     by this test.
 
-    The default run is the worst cells; `--long` is the whole grid (12 288
-    cells); `--grid` runs the grid alone and prints each family's worst. */
+    **What the grid did not reach, added 2026-10-04**: the third echo; MOD 50
+    and 100 on every CHARACTER and STEREO switch, against the held renders
+    over a whole cycle of MOD RATE (see `judgeGridCell`); a second switch
+    5 ms into the fade, and the switch thrown every block for 250 ms, on
+    every CHARACTER, STEREO and FX switch; and the FX switches on tape and
+    bucket-brigade at FEEDBACK 95. **Every one of them is held to the step
+    bound, and every one keeps it** (worst 1.44x, FX TYPE Diffuse -> Crush
+    thrown every block). **Their level is printed, not bounded, and open**:
+    it is the loop's own transient on a tone at FEEDBACK 95 -- the same with
+    the switch taken in one sample, so no fade of 30 ms or less reaches it.
+    Measured on ICE QUEEN, burst and dip with a 20 ms fade -> one sample ->
+    200 ms: STEREO ping-pong <-> stereo on bucket-brigade at 375.013 ms,
+    third echo, +1.50 -> +1.50 -> +0.28 dB and 43.8 -> 58.8 -> 0 ms; FX on,
+    Diffuse on bucket-brigade +5.57 -> +5.42 -> +5.52 dB; STEREO stereo ->
+    ping-pong on bucket-brigade at MOD 50 +1.85 -> +1.89 -> +1.15 dB; the
+    same thrown every block, a 191 ms dip at every length. The level through
+    the first two echoes of the cells judged before is judged as it was.
+
+    The default run is the worst cells and one of each added dimension;
+    `--long` is the whole grid (19 200 cells); `--grid` runs the grid alone
+    and prints each family's worst, `--grid <text>` the cells named. */
 enum class GridFamily { character, stereo, sync, note, fxOnOff, fxType, hold, chop, send, fxLink };
 
 struct GridSwitch
@@ -6692,6 +6712,14 @@ struct GridSwitch
     bool movesTime = false;
 };
 
+/** What happens after the first switch (2026-10-04). */
+enum class GridAfter
+{
+    once,        ///< the switch, then held
+    backAt5ms,   ///< back to the old state 5 ms into the fade
+    everyBlock   ///< back and forth every block for 250 ms, ending in the new state
+};
+
 struct GridCell
 {
     int which;            ///< into `gridSwitches (shortTime)`
@@ -6701,6 +6729,10 @@ struct GridCell
     int block;
     float feedback;
     bool noise;
+    float mod = 0.0f;                    ///< MOD DEPTH, at MOD RATE's default
+    GridAfter after = GridAfter::once;
+    int character = -1;                  ///< for the FX rows: the character they run on (-1: clean)
+    float timeMs = 0.0f;                 ///< 0: 13.7 or 375.013 ms by `shortTime`
 };
 
 constexpr double kGridTempo = 117.0;   // 1/8D is 384.6 ms: not a whole number of cycles either
@@ -6789,21 +6821,31 @@ std::vector<GridSwitch> gridSwitches (bool shortTime)
     return s;
 }
 
-struct GridJudgement { double step = 0.0, burstDb = -99.0, dipMs = 0.0; };
+struct GridJudgement
+{
+    double step = 0.0, burstDb = -99.0, dipMs = 0.0;   ///< the level through the second echo
+    double burstThrough3Db = -99.0, dipThrough3Ms = 0.0;
+};
 
 /** Renders one switch three ways -- switched at `at`, held before, held
     after -- and judges the window. `first` is the length of the first
-    block, which is what puts a block edge on `at`. */
+    block, which is what puts a block edge on `at`; a second switch 5 ms in
+    gets a block edge of its own, as a host's sample-accurate automation
+    gives it. */
 GridJudgement judgeGridCell (const GridSwitch& sw, const GridCell& cell)
 {
     const auto rate = cell.rate;
-    const auto timeMs = cell.shortTime ? 13.7f : 375.013f;
+    const auto timeMs = cell.timeMs > 0.0f ? cell.timeMs : (cell.shortTime ? 13.7f : 375.013f);
 
     auto base = defaults();
     base[P::Index::feedback] = cell.feedback;
     base[P::Index::mix]      = 50.0f;
     base[P::Index::time]     = timeMs;
     base[P::Index::laneTime] = timeMs;
+    base[P::Index::modDepth] = cell.mod;
+
+    if (cell.character >= 0)
+        base[P::Index::character] = (float) cell.character;
 
     for (const auto& [index, value] : sw.base)
         base[(size_t) index] = value;
@@ -6830,10 +6872,30 @@ GridJudgement judgeGridCell (const GridSwitch& sw, const GridCell& cell)
     const auto period = rate / 440.0;
     const auto t0 = cell.shortTime ? 0.25 : 1.0;
     const auto at = (int) std::lround (t0 * rate + cell.moment * period / 8.0) + 37;
+
+    // The last switch: the first, the one back 5 ms into its fade, or the
+    // end of 250 ms of switching every block (ending in the new state).
+    const auto backAt = at + (int) std::lround (0.005 * rate);
+    const auto everyEnd = at + (int) std::ceil (0.25 * rate / cell.block) * cell.block;
+    const auto last = cell.after == GridAfter::once ? at
+                    : cell.after == GridAfter::backAt5ms ? backAt : everyEnd;
+
+    // The switch and its first three echoes (the third from 2026-10-04: a
+    // STEREO switch at FEEDBACK 95 stepped 1.76x there and not before).
+    const auto echoes = 3.0;
     const auto from = at - (int) (0.03 * rate);
-    const auto to = at + (int) ((2.0 * longestMs * 0.001 + 0.06) * rate);
-    const auto settled = at + (int) ((2.0 * longestMs * 0.001 + 0.035) * rate);   // past the second echo's 30 ms
-    const auto n = to + (int) (0.01 * rate);
+    const auto to = last + (int) ((echoes * longestMs * 0.001 + 0.06) * rate);
+    const auto settled = last + (int) ((echoes * longestMs * 0.001 + 0.035) * rate);   // past the third echo's 30 ms
+
+    // The level bounds are judged where they were on 2026-10-04's first
+    // grid, through the second echo; the third echo's level is printed (see
+    // the comment above `GridFamily`).
+    const auto levelTo = last + (int) ((2.0 * longestMs * 0.001 + 0.06) * rate);
+
+    // Under modulation the held renders are read over a whole cycle of it.
+    const auto cycle = cell.mod > 0.0f ? (int) std::ceil (rate / (double) base[P::Index::modRate]) : 0;
+    const auto referenceTo = std::max (to, from + cycle);
+    const auto n = referenceTo + (int) (0.01 * rate);
 
     // The input: the tone in both channels, or independent noise in each.
     Block input { n };
@@ -6856,7 +6918,22 @@ GridJudgement judgeGridCell (const GridSwitch& sw, const GridCell& cell)
         }
     }
 
-    const auto render = [&] (int switchAt, int firstBlock)
+    // The state the switched render is in at `offset`.
+    const auto switchedState = [&] (int offset) -> const std::vector<float>&
+    {
+        if (offset < at)
+            return before;
+
+        if (cell.after == GridAfter::backAt5ms)
+            return offset < backAt ? after : before;
+
+        if (cell.after == GridAfter::everyBlock && offset < everyEnd)
+            return ((offset - at) / cell.block) % 2 == 0 ? after : before;
+
+        return after;
+    };
+
+    const auto render = [&] (bool switched, int firstBlock)
     {
         P::DwellDsp dsp;
         dsp.setParams (before.data(), (int) before.size());
@@ -6866,8 +6943,12 @@ GridJudgement judgeGridCell (const GridSwitch& sw, const GridCell& cell)
 
         for (int offset = 0; offset < n; )
         {
-            const auto count = std::min (offset == 0 ? firstBlock : cell.block, n - offset);
-            auto& v = offset >= switchAt ? after : before;
+            auto count = std::min (offset == 0 ? firstBlock : cell.block, n - offset);
+
+            if (switched && cell.after == GridAfter::backAt5ms && offset < backAt && offset + count > backAt)
+                count = backAt - offset;
+
+            const auto& v = switched ? switchedState (offset) : before;
 
             dsp.setParams (v.data(), (int) v.size());
             dsp.setTempo (kGridTempo, true, true);
@@ -6884,12 +6965,12 @@ GridJudgement judgeGridCell (const GridSwitch& sw, const GridCell& cell)
     if (firstBlock == 0)
         firstBlock = cell.block;
 
-    const auto switched = render (at, firstBlock);
-    const auto heldA = render (n + 1, cell.block);
+    const auto switched = render (true, firstBlock);
+    const auto heldA = render (false, cell.block);
 
     // B is held in the new state from the start.
     std::swap (before, after);
-    const auto heldB = render (n + 1, cell.block);
+    const auto heldB = render (false, cell.block);
     std::swap (before, after);
 
     const auto largestStep = [] (const std::vector<float>& x, int a, int b)
@@ -6919,7 +7000,27 @@ GridJudgement judgeGridCell (const GridSwitch& sw, const GridCell& cell)
         // loudest of the three in the same window, so a dip cannot make a
         // step look large.
         auto own = 0.0, worstStep = 0.0;
-        auto run = 0, longest = 0;
+        auto run = 0, longest = 0, longestThrough3 = 0;
+
+        // **Under modulation the reference is a whole cycle, not an
+        // instant** (2026-10-04). A modulated loop's comb moves against a
+        // steady tone, so its level swings by several dB and its steps with
+        // its pitch; the switched render moves through the same states at
+        // other moments, and set against the held level of that one instant
+        // it read as a burst and a click that the held render makes itself a
+        // moment earlier or later. So with MOD on, the step, the louder and
+        // the quieter level are the held renders' largest, loudest and
+        // quietest over one whole cycle of MOD RATE.
+        auto loudest = 0.0, quietest = 1.0e30;
+
+        for (int k = from; cycle > 0 && k + w <= referenceTo; k += hop)
+        {
+            const auto ra = rms (a, k, w), rb = rms (b, k, w);
+            own = std::max ({ own, largestStep (a, k, k + w) / std::max (ra, 1.0e-12),
+                              largestStep (b, k, k + w) / std::max (rb, 1.0e-12) });
+            loudest = std::max ({ loudest, ra, rb });
+            quietest = std::min ({ quietest, ra, rb });
+        }
 
         for (int k = from; k + w <= to; k += hop)
         {
@@ -6929,20 +7030,34 @@ GridJudgement judgeGridCell (const GridSwitch& sw, const GridCell& cell)
                               largestStep (b, k, k + w) / std::max (rb, 1.0e-12) });
 
             // The switched signal's own steps count too, before the switch and
-            // past the second echo: a stage that steps by design -- Crush's
+            // past the third echo: a stage that steps by design -- Crush's
             // hold -- steps as it does on whatever it is handed, and the held
             // render in the new state may hand it less.
             if (k + w <= at || k >= settled)
                 own = std::max (own, largestStep (s, k, k + w) / std::max (rs, 1.0e-12));
             worstStep = std::max (worstStep, largestStep (s, k, k + w) / std::max ({ rs, ra, rb, 1.0e-12 }));
-            j.burstDb = std::max (j.burstDb, dbOf (rs) - dbOf (std::max (ra, rb)));
 
-            run = dbOf (rs) < dbOf (std::min (ra, rb)) - 1.0 ? run + 1 : 0;
-            longest = std::max (longest, run);
+            const auto louder  = cycle > 0 ? loudest : std::max (ra, rb);
+            const auto quieter = cycle > 0 ? quietest : std::min (ra, rb);
+            j.burstThrough3Db = std::max (j.burstThrough3Db, dbOf (rs) - dbOf (louder));
+
+            if (k + w <= levelTo)
+                j.burstDb = std::max (j.burstDb, dbOf (rs) - dbOf (louder));
+
+            // A dip while the switch is still being thrown every block is the
+            // gesture, not a dip that lingers after it: that one is timed
+            // from the last switch.
+            const auto timed = cell.after != GridAfter::everyBlock || k >= last;
+            run = timed && dbOf (rs) < dbOf (quieter) - 1.0 ? run + 1 : 0;
+            longestThrough3 = std::max (longestThrough3, run);
+
+            if (k + w <= levelTo)
+                longest = std::max (longest, run);
         }
 
-        const auto spanMs = longest > 0 ? 1000.0 * (w + (longest - 1) * hop) / rate : 0.0;
-        j.dipMs = std::max (j.dipMs, spanMs);
+        const auto spanMs = [&] (int windows) { return windows > 0 ? 1000.0 * (w + (windows - 1) * hop) / rate : 0.0; };
+        j.dipMs = std::max (j.dipMs, spanMs (longest));
+        j.dipThrough3Ms = std::max (j.dipThrough3Ms, spanMs (longestThrough3));
         j.step = std::max (j.step, worstStep / std::max (own, 1.0e-12));
     }
 
@@ -6951,17 +7066,30 @@ GridJudgement judgeGridCell (const GridSwitch& sw, const GridCell& cell)
 
 std::string gridCellName (const GridSwitch& sw, const GridCell& cell)
 {
-    char buf[220];
-    std::snprintf (buf, sizeof (buf), "%s, TIME %s, moment %d/8, %.0f kHz / %d, FEEDBACK %.0f, %s",
-                   sw.name.c_str(), cell.shortTime ? "13.7 ms" : "375.013 ms", cell.moment,
-                   cell.rate * 0.001, cell.block, (double) cell.feedback, cell.noise ? "noise" : "440 Hz");
+    const auto timeMs = cell.timeMs > 0.0f ? cell.timeMs : (cell.shortTime ? 13.7f : 375.013f);
+    const char* const afters[] { "", ", back 5 ms into the fade", ", back and forth every block for 250 ms" };
+
+    char extra[64] = "";
+    if (cell.mod > 0.0f)
+        std::snprintf (extra, sizeof (extra), ", MOD %.0f", (double) cell.mod);
+
+    char buf[320];
+    std::snprintf (buf, sizeof (buf), "%s%s%s, TIME %.6g ms, moment %d/8, %.0f kHz / %d, FEEDBACK %.0f, %s%s%s",
+                   sw.name.c_str(), cell.character >= 0 ? " on " : "",
+                   cell.character >= 0 ? characterName (cell.character) : "", (double) timeMs, cell.moment,
+                   cell.rate * 0.001, cell.block, (double) cell.feedback, cell.noise ? "noise" : "440 Hz",
+                   extra, afters[(int) cell.after]);
     return buf;
 }
 
 /** The default run's cells, by switch name. */
 std::vector<GridCell> gridDefaultCells()
 {
-    struct Named { const char* name; bool shortTime; int moment; double rate; int block; float feedback; bool noise; };
+    struct Named
+    {
+        const char* name; bool shortTime; int moment; double rate; int block; float feedback; bool noise;
+        float mod = 0.0f; GridAfter after = GridAfter::once; int character = -1; float timeMs = 0.0f;
+    };
 
     const Named named[]
     {
@@ -6984,6 +7112,16 @@ std::vector<GridCell> gridDefaultCells()
         { "FX off, Diffuse", false, 4, 48000.0, 512, 60.0f, false },                   //  2.92x
         { "CHARACTER bucket-brigade -> clean", false, 6, 48000.0, 512, 60.0f, false }, //  3.09x
         { "FX on, Diffuse", false, 0, 48000.0, 512, 60.0f, false },                    //  2.75x
+
+        // One cell of each dimension added on 2026-10-04, the review's own
+        // where it named one: the third echo (STEREO on bucket-brigade at
+        // FEEDBACK 95), MOD 100 against the whole-cycle reference, a switch
+        // thrown every block for 250 ms, and an FX switch on bucket-brigade
+        // at FEEDBACK 95.
+        { "STEREO ping-pong -> stereo on bucket-brigade", false, 0, 48000.0, 512, 95.0f, false },
+        { "CHARACTER bucket-brigade -> clean", true, 0, 48000.0, 512, 60.0f, false, 100.0f, GridAfter::once, -1, 7.3f },
+        { "STEREO stereo -> ping-pong on clean", true, 0, 48000.0, 512, 95.0f, false, 0.0f, GridAfter::everyBlock, -1, 7.3f },
+        { "FX on, Diffuse", false, 0, 48000.0, 512, 95.0f, false, 0.0f, GridAfter::once, (int) P::kBucketBrigade },
     };
 
     std::vector<GridCell> cells;
@@ -6994,42 +7132,85 @@ std::vector<GridCell> gridDefaultCells()
 
         for (int i = 0; i < (int) switches.size(); ++i)
             if (switches[(size_t) i].name == c.name)
-                cells.push_back ({ i, c.shortTime, c.moment, c.rate, c.block, c.feedback, c.noise });
+                cells.push_back ({ i, c.shortTime, c.moment, c.rate, c.block, c.feedback, c.noise,
+                                   c.mod, c.after, c.character, c.timeMs });
+    }
+
+    return cells;
+}
+
+/** The whole grid, for `--long` and `--grid`. */
+std::vector<GridCell> gridAllCells()
+{
+    std::vector<GridCell> cells;
+
+    for (const auto shortTime : { false, true })
+    {
+        const auto switches = gridSwitches (shortTime);
+
+        for (int which = 0; which < (int) switches.size(); ++which)
+            for (int moment = 0; moment < 8; ++moment)
+                for (const auto rate : { 48000.0, 96000.0 })
+                    for (const auto block : { 512, 441 })
+                        for (const auto feedback : { 60.0f, 95.0f })
+                            for (const auto noise : { false, true })
+                                cells.push_back ({ which, shortTime, moment, rate, block, feedback, noise });
+
+        // 2026-10-04: what the grid did not reach. MOD 50 and 100 on every
+        // CHARACTER and STEREO switch, which change the read's modulation
+        // law; a second switch 5 ms into the fade and every block for the
+        // switches that fade a path; and the FX switches on tape and
+        // bucket-brigade at FEEDBACK 95, not on clean alone. The short time
+        // is 7.3 ms there, the review's. A quarter cycle apart, on the tone.
+        const auto shortMs = shortTime ? 7.3f : 0.0f;
+
+        for (int which = 0; which < (int) switches.size(); ++which)
+        {
+            const auto f = switches[(size_t) which].family;
+            const auto readLaw = f == GridFamily::character || f == GridFamily::stereo;
+            const auto fx = f == GridFamily::fxOnOff || f == GridFamily::fxType;
+
+            for (int moment = 0; moment < 8; moment += 2)
+                for (const auto rate : { 48000.0, 96000.0 })
+                    for (const auto feedback : { 60.0f, 95.0f })
+                    {
+                        if (readLaw)
+                            for (const auto mod : { 50.0f, 100.0f })
+                                cells.push_back ({ which, shortTime, moment, rate, 512, feedback, false,
+                                                   mod, GridAfter::once, -1, shortMs });
+
+                        if (readLaw || fx)
+                            for (const auto after : { GridAfter::backAt5ms, GridAfter::everyBlock })
+                                cells.push_back ({ which, shortTime, moment, rate, 512, feedback, false,
+                                                   0.0f, after, -1, shortMs });
+                    }
+
+            if (fx)
+                for (const auto character : { (int) P::kTape, (int) P::kBucketBrigade })
+                    for (int moment = 0; moment < 8; ++moment)
+                        for (const auto rate : { 48000.0, 96000.0 })
+                            for (const auto block : { 512, 441 })
+                                for (const auto noise : { false, true })
+                                    cells.push_back ({ which, shortTime, moment, rate, block, 95.0f, noise,
+                                                       0.0f, GridAfter::once, character });
+        }
     }
 
     return cells;
 }
 
 /** `--grid` runs this alone, at full size, and prints each family's worst
-    cell: what a fix is iterated against. */
-void testEverySwitchIsAFade (bool printWorst = false)
+    cell: what a fix is iterated against. `--grid <text>` runs only the
+    cells whose name carries that text, printing each. */
+void testEverySwitchIsAFade (bool printWorst = false, const std::string& only = {})
 {
     const auto started = std::chrono::steady_clock::now();
 
-    std::vector<GridCell> cells;
-
-    if (longRun)
-    {
-        for (const auto shortTime : { false, true })
-        {
-            const auto count = (int) gridSwitches (shortTime).size();
-
-            for (int which = 0; which < count; ++which)
-                for (int moment = 0; moment < 8; ++moment)
-                    for (const auto rate : { 48000.0, 96000.0 })
-                        for (const auto block : { 512, 441 })
-                            for (const auto feedback : { 60.0f, 95.0f })
-                                for (const auto noise : { false, true })
-                                    cells.push_back ({ which, shortTime, moment, rate, block, feedback, noise });
-        }
-    }
-    else
-    {
-        // The worst cells the full grid found on a265b41, one a family that
-        // failed, the families that did not at their worst, and the cells
-        // that were the only witness of a defect fixed on 2026-10-03.
-        cells = gridDefaultCells();
-    }
+    // The default run: the worst cells the full grid found on a265b41, one
+    // a family that failed, the families that did not at their worst, the
+    // cells that were the only witness of a defect fixed since, and one of
+    // each dimension added on 2026-10-04.
+    const auto cells = longRun ? gridAllCells() : gridDefaultCells();
 
     struct Worst { double step = 0.0, burst = -99.0, dip = 0.0; std::string stepAt, burstAt, dipAt; };
     std::vector<Worst> worst (10);
@@ -7039,26 +7220,38 @@ void testEverySwitchIsAFade (bool printWorst = false)
     {
         const auto switches = gridSwitches (cell.shortTime);
         const auto& sw = switches[(size_t) cell.which];
+        const auto name = gridCellName (sw, cell);
+
+        if (! only.empty() && name.find (only) == std::string::npos)
+            continue;
+
         const auto j = judgeGridCell (sw, cell);
         ++judged;
 
         auto& wf = worst[(size_t) sw.family];
-        const auto name = gridCellName (sw, cell);
 
-        if (j.step > wf.step)      { wf.step = j.step;     wf.stepAt = name; }
-        if (j.burstDb > wf.burst)  { wf.burst = j.burstDb; wf.burstAt = name; }
-        if (j.dipMs > wf.dip)      { wf.dip = j.dipMs;     wf.dipAt = name; }
+        if (j.step > wf.step)             { wf.step = j.step;                 wf.stepAt = name; }
+        if (j.burstThrough3Db > wf.burst) { wf.burst = j.burstThrough3Db;   wf.burstAt = name; }
+        if (j.dipThrough3Ms > wf.dip)     { wf.dip = j.dipThrough3Ms;         wf.dipAt = name; }
 
-        // See the comment above for what is judged where.
+        // See the comment above for what is judged where. The cells added on
+        // 2026-10-04 -- MOD, a second switch, FX on tape and bucket-brigade --
+        // are held to the step bound; their level is the loop's own
+        // transient and is printed.
+        const auto added = cell.mod > 0.0f || cell.after != GridAfter::once || cell.character >= 0;
         const auto reshapes = sw.family == GridFamily::fxOnOff || sw.family == GridFamily::fxType
                            || sw.family == GridFamily::fxLink;
-        const auto burstJudged = ! sw.movesTime && sw.family != GridFamily::fxType;
-        const auto dipJudged = ! sw.movesTime && ! reshapes;
+        const auto burstJudged = ! added && ! sw.movesTime && sw.family != GridFamily::fxType;
+        const auto dipJudged = ! added && ! sw.movesTime && ! reshapes;
 
-        char buf[400];
-        std::snprintf (buf, sizeof (buf), "%s: step %.2fx, burst %+.2f dB%s, longest dip %.1f ms%s",
-                       name.c_str(), j.step, j.burstDb, burstJudged ? "" : " (not judged)", j.dipMs,
-                       dipJudged ? "" : " (not judged)");
+        char buf[600];
+        std::snprintf (buf, sizeof (buf), "%s: step %.2fx, burst %+.2f dB%s (%+.2f through the third echo), "
+                       "longest dip %.1f ms%s (%.1f)",
+                       name.c_str(), j.step, j.burstDb, burstJudged ? "" : " (not judged)", j.burstThrough3Db,
+                       j.dipMs, dipJudged ? "" : " (not judged)", j.dipThrough3Ms);
+
+        if (! only.empty())
+            std::printf ("      %s\n", buf);
 
         check (j.step <= 1.5 && (! burstJudged || j.burstDb <= 1.0) && (! dipJudged || j.dipMs <= 30.0), buf);
     }
@@ -7335,12 +7528,13 @@ int main (int argc, char** argv)
             longRun = true;
 
     // `--grid`: the switch grid alone, at full size, with each family's worst
-    // cell printed -- what a switch fix is iterated against.
+    // cell printed -- what a switch fix is iterated against. `--grid <text>`
+    // runs the cells whose name carries the text, and prints every one.
     for (int i = 1; i < argc; ++i)
         if (std::string (argv[i]) == "--grid")
         {
             longRun = true;
-            testEverySwitchIsAFade (true);
+            testEverySwitchIsAFade (true, i + 1 < argc ? std::string (argv[i + 1]) : std::string());
             std::printf ("%d checks, %d failures (--grid)\n", checks, failures);
             return failures == 0 ? 0 : 1;
         }

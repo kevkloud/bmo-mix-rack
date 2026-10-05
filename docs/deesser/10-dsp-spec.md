@@ -32,9 +32,9 @@ the default, which is what the test in 11 §5 asserts.
 
 ## 2. Signal flow
 
-**(a) Detection path:** per channel a first-order 150 Hz high-pass feeds the
-*fullband reference* rectifier and a *band* bandpass (high-pass in shelf mode)
-at the user's f0 and width. Both come from the **dry** input, never the moving
+**(a) Detection path:** per channel a second-order 150 Hz high-pass (Q 0.707)
+feeds the *fullband reference* rectifier and a *band* bandpass (high-pass in
+shelf mode) at the user's f0 and width. Both come from the **dry** input, never the moving
 output filter, whose poles track its own gain — tapping it would close a
 feedback loop. **(b) Relative detector** → one level-independent *prominence* in
 dB (§3). **(c) Gain computer**: threshold, soft knee, slope, range → an offset
@@ -172,9 +172,12 @@ non-finite coefficient.
 
 **Smoothing:** the per-parameter constants are the *smooth* column of 11 §3's
 schema table and are not repeated here. Two rules belong to the DSP rather than
-to the schema: `freq` and `q` glide one-pole in the *log* domain, and `shape`
+to the schema: `freq` and `q` glide in the *log* domain, and `shape`
 crossfades the two contributions rather than jumping coefficients. The first
-set after prepare/reset is snapped.
+set after prepare/reset is snapped. As built (2026-10-03) every glide is a
+straight line over its column's time rather than a one-pole: it lands exactly
+and then does no work, which a one-pole never does (`DspCore.h`,
+`kFreqGlideMs`).
 
 ## 8. Metering
 
@@ -209,7 +212,7 @@ the host, and free to be retuned right up until it.
 | Slow release τ / engage | 120 / 150 ms | 01 §1; CALIBRATE |
 | Slow reference `S` τ / clamp | 500 ms / 20 dB below the κ=1 reference | no figure; CALIBRATE |
 | Hold / hysteresis | 5 ms / 1.5 dB | 02 §6; CALIBRATE |
-| Reference HPF / gates | 150 Hz 1st order; −55, −60 dBFS | CALIBRATE |
+| Reference HPF / gates | 150 Hz 2nd order, Q 0.707; −55, −60 dBFS | CALIBRATE |
 | Engine clamps | `f0` ≤ 0.45·Fs, Q 0.1–40, depth ≤ 30 dB | robustness; hosts send anything |
 | Channel link | power-sum, always linked | 01 §3 High |
 | Control interval / latency | 8 / 0 samples | repo; constraint |

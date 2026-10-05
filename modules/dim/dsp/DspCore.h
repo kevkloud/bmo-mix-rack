@@ -1,5 +1,7 @@
 #pragma once
 
+#include "core/dsp/SwitchFade.h"
+
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -41,6 +43,81 @@ private:
 };
 
 //==============================================================================
+/** OUTPUT: a level in dB, smoothed every sample, handed out as a gain.
+
+    The same behaviour as the equaliser's trims (modules/eq/dsp/DspCore.h,
+    whose comment has the measurements), kept here rather than shared
+    because modules do not include one another. Per sample, so a move takes
+    the same time at any host block size; in dB, so a full-range move does
+    not front-load its rise. A one-pole in float32 stalls short of a target
+    near 24 dB once its increment rounds away, so it lands on the target
+    exactly when within kLandDb or when a sample makes no progress. Landed,
+    next() does no work, and at 0 dB the caller leaves it out of the path
+    altogether (restsAtUnity). */
+class TrimSmoother
+{
+public:
+    static constexpr float kLandDb = 1.0e-3f;
+
+    void prepare (double sampleRate, double timeMs) noexcept
+    {
+        const auto tau = std::max (timeMs, 0.01) * 0.001;
+        coeff = (float) (1.0 - std::exp (-1.0 / (std::max (sampleRate, 1.0) * tau)));
+    }
+
+    void snap (float targetDb) noexcept
+    {
+        currentDb = targetDb;
+        setTarget (targetDb);
+        gain = targetGain;
+    }
+
+    void setTarget (float targetDb) noexcept
+    {
+        if (! (targetDb < this->targetDb) && ! (this->targetDb < targetDb))
+            return;
+
+        this->targetDb = targetDb;
+        targetGain = toGain (targetDb);
+    }
+
+    bool isSettled() const noexcept { return ! (currentDb < targetDb) && ! (targetDb < currentDb); }
+
+    /** Settled at exactly 0 dB: the caller skips the multiply entirely. */
+    bool restsAtUnity() const noexcept { return isSettled() && targetDb == 0.0f; }
+
+    float levelDb() const noexcept { return currentDb; }
+
+    /** One sample on. */
+    float next() noexcept
+    {
+        if (isSettled())
+            return gain;
+
+        const auto moved = currentDb + coeff * (targetDb - currentDb);
+
+        if (std::abs (targetDb - moved) < kLandDb || ! (moved < currentDb || currentDb < moved))
+        {
+            currentDb = targetDb;
+            gain = targetGain;
+        }
+        else
+        {
+            currentDb = moved;
+            gain = toGain (moved);
+        }
+
+        return gain;
+    }
+
+private:
+    static float toGain (float decibels) noexcept { return std::pow (10.0f, decibels * 0.05f); }
+
+    float coeff = 1.0f, currentDb = 0.0f, targetDb = 0.0f;
+    float gain = 1.0f, targetGain = 1.0f;
+};
+
+//==============================================================================
 /** A crossfading delay-line pitch shifter, one voice.
 
     A read pointer moving at a rate other than one sample per sample is a pitch
@@ -72,7 +149,7 @@ public:
     {
         std::fill (buffer.begin(), buffer.end(), 0.0f);
         writeIdx = 0;
-        phase = 0.0f;
+        phase = 0.0;
     }
 
     /** Back to the start of the sweep, keeping what the buffer holds. Two
@@ -80,15 +157,25 @@ public:
         produce identical output until their opposite detunes pull them apart
         -- which is what lets DETUNE come back in instantly. See
         DspCore::setParams. */
-    void restart() noexcept { phase = 0.0f; }
+    void restart() noexcept { phase = 0.0; }
 
     /** cents > 0 shifts up, < 0 down. */
     void setCents (float cents) noexcept
     {
         // A pitch ratio is 2^(cents/1200); the read pointer has to drift by the
         // difference from unity, so that is what the phase accumulates.
-        const auto ratio = std::pow (2.0f, cents / 1200.0f);
-        phaseInc = (1.0f - ratio) / (float) std::max (window, 1);
+        //
+        // In double, and so is the phase. The increment is tiny -- 4.0e-8 per
+        // sample at DETUNE 0.1 and 48 kHz, a quarter of that at 192 kHz --
+        // and a float phase near the top of [0, 1) resolves only 6e-8, so in
+        // single precision every sample's increment was rounded to whole steps
+        // of that. The up voice ran 49 % fast at 0.1 cents and 48 kHz, did not
+        // sweep at all at 0.1 (96 kHz) and 0.1-0.2 (192 kHz), and at 1 cent
+        // swung between 0.89 and 1.19 as the sweep moved through ranges of
+        // different resolution. In double every step of the knob lands within
+        // 0.001 cents at every rate; DimDspTests holds it to 0.01.
+        const auto ratio = std::pow (2.0, (double) cents / 1200.0);
+        phaseInc = (1.0 - ratio) / (double) std::max (window, 1);
     }
 
     float process (float x) noexcept
@@ -102,29 +189,47 @@ public:
 
         // Two taps, half a window apart, each faded by a raised cosine. The two
         // windows sum to exactly one, so a steady input comes out steady.
-        auto tap = [this, len] (float ph) noexcept
+        // The read position is worked out in double too: it is the phase times
+        // the window, and a float holding a position near the end of the
+        // buffer rounds it to a thousandth of a sample at 192 kHz, which
+        // would quantise the sweep the double phase has just made smooth.
+        // Only the fractional part, which is in [0, 1), goes back to float.
+        auto tap = [this, len] (double ph) noexcept
         {
-            const auto delay = ph * (float) window;
-            const auto rd    = (float) writeIdx - delay;
+            const auto rd = (double) writeIdx - ph * (double) window;
 
             auto i0 = (int) std::floor (rd);
-            const auto frac = rd - (float) i0;
+            const auto frac = (float) (rd - (double) i0);
 
             i0 %= len; if (i0 < 0) i0 += len;
             auto i1 = i0 + 1; if (i1 >= len) i1 -= len;
 
+            // Linear interpolation, which is a gentle low-pass that moves with
+            // the fraction, and it costs more the closer a frequency is to
+            // the sample rate. Measured on one voice, as RMS against the
+            // input (10 and 25 cents agree to 0.01 dB):
+            //
+            //               44.1 k   48 k    96 k    192 k
+            //     10 kHz   -1.48   -1.23   -0.31   -0.08 dB
+            //     16 kHz   -3.71   -3.01   -0.79   -0.20 dB
+            //
+            // So the generated side is darker at the base rates than at the
+            // high ones. Only the generated side: the mid and any side the
+            // source already had never pass through here. Left as it is on
+            // purpose -- a better interpolator changes the sound of GENERATE
+            // at every rate, which is a voicing decision, not a fix.
             return buffer[(size_t) i0] + frac * (buffer[(size_t) i1] - buffer[(size_t) i0]);
         };
 
-        const auto ph2 = phase >= 0.5f ? phase - 0.5f : phase + 0.5f;
-        const auto g1  = 0.5f * (1.0f - std::cos (2.0f * kPi * phase));
-        const auto g2  = 0.5f * (1.0f - std::cos (2.0f * kPi * ph2));
+        const auto ph2 = phase >= 0.5 ? phase - 0.5 : phase + 0.5;
+        const auto g1  = 0.5f * (1.0f - std::cos (2.0f * kPi * (float) phase));
+        const auto g2  = 0.5f * (1.0f - std::cos (2.0f * kPi * (float) ph2));
 
         const auto out = g1 * tap (phase) + g2 * tap (ph2);
 
         phase += phaseInc;
-        while (phase >= 1.0f) phase -= 1.0f;
-        while (phase <  0.0f) phase += 1.0f;
+        while (phase >= 1.0) phase -= 1.0;
+        while (phase <  0.0) phase += 1.0;
 
         if (++writeIdx >= len)
             writeIdx = 0;
@@ -134,8 +239,8 @@ public:
 
 private:
     std::vector<float> buffer;
-    int   window = 0, writeIdx = 0;
-    float phase = 0.0f, phaseInc = 0.0f;
+    int    window = 0, writeIdx = 0;
+    double phase = 0.0, phaseInc = 0.0;
 };
 
 //==============================================================================
@@ -209,6 +314,44 @@ private:
 };
 
 //==============================================================================
+/** Which controls the chain below ignores where the others stand.
+
+    The panel dims a control a mode makes inert (modules/AGENTS.md), and it
+    asks these rather than restating the rule, so the look and the sound
+    cannot disagree. DimDspTests renders each control at both ends of its
+    range in every state these call dead and asserts the output does not move,
+    and in every state they call live that it does. They take the parameters'
+    own values, so the panel passes what it reads and nothing is converted.
+
+    DIMENSION (width) multiplies the side after generate, diffuse and the
+    shuffler, so at 0 all three are dead whatever they hold. Rotation comes
+    after that and turns mid into side, so TURN is never dead, and asymmetry,
+    which reads the side after rotation, is dead at width 0 only while
+    rotation is 0 too. GENERATE (detuneOn) off injects nothing, so the cents
+    reach nothing. GENERATE itself is a switch and is never dimmed. */
+inline bool centsIsLive (bool detuneOn, float widthPercent) noexcept
+{
+    return detuneOn && widthPercent > 0.0f;
+}
+
+inline bool diffuseIsLive (float widthPercent) noexcept   { return widthPercent > 0.0f; }
+inline bool shuffleIsLive (float widthPercent) noexcept   { return widthPercent > 0.0f; }
+
+/** BELOW is the shuffler's corner, and at BLOOM 1.0 the shuffler is unity:
+    its low band times one plus its high band. Dead there -- but only to the
+    float rounding of that sum, not bit for bit; the low band still runs, and
+    z + (s - z) is not always exactly s. DimDspTests says by how much. */
+inline bool shuffleFreqIsLive (float widthPercent, float shuffleAmount) noexcept
+{
+    return widthPercent > 0.0f && shuffleAmount != 1.0f;
+}
+
+inline bool asymmetryIsLive (float widthPercent, float rotationDegrees) noexcept
+{
+    return widthPercent > 0.0f || rotationDegrees != 0.0f;
+}
+
+//==============================================================================
 /** BMO Dimension: split to mid/side, work on the side, sum back.
 
     Three stages in series on S -- generate, diffuse, image -- and a mid path
@@ -248,6 +391,7 @@ public:
         float depthPercent     = 50.0f;
         float rotationDegrees  = 0.0f;
         float asymmetryPercent = 0.0f;
+        float outputDb         = 0.0f;
     };
 
     void prepare (double sr, int, int)
@@ -272,9 +416,24 @@ public:
         detuneSm.prepare (sampleRate, 8.0);
         centsSm.prepare (sampleRate, 8.0);
 
+        // BELOW glides in a straight line over a fixed time. See setParams.
+        belowGlide.prepare (sampleRate, kBelowGlideMs);
+
+        // OUTPUT on the equaliser's 20 ms, per sample, in dB.
+        outputTrim.prepare (sampleRate, 20.0);
+
         reset();
     }
 
+    /** Clears every voice, filter and smoother and starts over at the
+        parameters' settings. It is a step, not a fade: called in the middle
+        of a signal it moved the output 13.6x the signal's own largest step
+        with GENERATE on (a mono 220 Hz tone) and 21.3x at BLOOM 3 (220/150 Hz
+        pair). That is acceptable because nothing calls it mid-signal: the
+        engine calls it only when the host releases the plugin
+        (releaseResources), and prepare() calls it before any audio. A host
+        that resumes after releasing starts from silence or from a transport
+        jump, either of which is a discontinuity of its own. */
     void reset()
     {
         up.reset();
@@ -359,7 +518,19 @@ public:
         // range fades to exactly nothing.
         centsSm.setTarget (std::clamp (std::abs (p.detuneCents), 0.0f, 1.0f));
 
-        shuffler.setFrequency (p.shuffleFreqHz);
+        // BELOW glides to a new corner instead of taking it at the next
+        // block. The shuffler's low band is a one-pole, and a corner that
+        // quadruples in one sample makes that pole catch up with its input in
+        // a few samples; BLOOM scales the catch-up, so at BLOOM 3 a 350 ->
+        // 1400 jump stepped a 100 Hz side tone 2.64x its own largest step, and
+        // 1.80x at 300 Hz. The glide is a straight line in Hz over
+        // kBelowGlideMs, run per sample in process(), so it takes the same
+        // time at any host block size; it lands on the target exactly, and
+        // from then on the coefficient is computed here, once per block, from
+        // the parameter itself -- the same arithmetic as before, so a BELOW
+        // that is not moving gives bit for bit what it always did.
+        belowGlide.setTarget (p.shuffleFreqHz);
+        outputTrim.setTarget (p.outputDb);
 
         lfoInc = (float) (std::max (p.rateHz, 0.0f) / sampleRate);
 
@@ -373,8 +544,13 @@ public:
             asymSm.snap (asymCoeff (p.asymmetryPercent));
             detuneSm.snap (p.detuneOn ? 1.0f : 0.0f);
             centsSm.snap (std::clamp (std::abs (p.detuneCents), 0.0f, 1.0f));
+            belowGlide.snap (p.shuffleFreqHz);
+            outputTrim.snap (p.outputDb);
             primed = true;
         }
+
+        if (! belowGlide.isMoving())
+            shuffler.setFrequency (belowGlide.value());
     }
 
     void process (float* const* channels, int numChannels, int numSamples)
@@ -387,8 +563,19 @@ public:
         // content and sum it straight back into the single channel, which is
         // the comb this module's whole topology exists to avoid: measured at
         // +1.17 dB and 0.67 of sample error before this guard.
+        //
+        // OUTPUT is the exception: it is a level, not imaging, and a mono
+        // track has as much use for a trim as a stereo one. At 0 dB it is
+        // not in the path, so the wire is still a wire.
         if (numChannels < 2 || channels[0] == nullptr || channels[1] == nullptr)
+        {
+            if (numChannels >= 1 && channels[0] != nullptr)
+                for (int i = 0; i < numSamples; ++i)
+                    if (! outputTrim.restsAtUnity())
+                        channels[0][i] *= outputTrim.next();
+
             return;
+        }
 
         auto* l = channels[0];
         auto* r = channels[1];
@@ -435,6 +622,11 @@ public:
                 lfoPhase -= 1.0f;
 
             // -- Image -------------------------------------------------------
+            // Only while BELOW is gliding; the sample it lands on sets the
+            // exact target's coefficient, and after that nothing runs here.
+            if (belowGlide.isMoving())
+                shuffler.setFrequency (belowGlide.next());
+
             side = shuffler.process (side, shuffleSm.tick());
             side *= widthSm.tick();
 
@@ -512,8 +704,21 @@ public:
             if (asym != 0.0f)
                 mid += asym * side;
 
-            l[i] = mid + side;
-            r[i] = mid - side;
+            auto outL = mid + side;
+            auto outR = mid - side;
+
+            // OUTPUT, after everything. Settled at 0 dB it is skipped rather
+            // than multiplied by one, so a session that never touches it is
+            // the module it was before the control existed.
+            if (! outputTrim.restsAtUnity())
+            {
+                const auto g = outputTrim.next();
+                outL *= g;
+                outR *= g;
+            }
+
+            l[i] = outL;
+            r[i] = outR;
         }
     }
 
@@ -521,6 +726,17 @@ public:
         fades out. Read-only, for tests -- it is what "instant on" is
         asserted against. */
     float detuneLevel() const noexcept { return detuneSm.value(); }
+
+    /** Where BELOW's glide is, in Hz, and whether it is still moving.
+        Read-only, for tests: "lands exactly, then does no work" is asserted
+        against these. */
+    float belowHz() const noexcept     { return belowGlide.value(); }
+    bool  belowMoving() const noexcept { return belowGlide.isMoving(); }
+
+    /** Where OUTPUT is, in dB, and whether it is out of the path (settled at
+        exactly 0 dB). Read-only, for tests. */
+    float outputDb() const noexcept       { return outputTrim.levelDb(); }
+    bool  outputBypassed() const noexcept { return outputTrim.restsAtUnity(); }
 
 private:
     /** The knob's percentage as the shear coefficient, at half scale.
@@ -558,6 +774,12 @@ private:
     Shuffler     shuffler;
 
     Smoother widthSm, shuffleSm, diffuseSm, depthSm, rotSm, asymSm, detuneSm, centsSm;
+
+    /** How long BELOW takes to reach a new corner. See setParams. */
+    static constexpr double kBelowGlideMs = 20.0;
+    bmo::dsp::Ramp belowGlide;
+
+    TrimSmoother outputTrim;   // OUTPUT, per sample, in dB
 
     float lfoPhase = 0.0f, lfoInc = 0.0f;
     bool  primed = false;

@@ -46,6 +46,10 @@ bmo_add_dsp_tool(vcomp_dsp_tests dsp/VcompDspTests.cpp)
 target_link_libraries(vcomp_dsp_tests PRIVATE bmo_vcomp_dsp)
 add_test(NAME vcomp_dsp COMMAND vcomp_dsp_tests)
 
+bmo_add_dsp_tool(vcomp_switch_tests dsp/VcompSwitchTests.cpp)
+target_link_libraries(vcomp_switch_tests PRIVATE bmo_vcomp_dsp)
+add_test(NAME vcomp_switch COMMAND vcomp_switch_tests)
+
 bmo_add_dsp_tool(deesser_dsp_tests dsp/DeesserDspTests.cpp)
 target_link_libraries(deesser_dsp_tests PRIVATE bmo_deesser_dsp)
 add_test(NAME deesser_dsp COMMAND deesser_dsp_tests)
@@ -180,6 +184,21 @@ add_test(NAME rack COMMAND rack_tests)
 bmo_add_tool(bus_tests plugin/BusTests.cpp ${BMO_ROOT}/products/rack/Registry.cpp)
 target_link_libraries(bus_tests PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp bmo_deesser bmo_fetcomp bmo_dwell bmo_reverb)
 add_test(NAME bus COMMAND bus_tests)
+
+# Sessions saved by a shipped release restore in this build: the blobs a release
+# wrote, restored into every product it shipped. Linked like rack_tests because
+# the rack restores through the registry, and with the tuner where it is built,
+# since a release shipped that too. The off-thread pass needs a message loop,
+# as rack_tests does. plugin/SESSION-COMPAT.md says how to add a release.
+bmo_add_tool(session_compat_tests plugin/SessionCompatTests.cpp ${BMO_ROOT}/products/rack/Registry.cpp)
+target_link_libraries(session_compat_tests PRIVATE bmo_eq bmo_sat bmo_util bmo_opto bmo_dim bmo_deq bmo_vcomp bmo_deesser bmo_fetcomp bmo_dwell bmo_reverb)
+target_compile_definitions(session_compat_tests PRIVATE JUCE_MODAL_LOOPS_PERMITTED=1)
+if(BMO_BUILD_TUNE)
+    target_include_directories(session_compat_tests PRIVATE ${BMO_ROOT})
+    target_link_libraries(session_compat_tests PRIVATE bmo_tune)
+    target_compile_definitions(session_compat_tests PRIVATE BMO_SESSION_COMPAT_TUNE=1)
+endif()
+add_test(NAME session_compat COMMAND session_compat_tests)
 
 # Tail-length reporting, across every product at once: the exact zero every
 # shipped module is required to report, BMO Linger's own stated figures, and

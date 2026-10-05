@@ -2,14 +2,22 @@
 // spec's T-suites. Each group says which T it is and, where the spec's own
 // wording could not be met or measured as written, what it asserts instead
 // and why. modules/deq/AGENTS.md has the reasoning in full.
+//
+// **The default run is a subset; `deq_dsp_tests --long` runs every row.**
+// The switch, cut-peak and shape-change tests keep by default the rows
+// that failed on the code each was written against, at 48 kHz and one
+// other rate, with the extreme settings; ctest runs the default. Run
+// --long before merging any change to modules/deq/dsp.
 
 #include "modules/deq/dsp/DspCore.h"
+#include "modules/deq/dsp/DeqDsp.h"
 #include "modules/deq/reference/Reference.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <iostream>
 #include <string>
 #include <utility>
@@ -20,15 +28,17 @@ namespace ref = bmo::deq::reference;
 
 namespace
 {
-    int failures = 0;
+    int failures = 0, checks = 0;
 
     void check (bool ok, const std::string& what)
     {
+        ++checks;
         if (! ok) { std::cerr << "FAIL: " << what << '\n'; ++failures; }
     }
 
     void checkClose (double actual, double expected, double tol, const std::string& what)
     {
+        ++checks;
         if (! (std::abs (actual - expected) <= tol))
         {
             std::cerr << "FAIL: " << what << " -- expected " << expected
@@ -39,11 +49,26 @@ namespace
 
     void checkAtMost (double actual, double limit, const std::string& what)
     {
+        ++checks;
         if (! (actual <= limit))
         {
             std::cerr << "FAIL: " << what << " -- limit " << limit << ", got " << actual << '\n';
             ++failures;
         }
+    }
+
+    /** --long runs every row of every grid; the default run keeps the subset
+        `pick` chooses in the switch, cut-peak and shape-change tests.
+        scripts/build.sh tests the Debug build, where the whole suite took
+        206 s on ICE QUEEN (2026-10-03). */
+    bool longRun = false;
+
+    /** `all` under --long, `kept` by default. Every value in `kept` is in
+        `all`, so the default run is a subset and asserts the same bounds. */
+    template <typename T>
+    std::vector<T> pick (std::initializer_list<T> all, std::initializer_list<T> kept)
+    {
+        return longRun ? std::vector<T> (all) : std::vector<T> (kept);
     }
 
     std::string cfg (Shape s, double f0, double q, double g)
@@ -1225,10 +1250,1761 @@ namespace
                     "Topology: parallel coincident cuts give 1 + 2(G - 1)");
         check (h.real() < 0.0, "Topology: ... and invert polarity there");
     }
+
+    //==========================================================================
+    // The module as the suite drives it: DeqDsp, a params.h value array in,
+    // setParams before prepare() and then before every block, the order
+    // ModuleEngine uses.
+    //==========================================================================
+    struct Values
+    {
+        std::vector<float> v;
+
+        Values() { for (const auto& spec : specs()) v.push_back (spec.def); }
+
+        float& at (int band, Control c) { return v[(size_t) indexOf (band, c)]; }
+        float& at (int index)           { return v[(size_t) index]; }
+    };
+
+    /** One dynamic bell at 1 kHz with nothing static about it: Q 1, 0 dB,
+        threshold -40, ratio 20, so a loud tone is cut by the whole range. */
+    Values dynamicBell (float attackMs, float releaseMs)
+    {
+        Values p;
+        p.at (0, Control::on) = 1.0f;     p.at (0, Control::shape) = 0.0f;
+        p.at (0, Control::freq) = 1000.0f; p.at (0, Control::gain) = 0.0f;  p.at (0, Control::q) = 1.0f;
+        p.at (0, Control::dyn) = 1.0f;    p.at (0, Control::thr) = -40.0f;  p.at (0, Control::ratio) = 20.0f;
+        p.at (0, Control::range) = -12.0f;
+        p.at (0, Control::attack) = attackMs; p.at (0, Control::release) = releaseMs;
+        return p;
+    }
+
+    double rmsDb (const std::vector<float>& x, size_t from, size_t to)
+    {
+        double sum = 0.0;
+        for (size_t i = from; i < to; ++i) sum += (double) x[i] * (double) x[i];
+        return 10.0 * std::log10 (std::max (sum / (double) (to - from), 1.0e-300));
+    }
+
+    /** A band's dynamics coming back into use carry on from where a band that
+        had them in use throughout would be.
+
+        Review of 2026-10-03: the detector ran only while DYN was on, so it
+        stood still while its dynamics were out of use and came back holding
+        whatever it heard last -- a stale -12 dB for 3.5 s at release 2000 ms,
+        or a band coming back with no cut at all where one that had stayed on
+        is cutting by its whole range. Every way back in is held here: DYN,
+        the band's On, DEQ, a shape with no dynamics to one with, and all of
+        them at once, which is what loading a preset or restoring a session
+        does to the value array. Each against a reference that kept its
+        dynamics in use throughout, on the band's applied gain and on the
+        audio in 10 ms windows, from 60 ms after the return -- past the
+        switch's own fade -- to 1 s after it. */
+    void testDynamicsComeBackCurrent()
+    {
+        struct Way { const char* name; void (*use) (Values&, bool); };
+        const Way ways[] {
+            { "DYN",             [] (Values& p, bool on) { p.at (0, Control::dyn) = on ? 1.0f : 0.0f; } },
+            { "band On",         [] (Values& p, bool on) { p.at (0, Control::on) = on ? 1.0f : 0.0f; } },
+            { "DEQ",             [] (Values& p, bool on) { p.at (kActive) = on ? 1.0f : 0.0f; } },
+            { "Low Cut to Bell", [] (Values& p, bool on) { p.at (0, Control::shape) = on ? 0.0f : 3.0f; } },
+            { "all at once",     [] (Values& p, bool on) { p.at (0, Control::on) = p.at (0, Control::dyn) = on ? 1.0f : 0.0f;
+                                                           p.at (0, Control::shape) = on ? 0.0f : 3.0f; } },
+        };
+
+        struct Scene { const char* name; bool loudFirst; float attackMs, releaseMs; };
+        const Scene scenes[] {
+            { "loud then quiet, release 120 ms",  true,  5.0f,   120.0f },
+            { "loud then quiet, release 2000 ms", true,  5.0f,   2000.0f },
+            { "quiet then loud, attack 200 ms",   false, 200.0f, 120.0f },
+        };
+
+        for (double rate : { 48000.0, 96000.0 })
+            for (const auto& scene : scenes)
+            {
+                // Out of use from 1 s to 2.5 s; the level changes at 1.5 s,
+                // while nothing is listening on the old code.
+                const auto n = (size_t) (4.0 * rate), away = (size_t) rate, back = (size_t) (2.5 * rate);
+                const auto change = (size_t) (1.5 * rate);
+
+                std::vector<float> tone (n);
+                for (size_t i = 0; i < n; ++i)
+                {
+                    const auto loud = scene.loudFirst ? i < change : i >= change;
+                    tone[i] = (float) (std::pow (10.0, (loud ? -6.0 : -60.0) / 20.0) * std::sqrt (2.0)
+                                       * std::sin (2.0 * kPi * 1000.0 * (double) i / rate));
+                }
+
+                for (const auto& way : ways)
+                {
+                    auto run = [&] (bool keepInUse, std::vector<double>& gain, std::vector<float>& audio)
+                    {
+                        auto p = dynamicBell (scene.attackMs, scene.releaseMs);
+                        DeqDsp d;
+                        d.setParams (p.v.data(), (int) p.v.size());
+                        d.prepare (rate, 64, 1);
+
+                        audio = tone;
+                        gain.assign (n, 0.0);
+
+                        for (size_t pos = 0; pos < n; pos += 64)
+                        {
+                            if (! keepInUse)
+                                way.use (p, pos < away || pos >= back);
+
+                            d.setParams (p.v.data(), (int) p.v.size());
+                            float* ch[1] { audio.data() + pos };
+                            d.process (ch, 1, 64);
+
+                            for (size_t i = pos; i < pos + 64; ++i)
+                                gain[i] = d.engine().bandGainDb (0);
+                        }
+                    };
+
+                    std::vector<double> gain, gainRef;
+                    std::vector<float> audio, audioRef;
+                    run (false, gain, audio);
+                    run (true, gainRef, audioRef);
+
+                    const auto from = back + (size_t) (0.06 * rate), to = back + (size_t) rate;
+                    const auto window = (size_t) (0.01 * rate);
+                    double worstGain = 0.0, worstLevel = 0.0;
+
+                    for (size_t i = from; i < to; ++i)
+                        worstGain = std::max (worstGain, std::abs (gain[i] - gainRef[i]));
+
+                    for (size_t i = from; i + window <= to; i += window)
+                        worstLevel = std::max (worstLevel, std::abs (rmsDb (audio, i, i + window) - rmsDb (audioRef, i, i + window)));
+
+                    const auto label = std::string (way.name) + " back on, " + scene.name + ", " + std::to_string ((int) rate) + " Hz";
+                    checkAtMost (worstGain, 0.1, "Dynamics back in use: applied gain as if never away, " + label);
+                    checkAtMost (worstLevel, 0.1, "Dynamics back in use: the audio as if never away, " + label);
+                }
+            }
+
+        // The listening costs nothing in what DYN off means: a band with its
+        // dynamics off is the static EQ to the bit whatever its detector
+        // knobs say, and so is one with DYN on and no range to move through.
+        {
+            const Stereo in { pinkNoise (24000, -6.0, 71u), pinkNoise (24000, -6.0, 72u) };
+
+            auto renderValues = [&] (Values p)
+            {
+                DeqDsp d;
+                d.setParams (p.v.data(), (int) p.v.size());
+                d.prepare (48000.0, 512, 2);
+
+                std::vector<float> l (in.l.begin(), in.l.end()), r (in.r.begin(), in.r.end());
+                for (size_t pos = 0; pos < l.size(); pos += 512)
+                {
+                    d.setParams (p.v.data(), (int) p.v.size());
+                    float* ch[2] { l.data() + pos, r.data() + pos };
+                    d.process (ch, 2, (int) std::min ((size_t) 512, l.size() - pos));
+                }
+                l.insert (l.end(), r.begin(), r.end());
+                return l;
+            };
+
+            Values still;
+            for (int b = 0; b < kBands; ++b)
+            {
+                still.at (b, Control::on) = 1.0f; still.at (b, Control::shape) = (float) (b % 3);
+                still.at (b, Control::freq) = 60.0f * (float) (b + 1); still.at (b, Control::gain) = b % 2 ? 5.0f : -7.0f;
+                still.at (b, Control::q) = 0.7f + 0.2f * (float) b; still.at (b, Control::place) = (float) (b % 3);
+            }
+
+            auto knobsMoved = still;
+            for (int b = 0; b < kBands; ++b)
+            {
+                knobsMoved.at (b, Control::thr) = -60.0f; knobsMoved.at (b, Control::range) = 24.0f;
+                knobsMoved.at (b, Control::ratio) = 20.0f; knobsMoved.at (b, Control::dir) = 1.0f;
+                knobsMoved.at (b, Control::attack) = 0.1f; knobsMoved.at (b, Control::release) = 5.0f;
+            }
+
+            auto noRange = still;
+            for (int b = 0; b < kBands; ++b) { noRange.at (b, Control::dyn) = 1.0f; noRange.at (b, Control::range) = 0.0f; }
+
+            const auto a = renderValues (still);
+            check (a == renderValues (knobsMoved), "Dynamics back in use: DYN off is the static EQ to the bit, whatever the detector knobs say");
+            check (a == renderValues (noRange), "Dynamics back in use: DYN on with no range is the static EQ to the bit");
+        }
+    }
+
+    /** AUTO is at its level from the first block after prepare() or reset(),
+        a fresh instance included.
+
+        Review of 2026-10-03: ModuleEngine calls setParams before prepare(),
+        when there is no sample rate to design with, so AUTO stayed at unity
+        and glided to its level over the first blocks. Settled at -18 dB, the
+        first 10 ms peaked at +4.6 dBFS against -9.3 settled. AUTO's figure
+        comes from the EQ's settings, not from the input, so it can be known
+        before the first sample.
+
+        Measured as the trim alone: the same instance's output with AUTO on
+        over the output with AUTO off, block by block, which takes the bands'
+        own start from rest out of it. */
+    void testAutoFromTheFirstBlock()
+    {
+        Values p;
+        p.at (0, Control::on) = 1.0f;      p.at (0, Control::shape) = 1.0f;   // a +24 dB low shelf
+        p.at (0, Control::freq) = 1000.0f; p.at (0, Control::gain) = 24.0f;   p.at (0, Control::q) = 0.5f;
+
+        for (double rate : { 44100.0, 48000.0, 96000.0 })
+        {
+            const auto n = (size_t) (0.3 * rate);
+            std::vector<float> tone (n);
+            for (size_t i = 0; i < n; ++i)
+                tone[i] = (float) (0.18 * std::sin (2.0 * kPi * 100.0 * (double) i / rate));
+
+            // Renders `tone` in 512-sample blocks; `before` runs on the
+            // instance first, and reset() follows it when asked.
+            auto render = [&] (bool autoOn, bool viaReset)
+            {
+                auto q = p;
+                q.at (kAutoGain) = autoOn ? 1.0f : 0.0f;
+
+                DeqDsp d;
+                d.setParams (q.v.data(), (int) q.v.size());
+                d.prepare (rate, 512, 1);
+
+                auto play = [&] (std::vector<float>& x)
+                {
+                    for (size_t pos = 0; pos < x.size(); pos += 512)
+                    {
+                        d.setParams (q.v.data(), (int) q.v.size());
+                        float* ch[1] { x.data() + pos };
+                        d.process (ch, 1, (int) std::min ((size_t) 512, x.size() - pos));
+                    }
+                };
+
+                if (viaReset)
+                {
+                    auto warmUp = tone;
+                    play (warmUp);
+                    d.reset();
+                }
+
+                auto y = tone;
+                play (y);
+                return std::pair<std::vector<float>, double> { y, d.autoGainNow() };
+            };
+
+            for (bool viaReset : { false, true })
+            {
+                const auto on = render (true, viaReset), off = render (false, viaReset);
+                const auto settledDb = 20.0 * std::log10 (on.second);
+                check (settledDb < -12.0, "AUTO: the +24 dB shelf asks for a deep trim, " + std::to_string ((int) rate) + " Hz");
+
+                const auto firstDb = rmsDb (on.first, 0, 512) - rmsDb (off.first, 0, 512);
+                checkClose (firstDb, settledDb, 0.5, std::string ("AUTO: the first block after ")
+                            + (viaReset ? "reset()" : "prepare() on a fresh instance") + " is at its level, "
+                            + std::to_string ((int) rate) + " Hz");
+            }
+        }
+    }
+
+    //==========================================================================
+    // Switches: every one fades. The house rule (core/AGENTS.md) is that the
+    // largest sample-to-sample step after a switch stays under 1.5x the steady
+    // signal's own largest step, heard or not.
+    //==========================================================================
+    using Setter = std::function<void (Values&, DeqDsp&)>;
+
+    struct Switch
+    {
+        std::string name;
+        Setter from, to;
+    };
+
+    /** Band 1 at `hz`: a +6 dB bell, Q 1, its dynamics ready to cut 12 dB
+        (threshold -40, ratio 4) but off. Band 2 an octave up, -4 dB, so a
+        solo has another band to move to. */
+    Values switchBase (float hz)
+    {
+        Values p;
+        p.at (0, Control::on) = 1.0f;   p.at (0, Control::shape) = 0.0f; p.at (0, Control::freq) = hz;
+        p.at (0, Control::gain) = 6.0f;
+        p.at (0, Control::q) = 1.0f;    p.at (0, Control::thr) = -40.0f; p.at (0, Control::ratio) = 4.0f;
+        p.at (0, Control::range) = -12.0f;
+        p.at (1, Control::on) = 1.0f;   p.at (1, Control::shape) = 0.0f; p.at (1, Control::freq) = 2.0f * hz;
+        p.at (1, Control::gain) = -4.0f; p.at (1, Control::q) = 2.0f;
+        return p;
+    }
+
+    std::vector<Switch> everySwitch()
+    {
+        std::vector<Switch> list;
+        auto value = [] (int band, Control c, float v) -> Setter
+        {
+            return [band, c, v] (Values& p, DeqDsp&) { p.at (band, c) = v; };
+        };
+        auto both = [] (Setter a, Setter b) -> Setter
+        {
+            return [a, b] (Values& p, DeqDsp& d) { a (p, d); b (p, d); };
+        };
+
+        for (int a = 0; a < 5; ++a)
+            for (int b = 0; b < 5; ++b)
+                if (a != b)
+                    list.push_back ({ std::string ("shape ") + kShapeNames[a] + " to " + kShapeNames[b],
+                                      value (0, Control::shape, (float) a), value (0, Control::shape, (float) b) });
+
+        for (int a = 0; a < 3; ++a)
+            for (int b = 0; b < 3; ++b)
+                if (a != b)
+                    list.push_back ({ std::string ("placement ") + kPlaceNames[a] + " to " + kPlaceNames[b],
+                                      value (0, Control::place, (float) a), value (0, Control::place, (float) b) });
+
+        list.push_back ({ "DYN on to off, in gain reduction", value (0, Control::dyn, 1.0f), value (0, Control::dyn, 0.0f) });
+        list.push_back ({ "DYN off to on, into gain reduction", value (0, Control::dyn, 0.0f), value (0, Control::dyn, 1.0f) });
+        list.push_back ({ "DIR above to below", both (value (0, Control::dyn, 1.0f), value (0, Control::dir, 0.0f)),
+                                                both (value (0, Control::dyn, 1.0f), value (0, Control::dir, 1.0f)) });
+        list.push_back ({ "DIR below to above", both (value (0, Control::dyn, 1.0f), value (0, Control::dir, 1.0f)),
+                                                both (value (0, Control::dyn, 1.0f), value (0, Control::dir, 0.0f)) });
+        list.push_back ({ "band On, on to off", value (0, Control::on, 1.0f), value (0, Control::on, 0.0f) });
+        list.push_back ({ "band On, off to on", value (0, Control::on, 0.0f), value (0, Control::on, 1.0f) });
+        list.push_back ({ "DEQ on to off", [] (Values& p, DeqDsp&) { p.at (kActive) = 1.0f; }, [] (Values& p, DeqDsp&) { p.at (kActive) = 0.0f; } });
+        list.push_back ({ "DEQ off to on", [] (Values& p, DeqDsp&) { p.at (kActive) = 0.0f; }, [] (Values& p, DeqDsp&) { p.at (kActive) = 1.0f; } });
+
+        for (int a = -1; a < 2; ++a)
+            for (int b = -1; b < 2; ++b)
+                if (a != b)
+                    list.push_back ({ "solo " + std::to_string (a + 1) + " to " + std::to_string (b + 1) + " (0 is none)",
+                                      [a] (Values&, DeqDsp& d) { d.setSolo (a); }, [b] (Values&, DeqDsp& d) { d.setSolo (b); } });
+
+        return list;
+    }
+
+    double largestStep (const std::vector<float>& x, size_t from, size_t to)
+    {
+        double m = 0.0;
+        for (size_t i = std::max<size_t> (from, 1); i < std::min (to, x.size()); ++i)
+            m = std::max (m, (double) std::abs (x[i] - x[i - 1]));
+        return m;
+    }
+
+    struct SwitchRender { std::vector<float> l, r; size_t flip; };
+
+    /** 0.6 s of a -18 dBFS RMS tone at `hz` on the left and 1.3 `hz` on the
+        right, or of nothing, through band 1 set up by `from`, with `to`
+        applied at the block nearest 0.3 s (and `then`, if given, `thenAfter`
+        samples later, to the block). Blocks of 64, so changes can land
+        mid-crossover. `quietFrom` silences the input from that sample on. */
+    SwitchRender renderSwitch (double rate, float hz, double phase, const Switch& sw, size_t quietFrom,
+                               const Setter& then = {}, size_t thenAfter = 0)
+    {
+        constexpr size_t block = 64;
+        const auto n = (size_t) (0.6 * rate) / block * block;
+        const auto flip = (size_t) (0.3 * rate) / block * block;
+        const auto amp = std::pow (10.0, -18.0 / 20.0) * std::sqrt (2.0);
+
+        SwitchRender out { std::vector<float> (n), std::vector<float> (n), flip };
+        for (size_t i = 0; i < std::min (n, quietFrom); ++i)
+        {
+            out.l[i] = (float) (amp * std::sin (2.0 * kPi * hz * (double) i / rate + phase));
+            out.r[i] = (float) (amp * std::sin (2.0 * kPi * 1.3 * hz * (double) i / rate + 0.7 * phase));
+        }
+
+        auto p = switchBase (hz);
+        DeqDsp d;
+        sw.from (p, d);
+        d.setParams (p.v.data(), (int) p.v.size());
+        d.prepare (rate, (int) block, 2);
+
+        for (size_t pos = 0; pos < n; pos += block)
+        {
+            if (pos == flip) sw.to (p, d);
+            if (then && pos == flip + thenAfter / block * block) then (p, d);
+
+            d.setParams (p.v.data(), (int) p.v.size());
+            float* ch[2] { out.l.data() + pos, out.r.data() + pos };
+            d.process (ch, 2, (int) block);
+        }
+
+        return out;
+    }
+
+    /** The largest step in the 30 ms after the flip over the steady signal's
+        own largest, measured before the flip and at the end of the render,
+        worst channel. */
+    double stepRatio (const SwitchRender& y, double rate)
+    {
+        const auto w = (size_t) (0.03 * rate);
+        double worst = 0.0;
+
+        for (const auto* ch : { &y.l, &y.r })
+        {
+            const auto steady = std::max ({ largestStep (*ch, y.flip - 4 * w, y.flip),
+                                            largestStep (*ch, ch->size() - 4 * w, ch->size()), 1.0e-12 });
+            worst = std::max (worst, largestStep (*ch, y.flip, y.flip + w) / steady);
+        }
+
+        return worst;
+    }
+
+    /** Every switch, every pair of choices, crosses over in 10 ms -- or, for a
+        shape, dips through silence in 28 ms (kShapeFadeOutMs) -- rather than
+        stepping: under 1.5x the steady signal's largest step at 44.1, 48 and
+        96 kHz, under a tone at the band and a decade below it, at four
+        phases. In silence a switch makes nothing; in the ring-down after a
+        signal it adds no burst. A change asked for during a crossover wins,
+        after at most one more crossover.
+
+        Review of 2026-10-03, at 100 Hz on the old code: Mid to Side 33x,
+        Side to Stereo 28x, Shape 6-19x, DYN off and DIR 5.0x, solo 38x. */
+    void testSwitchesFade()
+    {
+        const auto switches = everySwitch();
+
+        for (double rate : pick ({ 44100.0, 48000.0, 96000.0 }, { 44100.0, 48000.0 }))
+            for (float hz : { 100.0f, 1000.0f })
+                for (const auto& sw : switches)
+                {
+                    double worst = 0.0;
+                    for (int ph = 0; ph < 4; ++ph)
+                        worst = std::max (worst, stepRatio (renderSwitch (rate, hz, ph * kPi / 4.0, sw, (size_t) -1), rate));
+
+                    checkAtMost (worst, 1.5, "Switches: " + sw.name + " under a tone at " + std::to_string ((int) hz)
+                                 + " Hz, " + std::to_string ((int) rate) + " Hz, step over steady");
+                }
+
+        for (double rate : pick ({ 44100.0, 96000.0 }, { 44100.0 }))
+            for (const auto& sw : switches)
+            {
+                // Digital silence from the start: nothing comes out.
+                const auto silent = renderSwitch (rate, 100.0f, 0.0, sw, 0);
+                double peak = 0.0;
+                for (size_t i = 0; i < silent.l.size(); ++i)
+                    peak = std::max ({ peak, (double) std::abs (silent.l[i]), (double) std::abs (silent.r[i]) });
+                checkAtMost (peak, 0.0, "Switches: " + sw.name + " in silence makes nothing, " + std::to_string ((int) rate) + " Hz");
+
+                // Silence after a tone: the tone stops 5 ms before the switch,
+                // which lands in the bands' ring-down and adds no step larger
+                // than the ring-down's own since the tone stopped.
+                const auto stop = (size_t) (0.3 * rate) / 64 * 64 - (size_t) (0.005 * rate);
+                const auto quiet = renderSwitch (rate, 100.0f, 0.0, sw, stop);
+                const auto w = (size_t) (0.03 * rate);
+                double ratio = 0.0;
+                for (const auto* ch : { &quiet.l, &quiet.r })
+                    ratio = std::max (ratio, largestStep (*ch, quiet.flip, quiet.flip + w)
+                                             / std::max (largestStep (*ch, stop + 1, quiet.flip), 1.0e-9));
+                checkAtMost (ratio, 1.5, "Switches: " + sw.name + " in the ring-down after a tone, " + std::to_string ((int) rate) + " Hz");
+            }
+
+        // A change asked for mid-crossover: the latest wins, after a bounded
+        // wait, and nothing steps on the way. Shape Bell -> Low Shelf, then
+        // High Shelf 3 ms later, against Bell -> High Shelf at once; and the
+        // same for placement and solo.
+        {
+            const double rate = 48000.0;
+            const auto shapeTo = [] (float s) -> Setter { return [s] (Values& p, DeqDsp&) { p.at (0, Control::shape) = s; }; };
+            const auto placeTo = [] (float s) -> Setter { return [s] (Values& p, DeqDsp&) { p.at (0, Control::place) = s; }; };
+            const auto soloTo  = [] (int b)   -> Setter { return [b] (Values&, DeqDsp& d) { d.setSolo (b); }; };
+
+            struct Twice { const char* name; Setter from, first, latest; };
+            const Twice cases[] {
+                { "shape", shapeTo (0.0f), shapeTo (1.0f), shapeTo (2.0f) },
+                { "placement", placeTo (0.0f), placeTo (1.0f), placeTo (2.0f) },
+                { "solo", soloTo (-1), soloTo (0), soloTo (1) },
+            };
+
+            for (const auto& c : cases)
+            {
+                const Switch twice { c.name, c.from, c.first };
+                const Switch once { c.name, c.from, c.latest };
+                const auto a = renderSwitch (rate, 100.0f, 0.3, twice, (size_t) -1, c.latest, (size_t) (0.003 * rate));
+                const auto b = renderSwitch (rate, 100.0f, 0.3, once, (size_t) -1);
+
+                checkAtMost (stepRatio (a, rate), 1.5, std::string ("Switches: a second ") + c.name + " change mid-crossover does not step");
+
+                // By 60 ms the latest choice is what is playing.
+                const auto from = a.flip + (size_t) (0.06 * rate), to = a.flip + (size_t) (0.1 * rate);
+                checkAtMost (std::abs (rmsDb (a.l, from, to) - rmsDb (b.l, from, to)), 0.1,
+                             std::string ("Switches: the latest ") + c.name + " wins, left");
+                checkAtMost (std::abs (rmsDb (a.r, from, to) - rmsDb (b.r, from, to)), 0.1,
+                             std::string ("Switches: the latest ") + c.name + " wins, right");
+            }
+        }
+    }
+
+    /** The cut shapes' Q stops at kCutMaxQ, the way a shelf's stops at
+        kShelfMaxQ: the knob keeps its whole range and its value, and the
+        engine runs a cut no more resonant than Butterworth. Frosty's
+        decision, 2026-10-03.
+
+        Before it, a cut at the knob's top (Q 40) peaked +32 dB at its corner,
+        and the bus test's swept setting -- twelve Low Cuts at 1552.5 Hz, Q
+        4.36, +12.85 dB of resonance each -- stacked to +154 dB and put the
+        module out at +96.6 dBFS on a -3 dBFS signal. */
+    void testCutQIsCapped()
+    {
+        const double rate = 48000.0;
+
+        auto engineFor = [rate] (int shape, float hz, float q, int bands)
+        {
+            Values p;
+            for (int b = 0; b < bands; ++b)
+            {
+                p.at (b, Control::on) = 1.0f;  p.at (b, Control::shape) = (float) shape;
+                p.at (b, Control::freq) = hz;  p.at (b, Control::q) = q;
+            }
+
+            auto d = std::make_unique<DeqDsp>();
+            d->setParams (p.v.data(), (int) p.v.size());
+            d->prepare (rate, 512, 2);
+            d->setParams (p.v.data(), (int) p.v.size());
+            return d;
+        };
+
+        auto peakDb = [rate] (const DspCore& e)
+        {
+            double peak = 0.0;
+            for (double hz = 10.0; hz < 0.499 * rate; hz *= 1.0005)
+                peak = std::max (peak, std::abs (e.staticResponseAt (hz)));
+            return toDb (peak);
+        };
+
+        // The knob's own 0.71, as a host hands it over after snapping to the
+        // 0.01 step: not capped, so a default cut band is the cut it was.
+        const auto& qSpec = specs()[(size_t) indexOf (0, Control::q)];
+        const auto knob071 = qSpec.fromNormalised (qSpec.toNormalised (0.71f));
+
+        check (std::abs (effectiveQ (3, 40.0f) - 0.71f) < 1.0e-6f, "Cut Q: the cap is 0.71, the knob's default and its closest position to Butterworth");
+        check (effectiveQ (3, knob071) == knob071 && effectiveQ (4, knob071) == knob071 && effectiveQ (3, 0.71f) == 0.71f,
+               "Cut Q: the knob's 0.71 runs as itself");
+        check (effectiveQ (4, 40.0f) < 0.711f && effectiveQ (4, 0.72f) < 0.711f && effectiveQ (3, 0.3f) == 0.3f,
+               "Cut Q: above the cap a cut runs at it, below it at its knob");
+        check (effectiveQ (1, 30.0f) == kShelfMaxQ && effectiveQ (2, 1.5f) == 1.5f && effectiveQ (0, 30.0f) == 30.0f,
+               "Cut Q: the shelves keep their cap and a bell keeps all of its Q");
+
+        for (int shape : { 3, 4 })
+            for (float hz : { 30.0f, 1000.0f, 10000.0f })
+            {
+                const auto name = std::string (kShapeNames[shape]) + " at " + std::to_string ((int) hz) + " Hz";
+                const auto atCap = engineFor (shape, hz, 0.71f, 1);
+                const auto capPeak = peakDb (atCap->engine());
+
+                checkAtMost (capPeak, 0.05, "Cut Q: no resonance at the cap, " + name);
+
+                for (float q : { 0.72f, 2.0f, 4.36f, 40.0f })
+                {
+                    const auto asked = engineFor (shape, hz, q, 1);
+                    checkAtMost (peakDb (asked->engine()), capPeak + 1.0e-6,
+                                 "Cut Q: Q " + std::to_string (q) + " peaks no higher than the cap, " + name);
+                }
+
+                // Below the cap the knob is live: Q 0.3 is a softer corner.
+                const auto soft = engineFor (shape, hz, 0.3f, 1);
+                const auto atF0 = [hz] (const DeqDsp& d) { return toDb (std::abs (d.engine().staticResponseAt (hz))); };
+                check (atF0 (*soft) < atF0 (*atCap) - 1.0, "Cut Q: below the cap the knob still moves the corner, " + name);
+            }
+
+        // The bus test's swept setting: twelve stacked Low Cuts, Q 4.36.
+        {
+            const auto swept = engineFor (3, 1552.5f, 4.36f, kBands);
+            checkAtMost (peakDb (swept->engine()), 0.1, "Cut Q: twelve stacked cuts at Q 4.36 do not resonate");
+        }
+    }
+
+    /** The gain meter reads the gain the band is actually moving, clamp
+        included. Review of 2026-10-03: it read the detector's offset, so a
+        -24 dB bell asked for 24 dB more cut read 24 dB of cut while the
+        +-30 dB design clamp let 6 dB through.
+
+        Measured on the audio: a bell at 1 kHz, a steady 1 kHz tone, and the
+        band's move read as the output's level over the input's less the
+        bell's static gain, against the meter's figure (positive is cut). */
+    void testMeterReadsWhatIsApplied()
+    {
+        const double rate = 48000.0;
+        struct Case { float gain, range; bool below; float ratio; };
+        const Case cases[] {
+            { 0.0f, -24.0f, false, 20.0f },  { -24.0f, -24.0f, false, 20.0f }, { -12.0f, -24.0f, false, 20.0f },
+            { 24.0f, 24.0f, true, 20.0f },   { 12.0f, 24.0f, true, 20.0f },    { 20.0f, 12.0f, true, 20.0f },
+            { 0.0f, 24.0f, true, 20.0f },    { 24.0f, -12.0f, false, 2.0f },   { -24.0f, 12.0f, true, 2.0f },
+            { 6.0f, -6.0f, false, 4.0f },    { -20.0f, -18.0f, false, 20.0f },
+        };
+
+        for (const auto& c : cases)
+        {
+            Values p;
+            p.at (0, Control::on) = 1.0f;      p.at (0, Control::shape) = 0.0f;
+            p.at (0, Control::freq) = 1000.0f; p.at (0, Control::gain) = c.gain; p.at (0, Control::q) = 1.0f;
+            p.at (0, Control::dyn) = 1.0f;     p.at (0, Control::dir) = c.below ? 1.0f : 0.0f;
+            p.at (0, Control::thr) = c.below ? 0.0f : -60.0f;
+            p.at (0, Control::range) = c.range; p.at (0, Control::ratio) = c.ratio;
+            p.at (0, Control::attack) = 5.0f;  p.at (0, Control::release) = 200.0f;
+
+            DeqDsp d;
+            d.setParams (p.v.data(), (int) p.v.size());
+            d.prepare (rate, 512, 1);
+
+            const auto n = (size_t) rate;
+            std::vector<float> x (n);
+            for (size_t i = 0; i < n; ++i)
+                x[i] = (float) (0.5 * std::sin (2.0 * kPi * 1000.0 * (double) i / rate));
+
+            auto y = x;
+            for (size_t pos = 0; pos < n; pos += 512)
+            {
+                d.setParams (p.v.data(), (int) p.v.size());
+                float* ch[1] { y.data() + pos };
+                d.process (ch, 1, (int) std::min ((size_t) 512, n - pos));
+            }
+
+            const auto tail = n - (size_t) (0.25 * rate);
+            const auto movedDb = rmsDb (y, tail, n) - rmsDb (x, tail, n) - (double) c.gain;
+            const auto meter = (double) d.currentGainReductionDb();
+
+            checkClose (-meter, movedDb, 0.1, "Meter: reads the move applied, static " + std::to_string ((int) c.gain)
+                        + " range " + std::to_string ((int) c.range) + (c.below ? " below" : " above")
+                        + " ratio " + std::to_string ((int) c.ratio));
+        }
+    }
+
+    /** process() before prepare() passes the signal through untouched, the
+        engine and the module alike: with no sample rate there is no filter to
+        design, and the review of 2026-10-03 found it designing at a rate of
+        0 and putting out NaN. A wire is what an unprepared Dip does too
+        (core/dsp/SwitchFade.h), and what this module is at its defaults. */
+    void testProcessBeforePrepare()
+    {
+        std::vector<double> l (256), r (256);
+        for (size_t i = 0; i < l.size(); ++i) { l[i] = 0.3 * std::sin (0.05 * (double) i); r[i] = -0.2 * std::cos (0.07 * (double) i); }
+
+        {
+            auto s = bandsConfig (3);
+            DspCore e;
+            e.setSettings (s);
+            auto yl = l, yr = r;
+            double* ch[2] { yl.data(), yr.data() };
+            e.process (ch, 2, (int) yl.size());
+            check (yl == l && yr == r, "Before prepare: the engine passes the signal through untouched");
+        }
+
+        {
+            Values p;
+            for (int b = 0; b < kBands; ++b) { p.at (b, Control::on) = 1.0f; p.at (b, Control::gain) = 6.0f; p.at (b, Control::shape) = 0.0f; }
+            p.at (kOutput) = 6.0f;
+            p.at (kAutoGain) = 1.0f;
+
+            DeqDsp d;
+            d.setParams (p.v.data(), (int) p.v.size());
+            std::vector<float> fl (l.begin(), l.end()), fr (r.begin(), r.end());
+            const auto inL = fl, inR = fr;
+            float* ch[2] { fl.data(), fr.data() };
+            d.process (ch, 2, (int) fl.size());
+            check (fl == inL && fr == inR, "Before prepare: the module passes the signal through untouched");
+        }
+    }
+
+    /** A band that has never been switched on does no work. Its detector
+        starts listening the first time the band is live and keeps listening
+        until reset(), which is all the stale-state fix needs: a band that has
+        never been live has nothing to be stale about. Round 2 of the review
+        (2026-10-03) measured the earlier rule -- all twelve listening at the
+        defaults, where the module is a wire -- at 0.72 % -> 2.70 % of a block
+        at 192 kHz / 32. Counted in detector ticks, not time. */
+    void testUnusedBandsCostNothing()
+    {
+        const double rate = 48000.0;
+        Values p;
+        DeqDsp d;
+        d.setParams (p.v.data(), (int) p.v.size());
+        d.prepare (rate, 512, 2);
+
+        std::vector<float> l (512), r (512);
+        auto play = [&] (int blocks)
+        {
+            for (int k = 0; k < blocks; ++k)
+            {
+                for (size_t i = 0; i < l.size(); ++i) { l[i] = 0.1f * (float) std::sin (0.03 * (double) i); r[i] = -l[i]; }
+                d.setParams (p.v.data(), (int) p.v.size());
+                float* ch[2] { l.data(), r.data() };
+                d.process (ch, 2, 512);
+            }
+        };
+
+        auto ticks = [&] (int band) { return d.engine().detectorTicks (band); };
+        auto allQuiet = [&] (int except)
+        {
+            for (int b = 0; b < kMaxBands; ++b)
+                if (b != except && ticks (b) != 0)
+                    return false;
+            return true;
+        };
+
+        play (100);
+        check (allQuiet (-1), "Idle: at the defaults no band's detector runs");
+
+        // Band 3 on for a moment, then off: it keeps listening, nobody else starts.
+        p.at (2, Control::on) = 1.0f;
+        play (4);
+        p.at (2, Control::on) = 0.0f;
+        play (20);
+        const auto heard = ticks (2);
+        play (20);
+        check (ticks (2) == heard + 20 * 512, "Idle: a band that has been on keeps its detector listening once off");
+        check (allQuiet (2), "Idle: the bands never switched on still do no work");
+
+        // reset() forgets it.
+        d.reset();
+        const auto atReset = ticks (2);
+        play (20);
+        check (ticks (2) == atReset, "Idle: after reset() a band that is off does no work again");
+    }
+
+    /** The response of an SVF coefficient set at w (radians per sample): the
+        structure's own transfer function, H = m0 + m1 BP + m2 LP, with
+        BP = g (1 - z^-2) / D, LP = g^2 (1 + z^-1)^2 / D and
+        D = (1 + gk + g^2) + (2g^2 - 2) z^-1 + (1 - gk + g^2) z^-2. */
+    std::complex<double> svfResponseAt (const SvfCoeffs& c, double w)
+    {
+        const auto z1 = std::polar (1.0, -w), z2 = z1 * z1;
+        const auto g2 = c.g * c.g;
+        const auto d = (1.0 + c.g * c.k + g2) + (2.0 * g2 - 2.0) * z1 + (1.0 - c.g * c.k + g2) * z2;
+        return c.m0 + (c.m1 * c.g * (1.0 - z2) + c.m2 * g2 * (1.0 + z1) * (1.0 + z1)) / d;
+    }
+
+    /** A cut shape never has a resonant peak, at any instant: the cap on its
+        Q is applied to the Q each design actually uses, while Q glides and
+        through a change of shape, and a band coming into use starts at its
+        settings rather than gliding from wherever its smoothers were.
+
+        Round 2 of the review (2026-10-03): a preset turning a bell at Q 40
+        that had been switched off into a Low Cut that is on faded in
+        resonating, about +13 dB at the corner for about 5 ms; a bell at Q 40
+        changed to a cut while on resonated about +12 dB during the change,
+        because the cut was designed at the gliding Q. Checked on the cut's
+        coefficients at every sample -- the shape arriving's while it warms
+        up, the band's own while the cut runs -- at 64 frequencies from 10 Hz
+        to 0.499 fs and 41 around f0, for f0 from 30 Hz to 18 kHz at 44.1, 48,
+        96 and 192 kHz.
+
+        The bound is 0.06 dB, not 0.05: the steady High Cut itself, at the cap
+        and f0 17.9 kHz, peaks +0.055 dB at 44.1 kHz (+0.049 at 48, +0.008 at
+        96, +0.001 at 192), its matched design's fit 0.41 of the way to the
+        sample rate, where AGENTS.md's numbers have it up to 1.25 dB from the
+        prototype. Bringing that under 0.05 means changing the design, which
+        is not this fix's; it is pinned at what it measures. */
+    void testCutNeverResonates()
+    {
+        // The response formula first, against a design it can be checked by.
+        {
+            const double rate = 48000.0;
+            const auto bq = designMatched (Shape::bell, 1000.0, 2.0, 9.0, DesignGrid::make (rate));
+            const auto c = SvfCoeffs::fromBiquad (bq);
+            double worst = 0.0;
+            for (double hz : { 50.0, 700.0, 1000.0, 3000.0, 15000.0 })
+                worst = std::max (worst, std::abs (std::abs (svfResponseAt (c, 2.0 * kPi * hz / rate)) - std::abs (bq.responseAt (2.0 * kPi * hz / rate))));
+            checkAtMost (worst, 1.0e-9, "Cut peak: the SVF response formula matches the biquad");
+        }
+
+        // Which coefficients are a cut's, and when: the shape arriving's while it
+        // warms up, and the band's own while the cut is the one running.
+        struct Route { const char* name; void (*before) (Values&); void (*after) (Values&); bool arrivingIsCut; double curFromMs, curToMs; };
+        const Route routes[] {
+            { "a bell at Q 40 changed to a Low Cut while on",
+              [] (Values& p) { p.at (0, Control::shape) = 0.0f; },
+              [] (Values& p) { p.at (0, Control::shape) = 3.0f; }, true, 30.0, 50.0 },
+            { "a bell at Q 40 changed to a High Cut while on",
+              [] (Values& p) { p.at (0, Control::shape) = 0.0f; },
+              [] (Values& p) { p.at (0, Control::shape) = 4.0f; }, true, 30.0, 50.0 },
+            { "a Low Cut changed to a bell at Q 40 while on",
+              [] (Values& p) { p.at (0, Control::shape) = 3.0f; },
+              [] (Values& p) { p.at (0, Control::shape) = 0.0f; }, false, 0.0, 15.0 },
+            { "a preset turning an off bell at Q 40 into a Low Cut that is on",
+              [] (Values& p) { p.at (0, Control::shape) = 0.0f; p.at (0, Control::on) = 0.0f; },
+              [] (Values& p) { p.at (0, Control::shape) = 3.0f; p.at (0, Control::on) = 1.0f; }, false, 0.0, 50.0 },
+        };
+
+        double worstAll = -300.0;
+        std::string where;
+
+        for (double rate : pick ({ 44100.0, 48000.0, 96000.0, 192000.0 }, { 44100.0, 48000.0 }))
+            for (double f0 : pick ({ 30.0, 100.0, 1000.0, 10000.0, 14000.0, 18000.0 }, { 30.0, 1000.0, 18000.0 }))
+            {
+                std::vector<double> ws;
+                for (int k = 0; k < 64; ++k) ws.push_back (2.0 * kPi * 10.0 * std::pow (0.499 * rate / 10.0, (double) k / 63.0) / rate);
+                for (int k = -20; k <= 20; ++k) ws.push_back (std::min (0.998 * kPi, 2.0 * kPi * f0 * std::pow (2.0, k / 20.0) / rate));
+
+                auto peakDb = [&ws] (const SvfCoeffs& c)
+                {
+                    double peak = 0.0;
+                    for (auto w : ws) peak = std::max (peak, std::abs (svfResponseAt (c, w)));
+                    return toDb (peak);
+                };
+
+                for (const auto& route : routes)
+                {
+                    Values p;
+                    p.at (0, Control::on) = 1.0f;      p.at (0, Control::shape) = 0.0f;
+                    p.at (0, Control::freq) = (float) f0; p.at (0, Control::gain) = 12.0f; p.at (0, Control::q) = 40.0f;
+
+                    DeqDsp d;
+                    d.setParams (p.v.data(), (int) p.v.size());
+                    d.prepare (rate, 64, 1);
+
+                    std::vector<float> x (64);
+                    auto run = [&] (double seconds, bool sample) -> double
+                    {
+                        double worst = -300.0;
+                        const auto samples = (int) (seconds * rate);
+                        for (int n = 0; n < samples; n += sample ? 1 : 64)
+                        {
+                            const auto len = sample ? 1 : std::min (64, samples - n);
+                            for (int i = 0; i < len; ++i) x[(size_t) i] = 0.1f * (float) std::sin (0.13 * (n + i));
+                            d.setParams (p.v.data(), (int) p.v.size());
+                            float* ch[1] { x.data() };
+                            d.process (ch, 1, len);
+                            const auto ms = (double) n / rate * 1000.0;
+                            if (sample && route.arrivingIsCut)
+                                worst = std::max (worst, peakDb (d.engine().bandCoefficients (0, true)));
+                            if (sample && ms >= route.curFromMs && ms < route.curToMs)
+                                worst = std::max (worst, peakDb (d.engine().bandCoefficients (0)));
+                        }
+                        return worst;
+                    };
+
+                    // Live as a bell first, so a band switched off has been
+                    // listening, and long enough after the change before it
+                    // for a band switched off to have faded out completely (its
+                    // fade is a one-pole of 10 ms, settled to 1e-9 in 207 ms).
+                    run (0.1, false);
+                    route.before (p);
+                    run (0.3, false);
+                    route.after (p);
+                    const auto worst = run (0.05, true);
+                    const auto label = std::string (route.name) + ", f0 " + std::to_string ((int) f0) + " Hz, " + std::to_string ((int) rate) + " Hz";
+                    checkAtMost (worst, 0.06, "Cut peak: " + label + ", every sample for 50 ms");
+                    if (worst > worstAll) { worstAll = worst; where = label; }
+                }
+            }
+
+        std::cout << "  cut peak, worst over every route, f0 and rate: " << worstAll << " dB (" << where << ")\n";
+    }
+
+    //==========================================================================
+    // Level through a switch. A blend of two different filters' outputs can
+    // cancel where they are out of phase, so a switch that does not step can
+    // still leave a hole: the transition is measured on its level, not only
+    // on its steps.
+    //==========================================================================
+
+    /** 0.5 s of a tone at `hz`, sin on the left and cos on the right, through
+        band 1 at 1 kHz set up by `base` and `from`, with `to` applied at the
+        block nearest 0.2 s (blocks of 64). While both channels see the same
+        processing, hypot (L, R) of the output is the magnitude of the
+        response to a complex tone -- an exact envelope, sample by sample,
+        through anything time-varying. Returns its square. */
+    std::vector<double> envelopeThrough (double rate, double hz, Values p, const Setter& from, const Setter& to,
+                                         size_t& flip, bool contributionOnly = false)
+    {
+        constexpr size_t block = 64;
+        const auto n = (size_t) (0.5 * rate) / block * block;
+        flip = (size_t) (0.2 * rate) / block * block;
+
+        std::vector<float> l (n), r (n);
+        for (size_t i = 0; i < n; ++i)
+        {
+            l[i] = (float) (0.1 * std::sin (2.0 * kPi * hz * (double) i / rate));
+            r[i] = (float) (0.1 * std::cos (2.0 * kPi * hz * (double) i / rate));
+        }
+        const auto inL = l, inR = r;
+
+        DeqDsp d;
+        from (p, d);
+        d.setParams (p.v.data(), (int) p.v.size());
+        d.prepare (rate, (int) block, 2);
+
+        for (size_t pos = 0; pos < n; pos += block)
+        {
+            if (pos == flip) to (p, d);
+            d.setParams (p.v.data(), (int) p.v.size());
+            float* ch[2] { l.data() + pos, r.data() + pos };
+            d.process (ch, 2, (int) block);
+        }
+
+        std::vector<double> e2 (n);
+        for (size_t i = 0; i < n; ++i)
+        {
+            const auto a = (double) l[i] - (contributionOnly ? (double) inL[i] : 0.0);
+            const auto b = (double) r[i] - (contributionOnly ? (double) inR[i] : 0.0);
+            e2[i] = a * a + b * b;
+        }
+        return e2;
+    }
+
+    double meanDb (const std::vector<double>& e2, size_t from, size_t to)
+    {
+        double s = 0.0;
+        for (size_t i = from; i < to; ++i) s += e2[i];
+        return 10.0 * std::log10 (std::max (s / (double) (to - from), 1.0e-300));
+    }
+
+    /** The lowest 2 ms mean level in the 40 ms after the flip, against the
+        lower of the steady levels before it and after it settles, dB. */
+    double worstHoleDb (const std::vector<double>& e2, size_t flip, double rate)
+    {
+        const auto w = (size_t) (0.002 * rate);
+        const auto before = meanDb (e2, flip - (size_t) (0.05 * rate), flip);
+        const auto after  = meanDb (e2, flip + (size_t) (0.1 * rate), flip + (size_t) (0.15 * rate));
+        double lowest = 1.0e9;
+        for (size_t i = flip; i + w <= flip + (size_t) (0.04 * rate); i += 4)
+            lowest = std::min (lowest, meanDb (e2, i, i + w));
+        return lowest - std::min (before, after);
+    }
+
+    /** A change of shape dips through silence and does nothing else: for
+        every ordered pair of shapes, at the band's frequency and at 0.66 and
+        1.5 times it, with gains of -24, 0 and +24 dB and Q 0.71 and 2, the
+        level is under the lower of the two steady levels by 3 dB or more for
+        no longer than the dip itself (20 ms: the last 14.1 ms of a 20 ms fade
+        out and the first 5.7 ms of an 8 ms fade in), and
+        no step passes 1.5x. The dip is the owner's rule for a discrete
+        switch (2026-10-03); its depth, silence at the bottom, is printed per
+        pair rather than bounded.
+
+        Round 2 of the review (2026-10-03) found the crossover before this one
+        blended the two filters' outputs, which cancel where they are out of
+        phase -- Low Cut against High Cut at one corner is exact anti-phase
+        there, a full null at mid-fade. Round 3 found the series pair that
+        replaced it went 14 dB over both settings for two Q 0.1 cuts and
+        burst from the leaving filter's state. */
+    void testShapeChangeLeavesNoHole()
+    {
+        const double rate = 48000.0;
+        double worstAll = 0.0, longestAll = 0.0;
+
+        for (int a = 0; a < 5; ++a)
+            for (int b = 0; b < 5; ++b)
+            {
+                if (a == b)
+                    continue;
+
+                double worstPair = 0.0, worstStep = 0.0, longestPair = 0.0;
+                std::string where;
+
+                for (float gain : pick ({ -24.0f, 0.0f, 24.0f }, { -24.0f, 24.0f }))
+                    for (float q : { 0.71f, 2.0f })
+                        for (double m : pick ({ 1.0, 0.66, 1.5 }, { 1.0, 1.5 }))
+                        {
+                            Values p;
+                            p.at (0, Control::on) = 1.0f;      p.at (0, Control::freq) = 1000.0f;
+                            p.at (0, Control::gain) = gain;    p.at (0, Control::q) = q;
+
+                            size_t flip = 0;
+                            const auto e2 = envelopeThrough (rate, 1000.0 * m, p,
+                                                             [a] (Values& v, DeqDsp&) { v.at (0, Control::shape) = (float) a; },
+                                                             [b] (Values& v, DeqDsp&) { v.at (0, Control::shape) = (float) b; }, flip);
+
+                            const auto hole = worstHoleDb (e2, flip, rate);
+                            const auto lower = std::min (meanDb (e2, flip - (size_t) (0.05 * rate), flip),
+                                                         meanDb (e2, flip + (size_t) (0.1 * rate), flip + (size_t) (0.15 * rate)));
+                            size_t under = 0;
+                            for (size_t i = flip; i < flip + (size_t) (0.06 * rate); ++i)
+                                if (10.0 * std::log10 (std::max (e2[i], 1.0e-300)) < lower - 3.0)
+                                    ++under;
+                            const auto underMs = (double) under / rate * 1000.0;
+
+                            const auto label = std::string (kShapeNames[a]) + " to " + kShapeNames[b] + ", gain "
+                                             + std::to_string ((int) gain) + ", Q " + std::to_string (q) + ", at "
+                                             + std::to_string (m) + " f0";
+                            checkAtMost (underMs, 20.0, "Shape change: under the lower level by 3 dB for no longer than the dip, " + label);
+
+                            if (hole < worstPair) { worstPair = hole; where = label; }
+                            longestPair = std::max (longestPair, underMs);
+
+                            // And no step, measured the house way on a real tone.
+                            const Switch sw { label,
+                                [a, gain, q] (Values& v, DeqDsp&) { v.at (0, Control::shape) = (float) a; v.at (0, Control::freq) = 1000.0f;
+                                                                    v.at (0, Control::gain) = gain; v.at (0, Control::q) = q; },
+                                [b] (Values& v, DeqDsp&) { v.at (0, Control::shape) = (float) b; } };
+                            const auto step = stepRatio (renderSwitch (rate, (float) (1000.0 * m), 0.3, sw, (size_t) -1), rate);
+                            worstStep = std::max (worstStep, step);
+                            checkAtMost (step, 1.5, "Shape change: no step, " + label);
+                        }
+
+                worstAll = std::min (worstAll, worstPair);
+                longestAll = std::max (longestAll, longestPair);
+                std::cout << "  shape " << kShapeNames[a] << " to " << kShapeNames[b] << ": dip " << worstPair
+                          << " dB at its deepest 2 ms, under -3 dB for " << longestPair << " ms, worst step " << worstStep << "x\n";
+            }
+
+        std::cout << "  shape changes, deepest 2 ms of any dip " << worstAll << " dB, longest under -3 dB " << longestAll << " ms\n";
+    }
+
+    /** Solo and placement, measured per channel as exact envelopes: each
+        channel's complex envelope from two renders in quadrature (sin, then
+        cos) of the same stereo stimulus. Returns the dip (lowest 2 ms in the
+        40 ms after the switch against the lower steady level), the time
+        under that level by 3 dB, how far over the louder steady level the
+        envelope goes, and the house step ratio on the sin render. */
+    struct SwitchDip { double dip = 0.0, underMs = 0.0, over = -1.0e9, step = 0.0; };
+
+    std::array<SwitchDip, 2> measureSwitchDip (Values p, int soloFrom, const Setter& to, double hz,
+                                               double ampL, double ampR, double phaseR, bool contributionOnly)
+    {
+        constexpr double rate = 48000.0;
+        constexpr size_t block = 64;
+        const auto n = (size_t) (0.5 * rate) / block * block, flip = (size_t) (0.2 * rate) / block * block;
+
+        std::vector<double> parts[2][2];
+        std::vector<float> sinL;
+
+        for (int quad = 0; quad < 2; ++quad)
+        {
+            std::vector<float> l (n), r (n);
+            for (size_t i = 0; i < n; ++i)
+            {
+                const auto ph = 2.0 * kPi * hz * (double) i / rate + (quad ? kPi / 2.0 : 0.0);
+                l[i] = (float) (ampL * std::sin (ph));
+                r[i] = (float) (ampR * std::sin (ph + phaseR));
+            }
+            const auto inL = l, inR = r;
+
+            auto q = p;
+            DeqDsp d;
+            d.setSolo (soloFrom);
+            d.setParams (q.v.data(), (int) q.v.size());
+            d.prepare (rate, (int) block, 2);
+            for (size_t pos = 0; pos < n; pos += block)
+            {
+                if (pos == flip) to (q, d);
+                d.setParams (q.v.data(), (int) q.v.size());
+                float* ch[2] { l.data() + pos, r.data() + pos };
+                d.process (ch, 2, (int) block);
+            }
+
+            if (quad == 0) sinL = l;
+            parts[quad][0].resize (n); parts[quad][1].resize (n);
+            for (size_t i = 0; i < n; ++i)
+            {
+                parts[quad][0][i] = (double) l[i] - (contributionOnly ? (double) inL[i] : 0.0);
+                parts[quad][1][i] = (double) r[i] - (contributionOnly ? (double) inR[i] : 0.0);
+            }
+        }
+
+        std::array<SwitchDip, 2> out;
+        const auto w2 = (size_t) (0.002 * rate), w30 = (size_t) (0.03 * rate);
+
+        for (int c = 0; c < 2; ++c)
+        {
+            std::vector<double> e2 (n);
+            for (size_t i = 0; i < n; ++i) e2[i] = parts[0][c][i] * parts[0][c][i] + parts[1][c][i] * parts[1][c][i];
+
+            const auto before = meanDb (e2, flip - (size_t) (0.05 * rate), flip);
+            const auto after = meanDb (e2, flip + (size_t) (0.1 * rate), flip + (size_t) (0.15 * rate));
+            const auto lower = std::min (before, after), louder = std::max (before, after);
+
+            auto& o = out[(size_t) c];
+            for (size_t i = flip; i + w2 <= flip + (size_t) (0.04 * rate); i += 4)
+                o.dip = std::min (o.dip, meanDb (e2, i, i + w2) - lower);
+
+            size_t under = 0;
+            double peak = 0.0;
+            for (size_t i = flip; i < n; ++i)
+            {
+                if (i < flip + (size_t) (0.04 * rate) && 10.0 * std::log10 (std::max (e2[i], 1.0e-300)) < lower - 3.0) ++under;
+                peak = std::max (peak, e2[i]);
+            }
+            o.underMs = (double) under / rate * 1000.0;
+            o.over = 10.0 * std::log10 (std::max (peak, 1.0e-300)) - louder;
+        }
+
+        const auto steady = std::max ({ largestStep (sinL, flip - 4 * w30, flip), largestStep (sinL, n - 4 * w30, n), 1.0e-12 });
+        out[0].step = largestStep (sinL, flip, flip + w30) / steady;
+        return out;
+    }
+
+    /** Solo is accepted as a dip (the owner's rule for a discrete switch,
+        2026-10-03) and its bound pinned. It crosses between two different
+        signals -- the whole EQ, H x, and one band's contribution, (H - 1) x --
+        which cancel wherever H is real and between 0 and 1: a -6 dB bell at
+        its own frequency dips 18.7 dB for 7.1 ms (round 3 of the review,
+        measured on ICE QUEEN), and no blend of the two avoids that. Pinned
+        over cutting and boosting bells, a Low Cut and a cutting High Shelf,
+        tones at 0.5, 1 and 2 f0, solo on and off: the dip no deeper than
+        19 dB, under -3 dB for at most 7.5 ms, no step over 1.5x, and never
+        over the louder level by more than 1 dB. */
+    void testSoloHoleIsBounded()
+    {
+        struct Band { const char* name; int shape; float gain, q; };
+        const Band bands[] { { "a -12 dB bell", 0, -12.0f, 1.0f }, { "a -6 dB bell", 0, -6.0f, 1.0f }, { "a +12 dB bell", 0, 12.0f, 1.0f },
+                             { "a Low Cut", 3, 0.0f, 0.71f }, { "a -12 dB High Shelf", 2, -12.0f, 0.71f } };
+        double deepest = 0.0, longest = 0.0;
+
+        for (const auto& band : bands)
+            for (int from : { -1, 0 })
+                for (double m : { 0.5, 1.0, 2.0 })
+                {
+                    Values p;
+                    p.at (0, Control::on) = 1.0f; p.at (0, Control::shape) = (float) band.shape; p.at (0, Control::freq) = 1000.0f;
+                    p.at (0, Control::gain) = band.gain; p.at (0, Control::q) = band.q;
+
+                    const int to = from < 0 ? 0 : -1;
+                    const auto r = measureSwitchDip (p, from, [to] (Values&, DeqDsp& d) { d.setSolo (to); }, 1000.0 * m, 0.1, 0.1, 0.0, false)[0];
+                    const auto label = std::string ("solo ") + (from < 0 ? "on" : "off") + ", " + band.name + ", tone at " + std::to_string (m) + " f0";
+
+                    checkAtMost (-r.dip, 19.0, "Solo: the dip no deeper than pinned, " + label);
+                    checkAtMost (r.underMs, 7.5, "Solo: under -3 dB no longer than pinned, " + label);
+                    checkAtMost (r.step, 1.5, "Solo: (a) no step, " + label);
+                    checkAtMost (r.over, 1.0, "Solo: (b) never over the louder level, " + label);
+                    deepest = std::min (deepest, r.dip);
+                    longest = std::max (longest, r.underMs);
+                }
+
+        std::cout << "  solo: deepest dip " << deepest << " dB, longest under -3 dB " << longest << " ms\n";
+    }
+
+    /** Placement is accepted as a dip too, and its bound pinned. A channel's
+        Mid and Side contributions are the shares (H - 1)(L + R) / 2 and
+        (H - 1)(L - R) / 2, and their angle passes 90 degrees for the channel
+        whose own content is the smaller, so its contribution dips going from
+        one share to the other: Mid to Side with the right channel 6 dB under
+        the left dips 5.7 dB for 4.2 ms (round 3 of the review). Pinned for
+        every pair, a bell at +12 and -12 dB, the output and the contribution
+        of both channels: the dip no deeper than 6 dB, under -3 dB for at most
+        4.5 ms, no step over 1.5x, and the output never over the louder level
+        by more than 1 dB. */
+    void testPlacementDipIsBounded()
+    {
+        double deepest = 0.0, longest = 0.0;
+
+        for (float gain : { 12.0f, -12.0f })
+            for (int a = 0; a < 3; ++a)
+                for (int b = 0; b < 3; ++b)
+                {
+                    if (a == b)
+                        continue;
+
+                    Values p;
+                    p.at (0, Control::on) = 1.0f; p.at (0, Control::shape) = 0.0f; p.at (0, Control::freq) = 1000.0f;
+                    p.at (0, Control::gain) = gain; p.at (0, Control::q) = 1.0f; p.at (0, Control::place) = (float) a;
+
+                    for (bool contribution : { false, true })
+                    {
+                        const auto r = measureSwitchDip (p, -1, [b] (Values& v, DeqDsp&) { v.at (0, Control::place) = (float) b; },
+                                                         1000.0, 0.1, 0.05, 1.0, contribution);
+                        const auto label = std::string (kPlaceNames[a]) + " to " + kPlaceNames[b] + ", bell " + std::to_string ((int) gain)
+                                         + (contribution ? ", contribution" : ", output");
+
+                        for (int c = 0; c < 2; ++c)
+                        {
+                            const auto side = c == 0 ? ", louder left" : ", quieter right";
+                            checkAtMost (-r[(size_t) c].dip, 6.0, "Placement: the dip no deeper than pinned, " + label + side);
+                            checkAtMost (r[(size_t) c].underMs, 4.5, "Placement: under -3 dB no longer than pinned, " + label + side);
+                            if (! contribution)
+                                checkAtMost (r[(size_t) c].over, 1.0, "Placement: (b) the output never over the louder level, " + label + side);
+                            deepest = std::min (deepest, r[(size_t) c].dip);
+                            longest = std::max (longest, r[(size_t) c].underMs);
+                        }
+
+                        if (! contribution)
+                            checkAtMost (r[0].step, 1.5, "Placement: (a) no step, " + label);
+                    }
+                }
+
+        std::cout << "  placement: deepest dip " << deepest << " dB, longest under -3 dB " << longest << " ms\n";
+    }
+
+    //==========================================================================
+    // Held settings render exactly what 6f6b8c3 rendered. Every fix of the
+    // 2026-10-03 review was held to this -- with nothing switching, settings
+    // held and no cut above its cap, the output is bit-identical to the code
+    // before the review -- and until round 2 only an outside probe checked
+    // it. Here it is pinned: twelve bands of every shape, placement and
+    // direction, with dynamics, and without them, at 44.1, 48 and 96 kHz.
+    //==========================================================================
+    std::vector<float> heldNoise (size_t n, uint32_t seed)
+    {
+        std::vector<float> out (n);
+        double lp = 0.0;
+        for (auto& x : out)
+        {
+            seed = seed * 1664525u + 1013904223u;
+            const auto w = (double) seed / 4294967296.0 * 2.0 - 1.0;
+            lp = 0.9 * lp + 0.1 * w;
+            x = (float) (0.06 * w + 0.25 * lp);
+        }
+        return out;
+    }
+
+    /** 0: twelve dynamic and static bands; 1: the same with DYN off on all;
+        2: as 1 with every dynamics knob moved to an extreme. */
+    Values heldSettings (int which)
+    {
+        Values p;
+        const int shapes[12] { 3, 1, 0, 0, 0, 2, 0, 1, 0, 0, 2, 4 };
+        for (int b = 0; b < kBands; ++b)
+        {
+            p.at (b, Control::on) = 1.0f; p.at (b, Control::shape) = (float) shapes[b];
+            p.at (b, Control::freq) = 40.0f * (float) (b + 1) * (float) (b + 1);
+            p.at (b, Control::gain) = b % 2 ? 4.5f : -6.0f;
+            p.at (b, Control::q) = shapes[b] >= 3 ? 0.5f : 0.4f + 0.3f * (float) b;
+            p.at (b, Control::place) = (float) (b % 3);
+            p.at (b, Control::dyn) = which == 0 && shapes[b] <= 2 ? 1.0f : 0.0f;
+            p.at (b, Control::dir) = (float) ((b / 2) % 2);
+            p.at (b, Control::thr) = which == 2 ? -60.0f : -45.0f + 3.0f * (float) b;
+            p.at (b, Control::range) = which == 2 ? 24.0f : (b % 3 == 0 ? 9.0f : -12.0f);
+            p.at (b, Control::ratio) = which == 2 ? 20.0f : 1.5f + (float) b;
+            p.at (b, Control::attack) = which == 2 ? 0.1f : 0.5f + 3.0f * (float) b;
+            p.at (b, Control::release) = which == 2 ? 5.0f : 20.0f + 150.0f * (float) b;
+        }
+        return p;
+    }
+
+    uint64_t heldHash (int which, double rate)
+    {
+        auto p = heldSettings (which);
+        const auto n = (size_t) rate;
+        auto l = heldNoise (n, 101u), r = heldNoise (n, 202u);
+
+        DeqDsp d;
+        d.setParams (p.v.data(), (int) p.v.size());
+        d.prepare (rate, 512, 2);
+        for (size_t pos = 0; pos < n; pos += 512)
+        {
+            d.setParams (p.v.data(), (int) p.v.size());
+            float* ch[2] { l.data() + pos, r.data() + pos };
+            d.process (ch, 2, (int) std::min ((size_t) 512, n - pos));
+        }
+
+        uint64_t h = 1469598103934665603ull;   // FNV-1a over the output's bits
+        for (const auto* ch : { &l, &r })
+            for (auto x : *ch)
+            {
+                uint32_t u;
+                std::memcpy (&u, &x, 4);
+                for (int k = 0; k < 4; ++k) { h ^= (u >> (8 * k)) & 0xffu; h *= 1099511628211ull; }
+            }
+        return h;
+    }
+
+    /** The engine's own double-precision render of twelve held bands -- the
+        output's RMS, its peak and four fixed samples -- for pinning against
+        6f6b8c3. In double, a maths library's last-place differences stay at
+        the 1e-12 level while a real change of design does not. */
+    Settings heldEngineSettings (bool dynamic)
+    {
+        Settings s;
+        const Shape shapes[12] { Shape::lowCut, Shape::lowShelf, Shape::bell, Shape::bell, Shape::bell, Shape::highShelf,
+                                 Shape::bell, Shape::lowShelf, Shape::bell, Shape::bell, Shape::highShelf, Shape::highCut };
+        for (int b = 0; b < 12; ++b)
+        {
+            auto& x = s.bands[(size_t) b];
+            x.enabled = true; x.shape = shapes[b];
+            x.frequencyHz = 40.0 * (b + 1) * (b + 1);
+            x.gainDb = b % 2 ? 4.5 : -6.0;
+            x.q = (shapes[b] == Shape::lowCut || shapes[b] == Shape::highCut) ? 0.5
+                                                                               : std::min (0.4 + 0.3 * b, shapes[b] == Shape::bell ? 40.0 : 2.0);
+            x.placement = (Placement) (b % 3);
+            x.dynamics.enabled = dynamic && hasGain (shapes[b]);
+            x.dynamics.direction = (b / 2) % 2 ? Direction::below : Direction::above;
+            x.dynamics.thresholdDb = -45.0 + 3.0 * b;
+            x.dynamics.rangeDb = b % 3 == 0 ? 9.0 : -12.0;
+            x.dynamics.ratio = 1.5 + b;
+            x.dynamics.attackMs = 0.5 + 3.0 * b;
+            x.dynamics.releaseMs = 20.0 + 150.0 * b;
+        }
+        return s;
+    }
+
+    std::array<double, 6> heldEngineFigures (bool dynamic, double rate)
+    {
+        const auto n = (size_t) rate;
+        std::vector<double> l (n), r (n);
+        {
+            uint32_t a = 101u, b = 202u;
+            double la = 0.0, lb = 0.0;
+            for (size_t i = 0; i < n; ++i)
+            {
+                a = a * 1664525u + 1013904223u; b = b * 1664525u + 1013904223u;
+                const auto wa = (double) a / 4294967296.0 * 2.0 - 1.0, wb = (double) b / 4294967296.0 * 2.0 - 1.0;
+                la = 0.9 * la + 0.1 * wa; lb = 0.9 * lb + 0.1 * wb;
+                l[i] = 0.06 * wa + 0.25 * la; r[i] = 0.06 * wb + 0.25 * lb;
+            }
+        }
+
+        DspCore e;
+        e.prepare (rate, 512, 2);
+        e.setSettings (heldEngineSettings (dynamic));
+        for (size_t pos = 0; pos < n; pos += 512)
+        {
+            double* ch[2] { l.data() + pos, r.data() + pos };
+            e.process (ch, 2, (int) std::min ((size_t) 512, n - pos));
+        }
+
+        double sum = 0.0, peak = 0.0;
+        for (size_t i = 0; i < n; ++i)
+        {
+            sum += l[i] * l[i] + r[i] * r[i];
+            peak = std::max ({ peak, std::abs (l[i]), std::abs (r[i]) });
+        }
+
+        std::array<double, 6> f { std::sqrt (sum / (2.0 * (double) n)), peak, 0.0, 0.0, 0.0, 0.0 };
+        for (size_t k = 1; k <= 4; ++k)
+            f[k + 1] = l[n * k / 5] + r[n * k / 5 + 1];
+        return f;
+    }
+
+    void testHeldSettingsAreUnchanged()
+    {
+        const double rates[] { 44100.0, 48000.0, 96000.0 };
+
+        // DYN off is the static EQ, to the bit, wherever the knobs are:
+        // anywhere, on any compiler.
+        for (double rate : rates)
+            check (heldHash (1, rate) == heldHash (2, rate),
+                   "Held: DYN off is the static EQ to the bit, whatever the dynamics knobs say, " + std::to_string ((int) rate) + " Hz");
+
+        // The figures themselves, against 6f6b8c3's: RMS, peak and four
+        // samples of the engine's double output, captured on ICE QUEEN from
+        // that tree on 2026-10-03. They agree to 3.9e-12 relative between the
+        // DLL and the static runtime (/MD, /MT) -- 6f6b8c3 and this tree are
+        // bit-identical under each -- and a 1e-9 error in one coefficient
+        // moves them by 6e-9 to 4e-8. So 1e-10 of each figure under MSVC, 25
+        // times the spread measured, catches that.
+        //
+        // Elsewhere the figures cannot be held that closely to numbers made
+        // with another compiler and maths library. The first time this ran
+        // off Windows (the macOS job, 2026-10-04) the samples came out about
+        // 1e-8 away, 2e-7 of the row's RMS and 2e-6 of the smaller samples
+        // themselves, and a bound of 1e-9 of each figure failed all of them.
+        // So there the bound is absolute, 1e-4 of the row's RMS (80 dB under
+        // the signal, several hundred times what was seen): it still catches
+        // a wrong coefficient or a dropped band, and no longer pretends to
+        // catch a 1e-9 one. The float output's exact hash is printed, for the
+        // record only: it differs in the last place between runtimes.
+#if defined (_MSC_VER)
+        constexpr double tolerance = 1.0e-10;
+        constexpr bool   ofEachFigure = true;
+#else
+        constexpr double tolerance = 1.0e-4;
+        constexpr bool   ofEachFigure = false;
+#endif
+        const double pinned[2][3][6] {
+            {   // dynamic
+                { 0.04765819572534296, 0.19197901171426757, 0.0051584221808478881, -0.014753304787781616, -0.086915310788695924, -0.16743542885715382 },
+                { 0.046839222204263939, 0.18266891146935921, 0.036383053901249587, 0.065243938846074392, -0.044714106865857861, 0.02716817334030212 },
+                { 0.041971532365942282, 0.19119157594160865, -0.015083977264030775, -0.033139035876273301, 0.044692853989185717, -0.15027950541184065 },
+            },
+            {   // static
+                { 0.058391020817543431, 0.23182606005486331, 0.0035353217750529325, -0.023945993810449775, -0.10821508551253761, -0.19767088073262332 },
+                { 0.057417000220107546, 0.22762664416342648, 0.040835577444195172, 0.076565963087499495, -0.055461633902529436, 0.037210753167592918 },
+                { 0.051481891610753089, 0.23377207783261333, -0.020468243065762708, -0.032412158572005759, 0.020400191887946107, -0.17308793254136778 },
+            },
+        };
+        const char* names[] { "RMS", "peak", "sample 1", "sample 2", "sample 3", "sample 4" };
+
+        for (int which = 0; which < 2; ++which)
+            for (int i = 0; i < 3; ++i)
+            {
+                const auto got = heldEngineFigures (which == 0, rates[i]);
+                for (size_t k = 0; k < got.size(); ++k)
+                    checkClose (got[k], pinned[which][i][k],
+                                tolerance * (ofEachFigure ? std::abs (pinned[which][i][k]) : pinned[which][i][0]),
+                                std::string ("Held: ") + (which == 0 ? "dynamic" : "static") + " bands' " + names[k]
+                                + " as 6f6b8c3's at " + std::to_string ((int) rates[i]) + " Hz");
+
+                std::cout << "  held " << (which == 0 ? "dynamic" : "static") << " at " << rates[i] << ": float output hash 0x"
+                          << std::hex << heldHash (which == 0 ? 0 : 1, rates[i]) << std::dec << '\n';
+            }
+    }
+
+    /** reset() before prepare() returns, and leaves the module a wire. */
+    void testResetBeforePrepare()
+    {
+        auto p = heldSettings (0);
+        DeqDsp d;
+        d.reset();
+        d.setParams (p.v.data(), (int) p.v.size());
+        d.reset();
+
+        std::vector<float> l (64, 0.1f), r (64, -0.1f);
+        const auto inL = l, inR = r;
+        float* ch[2] { l.data(), r.data() };
+        d.process (ch, 2, 64);
+        check (l == inL && r == inR, "Before prepare: reset() returns and the module stays a wire");
+
+        DspCore e;
+        e.reset();
+        std::vector<double> x (64, 0.2);
+        const auto in = x;
+        double* one[1] { x.data() };
+        e.process (one, 1, 64);
+        check (x == in, "Before prepare: the engine's reset() returns and it stays a wire");
+    }
+
+    //==========================================================================
+    // A change of shape, measured whole: band 1 alone at f0, settled, then
+    // its shape changed at a block boundary (blocks of 32), against the
+    // owner's rule for a discrete switch (2026-10-03): it may pass through a
+    // short dip, and it may not click, burst or linger.
+    //==========================================================================
+    // What the shape grid measures (testShapeChangeGrid), on ICE QUEEN,
+    // 2026-10-03: the arriving shape's output is bit-identical to an
+    // always-final instance's within 545 ms wherever it settles inside the
+    // render, and the dip's deepest 2 ms is 28.25 dB under the lower level.
+    constexpr double kIdenticalMs = 600.0;
+    constexpr double kDipDepthDb = 28.5;
+
+    struct ShapeChange
+    {
+        double overTone = -1.0e9;   // largest tone envelope after the change over the louder steady level, dB
+        double overNoise = -1.0e9;  // largest 5 ms noise RMS after it over the band held at the louder shape, dB
+        double hole = 0.0;          // lowest 2 ms tone level in the change under the lower steady level, dB
+        double step = 0.0;          // largest sample step in 30 ms over the steady signal's own
+        double changeMs = 0.0;      // from the request until the output is the final shape's alone
+        double identicalMs = -1.0;  // from the request until bit-identical to an always-final instance; -1 never
+    };
+
+    /** How long a band at this setting takes to settle, s: five of its
+        slowest time constants (a bell's pole Q moves with its gain), at least
+        0.15 s and at most 1.5 s. */
+    double settleSeconds (int shape, float q, double f0, float gain)
+    {
+        auto poleQ = (double) effectiveQ (shape, q);
+        if (shape == 0) poleQ *= std::pow (10.0, std::abs ((double) gain) / 40.0);
+        return std::min (1.5, 0.15 + 5.0 * poleQ / (kPi * f0));
+    }
+
+    ShapeChange measureShapeChange (double rate, int a, int b, double f0, float gain, float q, bool withIdentity = false)
+    {
+        constexpr size_t block = 32;
+        const auto flip = (size_t) (settleSeconds (a, q, f0, gain) * rate) / block * block;
+        const auto n = flip + (size_t) ((settleSeconds (b, q, f0, gain) + 0.25) * rate) / block * block;
+        const auto w2 = (size_t) (0.002 * rate), w5 = (size_t) (0.005 * rate), w30 = (size_t) (0.03 * rate);
+        const auto hz = std::min (f0, 0.45 * rate);
+
+        auto setUp = [&] (int shape)
+        {
+            Values p;
+            p.at (0, Control::on) = 1.0f; p.at (0, Control::shape) = (float) shape; p.at (0, Control::freq) = (float) f0;
+            p.at (0, Control::gain) = gain; p.at (0, Control::q) = q;
+            return p;
+        };
+
+        auto render = [&] (std::vector<float> x, bool change, int from)
+        {
+            auto p = setUp (from);
+            DeqDsp d;
+            d.setParams (p.v.data(), (int) p.v.size());
+            d.prepare (rate, (int) block, 1);
+            for (size_t pos = 0; pos < n; pos += block)
+            {
+                if (change && pos == flip) p.at (0, Control::shape) = (float) b;
+                d.setParams (p.v.data(), (int) p.v.size());
+                float* ch[1] { x.data() + pos };
+                d.process (ch, 1, (int) std::min (block, n - pos));
+            }
+            return x;
+        };
+
+        std::vector<float> s (n), c (n);
+        for (size_t i = 0; i < n; ++i)
+        {
+            const auto ph = 2.0 * kPi * hz * (double) i / rate + 0.3;
+            s[i] = (float) (0.1259 * std::sin (ph));      // -18 dBFS RMS
+            c[i] = (float) (0.1259 * std::cos (ph));
+        }
+        const auto noiseIn = heldNoise (n, 3u + (uint32_t) (a * 7 + b));
+
+        const auto ys = render (s, true, a), yc = render (c, true, a), yn = render (noiseIn, true, a);
+
+        ShapeChange r;
+        std::vector<double> e2 (n);
+        for (size_t i = 0; i < n; ++i) e2[i] = (double) ys[i] * ys[i] + (double) yc[i] * yc[i];
+
+        auto meanDbOf = [&] (const std::vector<double>& v, size_t from, size_t to)
+        {
+            double sum = 0.0;
+            for (size_t i = from; i < to; ++i) sum += v[i];
+            return 10.0 * std::log10 (std::max (sum / (double) (to - from), 1.0e-300));
+        };
+
+        const auto before = meanDbOf (e2, flip - w5, flip), after = meanDbOf (e2, n - 4 * w5, n);
+        const auto louder = std::max (before, after), lower = std::min (before, after);
+
+        double peak = 0.0;
+        for (size_t i = flip; i < n; ++i) peak = std::max (peak, e2[i]);
+        r.overTone = 10.0 * std::log10 (std::max (peak, 1.0e-300)) - louder;
+
+        for (size_t i = flip; i + w2 <= flip + (size_t) (0.06 * rate); i += 4)
+            r.hole = std::min (r.hole, meanDbOf (e2, i, i + w2) - lower);
+
+        // Noise against the same noise through the band held at either shape,
+        // window by window, so that what is measured is the change and not
+        // the noise's own variation.
+        const auto heldA = render (noiseIn, false, a), heldB = render (noiseIn, false, b);
+        std::vector<double> n2 (n), a2 (n), b2 (n);
+        for (size_t i = 0; i < n; ++i)
+        {
+            n2[i] = (double) yn[i] * yn[i];
+            a2[i] = (double) heldA[i] * heldA[i];
+            b2[i] = (double) heldB[i] * heldB[i];
+        }
+        for (size_t i = flip; i + w5 <= n; i += w5 / 4)
+            r.overNoise = std::max (r.overNoise, meanDbOf (n2, i, i + w5) - std::max (meanDbOf (a2, i, i + w5), meanDbOf (b2, i, i + w5)));
+
+        const auto steady = std::max ({ largestStep (ys, flip - 4 * w30, flip), largestStep (ys, n - 4 * w30, n), 1.0e-12 });
+        r.step = largestStep (ys, flip, flip + w30) / steady;
+
+        if (withIdentity)
+        {
+            size_t last = flip;
+            for (size_t i = flip; i < n; ++i)
+                if (yn[i] != heldB[i]) last = i + 1;
+            r.identicalMs = last >= n ? -1.0 : (double) (last - flip) / rate * 1000.0;
+        }
+
+        return r;
+    }
+
+    /** A change of shape never bursts: during and after it the output stays
+        within 1 dB of the louder of the two steady levels, for a tone at the
+        band's frequency and for noise.
+
+        Round 3 of the review (2026-10-03): the shape arriving carried on from
+        the leaving filter's state, and a bell at +24 dB, Q 40, 30 Hz -- whose
+        state holds a resonance built up over seconds -- changed to a Low
+        Shelf peaked at +37.7 dBFS on a -15 dBFS tone, 30.8 dB over the
+        louder steady level, for 141 ms over by 6 dB. Every ordered pair at
+        30 Hz, 1 kHz and 18 kHz, Q 0.1 and 40, gain -24 and +24 at 48 kHz, and
+        the 30 Hz Q 40 cells at 44.1, 96 and 192 kHz too; the whole grid is
+        the probe's. */
+    void testShapeChangeNeverBursts()
+    {
+        double worstTone = -1.0e9, worstNoise = -1.0e9;
+        std::string whereTone, whereNoise;
+
+        auto cell = [&] (double rate, int a, int b, double f0, float gain, float q)
+        {
+            const auto r = measureShapeChange (rate, a, b, f0, gain, q);
+            const auto label = std::string (kShapeNames[a]) + " to " + kShapeNames[b] + ", " + std::to_string ((int) f0) + " Hz, gain "
+                             + std::to_string ((int) gain) + ", Q " + std::to_string (q) + ", " + std::to_string ((int) rate) + " Hz";
+            checkAtMost (r.overTone, 1.0, "Shape change: a tone at f0 stays within 1 dB of the louder level, " + label);
+            checkAtMost (r.overNoise, 1.0, "Shape change: noise stays within 1 dB of the louder level, " + label);
+            if (r.overTone > worstTone) { worstTone = r.overTone; whereTone = label; }
+            if (r.overNoise > worstNoise) { worstNoise = r.overNoise; whereNoise = label; }
+        };
+
+        for (int a = 0; a < 5; ++a)
+            for (int b = 0; b < 5; ++b)
+                if (a != b)
+                {
+                    for (double f0 : pick ({ 30.0, 1000.0, 18000.0 }, { 30.0 }))
+                        for (float q : pick ({ 0.1f, 40.0f }, { 40.0f }))
+                            for (float gain : { -24.0f, 24.0f })
+                                cell (48000.0, a, b, f0, gain, q);
+
+                    for (double rate : pick ({ 44100.0, 96000.0, 192000.0 }, { 44100.0 }))
+                        cell (rate, a, b, 30.0, 24.0f, 40.0f);
+                }
+
+        std::cout << "  shape changes, worst over the louder level: tone " << worstTone << " dB (" << whereTone
+                  << "), noise " << worstNoise << " dB (" << whereNoise << ")\n";
+    }
+
+    /** The owner's criteria for a discrete switch, over the whole grid of
+        shape changes at 48 kHz (the probe runs it at 44.1, 96 and 192 too):
+        every ordered pair, f0 30 / 100 / 1k / 10k / 18k Hz, Q 0.1 / 0.71 / 2 /
+        40 (as the caps leave them), gain -24 / 0 / +24, a tone at f0 and
+        noise.
+          (a) the largest sample step, under 1.5x the signal's own;
+          (b) never more than 1 dB over the louder steady level;
+          (c) over in 28 ms, then bit-identical to an instance always at the
+              final shape -- within kIdenticalMs wherever the arriving shape
+              settles inside the render, which is every cell but the
+              slowest, recorded;
+          (d) the dip's depth, recorded per pair and pinned at what it
+              measures.
+        Round 3 of the review (2026-10-03) measured the series pair on 8ea4cd2
+        against these: Low Cut to High Cut at Q 0.1, 1 kHz, 14 dB over both
+        settings mid-change with a 5.0x step; High Shelf to Low Shelf at
+        100 Hz, Q 2, 1.79x. */
+    void testShapeChangeGrid()
+    {
+        constexpr double rate = 48000.0;
+        double worstStep = 0.0, worstOver = -1.0e9, worstHole = 0.0, worstIdentical = 0.0;
+        int neverIdentical = 0, cells = 0;
+        std::string whereStep, whereOver, whereHole, whereIdentical;
+
+        for (int a = 0; a < 5; ++a)
+            for (int b = 0; b < 5; ++b)
+            {
+                if (a == b)
+                    continue;
+
+                double pairHole = 0.0;
+
+                for (double f0 : pick ({ 30.0, 100.0, 1000.0, 10000.0, 18000.0 }, { 100.0, 1000.0 }))
+                    for (float q : pick ({ 0.1f, 0.71f, 2.0f, 40.0f }, { 0.1f, 2.0f, 40.0f }))
+                        for (float gain : pick ({ -24.0f, 0.0f, 24.0f }, { -24.0f, 24.0f }))
+                        {
+                            const auto r = measureShapeChange (rate, a, b, f0, gain, q, true);
+                            const auto label = std::string (kShapeNames[a]) + " to " + kShapeNames[b] + ", " + std::to_string ((int) f0)
+                                             + " Hz, gain " + std::to_string ((int) gain) + ", Q " + std::to_string (q);
+                            ++cells;
+
+                            checkAtMost (r.step, 1.5, "Shape grid: (a) no step, " + label);
+                            checkAtMost (std::max (r.overTone, r.overNoise), 1.0, "Shape grid: (b) never over the louder level, " + label);
+
+                            if (r.identicalMs < 0.0)
+                            {
+                                ++neverIdentical;
+                                std::cout << "  grid: not yet bit-identical to the final shape when the render ends, " << label << "\n";
+                            }
+                            else
+                            {
+                                checkAtMost (r.identicalMs, kIdenticalMs, "Shape grid: (c) the final shape's own output, bit for bit, " + label);
+                                if (r.identicalMs > worstIdentical) { worstIdentical = r.identicalMs; whereIdentical = label; }
+                            }
+
+                            checkAtMost (-r.hole, kDipDepthDb, "Shape grid: (d) the dip no deeper than it measures, " + label);
+
+                            if (r.step > worstStep) { worstStep = r.step; whereStep = label; }
+                            if (std::max (r.overTone, r.overNoise) > worstOver) { worstOver = std::max (r.overTone, r.overNoise); whereOver = label; }
+                            if (r.hole < worstHole) { worstHole = r.hole; whereHole = label; }
+                            pairHole = std::min (pairHole, r.hole);
+                        }
+
+                std::cout << "  grid " << kShapeNames[a] << " to " << kShapeNames[b] << ": deepest dip " << pairHole << " dB\n";
+            }
+
+        std::cout << "  shape grid, " << cells << " cells: worst step " << worstStep << "x (" << whereStep << "), worst over "
+                  << worstOver << " dB (" << whereOver << "), deepest dip " << worstHole << " dB (" << whereHole
+                  << "), bit-identical to the final shape by " << worstIdentical << " ms (" << whereIdentical << "), "
+                  << neverIdentical << " cells not within the render\n";
+    }
+
+    /** A shape asked for again and again, every block or every few, never
+        steps either: Bell and Low Cut, Low Cut and High Cut, the two shelves,
+        High Shelf and High Cut, at 100 Hz and 1 kHz, against the louder
+        static shape's own largest step. Round 3 of the review measured the
+        shelves toggling at 100 Hz at 1.96x on 8ea4cd2. */
+    void testShapeTogglingNeverSteps()
+    {
+        constexpr double rate = 48000.0;
+        constexpr size_t block = 64;
+        const auto m = (size_t) (2.0 * rate);
+
+        for (double f0 : { 100.0, 1000.0 })
+            for (std::pair<int, int> pr : { std::pair { 0, 3 }, std::pair { 3, 4 }, std::pair { 1, 2 }, std::pair { 2, 4 } })
+                for (int every : { 1, 3, 64 })
+                {
+                    auto run = [&] (bool toggle, int fixed)
+                    {
+                        Values p;
+                        p.at (0, Control::on) = 1.0f; p.at (0, Control::freq) = (float) f0;
+                        p.at (0, Control::gain) = 12.0f; p.at (0, Control::q) = 2.0f;
+                        p.at (0, Control::shape) = (float) (toggle ? pr.first : fixed);
+
+                        std::vector<float> x (m);
+                        for (size_t i = 0; i < m; ++i) x[i] = (float) (0.178 * std::sin (2.0 * kPi * f0 * (double) i / rate + 0.3));
+
+                        DeqDsp d;
+                        d.setParams (p.v.data(), (int) p.v.size());
+                        d.prepare (rate, (int) block, 1);
+                        int k = 0;
+                        for (size_t pos = 0; pos < m; pos += block)
+                        {
+                            if (toggle && pos >= (size_t) (0.5 * rate) && (pos / block) % (size_t) every == 0)
+                                p.at (0, Control::shape) = (float) (k++ % 2 ? pr.first : pr.second);
+                            d.setParams (p.v.data(), (int) p.v.size());
+                            float* ch[1] { x.data() + pos };
+                            d.process (ch, 1, (int) block);
+                        }
+                        return x;
+                    };
+
+                    const auto half = (size_t) (0.5 * rate);
+                    const auto steady = std::max (largestStep (run (false, pr.first), half, m), largestStep (run (false, pr.second), half, m));
+                    const auto toggled = largestStep (run (true, 0), half, m);
+
+                    checkAtMost (toggled / steady, 1.5, std::string ("Shape toggling: ") + kShapeNames[pr.first] + " and " + kShapeNames[pr.second]
+                                 + " every " + std::to_string (every) + " blocks at " + std::to_string ((int) f0) + " Hz, step over the louder shape's");
+                }
+    }
+
+    /** Catching up costs a fixed budget however many bands change shape at
+        once, and a band changing alone still hears its whole record. Round 4
+        of the review (2026-10-03): on 6061b89 every band changing caught up on
+        all of its record over the fade out, up to 33 filter steps a sample
+        each, so twelve Low Shelves at 30-46.5 Hz and Q 40 turned into Bells in
+        one block took 396 steps a sample -- 50.8 % of a 192 kHz / 32-sample
+        block at its 99th percentile. Counted in steps, not timed: the harness
+        may not depend on the wall clock. */
+    void testShapeWarmUpIsBudgeted()
+    {
+        for (double rate : { 48000.0, 192000.0 })
+        {
+            const auto record = (int) std::lround (rate * kShapeHistoryMs * 0.001) - 1;
+
+            auto changeShapes = [rate] (int changing, DspCore& e)
+            {
+                Settings s;
+                s.bandCount = 12;
+
+                for (int i = 0; i < 12; ++i)
+                {
+                    auto& b = s.bands[(size_t) i];
+                    b.enabled = true; b.shape = Shape::lowShelf; b.frequencyHz = 30.0 * (1.0 + 0.05 * i); b.q = 40.0; b.gainDb = 6.0;
+                }
+
+                e.prepare (rate, 32, 2);
+                e.setSettings (s);
+
+                const auto x = pinkNoise ((size_t) (1.2 * rate), -12.0);
+                std::vector<double> l (32), r (32);
+                const auto flip = (size_t) rate;
+
+                for (size_t pos = 0; pos + 32 <= x.size(); pos += 32)
+                {
+                    if (pos == flip)
+                    {
+                        for (int i = 0; i < changing; ++i)
+                            s.bands[(size_t) i].shape = Shape::bell;
+
+                        e.setSettings (s);
+                    }
+
+                    for (size_t k = 0; k < 32; ++k) { l[k] = x[pos + k]; r[k] = 0.9 * x[pos + k]; }
+                    double* ch[2] { l.data(), r.data() };
+                    e.process (ch, 2, 32);
+                }
+            };
+
+            const auto at = " at " + std::to_string ((int) rate) + " Hz";
+
+            DspCore one;
+            changeShapes (1, one);
+            check (one.shapeLookBack (0) == record, "Shape warm-up: a band changing alone hears its whole record" + at
+                   + " (" + std::to_string (one.shapeLookBack (0)) + " of " + std::to_string (record) + " samples)");
+            check (one.peakWarmSteps() == 1 + one.shapeWarmBudget(), "Shape warm-up: a band changing alone takes the whole budget" + at
+                   + " (" + std::to_string (one.peakWarmSteps()) + " steps a sample)");
+
+            DspCore twelve;
+            changeShapes (12, twelve);
+            check (twelve.peakWarmSteps() <= 12 + twelve.shapeWarmBudget(), "Shape warm-up: twelve bands changing in one block keep to the budget" + at
+                   + " (" + std::to_string (twelve.peakWarmSteps()) + " steps a sample, budget 12 + " + std::to_string (twelve.shapeWarmBudget()) + ")");
+
+            int shortest = record;
+            for (int i = 0; i < 12; ++i)
+                shortest = std::min (shortest, twelve.shapeLookBack (i));
+
+            check (shortest > 0, "Shape warm-up: every band of twelve changing at once still looks back" + at);
+            std::cout << "  shape warm-up" << at << ": one band " << one.peakWarmSteps() << " steps a sample, looks back "
+                      << one.shapeLookBack (0) * 1000.0 / rate << " ms; twelve " << twelve.peakWarmSteps() << ", shortest look-back "
+                      << shortest * 1000.0 / rate << " ms\n";
+        }
+    }
 }
 
-int main()
+int main (int argc, char** argv)
 {
+    longRun = argc > 1 && std::string (argv[1]) == "--long";
+
     testLatency();
     testBlockSizeInvariance();
     testAccuracy();
@@ -1241,7 +3017,26 @@ int main()
     testSerial();
     testTopologyBehaviour();
     testSoloAndTap();
+    testDynamicsComeBackCurrent();
+    testAutoFromTheFirstBlock();
+    testSwitchesFade();
+    testCutQIsCapped();
+    testMeterReadsWhatIsApplied();
+    testProcessBeforePrepare();
+    testUnusedBandsCostNothing();
+    testCutNeverResonates();
+    testShapeChangeLeavesNoHole();
+    testSoloHoleIsBounded();
+    testPlacementDipIsBounded();
+    testHeldSettingsAreUnchanged();
+    testResetBeforePrepare();
+    testShapeChangeNeverBursts();
+    testShapeChangeGrid();
+    testShapeTogglingNeverSteps();
+    testShapeWarmUpIsBudgeted();
 
+    std::cout << checks << " checks, " << failures << " failures"
+              << (longRun ? "" : " (the default subset; --long runs every row)") << "\n";
     if (failures == 0)
         std::cout << "deq_dsp: all passed\n";
 

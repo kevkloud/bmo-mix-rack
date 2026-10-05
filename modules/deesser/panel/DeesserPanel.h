@@ -173,9 +173,8 @@ public:
         `gr` parks the bar at a stated reduction so it can be rendered showing
         something. It exists for the same reason BMO Opto's `meter` key did:
         a meter's look cannot be reviewed at rest, and the reading it wants is
-        one no parameter can reach -- while the DSP is a placeholder there is
-        no reduction at all, and once it is real, producing exactly 8 dB on
-        demand would mean finding audio that does. It is refused outside
+        one no parameter can reach: producing exactly 8 dB on demand would
+        mean finding audio that does. It is refused outside
         0..18, which is the bar's own range.
 
         It is a *render* key and nothing else: `setUiState` is called by
@@ -202,9 +201,10 @@ private:
         outside (`core/ui/LevelBars.h`). */
     void timerCallback() override;
 
-    /** Lights the one shape switch that `choice` names. Called from the click
-        handlers and from the parameter, so a setting made by the host and one
-        made by a click land in the same state. */
+    /** Lights the one shape switch that `choice` names, and dims Q in SHELF,
+        where it reaches nothing. Called from the click handlers and from the
+        parameter, so a setting made by the host and one made by a click land
+        in the same state. */
     void showShape (int choice);
 
     /** The one place LISTEN becomes a call to the engine. -1 clears it; this

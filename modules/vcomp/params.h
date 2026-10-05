@@ -176,7 +176,7 @@ inline const ParamSpecs& specs()
         // both rails the crossover is bypassed outright rather than run with
         // nothing in the outer bands, because a crossover left in circuit
         // still costs the allpass phase shift it always costs. See
-        // DspCore::bandsActive().
+        // BandSplit in modules/vcomp/dsp/Crossover.h.
         S::logParam (kLowThru,  "Low Thru",  kLowThruOffHz, 500.0f,   1.0f, kStandardLowThruHz,  F::Hertz),
         S::logParam (kHighThru, "High Thru", 2000.0f, kHighThruOffHz, 1.0f, kStandardHighThruHz, F::Hertz),
     };

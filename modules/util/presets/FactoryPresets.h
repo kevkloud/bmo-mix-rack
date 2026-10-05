@@ -17,7 +17,7 @@ inline const std::vector<FactoryPreset>& factory()
 
         { "Flip Polarity", { { kPhaseL, 1.0f }, { kPhaseR, 1.0f } } },
 
-        { "Side Only", { { kWidth, 200.0f } } },            // as wide as it goes
+        { "Wide", { { kWidth, 200.0f } } },                 // the side doubled, the mid kept
 
         { "Narrow", { { kWidth, 60.0f } } },                // pulled in for a bus
 

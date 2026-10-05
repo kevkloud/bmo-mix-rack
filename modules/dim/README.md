@@ -56,7 +56,13 @@ S1 recommends 600–700 Hz.
 
 **TURN** (Rotation) — the whole soundfield turned, without changing the
 relative levels of anything standing on it. Positive degrees move the image
-**right**, like a pan knob. Its ends are marked L and R.
+**right**, like a pan knob. Its ends are marked L and R. **At its ends it
+breaks mono:** at full L a centre source lands hard left, 3 dB down in a mono
+sum, and anything hard-panned *left* comes out in anti-phase and disappears
+from a mono sum entirely (measured at −180 dB); full R does the same to
+anything hard-panned right. It is the one control here that can take
+something out of the mono sum altogether — everywhere else the centre comes
+through to within −143.5 dBFS.
 
 **TILT** (Asymmetry) — left against right, with centre material left exactly
 where it is. This is not a balance control and not a pan; a dead-centre vocal
@@ -65,6 +71,10 @@ knob with a crossover. Positive settings favour the **right**, the same way
 TURN turns: material on the right comes up and material on the left goes down.
 (It leaned left until 2026-09-16, when the sign was flipped to agree.) Its ends
 are marked L and R.
+
+**OUTPUT** — a trim on both channels after everything else, ±24 dB, 0 by
+default. Added 2026-10-03; a session or preset saved before it plays exactly
+as it did, and no factory preset sets it.
 
 ## Presets
 
@@ -80,13 +90,20 @@ The rest split on one line: whether your source already has side content.
 
 ## Things worth knowing before you use it
 
-- **DIMENSION at 0 turns the whole module off**, GENERATE included — it sits
-  downstream of everything else.
-- **DETUNE is inactive until GENERATE is switched on.** It is the only control on
-  the panel that does nothing where it stands, and the switch above its row says so.
-- **There is no output trim yet**, and extreme BLOOM and DIMENSION together can
-  add real level. Watch what leaves it.
+- **DIMENSION at 0 silences GENERATE, DRIFT and BLOOM** — it sits downstream
+  of all three. TURN still works there, because it comes after DIMENSION and
+  turns the centre itself, and TILT works whenever TURN is away from 0.
+- **A knob that does nothing where the others stand is dimmed**, and comes back
+  the moment it would do something again. Its value is kept and still
+  automates. DETUNE is dimmed until GENERATE is on; BELOW while BLOOM is at
+  1.0, where there is no shuffling for it to place; and at DIMENSION 0,
+  DETUNE, DRIFT, BLOOM and BELOW, and TILT too unless TURN is away from 0.
+  On a fresh instance that means DETUNE and BELOW start dimmed.
+- **Extreme BLOOM and DIMENSION together can add real level** — up to +7.2 dBFS
+  peak from a source at -18 dBFS RMS. **OUTPUT** (±24 dB, 0 by default) is there to
+  take it back; it is a hand-set trim, not an automatic match.
 - **On a mono track it is a wire**, by design. There is no image to work on.
+  OUTPUT still works there: it is a level, not part of the image.
 - **The detune stage throbs.** The two voices beat against each other, so the
   width pulses — roughly 12 Hz at the default, slower and deeper on bass. This
   is a known open question and is the main thing the module is being listened

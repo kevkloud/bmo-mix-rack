@@ -35,7 +35,7 @@ enum class Shape { bell = 0, highShelf };
 
     A shelf's Q goes through `effectiveQ` here as everywhere else, so the
     engine, the panel sketch and the tests cannot disagree about what a shelf
-    at Q 4 actually is. */
+    at Q 4 actually is: since 2026-10-03 it is a shelf at `kShelfQ`. */
 inline dsp::Biquad cutDesign (Shape shape, double hz, double q, double depthDb,
                               const dsp::DesignGrid& grid) noexcept
 {
@@ -135,12 +135,24 @@ struct Band
     Shape  designedShape = Shape::bell;
     double designedHz = -1.0, designedQ = -1.0, designedDepth = -1.0;
     Shape  sideShape = Shape::bell;
-    double sideHz = -1.0, sideQ = -1.0;
+    double sideHz = -1.0, sideQ = -1.0, sideRate = -1.0;
 
+    /** Clears the filters **and forgets both designs**.
+
+        The caches are keyed on the settings, and neither the cut's grid nor
+        (until 2026-10-03) the sidechain's rate was part of the key -- so a
+        prepare() at another rate, which ends in a reset, found nothing moved
+        and went on running the old rate's coefficients. After 96 kHz -> 48 kHz
+        the detector heard nothing at all. Forgetting the designs here makes
+        the next one a fresh design whatever changed, which is what a reset
+        is for; it costs one design per reset. */
     void reset() noexcept
     {
         for (auto& s : state)     s.reset();
         for (auto& s : sideState) s.reset();
+
+        designedHz = designedQ = designedDepth = -1.0;
+        sideHz = sideQ = sideRate = -1.0;
     }
 
     /** Re-derive the cut if anything it depends on has moved, and set the
@@ -185,15 +197,27 @@ struct Band
 
     /** The detector's filter, redesigned only when its own inputs move. It
         does **not** follow the depth: the band being listened to is a property
-        of the settings, not of how hard the module happens to be working. */
+        of the settings, not of how hard the module happens to be working.
+
+        The rate is part of what it was designed from: the same frequency is a
+        different filter at another rate.
+
+        **A shelf detects at the shelf's own Q**, `effectiveQ`, as the cut
+        does. At the knob's raw Q the high-pass resonated -- +7.96 dB at the
+        corner at the default 2.5, +15.56 at 6 -- so the detector heard the
+        band around the corner several times louder than the shelf it drives
+        would ever treat it. Only the shelf goes through it: a bell's Q is
+        passed exactly as it comes, so the bell's detector is the one it was. */
     void designSide (Shape shape, double hz, double q, double sampleRate) noexcept
     {
         if (shape == sideShape
             && std::abs (hz - sideHz) < 1.0e-9
-            && std::abs (q - sideQ) < 1.0e-9)
+            && std::abs (q - sideQ) < 1.0e-9
+            && sampleRate == sideRate)
             return;
 
-        const auto design = detectorDesign (shape, hz, q, sampleRate);
+        const auto shaped = shape == Shape::highShelf ? (double) effectiveQ (highShelf, (float) q) : q;
+        const auto design = detectorDesign (shape, hz, shaped, sampleRate);
         const auto c = dsp::SvfCoeffs::fromBiquad (design);
 
         if (! design.isFinite() || ! design.isStable() || ! c.isStable())
@@ -201,7 +225,7 @@ struct Band
 
         sideCoeffs = c;
         sideTaps = dsp::SvfTaps::of (c.g, c.k);
-        sideShape = shape; sideHz = hz; sideQ = q;
+        sideShape = shape; sideHz = hz; sideQ = q; sideRate = sampleRate;
     }
 
     /** Walk the live coefficients one sample toward the target. */

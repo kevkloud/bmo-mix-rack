@@ -67,11 +67,35 @@ static_assert (kAutoGain == 158 && kCount == 159);
     the engine, the curve and the panel all read a shelf's through this. */
 inline constexpr float kShelfMaxQ = 2.0f;
 
-/** The Q a band actually runs at: its knob, or kShelfMaxQ for a shelf asked
-    for more. shapeChoice is the stored choice index (kShapeNames). */
+/** The most resonant a Low Cut or High Cut goes: 0.71, the Q knob's default
+    and its closest position to Butterworth's 0.7071, so a cut never boosts.
+    Frosty's decision, 2026-10-03, after the review found a cut at the knob's
+    top (40) peaking +32 dB at its corner, and twelve stacked at the bus
+    test's swept Q of 4.36 adding +154 dB of resonance (+96.6 dBFS out of a
+    -3 dBFS signal; +436.9 dBFS was reachable). At 0.71 a cut peaks at most
+    +0.011 dB anywhere at 48 kHz, so twelve stacked cannot add gain either.
+    Like the shelves' cap it is not a schema change: the parameter keeps
+    0.1-40, its step and its default, and below the cap the knob still sets
+    how soft the corner is. */
+inline constexpr float kCutMaxQ = 0.71f;
+
+/** The Q a band actually runs at: its knob, or the cap for a shelf or a cut
+    asked for more. shapeChoice is the stored choice index (kShapeNames).
+
+    A cut is compared with half a knob step of slack: a host hands the knob's
+    0.71 back as 0.71000004 after snapping it to the 0.01 step, and capping
+    that to the literal's 0.70999998 would move every default cut band by a
+    rounding error and change the bits of sessions saved before the cap. The
+    next position up, 0.72, is capped. */
 inline constexpr float effectiveQ (int shapeChoice, float q) noexcept
 {
-    return (shapeChoice == 1 || shapeChoice == 2) && q > kShelfMaxQ ? kShelfMaxQ : q;
+    if ((shapeChoice == 1 || shapeChoice == 2) && q > kShelfMaxQ)
+        return kShelfMaxQ;
+
+    if ((shapeChoice == 3 || shapeChoice == 4) && q > kCutMaxQ + 0.005f)
+        return kCutMaxQ;
+
+    return q;
 }
 
 inline constexpr int indexOf (int band, Control c) noexcept

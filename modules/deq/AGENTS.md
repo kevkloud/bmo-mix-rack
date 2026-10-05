@@ -26,7 +26,9 @@ one before it. Every decision so far is in `spec/decisions.md`; in short:
   is in core (`ModuleDef::expandedWidth`; `core/AGENTS.md` has the rules) and
   only DEQ uses it.
 - **Knobs show values**, **AUTO** is BMO EQ's static compensation
-  (`dsp/AutoGain.h`), and **a shelf's Q stops at 2** (`kShelfMaxQ`).
+  (`dsp/AutoGain.h`), **a shelf's Q stops at 2** (`kShelfMaxQ`), and **a
+  cut's at 0.71** (`kCutMaxQ`, 2026-10-03: no cut boosts, so twelve stacked
+  cannot resonate).
 - **Serial**, pending the listening test.
 
 ## The panel
@@ -147,6 +149,10 @@ that moves is a design that changed.
 
 ## Where the spec was changed in the tests, and why
 
+`deq_dsp_tests` runs a subset of its switch, cut-peak and shape-change grids
+by default, which is what ctest runs; `deq_dsp_tests --long` runs every row.
+Run `--long` before merging any change to `dsp/`.
+
 Every one of these is argued with numbers in `spec/review-v0.1.md`.
 
 - **T2 absolute targets** are asserted only at f0 ≤ 200 Hz. Above that, a wide
@@ -235,6 +241,69 @@ small.
 - **T4 zipper metric** (≤ −80 dB excess energy) is not implemented; the
   modulation tests assert stability, boundedness and gain-step overshoot.
 - **T9 SIMD across bands** not attempted. The per-sample loop is scalar.
+- **A frequency jump across a tone is not a step to fix.** Moving a +6 dB
+  bell from 100 Hz to 10 kHz at once under a 1 kHz tone reads 2.00x on the
+  switch-step measure, and that is the bell's own +6.02 dB passing over the
+  tone on its 10 ms glide: +3 dB reads 1.42x, +12 dB 3.91x, and no glide
+  length changes it, because the bell does pass through 1 kHz on the way
+  (2026-10-03 review, measured on ICE QUEEN). Left as it is.
+- **A change of shape dips the whole output, not only the band** (round 3
+  of the review, 2026-10-03; the owner's rule for a discrete switch: it may
+  pass through a short dip, it may not click, burst or linger). The output
+  -- everything, every band and the dry signal under them -- fades to zero
+  over 20 ms while the shape arriving warms up on a record of the band's
+  own input (`kShapeHistoryMs`, 640 ms), the band takes it at the bottom,
+  and the output fades back in over 8 ms. Measured in round 4 at 48 kHz: a
+  10 kHz tone with a band at 100 Hz changing shape goes to zero, under
+  -3 dB for 19.8 ms and under -20 dB for 2.8 ms; a 0 dB Bell changed to a
+  shelf, which changes nothing else, dips the same; two bands changed
+  15 ms apart hold it under -3 dB for 33.2 ms. Every blend of two shapes'
+  outputs tried before it cancelled, went over both levels, or burst from a
+  state that was not the arriving shape's own.
+  The record is allocated in prepare() for all twelve bands, on or off:
+  2.95 MB at 48 kHz and 11.8 MB at 192 kHz, per instance.
+  A shape slower than 640 ms can hold (a +24 dB bell at Q 40 under about
+  50 Hz) still arrives settling: up to 1.5 dB over at a tone off its
+  frequency (`DspCore.h`, `kShapeHistoryMs`). A change into a +24 dB Bell
+  at Q 40 and 30 Hz takes 10 to 12 s to come within -63 dB of an instance
+  that always had it; that is the bell's own pole (time constant 1.7 s),
+  the filter and not the switch.
+- **Catching up is one budget for all bands** (`kShapeWarmBudget`, round 4,
+  2026-10-03): one band's whole record over the fade out, 32 filter steps
+  a sample beyond the one each band changing takes. A band changing alone
+  looks back the full 640 ms; twelve slow bands changing in one block look
+  back 40 to 60 ms each; a band beginning while others are still catching
+  up may get none and warm on the 20 ms of the fade alone. Measured on
+  ICE QUEEN, % of the block's real time, mean / p99 / max, best of three
+  runs; twelve Low Shelves at 30-46.5 Hz, +6 dB, Q 40, stereo noise
+  (uniform, -25 dBFS RMS), turned to Bells every 250 ms (one band, or all
+  twelve in one block), timed over the 30 ms after each change:
+
+  | | 48 kHz / 512 | 192 kHz / 32 |
+  |---|---|---|
+  | held | 1.09 / 1.15 / 1.37 | 4.72 / 5.16 / 16.38 |
+  | one band changing | 1.60 / 1.93 / 1.95 | 8.16 / 11.10 / 15.78 |
+  | twelve changing in one block | 2.01 / 2.58 / 2.72 | 11.83 / 16.74 / 19.50 |
+  | twelve, before the budget (6061b89) | 7.27 / 10.99 / 11.01 | 35.62 / 53.58 / 64.98 |
+
+  `testShapeWarmUpIsBudgeted` counts the steps (44 a sample for twelve,
+  33 for one alone).
+- **Several bands changing shape at once are outside the switch criteria,
+  before the budget and after it** (round 4, 2026-10-03, measured on
+  ICE QUEEN at 48 and 192 kHz, which agree within 0.1 dB). In series each
+  band's record is of what the bands before it did *before* they changed,
+  so its arriving shape warms on input it will not hear. Twelve Low
+  Shelves at 30-46.5 Hz and Q 40 turned to Bells in one block, a tone at a
+  band's frequency or -18 dBFS RMS noise, before -> after the budget:
+  +6 dB never goes over, its step 2.71x at 37.5 Hz either way and 1.45x ->
+  1.75x at 46.5 Hz; +24 dB at 37.5 Hz, +17.5 dB / 14.6x -> -4.3 dB / 1.37x;
+  -24 dB at 30 Hz, +9.0 dB / 7.1x -> +17.8 dB / 29.0x, and its worst cell,
+  46.5 Hz, +25.0 dB / 85x -> +25.1 dB / 86x. Three bands' worth of budget
+  (23.2 % p99) still leaves +14.0 dB / 17.5x. One band of the same twelve
+  changing alone is not cleared either: the round 4 probe reads +29 to
+  +169 dB over on tones at the other bands' frequencies, identical before
+  and after the budget, and not yet explained. The grid (one band, alone in
+  the EQ) is inside the criteria.
 - **Bell precision at f0 < 3e-4 Fs**: 2e-6 dB off the knob gain from
   cancellation in the zero fit. Inaudible; fixable by computing 1 ± a1 + a2
   from the pole radius and angle rather than from a1, a2.

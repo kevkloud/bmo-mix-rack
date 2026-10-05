@@ -49,7 +49,7 @@ Order of operations: GAIN → polarity → MONO → WIDTH → PAN. Zero latency.
   nothing crashes.
 
 ## 7. Presets
-- Mono Check, Flip Polarity, Side Only, Narrow, Pad −6: each does only the
+- Mono Check, Flip Polarity, Wide, Narrow, Pad −6: each does only the
   thing it is named for and nothing carries over from the previous preset.
 
 ## 8. Look (do not judge)

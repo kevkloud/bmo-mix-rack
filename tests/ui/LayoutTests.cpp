@@ -25,6 +25,8 @@
 #include "modules/deesser/panel/DeesserPanel.h"
 #include "modules/deesser/params.h"
 #include "products/dim/Product.h"
+#include "modules/dim/params.h"
+#include "modules/dim/dsp/DspCore.h"
 #include "products/dwell/Product.h"
 #include "modules/dwell/params.h"
 #include "modules/dwell/panel/DwellPanel.h"
@@ -1615,6 +1617,54 @@ void checkDeesserPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
         check (bell->getToggleState(), who + " the parameter lights the shape pair, not the click");
     }
 
+    //== Q dims in SHELF, where it reaches nothing ============================
+    //
+    // A control a mode makes inert is dimmed (modules/AGENTS.md). A shelf runs
+    // at kShelfQ whatever the knob says (the owner's decision, 2026-10-03), so
+    // Q does nothing there, and the panel must say so on the same function the
+    // engine designs through. Driven through the parameter rather than a click,
+    // because automation and a preset recall reach the panel that way; and the
+    // value must survive the round trip, because a mode that reset the knob to
+    // make the dim "true" would pass a check on the dim alone.
+    {
+        namespace D = bmo::deesser;
+
+        const auto qLive = [&]() -> int
+        {
+            auto* found = dynamic_cast<bmo::ui::PlainKnob*> (findNamed (panel, "Q"));
+            const auto* face = found != nullptr ? knobFace (*found) : nullptr;
+
+            if (face == nullptr)
+            {
+                check (false, who + " has no Q knob with a rotary under it");
+                return -1;
+            }
+
+            return face->isEnabled() ? 1 : 0;
+        };
+
+        params.setReal (D::Index::q, 4.0f);
+
+        params.setReal (D::Index::shape, (float) D::highShelf);
+        check (qLive() == 0, who + " Q should dim in SHELF, which runs at one Q whatever it says");
+        check (D::effectiveQ (D::highShelf, 0.7f) == D::effectiveQ (D::highShelf, 6.0f),
+               who + " the engine should agree a shelf ignores Q");
+
+        params.setReal (D::Index::shape, (float) D::bell);
+        check (qLive() == 1, who + " Q should be live in BELL");
+        check (D::effectiveQ (D::bell, 0.7f) != D::effectiveQ (D::bell, 6.0f),
+               who + " the engine should agree a bell reads Q");
+
+        params.setReal (D::Index::shape, (float) D::highShelf);
+        check (qLive() == 0, who + " Q should dim again on the way back to SHELF");
+
+        checkNear (params.getReal (D::Index::q), 4.0, 1.0e-3,
+                   who + " SHAPE must not write the Q it is ignoring");
+
+        params.setReal (D::Index::shape, (float) D::bell);
+        params.setReal (D::Index::q, D::specs()[D::Index::q].def);
+    }
+
     //== One GR bar, scaled to what the module can actually do ================
     //
     // The needle and its IN/GR/OUT row went on 2026-09-20 (Frosty). Two of
@@ -1763,6 +1813,145 @@ void checkDeesserPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
         params.setReal (bmo::deesser::Index::shape, (float) bmo::deesser::bell);
         params.setReal (bmo::deesser::Index::range, 8.0f);
     }
+}
+
+/** BMO Dimension dims what its DSP ignores (modules/AGENTS.md, "A control a
+    mode makes inert is dimmed"). Four controls decide it -- GENERATE,
+    DIMENSION, BLOOM and TURN -- and the expected state of every knob is
+    written out here per state rather than read off the functions the panel
+    asks: a test that took its answer from the same place the panel does
+    would agree with any answer. DimDspTests holds the functions to the
+    audio; this holds the panel to them, and the values to what the user
+    set. */
+void checkDimPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
+{
+    namespace D = bmo::dim;
+
+    auto& params = panel.getContext().params;
+
+    const auto live = [&] (const char* caption) -> int
+    {
+        auto* found = dynamic_cast<bmo::ui::PlainKnob*> (findNamed (panel, caption));
+        const auto* face = found != nullptr ? knobFace (*found) : nullptr;
+
+        if (face == nullptr)
+        {
+            check (false, who + " has no " + caption + " knob with a rotary under it");
+            return -1;
+        }
+
+        return face->isEnabled() ? 1 : 0;
+    };
+
+    // Values a dim must not eat: set before any state is visited, read back
+    // after the last.
+    params.setReal (D::Index::detune,      17.5f);
+    params.setReal (D::Index::diffuse,     40.0f);
+    params.setReal (D::Index::shuffleFreq, 900.0f);
+    params.setReal (D::Index::asymmetry,   -30.0f);
+
+    struct State
+    {
+        const char* name;
+        bool  generate;
+        float width, bloom, turn;
+        int   detune, drift, dimension, bloomLive, below, turnLive, tilt;
+    };
+
+    const State states[]
+    {
+        // GENERATE off: DETUNE only sets the voices' pitch and nothing is
+        // injected. BLOOM at 1.0: the shuffler is unity, so its corner does
+        // nothing. DRIFT stays live -- it works on any side content, not only
+        // what GENERATE makes.
+        { "GENERATE off, BLOOM 1",          false, 100.0f, 1.0f, 0.0f,  0, 1, 1, 1, 0, 1, 1 },
+        { "everything engaged",             true,  100.0f, 3.0f, 0.0f,  1, 1, 1, 1, 1, 1, 1 },
+
+        // DIMENSION 0 zeroes the side after generate, drift and bloom, so all
+        // of them are dead. TURN is not: it turns mid into side after the
+        // zeroing. TILT reads the side after TURN, so it is dead only while
+        // TURN is at 0.
+        { "DIMENSION 0, TURN 0",            true,  0.0f,   3.0f, 0.0f,  0, 0, 1, 0, 0, 1, 0 },
+        { "DIMENSION 0, TURN 30",           true,  0.0f,   3.0f, 30.0f, 0, 0, 1, 0, 0, 1, 1 },
+        { "GENERATE off, BLOOM 3, TURN 30", false, 100.0f, 3.0f, 30.0f, 0, 1, 1, 1, 1, 1, 1 },
+
+        // GENERATE on where nothing it makes reaches the output, and off in
+        // the same place: the switch is lit in the first and simply off in
+        // the second, never dimmed (checked below).
+        { "GENERATE on, DIMENSION 0, BLOOM 1",  true,  0.0f, 1.0f, 0.0f, 0, 0, 1, 0, 0, 1, 0 },
+        { "GENERATE off, DIMENSION 0, BLOOM 1", false, 0.0f, 1.0f, 0.0f, 0, 0, 1, 0, 0, 1, 0 },
+        { "back to GENERATE off, BLOOM 1",  false, 100.0f, 1.0f, 0.0f,  0, 1, 1, 1, 0, 1, 1 },
+    };
+
+    // GENERATE is never dimmed -- Frosty, 2026-10-03: "don't dim the generate
+    // button if it is active". It is the switch, the way back in; at
+    // DIMENSION 0 it is still on, just not heard. So in every state it is
+    // enabled, not locked, at full alpha, and shows its parameter: lit when
+    // on, plainly off when off, as on main.
+    const auto generateShows = [&] (bool on, const juce::String& where)
+    {
+        auto* sw = dynamic_cast<bmo::ui::SwitchButton*> (findNamed (panel, "GENERATE"));
+
+        if (sw == nullptr)
+        {
+            check (false, who + " has no GENERATE switch");
+            return;
+        }
+
+        juce::ToggleButton* button = nullptr;
+        for (auto* child : sw->getChildren())
+            if (auto* b = dynamic_cast<juce::ToggleButton*> (child))
+                button = b;
+
+        check (button != nullptr, where + " GENERATE has a button");
+
+        if (button == nullptr)
+            return;
+
+        check (sw->isEnabled() && button->isEnabled(), where + " GENERATE is not dimmed");
+        check (sw->getAlpha() == 1.0f && button->getAlpha() == 1.0f, where + " GENERATE is at full strength");
+        check (! sw->isLockedOn(), where + " GENERATE is not locked");
+        check (button->getToggleState() == on, where + " GENERATE shows " + (on ? "on" : "off"));
+    };
+
+    for (const auto& s : states)
+    {
+        // Through the parameters, as a host lane or a preset recall moves
+        // them: the panel has to follow without a click.
+        params.setReal (D::Index::detuneOn, s.generate ? 1.0f : 0.0f);
+        params.setReal (D::Index::width,    s.width);
+        params.setReal (D::Index::shuffle,  s.bloom);
+        params.setReal (D::Index::rotation, s.turn);
+
+        const auto where = who + ", " + s.name + ":";
+
+        checkEquals (live ("DETUNE"),    s.detune,    where + " DETUNE live");
+        checkEquals (live ("DRIFT"),     s.drift,     where + " DRIFT live");
+        checkEquals (live ("DIMENSION"), s.dimension, where + " DIMENSION live");
+        checkEquals (live ("BLOOM"),     s.bloomLive, where + " BLOOM live");
+        checkEquals (live ("BELOW"),     s.below,     where + " BELOW live");
+        checkEquals (live ("TURN"),      s.turnLive,  where + " TURN live");
+        checkEquals (live ("TILT"),      s.tilt,      where + " TILT live");
+
+        // And the functions the engine's tests hold to the audio agree with
+        // the table, so the panel cannot be right by accident.
+        check (D::centsIsLive (s.generate, s.width) == (s.detune == 1),       where + " centsIsLive agrees");
+        check (D::diffuseIsLive (s.width) == (s.drift == 1),                  where + " diffuseIsLive agrees");
+        check (D::shuffleIsLive (s.width) == (s.bloomLive == 1),              where + " shuffleIsLive agrees");
+        check (D::shuffleFreqIsLive (s.width, s.bloom) == (s.below == 1),     where + " shuffleFreqIsLive agrees");
+        check (D::asymmetryIsLive (s.width, s.turn) == (s.tilt == 1),         where + " asymmetryIsLive agrees");
+
+        generateShows (s.generate, where);
+    }
+
+    checkNear (params.getReal (D::Index::detune),      17.5,  1.0e-3, who + " a dim must not write DETUNE");
+    checkNear (params.getReal (D::Index::diffuse),     40.0,  1.0e-3, who + " a dim must not write DRIFT");
+    checkNear (params.getReal (D::Index::shuffleFreq), 900.0, 1.0e-3, who + " a dim must not write BELOW");
+    checkNear (params.getReal (D::Index::asymmetry),   -30.0, 1.0e-3, who + " a dim must not write TILT");
+
+    // Back to the defaults, so the panel is left as it was found.
+    for (int i = 0; i < D::Index::count; ++i)
+        params.setReal (i, D::specs()[(size_t) i].def);
 }
 
 /** BMO Linger's panel: the paged handheld.
@@ -3938,6 +4127,44 @@ int main (int argc, char** argv)
         checkReverbPanel (panel, "reverb");
     });
 
+    // BMO Dimension's dims. Its own panel, because this one moves parameters
+    // and every check above reads a panel that has not been touched.
+    withPanel (named ("dim"), [] (bmo::ui::ModulePanel& panel)
+    {
+        checkDimPanel (panel, "dim");
+
+        // OUTPUT (2026-10-03) is in the suite's output section, Frosty's
+        // choice from two renders: the rule on the shared line, the knob on
+        // rows 602..679 at the trim size, and the switch row between them
+        // empty, since this module has no output switches.
+        checkOutputRule      (panel, "dim");
+        checkOutputSection   (panel, "dim");
+        checkTrimKnobHeights (panel, "dim", { "OUTPUT" });
+
+        for (auto* child : panel.getChildren())
+            check (! child->isVisible() || ! child->getBounds().intersects (juce::Rectangle<int> (0, 574, panel.getWidth(), 28)),
+                   "dim's output switch row is empty, but " + child->getName() + " is in it");
+
+        // What the section cost: DIMENSION at 132 (its box is knob + 30), and
+        // the SOURCE legend centred 8 px down the panel where it was 18. All
+        // four derived gaps are at their floor, so a block that grows has to
+        // say where its pixels come from.
+        if (auto* dimension = findNamed (panel, "DIMENSION"))
+            checkEquals (dimension->getHeight(), 162, "dim DIMENSION box is the 132 px knob plus 30");
+        else
+            check (false, "dim has no DIMENSION knob");
+
+        bool sawSource = false;
+        for (const auto& rule : panel.getRules())
+            if (rule.text == "SOURCE")
+            {
+                sawSource = true;
+                checkEquals (rule.row.getCentreY(), 8, "dim SOURCE legend centre");
+            }
+
+        check (sawSource, "dim has a SOURCE legend");
+    });
+
     // BMO Util reserves the output section and adopts neither half of it. This
     // is the case that proves a reservation is worth anything.
     withPanel (named ("util"), [] (bmo::ui::ModulePanel& panel)
@@ -4060,6 +4287,28 @@ int main (int argc, char** argv)
             // exactly that reason.
             checkReverbPanel (*linger, "rack reverb");
         }
+
+        rack->editorBeingDeleted (editor.get());
+        editor.reset();
+    }
+
+    // BMO Dimension in a rack: the same dims over generic `SlotParameter`s,
+    // which is where a ParameterAttachment that only worked on the standalone
+    // parameters would show.
+    {
+        auto rack = createRack();
+        rack->prepareToPlay (48000.0, 512);
+        rack->clearChain();
+        rack->addModule (*rack->findModule ("dim"));
+
+        std::unique_ptr<juce::AudioProcessorEditor> editor (rack->createEditorAndMakeActive());
+        std::vector<bmo::ui::ModulePanel*> panels;
+        collectPanels (*editor, panels);
+
+        check (panels.size() == 1, "a dim rack has one panel");
+
+        if (panels.size() == 1)
+            checkDimPanel (*panels[0], "rack dim");
 
         rack->editorBeingDeleted (editor.get());
         editor.reset();

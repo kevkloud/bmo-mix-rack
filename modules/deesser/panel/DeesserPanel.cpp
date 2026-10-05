@@ -108,10 +108,11 @@ float BandSketch::responseDbAt (float hz) const noexcept
     const auto w0 = (double) freqHz;
 
     // A shelf's Q through effectiveQ, which is what the engine will design
-    // through: past 2 the shelf grows a resonant dip below its corner and
-    // climbs back above it, which is not a shelf. The knob still reads what it
-    // reads -- Q is one parameter whatever the shape. This picture drawing the
-    // raw Q is how the rule was found; see modules/deesser/params.h.
+    // through: a shelf runs at kShelfQ whatever the knob says, because any
+    // more grows a rise below its corner and a cut past RANGE above it. The
+    // knob still reads what it reads -- Q is one parameter whatever the shape.
+    // This picture drawing the raw Q is how the rule was found; see
+    // modules/deesser/params.h.
     const auto qq = (double) juce::jmax (0.1f, effectiveQ (shapeChoice, q));
 
     // The cut, as a linear gain: `range` is a depth, so it enters negative.
@@ -388,6 +389,15 @@ void DeesserPanel::showShape (int choice)
 {
     bellButton .setToggleState (choice == bell,      juce::dontSendNotification);
     shelfButton.setToggleState (choice == highShelf, juce::dontSendNotification);
+
+    // **A control a mode makes inert is dimmed** (Frosty, 2026-10-02, for every
+    // module). A shelf runs at kShelfQ whatever Q says, so Q dims in SHELF --
+    // caption and all, never locked and never written: the value is kept, it
+    // still automates, and BELL gives it back. `qIsLive` is the function the
+    // engine's `effectiveQ` asks, so the panel and the audio cannot disagree.
+    // This runs from the shape's attachment, so automation and a preset recall
+    // dim it exactly as a click does.
+    qKnob.setKnobEnabled (qIsLive (choice));
 }
 
 void DeesserPanel::setListening (bool shouldListen)

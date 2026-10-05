@@ -216,9 +216,23 @@ struct Golden
     cross is a tolerance wide enough to hide a change. If a future failure
     reports a delta anywhere near these numbers, that is a regression and not
     float noise. The message prints the delta so that is visible rather than
-    inferred. */
+    inferred.
+
+    **The peak bound off MSVC is 1e-4, since 2026-10-04.** The rack's swept
+    row then missed on macOS by 3.5e-5 in one figure (the right channel's
+    peak, 0.979872 against 0.979837, 0.0003 dB) while every RMS figure and
+    every other peak held, and Windows matched the same goldens. That row
+    runs eight modules in series, and several of their smoothers now land
+    "when a step makes no further progress", which is exact within one
+    maths library and falls a sample or two apart across two; a peak is one
+    sample, so it shows there first. Under MSVC, where the goldens are made,
+    the bound stays 1e-5. */
 constexpr double kRmsTol  = 1.0e-3;   // dB
+#if defined (_MSC_VER)
 constexpr double kPeakTol = 1.0e-5;   // linear
+#else
+constexpr double kPeakTol = 1.0e-4;   // linear
+#endif
 
 void checkGolden (double actual, double expected, double absTol, const juce::String& what)
 {
@@ -466,10 +480,23 @@ const Golden kDefaults[]
       -18.752053514, 0.263523042202, -18.752053514, 0.263523042202 },
 };
 
-// BMO DEQ's swept row is loud on purpose and is not a fault: 0.63 turns all 24
-// bands on and boosts each of them, and 24 stacked boosts is +90 dB. The
-// filters are stable -- it is plain gain, not a runaway -- and the number is
-// deterministic, which is all a fingerprint has to be.
+// BMO DEQ at 0.63 turns all 12 bands on as Low Cuts at 1552.5 Hz, Q 4.36,
+// with AUTO on and the output at +6.2 dB. Until 2026-10-03 each of those cuts
+// resonated +12.85 dB at its corner, twelve stacked made +154 dB, and this row
+// read +89.70 dBFS RMS with a peak of 67366 (+96.6 dBFS) -- not a runaway,
+// but a cut that could boost without limit. Frosty capped the cuts' Q at
+// kCutMaxQ (0.71) that day, as the shelves' already was, and the row was
+// regenerated on ICE QUEEN as the record of that decision:
+//
+//   mono            +89.700048 dBFS RMS, peak 67366   -> -11.470041, 0.886605
+//   stereo L / R    +84.742162 / +84.742162, 53060.81 / 53060.84
+//                                                     -> -3.771258 / -3.769610, 1.880584 / 1.907981
+//
+// The stereo rows sit higher than mono because the swept placement is Mid:
+// the side of a decorrelated pair passes the twelve cuts untouched and still
+// takes AUTO's +10.6 dB and the output's +6.2 dB. The "rack" swept row
+// below moved with it, because BMO DEQ is the sixth of its eight slots; no
+// tolerance was touched.
 const Golden kSwept[]
 {
     { "util",
@@ -503,22 +530,46 @@ const Golden kSwept[]
       -20.0948769542, 0.336609631777,
       -21.2901275396, 0.277803987265, -21.1450327082, 0.417769670486,
       -20.0948769542, 0.336609631777, -20.0948769542, 0.336609631777 },
+    // BMO Dimension at 0.63 has GENERATE on and DETUNE at 0.63 of its travel,
+    // so this row hears the detune voices. Regenerated on ICE QUEEN,
+    // 2026-10-03, for this row alone, when the voices' sweep phase went to
+    // double precision. In single precision the up voice was 0.02 to 0.03
+    // cents off at either step beside 15.75 (+15.68 for 15.7, +15.83 for
+    // 15.8, measured at 48 kHz) and the read position was rounded to a
+    // thousandth of a sample; now both voices deliver their setting to 0.001.
+    // Against the row before, the RMS figures moved by up to 0.0059 dB and the
+    // peaks by up to 2.4e-3 on 0.53 (0.04 dB). The mono figures did not move,
+    // and the rack's swept row moved by 1e-4 dB, inside its tolerance.
+    //
+    // Regenerated again the same day for OUTPUT, the eleventh parameter,
+    // which 0.63 of normalised puts at +6.2 dB: every RMS figure is exactly
+    // 6.2 dB up and every peak 10^(6.2/20) = 2.042 times larger, the mono one
+    // included (the trim is a level, so it applies on a mono instance too).
+    // Nothing else in the row moved, and the defaults row, with OUTPUT at
+    // 0 dB, did not move at all.
     { "dim",
-      -18.0000001899, 0.237879320979,
-      -12.0777680029, 0.615875780582, -15.4762951629, 0.465581327677,
-      -23.1036245406, 0.199254766107, -12.8562159113, 0.526588916779 },
+      -11.7999998243, 0.485687255859,
+      -5.87867470619, 1.25943660736, -9.278296506, 0.950595080853,
+      -16.9095587195, 0.408530026674, -6.65830929824, 1.07017970085 },
     { "deq",
-      89.7000479803, 67366,
-      84.7421622782, 53060.8125, 84.7421621754, 53060.8398438,
-      89.7000479803, 67366, 89.7000479803, 67366 },
+      -11.470041361, 0.886605024338,
+      -3.77125845442, 1.88058388233, -3.76960981771, 1.90798139572,
+      -11.470041361, 0.886605024338, -11.470041361, 0.886605024338 },
     { "ltvcomp",
       -7.16919915094, 0.988553106785,
       -10.8123103775, 0.853308975697, -9.8115626611, 0.988553166389,
       -7.16919915094, 0.988553106785, -7.16919915094, 0.988553106785 },
+    // BMO Defang at 0.63 of normalised is in SHELF shape, and on 2026-10-03
+    // the owner decided a shelf has no boost and never cuts past RANGE: it
+    // runs at Q 0.707 whatever the knob says, and its detector at the same Q.
+    // Regenerated on ICE QUEEN with --print for this row alone, as the record
+    // of that decision: RMS up by 0.05-0.10 dB, peaks by under 0.0032, the
+    // resonant shelf having cut deeper than RANGE. The defaults row (Bell) did
+    // not move.
     { "deesser",
-      -18.1231178049, 0.234146103263,
-      -18.0548834769, 0.236055493355, -18.0545154892, 0.239385798573,
-      -18.1231178049, 0.234146103263, -18.1231178049, 0.234146103263 },
+      -18.0229176871, 0.237327337265,
+      -18.0033021984, 0.23783005774, -18.0033560106, 0.239815115929,
+      -18.0229176871, 0.237327337265, -18.0229176871, 0.237327337265 },
     { "fetcomp",
       -14.1968014623, 0.385867774487,
       -14.3174488279, 0.38244971633, -14.2261054655, 0.383085817099,
@@ -563,10 +614,22 @@ const Golden kSwept[]
     // answers the louder start more strongly: against main's row, RMS -0.040
     // (mono), -0.077 / -0.074 (stereo L / R), -0.044 / -0.041 (duplicate and
     // mono -> stereo L / R) dB, and every peak up by 0.0028 to 0.0075.
+    // Regenerated on ICE QUEEN, 2026-10-03, for BMO DEQ's cut Q cap (see the
+    // note above this table). Mono RMS -12.3128 dBFS (6f6b8c3) -> -17.8614,
+    // peak 1.16623 -> 0.98509. The branch this was made on also carried BMO
+    // EQ's switch fixes, which had moved this row to -12.3533 / 1.16854 on
+    // their own; the figures here are both together.
+    // Regenerated once more on ICE QUEEN, 2026-10-03, with --print, when the
+    // Dimension, dynamic equaliser, LTV Comp and Defang fixes were brought
+    // together on top of all of the above. Mono RMS, built at each step:
+    // -11.7196 (before) -> -11.4156 with Dimension (OUTPUT +6.2 dB at 0.63),
+    // -> -16.1270 with the DEQ cut Q cap, unchanged by LTV Comp, -> -14.9040
+    // with Defang's shelf decision. Peak 1.16199 -> 0.98121. No tolerance
+    // was touched.
     { "rack",
-      -11.7195631752, 1.16198933125,
-      -11.317069677, 1.15757536888, -11.2731589041, 1.15886342525,
-      -11.854487306, 1.15360951424, -11.8121786505, 1.15331184864 },
+      -14.904039426, 0.98121213913,
+      -16.1090252929, 0.984293937683, -16.8254629299, 0.96965867281,
+      -13.4428295266, 0.98645991087, -13.7304542727, 0.979837238789 },
 };
 
 const Golden* goldenFor (const Golden* table, size_t n, const char* id)

@@ -3,6 +3,34 @@
 The spec (`spec-v0.1.md`) is kept as received. Decisions that change it are
 recorded here, newest first, with who made them and what evidence they rest on.
 
+## 2026-10-03 — Frosty: a cut's Q stops at 0.71
+
+From the rack review. A Low Cut or High Cut at the Q knob's top (40) peaked
++32 dB at its corner; the bus test's swept setting stacks twelve at Q 4.36
+(+12.85 dB each, +154 dB together) and put the module out at +96.6 dBFS on a
+-3 dBFS signal, and +436.9 dBFS was reachable. **Cap the cut shapes' Q, as
+the shelves' already is.** `kCutMaxQ` in `params.h`, read through
+`effectiveQ` by the engine, the curve and the panel alike.
+
+Resonance peak of the matched design at 48 kHz: the largest |H| of
+`designMatched` for a Low Cut and a High Cut with corners at 100 Hz, 1 kHz
+and 10 kHz, read at log-spaced points (ratio 1.0005) from 10 Hz to 0.499 fs,
+worst of the six, measured on ICE QUEEN:
+
+| Q | 0.71 | 0.75 | 0.8 | 1.0 | 1.3 | 2.0 | 4.36 | 40 |
+|---|---|---|---|---|---|---|---|---|
+| peak dB | +0.011 | +0.098 | +0.295 | +1.385 | +3.140 | +6.482 | +13.035 | +32.230 |
+
+**0.71 was chosen**: the knob's default and its closest position to
+Butterworth's 0.7071, so a cut never boosts, twelve stacked cannot either,
+and a default cut band is the cut it always was. The runner-up was a stated
++3 dB of bump (Q 1.30): +35.7 dB for twelve stacked. The shelves' own 2 would
+have left +75.6 dB. No factory preset uses a cut (Init's two default cut
+bands are off, and at Q 0.71 sit at the cap). The parameter is unchanged --
+0.1-40, step 0.01, default 0.71 -- and below the cap the knob still softens
+the corner, so it is not dimmed: the panel writes it back to the cap after a
+user action leaves a cut above it, exactly as it does a shelf (`clampShelfQ`).
+
 ## 2026-09-15 — the UI pass: a dimmed control's caption, and what GR shows
 
 From module 2 of the UI pass on **AURORA**; the measurements and the renders

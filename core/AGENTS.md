@@ -116,16 +116,27 @@ rack/     SlotParameter (one generic host parameter, remapped live),
   signals: no stale audio from the moment bypass began, no dip, settled
   bit-exact on either path. The cost is the modules' processing while
   bypassed, the same as while not; a host that wants the CPU back
-  deactivates the plugin. A block larger than prepare promised cuts instead
-  of fading. `bus_tests` holds both directions, both products, for BMO EQ at
+  deactivates the plugin. **So the plugin's own bypass returns no CPU**
+  (measured on ICE QUEEN, 2026-10-04, eight modules at 192 kHz / 32: 156 us
+  a block bypassed against 157 us processing), and that is the price of the
+  clean switch back: an engine stopped while bypassed would come back
+  holding the moment it stopped. A block larger than prepare promised is
+  outside what a host may send; it is handled anyway, but it cuts instead
+  of fading -- measured 6.84x the steady signal's sample-to-sample step out
+  of bypass and 3.75x into it. In the rack such a block also runs without
+  the edit warming, so an engine an edit brings in starts cold; and while
+  bypassed the chain is not run for it at all, so an edit waiting to be
+  swapped in waits for the next block that fits. `bus_tests` holds both directions, both products, for BMO EQ at
   2x and 8x, BMO Util at +6 dB, the FET compressor and the delay.
 - **A module this build does not have keeps its slot** (2026-10-04), so a
   session saved by a later release with a new module survives being opened
   and saved here. On restore its SLOT element is kept (`Slot::unknown`); the
   slot has no def and no engine, passes audio through bit for bit, keeps its
   lanes generic and inert, and so the modules after it keep their lanes and
-  automation. `captureState` writes the element back verbatim, its own
-  index attribute included; a chain edit around it carries it; removing it
+  automation. `captureState` writes the element back verbatim, every
+  original attribute kept, its own `index` included -- which a restore
+  ignores, since a slot's position is its order among the SLOT elements, so
+  an `index` that disagrees with that order is harmless; a chain edit around it carries it; removing it
   is a normal remove; the editor shows a remove-only placeholder naming the
   id. `getModuleAt` is null for it and `getNumModules` counts it, so any
   code walking the chain must check. No tag, attribute or lane changed, and

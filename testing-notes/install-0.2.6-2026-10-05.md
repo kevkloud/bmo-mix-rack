@@ -9,7 +9,19 @@ and every bundle verified by SHA-256 against the artifact after the copy.
 rc1 tag's run (link-time optimisation on, as every tag build), downloaded on
 2026-10-05 with the owner's approval; the `v0.2.6` tag's own run was still
 building at the time of the install and its artifact is to be compared with
-this one by hash when it lands (same source, same configuration). `Version`
+this one by hash when it lands (same source, same configuration).
+
+**Compared on 2026-10-06, after the `v0.2.6` run (`37410860312`) went green on
+all four jobs:** the two artifacts differ in every bundle's bytes (a
+link-time-optimised build is not reproducible byte for byte between runs), and
+their audio fingerprints, recorded by each run's own Windows job, are
+identical in all 108 lines, hashes included. So what is installed from the rc1
+run and what the `v0.2.6` tag built are the same audio to the bit; the rc1
+artifact stays installed, and the `v0.2.6` artifact's bundle hashes begin
+`204cab80` (CEQ), `996713cf` (DEQ), `f3d57cd4` (Defang), `208c3ff6`
+(Dimension), `7bd81940` (Dwell), `4bcccb88` (FET), `fdd0b8d5` (Linger),
+`5f6207ae` (Mix Rack), `e4a3ce28` (Opto), `43776adb` (Saturator), `4da9ad98`
+(Tune RT), `fcab6d3b` (Util), `76447317` (LTV Comp). `Version`
 in every `moduleinfo.json` reads **0.2.6** (39 of 39 files).
 
 **What the bundles that were there were:** not 0.2.5. Twelve of the thirteen

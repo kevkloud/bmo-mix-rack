@@ -31,7 +31,7 @@ and to test 0.2.6 directly.
 | BMO Opto | `c0b6e0a725648d39db8ceed402bef753a9e9f15a611a6d3ac50d3796ad4a4dc8` |
 | BMO Saturator | `e88160375390c424e9fc770e380fb4703751f7674847ac4825ea638e45659e3a` |
 | BMO Tune RT | `36a4f11090332ac8fe9c60f1b6d092cfca55c509e3823dfbc28fe76fe0d6fcd2` |
-| BMO Util | `2818ba5a3b7a1e8e1f41b36b8ecdd89494cb4e4ee42e405c82eb734e1f13640` |
+| BMO Util | `2818ba5a3b7a1e8ed5f41b36b8ecdd89494cb4e4ee42e405c82eb734e1f13640` |
 | LTV Comp | `1abe2aeb98a92653984ae19840cd9d79c1ef21c0b3a5be3ab0227afc5d0c987a` |
 
 VST3 only, as before: the artifact's thirteen Standalone builds were not

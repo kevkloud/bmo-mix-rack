@@ -2198,6 +2198,14 @@ int main (int argc, char** argv)
                 v[(size_t) Index::erdensity] = 100.0f;
             }
 
+            // **Modulation off for this comparison.** Each line's delay wanders on
+            // its own random path from the moment the network lands, so an
+            // instance that has run ten seconds of silence and one that has run
+            // none are at different points on it and are not the same samples,
+            // however exactly both are at their settings. What is compared
+            // here is the settings.
+            v[(size_t) Index::moddepth] = 0.0f;
+
             auto settled = fresh (v, c.rate);
             play (*settled, v, (int) (10.0 * c.rate), true);
             const auto reference = play (*settled, v, (int) c.rate, false);
@@ -3255,7 +3263,9 @@ int main (int argc, char** argv)
     {
         const auto onset = [rate] (float preMs)
         {
-            const auto ir = renderTail ([preMs] (DspCore::Params& p) { p.preDelayMs = preMs; }, rate, 512, 0.5f);
+            // Modulation off: it moves each line's first arrival by up to its
+            // depth, and this measures the pre-delay to the sample.
+            const auto ir = renderTail ([preMs] (DspCore::Params& p) { p.preDelayMs = preMs; p.modDepthMs = 0.0f; }, rate, 512, 0.5f);
             float peak = 0.0f;
             for (int i = 0; i < ir.size(); ++i)
                 peak = std::max (peak, std::abs (ir.l[(size_t) i]) + std::abs (ir.r[(size_t) i]));
@@ -3686,6 +3696,10 @@ int main (int argc, char** argv)
             c.dampLo = c.dampHi = 2.0f;
             c.loKneeHz = constantsFor (room).dampLoFreqHz;
             c.hiKneeHz = constantsFor (room).dampHiFreqHz;
+            // Modulation off: these figures pin what a length move takes from
+            // the tail. The interpolated reads modulation needs shave a little
+            // off the top of every pass as well, which is measured on its own.
+            c.modDepthMs = 0.0f;
             Late late;
             late.setConfig (c);
             late.prepare (rate, block);
@@ -4704,6 +4718,154 @@ int main (int argc, char** argv)
                       << s.ratio << ", settles at " << s.settled << ")\n";
             check (jump <= 3.0, (std::string (m.name) + ": no 1 ms energy jump above 3 dB in the tail").c_str());
         }
+    }
+
+    //==========================================================================
+    //== M3b: modulation, the input stage and the onset.
+    //==========================================================================
+
+    //== Modulation never detunes a line by more than 3 cents ===================
+    //
+    // 10 section 4 and 11 section 6: each line's delay wanders on a random
+    // path, and a delay changing at dT/dt detunes what passes through it by
+    // 1200 log2 (1 + dT/dt) cents. Read off the modulators themselves, every
+    // sample, at the corners of MOD DEPTH and MOD RATE and at four rates: the
+    // steepest step is at most the 3-cent slope, the deviation stays inside
+    // the depth asked for, the lines do move, and no two move together.
+    {
+        float worstCents = 0.0f;
+        bool inside = true, moves = true, apart = true;
+
+        for (const auto rate : { 44100.0, 48000.0, 96000.0, 192000.0 })
+            for (const auto& corner : { std::array<float, 2> { 0.8f, 1.2f }, std::array<float, 2> { 0.8f, 0.1f },
+                                        std::array<float, 2> { 0.1f, 1.2f }, std::array<float, 2> { 0.28f, 0.5f } })
+            {
+                LateConfig c;
+                c.modDepthMs = corner[0];
+                c.modRateHz  = corner[1];
+                DspCore::Late late;
+                late.setConfig (c);
+                late.prepare (rate, 64);
+
+                const auto depthSamples = corner[0] * 0.001f * (float) rate;
+                float in[64] {}, l[64], r[64];
+                float last[DspCore::kNumLines] {}, peak[DspCore::kNumLines] {};
+                double dot01 = 0.0, e0 = 0.0, e1 = 0.0;
+                float steepest = 0.0f;
+
+                // One sample a call, so every sample of every path is seen.
+                for (int n = 0; n < (int) (12.0 * rate); ++n)
+                {
+                    late.process (in, l, r, 1);
+                    for (int i = 0; i < DspCore::kNumLines; ++i)
+                    {
+                        const auto m = late.modulationSamples (i);
+                        steepest = std::max (steepest, std::abs (m - last[i]));
+                        peak[i]  = std::max (peak[i], std::abs (m));
+                        last[i]  = m;
+                    }
+                    dot01 += (double) last[0] * last[1];
+                    e0 += (double) last[0] * last[0];
+                    e1 += (double) last[1] * last[1];
+                }
+
+                worstCents = std::max (worstCents, 1200.0f * std::log2 (1.0f + steepest));
+                for (int i = 0; i < DspCore::kNumLines; ++i)
+                {
+                    inside = inside && peak[i] <= depthSamples * 1.0001f;
+                    moves  = moves && peak[i] > 0.0f;
+                }
+                apart = apart && std::abs (dot01) < 0.9 * std::sqrt (e0 * e1);
+            }
+
+        std::cout << "  modulation: steepest detune over 16 corners " << worstCents << " cents\n";
+        check (worstCents <= 3.0f * 1.001f, "no line is ever detuned by more than 3 cents, at any corner of MOD DEPTH and MOD RATE");
+        check (inside, "no line strays further than MOD DEPTH");
+        check (moves, "every line is modulated");
+        check (apart, "two lines' paths are not the same path");
+    }
+
+    //== The top of the tail decays the same at 48 kHz as at 96 ================
+    //
+    // Modulation needs fractional reads, and an interpolated read loses a
+    // little off the top on every pass -- more the lower the sample rate.
+    // Four-point reads at 48 kHz put the 6.4 kHz band 8-14 % short of the
+    // same band at 96 kHz; 11 section 6 allows 5 % between rates. So the
+    // reads are six-point under 88.2 kHz and four-point above, and this
+    // holds the band, with modulation on at its default, to that 5 %.
+    {
+        check (DspCore::Late().readsSixPoint(), "an unprepared network defaults to the six-point read");
+
+        double t48 = 0.0;
+        for (const auto rate : { 48000.0, 44100.0, 96000.0, 192000.0 })
+        {
+            const auto ir = renderTail ([] (DspCore::Params& p)
+            {
+                p.decaySeconds = 2.0f;
+                p.dampLo = p.dampHi = 1.0f;
+            }, rate, 512, 3.4f);
+            const auto t = t60Of (bandEnergyOf (ir, 6400.0), ir.rate, -5.0, -25.0);
+            if (rate == 48000.0) t48 = t;
+            std::cout << "  T60 at 6.4 kHz, modulated, " << rate << " Hz: " << t << " s\n";
+            check (std::abs (t - t48) <= 0.05 * t48,
+                   ("the 6.4 kHz T60 with modulation on is within 5 % of 48 kHz's at " + std::to_string ((int) rate)).c_str());
+        }
+    }
+
+    //== The deepest, fastest modulation does not feed the loop ================
+    //
+    // A read that moves is a read whose weights move, and the loop has to
+    // lose energy with that on (Frosty's rule). The longest tail, a 10 ms
+    // burst, MOD DEPTH and MOD RATE at their corners, at a six-point rate and
+    // a four-point one: no 5 s window is louder than the one before.
+    {
+        int grew = 0, rows = 0;
+
+        for (const auto rate : { 48000.0, 96000.0 })
+            for (const auto& corner : { std::array<float, 2> { 0.8f, 1.2f }, std::array<float, 2> { 0.8f, 0.3f } })
+                for (const auto size : { 0.5f, 12.0f, 80.0f })
+                {
+                    DspCore core;
+                    DspCore::Params p;
+                    p.sizeM = size;
+                    p.decaySeconds = 20.0f;
+                    p.dampLo = p.dampHi = 2.0f;
+                    p.modDepthMs = corner[0];
+                    p.modRateHz  = corner[1];
+                    p.erLevelDb = -40.0f;
+                    p.verbLevelDb = 0.0f;
+                    p.mix = 1.0f;
+                    core.setParams (p);
+                    core.prepare (rate, 512, 2);
+
+                    std::vector<float> l (512), r (512);
+                    float* chans[] { l.data(), r.data() };
+                    const auto window = (long long) (5.0 * rate), total = (long long) (20.0 * rate), burst = (long long) (0.01 * rate);
+                    float peak = 0.0f, last = 1.0e30f;
+                    bool rose = false;
+
+                    for (long long n = 0; n < total; n += 512)
+                    {
+                        for (int i = 0; i < 512; ++i)
+                            l[(size_t) i] = r[(size_t) i] = n + i < burst ? noiseAt ((int) (n + i)) * 0.6928f : 0.0f;
+                        core.process (chans, 2, 512);
+                        for (int i = 0; i < 512; ++i)
+                            peak = std::max ({ peak, std::abs (l[(size_t) i]), std::abs (r[(size_t) i]) });
+
+                        if ((n + 512) / window != n / window)
+                        {
+                            rose = rose || (n >= window && peak > last);
+                            if (n >= window) last = peak;
+                            peak = 0.0f;
+                        }
+                    }
+
+                    ++rows;
+                    grew += rose ? 1 : 0;
+                }
+
+        std::cout << "  modulation at its corners over a 40 s tail: " << grew << " of " << rows << " rows grew\n";
+        check (grew == 0, "the deepest and the fastest modulation never make the tail grow");
     }
 
     //== prepare() and reset() are reachable and do not throw ================

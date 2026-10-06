@@ -535,6 +535,8 @@ private:
         lc.dampHi       = params.dampHi;
         lc.loKneeHz     = params.dampLoFreqHz;
         lc.hiKneeHz     = params.dampHiFreqHz;
+        lc.modDepthMs   = params.modDepthMs;
+        lc.modRateHz    = params.modRateHz;
         late.setConfig (lc);
 
         tEr    = faderGain (params.erLevelDb);

@@ -58,6 +58,8 @@ struct LateConfig
     float dampHi       = 0.4f;                          ///< T60 multiplier above the high knee
     float loKneeHz     = roomDefaults::kDampLoFreqHz;
     float hiKneeHz     = roomDefaults::kDampHiFreqHz;
+    float modDepthMs   = roomDefaults::kModDepthMs;     ///< 0.1..0.8, each line's peak deviation
+    float modRateHz    = roomDefaults::kModRateHz;      ///< 0.1..1.2
 };
 
 //==============================================================================
@@ -123,6 +125,12 @@ public:
     {
         sampleRate = newSampleRate > 0.0 ? newSampleRate : 48000.0;
         fadeLength = std::max (1, (int) std::lround (kCrossfadeMs * 0.001 * sampleRate));
+
+        sixPoint = sampleRate < 80000.0;
+        // Each line's modulator runs at its own fraction of MOD RATE, spread by
+        // the golden ratio so no two share a period.
+        for (int i = 0; i < N; ++i)
+            modScale[i] = 1.0f - 0.4f * (float) std::fmod ((double) i * 0.6180339887, 1.0);
 
         moveRamp.resize ((size_t) fadeLength + 1);
         for (int k = 0; k <= fadeLength; ++k)
@@ -226,6 +234,7 @@ public:
 
         applyPendingConfig();
         smoothCoefficients (numSamples);
+        modDepth = modDepthSamples();
 
         const auto half = fadeLength;
 
@@ -267,6 +276,7 @@ public:
             x = afterTwo + (x - afterTwo) * fourWeight;
 
             // Read, absorb, mix, write.
+            advanceModulation();
             float mixed[N];
             float l = 0.0f, r = 0.0f;
 
@@ -274,7 +284,7 @@ public:
             {
                 for (int i = 0; i < N; ++i)
                 {
-                    const auto y = absorb (filt[(size_t) i], read (i, lengths[i]));
+                    const auto y = absorb (filt[(size_t) i], readAt (i, (float) lengths[i] + modNow[i]));
                     mixed[i] = y;
                     l += outL[i] * y;
                     r += outR[i] * y;
@@ -332,8 +342,8 @@ public:
                     const auto a = writtenBefore (movePos - lengths[i]);
                     const auto b = std::min (1.0f - writtenBefore (movePos - fadeTo[i]), 1.0f - a);
 
-                    const auto ya = absorb (filt[(size_t) i],   a * read (i, lengths[i]));
-                    const auto yb = absorb (filtTo[(size_t) i], b * read (i, fadeTo[i]));
+                    const auto ya = absorb (filt[(size_t) i],   a * readAt (i, (float) lengths[i] + modNow[i]));
+                    const auto yb = absorb (filtTo[(size_t) i], b * readAt (i, (float) fadeTo[i] + modNow[i]));
                     mixed[i] = ya + yb;
                     lOld += outL[i] * ya;  rOld += outR[i] * ya;
                     lNew += outL[i] * yb;  rNew += outR[i] * yb;
@@ -428,6 +438,12 @@ public:
         return (double) f.g * at (f.lb, f.la) * at (f.hb, f.ha);
     }
 
+    /** Line i's deviation from its length right now, in samples, and the
+        steepest that may ever change per sample (3 cents). For the tests. */
+    float modulationSamples (int i) const noexcept { return modNow[i]; }
+    static constexpr float maxDetunePerSample() noexcept { return 0.0017344f; }
+    bool readsSixPoint() const noexcept { return sixPoint; }
+
     /** **The tail's level does not rise as the room shrinks.** For a given T60 a
         network's energy grows with how often it recirculates, about T60 /
         tau-bar, so at a fifth of a type's SIZE its tail was 7 dB louder and
@@ -519,6 +535,7 @@ private:
 
         smoothed = { current.decaySeconds, current.dampLo, current.dampHi };
         designAll();
+        resetModulation();
     }
 
     void applyPendingConfig() noexcept
@@ -651,6 +668,171 @@ private:
         auto i = writeIdx - delay;
         if (i < 0) i += lineLength;
         return lines[(size_t) line][(size_t) i];
+    }
+
+    /** A read at a fractional delay, Lagrange: six points at 44.1 and 48 kHz,
+        four at 88.2 kHz and above (`sixPoint`).
+
+        **Why not two points.** Linear interpolation is a low-pass that
+        depends on the fraction: half way between samples it is 0.78 dB down
+        at 6.4 kHz at 48 kHz, on every pass, where a 25 ms line at DECAY 2 s
+        is meant to lose 0.75 dB -- the top of the tail would decay twice as
+        fast as HIGH x says.
+
+        **Why six at 48 kHz and four above.** The loss is a function of
+        frequency over the sample rate, so it matters where the rate is low
+        and is nothing where it is high. Four points at 48 kHz are 0.10 dB
+        down at 6.4 kHz half way between samples, and that measured: HIGH x
+        2.0 came out 1.69 (11 section 6 allows 15 %), and a 6.4 kHz band that
+        decays 8-14 % faster at 48 kHz than at 96, where 11 section 6 wants
+        5 %. Six points are 0.014 dB down there. At 96 kHz four points are
+        0.005 dB down, and that is the rate where the CPU has no room for
+        six. An odd-order Lagrange interpolator reading in its middle
+        interval, as both always do here, never exceeds unity gain, so the
+        loop cannot gain from it. */
+    float readAt (int line, float delay) const noexcept
+    {
+        const auto whole = (int) delay;
+        const auto f     = delay - (float) whole;
+        const auto& buf  = lines[(size_t) line];
+
+        if (! sixPoint)
+        {
+            // buf at delays whole + 2, whole + 1, whole, whole - 1.
+            auto i = writeIdx - whole - 2;
+            if (i < 0) i += lineLength;
+            float s[4];
+            if (i + 3 < lineLength)
+            {
+                s[0] = buf[(size_t) i]; s[1] = buf[(size_t) i + 1]; s[2] = buf[(size_t) i + 2]; s[3] = buf[(size_t) i + 3];
+            }
+            else
+            {
+                for (int k = 0; k < 4; ++k)
+                    s[k] = buf[(size_t) ((i + k) % lineLength)];
+            }
+
+            // Nodes at delays -1, 0, 1, 2 about `whole`; the point is at f.
+            const auto fm1 = f - 1.0f, fm2 = f - 2.0f, fp1 = f + 1.0f;
+            return s[3] * (-f * fm1 * fm2 * (1.0f / 6.0f))
+                 + s[2] * (fp1 * fm1 * fm2 * 0.5f)
+                 + s[1] * (-fp1 * f * fm2 * 0.5f)
+                 + s[0] * (fp1 * f * fm1 * (1.0f / 6.0f));
+        }
+
+        // buf at delays whole + 3 ... whole - 2.
+        auto i = writeIdx - whole - 3;
+        if (i < 0) i += lineLength;
+        float s[6];
+        if (i + 5 < lineLength)
+        {
+            for (int k = 0; k < 6; ++k)
+                s[k] = buf[(size_t) (i + k)];
+        }
+        else
+        {
+            for (int k = 0; k < 6; ++k)
+                s[k] = buf[(size_t) ((i + k) % lineLength)];
+        }
+
+        // Nodes at delays -2 ... 3 about `whole`; the point is at f.
+        const auto a = f + 2.0f, b = f + 1.0f, c = f, d = f - 1.0f, e = f - 2.0f, g = f - 3.0f;
+        const auto ab = a * b, eg = e * g, cd = c * d;
+        return s[5] * (b * cd * eg * (-1.0f / 120.0f))
+             + s[4] * (a * cd * eg * (1.0f / 24.0f))
+             + s[3] * (ab * d * eg * (-1.0f / 12.0f))
+             + s[2] * (ab * c * eg * (1.0f / 12.0f))
+             + s[1] * (ab * cd * g * (-1.0f / 24.0f))
+             + s[0] * (ab * cd * e * (1.0f / 120.0f));
+    }
+
+    //== Modulation (10 section 4) ==============================================
+    //
+    // Each line's delay wanders about its length on its own slow random
+    // path: a new random target every half period, reached along a
+    // smoothstep. **Random and not an LFO**, because a periodic sweep is a
+    // chorus and a random one is not (10 section 4), and **slope-bounded by
+    // construction**: a line whose delay changes at dT/dt is detuned by
+    // 1200 log2 (1 + dT/dt) cents, a smoothstep between two points P apart
+    // has a steepest slope of 1.5 times their difference over P, and the
+    // depth is held so that never passes kMaxDetune -- 3 cents. So MOD DEPTH
+    // and MOD RATE trade against each other at the top: at 1 Hz the deepest
+    // a line may go is 0.289 ms, and the full 0.8 ms is only reached under
+    // 0.36 Hz.
+    //
+    // The path is worked out every kModStride samples and walked in straight
+    // lines between, one add a line a sample; a chord of a curve is never
+    // steeper than the curve, so the bound holds. Counted in samples, never
+    // in blocks, so the block size cannot be heard.
+
+    /** 2^(3/1200) - 1: the slope that is 3 cents. */
+    static constexpr float kMaxDetune = 0.0017344f;
+    static constexpr int   kModStride = 16;
+
+    struct Modulator
+    {
+        float from = 0.0f, to = 0.0f;
+        int   pos = 0, period = 1;
+        float step = 1.0f;          ///< 1 / period
+        std::uint32_t rng = 1;
+    };
+
+    /** The deepest any line may be modulated at this rate, in samples. */
+    float modDepthSamples() const noexcept
+    {
+        const auto rate  = std::clamp (requested.modRateHz, 0.01f, 5.0f);
+        const auto depth = std::clamp (requested.modDepthMs, 0.0f, kModHeadroomMs * 0.8f) * 0.001f;
+        return std::min (depth, kMaxDetune / (6.0f * rate)) * (float) sampleRate;
+    }
+
+    void advanceModulation() noexcept
+    {
+        if (modTick == 0)
+        {
+            for (int i = 0; i < N; ++i)
+            {
+                auto& m = mod[(size_t) i];
+                m.pos += kModStride;
+
+                if (m.pos >= m.period)
+                {
+                    m.rng  = m.rng * 1664525u + 1013904223u;
+                    m.from = m.to;
+                    m.to   = modDepth * ((float) (m.rng >> 8) * (2.0f / 16777216.0f) - 1.0f);
+
+                    // Half a period at this line's own rate -- and never
+                    // shorter than the slope allows, so a depth or rate that
+                    // has just moved cannot make this one segment steeper
+                    // than 3 cents.
+                    const auto half     = (float) sampleRate / (2.0f * std::clamp (requested.modRateHz, 0.01f, 5.0f) * modScale[i]);
+                    const auto forSlope = 1.5f * std::abs (m.to - m.from) / kMaxDetune;
+                    m.period = std::max (kModStride, (int) std::ceil (std::max (half, forSlope)));
+                    m.step   = 1.0f / (float) m.period;
+                    m.pos    = 0;
+                }
+
+                const auto p      = (float) m.pos * m.step;
+                const auto target = m.from + (m.to - m.from) * p * p * (3.0f - 2.0f * p);
+                modInc[i] = (target - modNow[i]) * (1.0f / (float) kModStride);
+            }
+        }
+
+        for (int i = 0; i < N; ++i)
+            modNow[i] += modInc[i];
+
+        modTick = (modTick + 1) % kModStride;
+    }
+
+    /** Modulators back to rest, seeded per line so a render is repeatable. */
+    void resetModulation() noexcept
+    {
+        for (int i = 0; i < N; ++i)
+        {
+            mod[(size_t) i] = {};
+            mod[(size_t) i].rng = 0x9e3779b9u * (std::uint32_t) (i + 1);
+            modNow[i] = modInc[i] = 0.0f;
+        }
+        modTick = 0;
     }
 
     static float raisedCosine (int pos, int length) noexcept
@@ -886,6 +1068,14 @@ private:
     std::array<float, 2> designedKnees { 0.0f, 0.0f };
 
     float inSign[N] {}, outL[N] {}, outR[N] {};
+
+    std::array<Modulator, N> mod {};
+    float modNow[N] {};      ///< each line's deviation this sample, in samples
+    float modScale[N] {};    ///< each line's share of MOD RATE, 0.6..1, so no two keep step
+    float modDepth = 0.0f;   ///< `modDepthSamples`, taken once a block
+    float modInc[N] {};      ///< each line's step a sample, until the next stride
+    int   modTick = 0;
+    bool  sixPoint = true;   ///< six-point reads below 88.2 kHz, four above; see readAt
 
 };
 

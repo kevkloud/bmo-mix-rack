@@ -462,9 +462,12 @@ const Golden kDefaults[]
       // the M2 row. The swept row did not move, and should not have: its
       // PRE-DELAY is 157 ms, past the end of this suite's 85 ms of signal, so
       // its tail never starts.
-      -18.2163922222, 0.241076186299,
-      -17.9521665021, 0.248789131641, -18.2492466603, 0.243136674166,
-      -17.8128481771, 0.259217143059, -18.6147132938, 0.237479582429 },
+      // Recaptured on ICE QUEEN, 2026-10-05, when the tail's lines began to
+      // be modulated (M3b): one figure left tolerance, the last peak, by
+      // 1.4e-4 (0.005 dB); the rest moved by at most 3.3e-5 dB and 9.2e-6.
+      -18.2163826847, 0.241076186299,
+      -17.9521647983, 0.248789131641, -18.2492136317, 0.243127435446,
+      -17.8128251726, 0.259215831757, -18.6147332839, 0.237616017461 },
     // Recaptured with the BMO Saturator row above, for the same reason: the
     // Saturator is the third slot of this chain. RMS fell by 1.281 dB (mono,
     // stereo-in duplicate, mono -> stereo), 1.152 dB (stereo L) and 0.882 dB

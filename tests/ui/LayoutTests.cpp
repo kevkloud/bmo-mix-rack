@@ -4046,6 +4046,23 @@ int main (int argc, char** argv)
         checkOversamplingRow (panel, "sat", 0);
     });
 
+    // BMO Opto's mode pair reads TELE over STRESS (Frosty, 2026-10-06/07, from
+    // the 0.2.6 pass). It read TELE over ELD until then. The new word is twice
+    // as long, and checkSwitchLabelsFit already measures it against the box.
+    withPanel (named ("opto"), [] (bmo::ui::ModulePanel& panel)
+    {
+        auto* tele   = dynamic_cast<juce::Button*> (findNamed (panel, "TELE"));
+        auto* stress = dynamic_cast<juce::Button*> (findNamed (panel, "STRESS"));
+
+        check (tele != nullptr, "opto has a TELE switch");
+        check (stress != nullptr, "opto has a STRESS switch");
+        check (findNamed (panel, "ELD") == nullptr, "opto no longer has an ELD switch");
+
+        if (tele != nullptr && stress != nullptr)
+            check (tele->getBottom() < stress->getY() && tele->getX() == stress->getX(),
+                   "opto STRESS sits under TELE, as ELD did");
+    });
+
     // BMO CEQ: AUTO took the switch-row place HI-Q left when it went up to the
     // mid band, the oversampling section arrived under LO-CUT, and the band
     // column between the two shared sections is pinned row by row.

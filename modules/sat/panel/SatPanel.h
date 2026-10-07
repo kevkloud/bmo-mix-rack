@@ -27,10 +27,10 @@ private:
     ui::SwitchButton satIn, phase, autoGain;
 
     /** Oversampling is one choice parameter, not three switches, and these are
-        in radio behaviour over it the way BMO Opto's TELE / ELD and its meter's
-        IN / GR / OUT are: the click sets the parameter and the parameter sets
-        the buttons. Clicking the lit one puts it back to Off, which is the
-        position that has no switch of its own. */
+        in radio behaviour over it the way BMO Opto's TELE / STRESS and its
+        meter's IN / GR / OUT are: the click sets the parameter and the
+        parameter sets the buttons. Clicking the lit one puts it back to Off,
+        which is the position that has no switch of its own. */
     juce::ToggleButton os2x, os4x, osHq;
     std::unique_ptr<juce::ParameterAttachment> osAttachment;
 

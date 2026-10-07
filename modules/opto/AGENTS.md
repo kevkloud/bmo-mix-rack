@@ -162,10 +162,15 @@ absolute rather than relative, and at the level a track arrives at.
   to how much reduction a preset holds. They were re-solved on 2026-10-03
   for the new release. `BMO_PRINT_PRESET_LEVELS` on `opto_tests` prints every
   delta, pass or fail. Ask before re-solving them.
-- **The Mode labels and the two mode buttons** stay as they are for 0.2.6 and
-  are due a change after it. It is display only: the parameter is a choice
-  saved by index under `mode`, so new labels do not break a session as long as
-  the number and order of choices hold.
+- **The Mode labels and the two mode buttons** were renamed after the 0.2.6
+  pass (Frosty, 2026-10-06/07): the panel's ELD reads STRESS, TELE stays, and
+  the host label "Stressed" is "Stress". It is display only: the parameter is
+  a choice saved by index under `mode`, so a new label does not break a
+  session as long as the number and order of choices hold. `opto_tests` pins
+  both labels and shows the saved state carries the index and no word;
+  `session_compat_tests` restores 0.2.5's Stressed session onto Stress. The
+  prose here and the comments under `dsp/` still call that mode Stressed; it
+  is the same mode.
 - **One bad sample latches a channel** until reset. That is being fixed once,
   in the shared processor, for every module; do not fix it here.
 

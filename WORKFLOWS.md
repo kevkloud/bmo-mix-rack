@@ -140,7 +140,7 @@ two.
 | question | answer | effect on the UI pass |
 |---|---|---|
 | **Opto: hard-patch LINK always-on?** | **No — LINK stays a control** (Frosty, 2026-09-11) | none. Opto's panel is final as it stands |
-| **Opto: are TELE / ELD / COLOR the names?** | **Yes, locked** (Frosty, 2026-09-11) | none. Caption widths can be measured as final |
+| **Opto: are TELE / ELD / COLOR the names?** | **Yes, locked** (Frosty, 2026-09-11); ELD renamed STRESS on 2026-10-07 after the 0.2.6 pass, the lock otherwise standing | none. Caption widths can be measured as final |
 | **DEQ: ship a serial/parallel switch?** | **Held for the blind test** (Frosty, 2026-09-11) | **DEQ's control layout waits.** Everything else in the pass proceeds |
 
 Both Opto answers are in `testing-notes/opto-0.2.1-handoff.md` §7, which is
@@ -157,9 +157,10 @@ where they were open questions.
   a rate, dropping one, or changing the default all mean retiring an id, which
   is a deliberate act and not something that happens quietly mid-pass. So it
   does not gate the pass.
-- **A panel's button labels are not its schema.** Opto's TELE and ELD are UI
-  strings over a `Mode` parameter whose choices are `Tele` and `Stressed`.
-  Renaming a button is free; renaming a choice is not.
+- **A panel's button labels are not its schema.** Opto's TELE and STRESS are UI
+  strings over a `Mode` parameter whose choices are `Tele` and `Stress`
+  (ELD and `Stressed` until 2026-10-07). Renaming a button is free; renaming
+  a choice is not.
 
 ### What that means for the UI pass
 

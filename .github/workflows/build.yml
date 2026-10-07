@@ -89,7 +89,7 @@ jobs:
   long:
     name: DSP, every row
     runs-on: ubuntu-latest
-    timeout-minutes: 100
+    timeout-minutes: 190
     steps:
       - uses: actions/checkout@v4
 

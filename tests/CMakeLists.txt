@@ -3,17 +3,17 @@
 # The exhaustive run of a suite that keeps a subset by default: the same
 # executable with `--long`, registered as `<name>_long` and labelled `long`,
 # only when BMO_LONG_TESTS is ON (the option in the root CMakeLists.txt says
-# why). The fence is one figure for all six, set by the slowest: dwell_dsp's
-# whole grid is 360 rows, 26 minutes in Release on ICE QUEEN
-# (modules/dwell/AGENTS.md), and a CI container is slower than that machine,
-# so 5400 s is about three times the slowest honest run. reverb_dsp's own
-# fence is 1350 s and a quarter of that is a 280 s test that only runs under
-# --long; the others' whole grids are 30 s to 3 minutes. A run that reaches
-# the fence still fails, as a timeout.
+# why). The fence is one figure for all six, set by the slowest. Measured on
+# the first CI run (ubuntu, four suites at a time, 2026-10-06): dwell_dsp
+# 3661 s (its 360 rows are 26 minutes in Release on ICE QUEEN; the container
+# is 2.3 times slower), reverb_dsp 870 s, vcomp_switch 301 s, eq_switch
+# 191 s, sat_switch and deq_dsp 59 s each. 11000 s is three times the
+# slowest honest run, as reverb_dsp's own 1350 s fence is three times its
+# slowest Debug run. A run that reaches the fence still fails, as a timeout.
 function(bmo_long_test name)
     if(BMO_LONG_TESTS)
         add_test(NAME ${name}_long COMMAND ${name}_tests --long)
-        set_tests_properties(${name}_long PROPERTIES LABELS long TIMEOUT 5400)
+        set_tests_properties(${name}_long PROPERTIES LABELS long TIMEOUT 11000)
     endif()
 endfunction()
 

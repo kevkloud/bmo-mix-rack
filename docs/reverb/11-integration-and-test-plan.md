@@ -709,10 +709,10 @@ the whole component, which is what stops a curve being drawn through the menu.
 - **The EQ page draws a spectrum behind its curve** — Frosty's addition,
   2026-09-21 — and it **overrides "redrawn from parameters only" for that page
   alone**. EARLY and TAIL are unchanged and the screen's timer runs only while
-  EQ is showing. The tap is at **the point the Reverb EQ acts on**, pre both
-  generators, which is where 10 §2 puts the EQ; until there is an engine
-  `DspCore::process` is a marked pass-through, so it shows the dry input, which
-  is honest rather than broken — **do not move the tap to fix it.** The
+  EQ is showing. The tap is on **the input stage's output** since 2026-10-06 (Frosty: "it
+  should show the output, with EQ applied"): what the room is given, after the
+  high-pass, DARKEN and the Reverb EQ, so the spectrum moves with the knobs.
+  Until then it was on the input, ahead of the EQ. The
   consequence for tooling is that **a render of this page needs `signal=-18`**:
   a parameter-driven screen renders at rest and an analyser does not.
 

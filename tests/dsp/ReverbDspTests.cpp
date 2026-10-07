@@ -5246,6 +5246,48 @@ int main (int argc, char** argv)
             check (worstEr < 0.05, "the early reflections are fed through the high-pass, DARKEN and the Reverb EQ");
             check (worstTail < 0.05, "and so is the tail's direct feed");
 
+            // The EQ page's spectrum is the stage's output (Frosty,
+            // 2026-10-06: "it should show the output, with EQ applied"): a
+            // 5 kHz sine with DARKEN at 2 kHz reads as the stage leaves it,
+            // 8.5 dB down, and not as it went in. The tap holds the newest
+            // samples, so the last 4096 written are the last 4096 fed.
+            {
+                auto p = DspCore::Params {};
+                p.inHiCutHz = 2000.0f;
+
+                DspCore core;
+                core.prepare (rate, 512, 2);
+                core.setParams (p);
+                core.eqAnalyser().setEnabled (true);
+
+                std::vector<float> l (512), r (512);
+                // 4096 samples of a sine at 0.25: 426.7 cycles, so its mean
+                // square is the sine's to three parts in ten thousand.
+                const auto inSq = 4096.0 * 0.5 * 0.25 * 0.25;
+
+                for (int at = 0; at < 48000; at += 512)
+                {
+                    for (int i = 0; i < 512; ++i)
+                        l[(size_t) i] = r[(size_t) i] = 0.25f * (float) std::sin (2.0 * 3.14159265358979323846 * 5000.0 * (double) (at + i) / rate);
+
+                    float* chans[] { l.data(), r.data() };
+                    core.process (chans, 2, 512);
+                }
+
+                std::vector<float> seen (4096);
+                const auto got = core.eqAnalyser().read (seen.data(), 4096);
+                double outSq = 0.0;
+                for (const auto v : seen) outSq += (double) v * v;
+
+                const auto measured = 10.0 * std::log10 (std::max (outSq, 1.0e-300) / inSq);
+                const auto expected = InputStage::lowPassDbAt (InputStage::darkenCoefFor (2000.0, rate), 5000.0, rate)
+                                    + InputStage::highPassDbAt (InputStage::highPassCoefFor (rate), 5000.0, rate);
+
+                std::cout << "  the EQ page's spectrum tap: 5 kHz with DARKEN at 2 kHz reads " << measured << " dB re the input (the stage's design: " << expected << ")\n";
+                check (got == 4096, "the analyser tap fills while enabled");
+                check (std::abs (measured - expected) < 0.05, "the analyser tap is the input stage's output, EQ and DARKEN applied");
+            }
+
             // The dry path: MIX 50 %, both faders off, the busiest setting.
             {
                 auto p = with (DspCore::Params {}, settings[2]);

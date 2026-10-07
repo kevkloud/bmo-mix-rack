@@ -206,9 +206,9 @@ a one-line change plus a re-run of the budget rather than a rewrite.
 - **The per-type block is fourteen constants**, five of which have no host lane
   at all — the engine reads those straight off the row. `TypeConstants` and
   `constantsFor` are in `params.h`.
-- **The analyser tap is already at the point the Reverb EQ will act on.** Until
-  there is a wet signal it shows the dry input, which is correct and is
-  commented as such. **Do not move the tap to fix it.**
+- **The analyser tap is on the input stage's output** since 2026-10-06, on
+  Frosty's word: the spectrum shows what the room is given, with the EQ
+  applied. It was on the input before that.
 - **Latency is zero and that is the shipped figure**, not a placeholder.
 - **Tail reporting is live** — `tailSecondsFor` in `DspCore.h` is the only copy
   of the formula, asserted against hand-written seconds in `TailTests`. When

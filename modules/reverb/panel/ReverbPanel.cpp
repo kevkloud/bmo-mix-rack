@@ -589,14 +589,19 @@ int LingerScreen::activeTapCount() const noexcept
 namespace
 {
     /** DARKEN, and it is **not** one of the three EQ nodes -- it is the input
-        high-cut in series ahead of them. One pole, no Q, no gain, so it has no
-        `EqNodes` entry: giving it a `Biquad` would claim an order that nobody
-        has chosen for it (10 section 2 does not say), and an unmarked guess
-        about a filter is the same fault as an unmarked CALIBRATE number. */
-    float inputHiCutDbAt (float hz, float cornerHz) noexcept
+        high-cut in series ahead of them, one pole with no Q and no gain, so
+        it has no `EqNodes` entry.
+
+        **This is the engine's own law** (`InputStage`), at the rate the page
+        is drawn at, since 2026-10-06 on Frosty's word. Until then it was the
+        analogue -10 log10 (1 + (f / fc)^2), which the running pole matches
+        at the corner and not beside it: at 48 kHz and the default corner the
+        engine is 1.45 dB down at 10 kHz and that curve said 0.97. It costs
+        the audio thread nothing; this is paint. */
+    float inputHiCutDbAt (float hz, float cornerHz, double rate) noexcept
     {
-        const auto r = juce::jmax (1.0f, hz) / juce::jmax (1.0f, cornerHz);
-        return -10.0f * std::log10 (1.0f + r * r);
+        return (float) InputStage::lowPassDbAt (InputStage::darkenCoefFor ((double) cornerHz, rate),
+                                                (double) juce::jmax (1.0f, hz), rate);
     }
 }
 
@@ -608,9 +613,10 @@ float LingerScreen::nodeDbAt (EqNode node, float hz) const noexcept
 float LingerScreen::responseDbAt (float hz) const noexcept
 {
     // The three Reverb EQ nodes, **as the engine's own matched-Z designs**, plus
-    // the input high-cut's one pole. Serial, so the dB add.
+    // the input high-cut's one pole as the engine runs it. Serial, so the dB
+    // add.
     return (float) nodes.magnitudeDbAt ((double) juce::jmax (1.0f, hz), drawnAt)
-             + inputHiCutDbAt (hz, state.inHiCutHz);
+             + inputHiCutDbAt (hz, state.inHiCutHz, drawnAt);
 }
 
 std::array<float, 4> LingerScreen::nodeFrequencies() const noexcept

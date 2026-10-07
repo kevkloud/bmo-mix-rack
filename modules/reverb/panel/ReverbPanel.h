@@ -57,11 +57,10 @@ enum class Page { early = 0, tail, eq };
     `core/dsp/AnalyserTap.h` is why the tap itself cannot change the sound or
     the latency.
 
-    **What the spectrum is showing is the dry input**, because `dsp/DspCore.h`
-    is a marked pass-through and there is no reverb under it yet. The tap is at
-    the point the Reverb EQ acts on -- pre both generators, which is where 10
-    section 2 puts the EQ -- so the wiring is already right and only the signal
-    is missing. It is honest rather than broken, and it is marked at the tap
+    **What the spectrum is showing is the input stage's output**: what the
+    room is given, with the high-pass, DARKEN and the Reverb EQ applied, so it
+    moves with the knobs (Frosty, 2026-10-06; until then the tap was on the
+    input). It is marked at the tap
     site, here, and in AGENTS.md so that nobody "fixes" a working analyser.
 
     **It draws in the module's accent, not in LCD green.** A second hue on one

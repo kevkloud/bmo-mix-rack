@@ -3254,11 +3254,14 @@ void checkReverbPanel (bmo::ui::ModulePanel& panel, const juce::String& who)
 
         // **Flat at the defaults, and flat is the input cut's number alone.**
         // Every node is a unity biquad, so the whole reading at 1 kHz is
-        // DARKEN's one pole at 20 kHz: -10*log10(1 + (1000/20000)^2), which
-        // is -0.01086 dB. Not "roughly zero" -- the exact figure, because an EQ
-        // that had quietly acquired half a dB somewhere would still read as
-        // roughly zero.
-        checkNear (screen.responseDbAt (1000.0f), -0.010857, 1.0e-4,
+        // DARKEN's one pole at 20 kHz **as the engine runs it at 48 kHz**,
+        // the rate this page is drawn at: pole 0.18012, so -0.019866 dB at
+        // 1 kHz. Not "roughly zero" -- the exact figure, because an EQ that
+        // had quietly acquired half a dB somewhere would still read as
+        // roughly zero. Until 2026-10-06 the page drew the analogue pole,
+        // -10*log10(1 + (1000/20000)^2) = -0.010857 dB, and this row said so;
+        // Frosty had the page draw the engine's law that day.
+        checkNear (screen.responseDbAt (1000.0f), -0.019866, 1.0e-4,
                    who + " a flat EQ page draws a flat curve");
 
         // **1e-4 dB rather than 1e-9, and the difference is a platform fact

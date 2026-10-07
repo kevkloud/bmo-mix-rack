@@ -84,10 +84,9 @@ enum class ErMode { taps = 0, energy };
       part has not moved: a reverb has no gain reduction to report and there is
       no part of it to hear on its own. **The `AnalyserTap` is no longer in
       that list.** The owner asked for a spectrum behind the EQ page's response
-      curve on 2026-09-21, so `eqAnalyser()` below is a real tap at the point
-      the Reverb EQ acts on -- see it for why it shows the dry input until
-      there is an engine, and why that is honest rather than broken. EARLY and
-      TAIL stay parameter-driven.
+      curve on 2026-09-21, so `eqAnalyser()` below is a real tap, on the
+      input stage's output since 2026-10-06. EARLY and TAIL stay
+      parameter-driven.
     - `tailSecondsFor` below is the figure the host is told. It reaches a host
       through `ModuleDsp::tailSecondsForParams` (milestone M5, 11 section 2a),
       which `ReverbDsp` answers by unpacking the values and calling it, and
@@ -350,20 +349,15 @@ public:
 
     /** The window the EQ page's spectrum is drawn from.
 
-        **It is the signal the Reverb EQ acts on**, which 10 section 2 puts
-        pre both generators: the EQ shapes what the room is given rather than
-        what it returns, so this is the point whose spectrum a user is reading
-        the EQ curve against. Wiring it here rather than on the output is not a
-        placeholder decision -- it is where the tap belongs once there is a
-        reverb, and putting it on the output would have to be undone.
-
-        **It shows the input, ahead of the input stage, and does not react to
-        the EQ knobs.** The spectrum is what the EQ is given and the curve
-        over it is what the EQ does to it. A reader who finds the spectrum
-        "not reacting to the EQ knobs" has found that, not a broken analyser.
-        **Do not move the tap to fix it.**
-        See modules/reverb/AGENTS.md, "The analyser is real and the signal
-        under it is not yet".
+        **It is the input stage's output: what the room is given, with the
+        high-pass, DARKEN and the Reverb EQ applied.** Frosty, 2026-10-06:
+        "it should show the output, with EQ applied". So the spectrum moves
+        with the EQ knobs, and it is one channel, because the stage runs on
+        the mid of the input. Until that day it was written from the input,
+        ahead of the stage, and every note beside it said not to move it;
+        that was the specification's reading and this is the owner's.
+        It is not the module's output: the reflections and the tail are
+        downstream of it and the dry signal never passes through it.
 
         Reading it costs the audio thread nothing until a panel enables it, and
         a closed editor is the normal state of a plugin in a finished session
@@ -373,17 +367,15 @@ public:
 
     /** M3a: the early reflections and the tail.
 
-        The analyser window is written from the input, ahead of the input
-        stage. The mid of the input (a mono bus is its own mid) goes through
-        the input stage and is what both generators are given: the ER
+        The mid of the input (a mono bus is its own mid) goes through the
+        input stage and is what both generators are given, and what the
+        analyser window is written from: the ER
         generator returns the ER bus at table level, and the tail is fed
         SOURCE's balance, (1 - d) * that mid + d * ER mid; the two faders,
         WIDTH, the MIX law and OUTPUT are applied here with 20 ms one-pole
         smoothing on every gain. */
     void process (float* const* channelData, int numChannels, int numSamples)
     {
-        eqTap.write (channelData, numChannels, numSamples);
-
         if (numChannels < 1 || numSamples < 1 || feed.empty())
             return;
 
@@ -421,6 +413,10 @@ public:
             // 10 section 2: the high-pass, DARKEN and the Reverb EQ act on
             // what both generators are given, and on nothing else.
             input.process (feed.data(), n);
+
+            // The EQ page's spectrum is this signal; see `eqAnalyser`.
+            const float* const tapped[] { feed.data() };
+            eqTap.write (tapped, 1, n);
 
             er.process (feed.data(), erL.data(), erR.data(), n);
 

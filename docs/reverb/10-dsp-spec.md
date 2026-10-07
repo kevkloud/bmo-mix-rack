@@ -591,8 +591,10 @@ dry path. Where it departs from or adds to this document:
   −20 dB. Worst gap anywhere up to 20 kHz, over corners 2 to 20 kHz: 3.1 dB
   at 44.1 kHz, 2.6 at 48, 0.62 at 96, 0.15 at 192. A pole-zero fit was
   worked through for the default and is no closer (0.52 dB at 10 kHz, the
-  error the other way). **Open: the EQ page should draw the engine's own
-  law** (`InputStage::lowPassDbAt`), which is a panel change.
+  error the other way). **The EQ page draws the engine's own law since
+  2026-10-06** (`InputStage::lowPassDbAt` at the rate the page is drawn
+  at), on Frosty's word: "option 1 if it doesn't increase cpu
+  significantly". It is paint and costs the audio thread nothing.
 - **DARKEN is not transparent at 20 kHz** and is not bypassed there: a
   bypass at the end stop would be a step in the response one detent wide.
 - **A coefficient move is a straight line over 20 ms that lands exactly**,
@@ -615,13 +617,40 @@ dry path. Where it departs from or adds to this document:
   after the span, the 5 ms energy windows and the DENSITY sweep's fixed
   window. A high-pass has no DC to sum and follows every tap with an 8 ms
   tail. Every other row plays through the stage.
-- **The analyser tap did not move.** It reads the input, ahead of the
-  stage, so the spectrum behind the EQ curve is what the EQ is given and
-  does not change when the EQ is turned.
+- **The analyser tap is on the stage's output** (Frosty, 2026-10-06: "it
+  should show the output, with EQ applied"). The spectrum behind the EQ
+  curve is what the room is given, one channel, and moves with the knobs.
+  It was on the input until then. It is not the module's output.
+
+**Heard by Frosty on 2026-10-06**, on monitors and headphones, the amp in
+stereo, from the two sets rendered on ICE QUEEN
+(`testing-notes/linger-listening-set-2026-10-06-m3b.md` has every answer):
+
+- Modulation: "flutter is gone"; on the held note "ring is gone, depending
+  on type it reads as wobble, but in a good way"; the other types "sounds
+  good"; SOURCE "sounds better".
+- The input stage: DARKEN "works as expected, but maybe range down to
+  1khz"; the cuts, shelves, bell and bandpass all pass; and of the flat
+  default against M3a, with the high-pass and DARKEN now always in, "i like
+  this one more".
+
+**Decided by Frosty on 2026-10-06:**
+
+- **Decay truncation is left out**: "leave it out. I'm happy where we're
+  at". `decayShape` stays in `TypeConstants` at 3.5, linear, for every type
+  and the engine does not read it. §1's contour is not built.
+- **The 150 ms wet fade in `reset()` is not buildable in the DSP** and is
+  recorded as such: nothing plays after a reset for a fade to act on, and a
+  module cannot know one is coming. §5 and `11` §6's Bypass row asked for
+  it. Frosty: "record as not buildable and recommend making a bypass". The
+  recommendation is §8 (4): a per-slot bypass in the rack, which lets a
+  module's tail ring out or fade while the slot is still there.
+- **DARKEN's bottom of range, 2 kHz → 1 kHz, is raised and not decided.**
+  It is a range change on a schema that froze at 0.2.6; it waits for
+  Frosty's word.
 
 Still to build in M3b: ATTACK (the onset contour), and `11` §6's onset,
-echo-density, denormal and pitch rows. Decay truncation and the 150 ms wet
-fade in `reset()` are with Frosty.
+echo-density, denormal and pitch rows.
 
 ## 5. Parameter changes, bypass, tail reporting
 

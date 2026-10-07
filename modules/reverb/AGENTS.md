@@ -30,12 +30,13 @@ were printed from. **M3a landed on 2026-10-02** (heard and passed):
 `dsp/LateNetwork.h` is the tail -- pre-delay, input diffusers, eight prime
 lines with Hadamard mixing, absorbent filters in double -- fed by SOURCE and
 returned through WIDTH and REVERB; `10` §4's "As built in M3a" lists where it
-departs from the spec. **M3b so far, on ICE QUEEN, neither part heard yet**:
+departs from the spec. **M3b so far, on ICE QUEEN, both parts heard and
+passed on 2026-10-06** (`testing-notes/linger-listening-set-2026-10-06-m3b.md`):
 the tail's lines are modulated (2026-10-05), and `dsp/InputStage.h` puts a
 20 Hz high-pass, DARKEN and the three Reverb EQ nodes ahead of both
 generators (2026-10-06); `10` §4's "As built in M3b" is the record. Still to
-come: the rest of M3b (the onset contour, and the truncation contour if it is
-wanted) and M4 (the type blocks).
+come: the rest of M3b (the onset contour; the truncation contour is left out
+on Frosty's word, 2026-10-06) and M4 (the type blocks).
 Latency is zero, which is the *shipped* figure and not a stand-in. **Both
 have been heard**: the early reflections at the M2 checkpoint
 (`testing-notes/linger-listening-set-2026-09-24.md`) and the tail at M3a's
@@ -946,11 +947,12 @@ reflection stops fusing with the direct sound.
 The three are the Reverb EQ's, drawn by `EqNodes::design` — which is
 `dsp::designMatched`, which is the code the engine runs
 (`dsp/InputStage.h`, since 2026-10-06). DARKEN's one pole is in the curve,
-because it is in the chain, **and it is still the screen's own analogue
-arithmetic, which is not the engine's law**: the engine's pole is exact at
-the corner and up to 0.53 dB off the drawn curve at the default at 48 kHz
-(`10` §4, "As built in M3b", has the table). Drawing
-`InputStage::lowPassDbAt` at the running rate closes it and is open.
+because it is in the chain, **and since 2026-10-06 it is the engine's own
+law**, `InputStage::lowPassDbAt` at the rate the page is drawn at (Frosty's
+call). Until then it was an analogue one-pole, which the running pole
+matches at the corner and not beside it: 0.53 dB apart at the default at
+48 kHz (`10` §4, "As built in M3b", has the table). The fixed 20 Hz
+high-pass is in the sound and not in the curve.
 
 **DARKEN is drawn as a region and was an open circle until 2026-09-22.** The
 circle was wrong twice: one stroke's difference from three filled markers reads
@@ -1052,16 +1054,17 @@ the Reverb EQ acts on** — pre both generators, which is where `10` section 2
 puts the EQ. That is where it belongs once there is an engine, so no rewiring
 is owed.
 
-**It shows the input, ahead of the EQ, and it does not react to the EQ
-knobs. That is where it stays.** The Reverb EQ has been in the path since
-2026-10-06 (`dsp/InputStage.h`), so this section's heading is history: the
-signal under the curve is real now. The tap is still the module's input --
-what the stage is given, before the high-pass, DARKEN and the three nodes --
-so the picture reads as "this spectrum, shaped by this curve, is what the
-room hears". Moving the tap after the EQ would make the spectrum follow the
-knobs and would stop it being the thing the curve acts on; that is a
-decision for Frosty and has not been asked for. **Do not move the tap to
-fix it.**
+**It shows the input stage's output: what the room is given, with the
+high-pass, DARKEN and the Reverb EQ applied, so it moves with the knobs.**
+Frosty, 2026-10-06: "it should show the output, with EQ applied". The
+Reverb EQ has been in the path since that day (`dsp/InputStage.h`), so this
+section's heading is history. Until then the tap was on the module's input
+and every note here said not to move it; that was the specification's
+reading, and the paragraph above this one still describes it. It is one
+channel, because the stage runs on the mid of the input, and it is **not
+the module's output**: the reflections and the tail are downstream, and the
+dry signal never passes through the stage. `reverb_dsp_tests` asserts a
+5 kHz sine with DARKEN at 2 kHz reads 8.5 dB down at the tap.
 
 Adding the override costs the other modules nothing — `ModuleDsp::analyser()`
 returns null by default and BMO DEQ was its only overrider — and

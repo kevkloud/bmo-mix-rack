@@ -9,7 +9,7 @@ have one without the other. No latency.
 > **Not finished.** The panel, the parameters, the display, the early
 > reflections and the tail are real, and the early reflections and the tail
 > have been heard. The EQ page's curve and DARKEN are in the sound and the
-> tail is modulated, neither heard yet; the tail's onset bloom is not built,
+> tail is modulated, both heard; the tail's onset bloom is not built,
 > and only Room's voicing is worked out. See `AGENTS.md` and `docs/reverb/`.
 
 ## The shape of it
@@ -134,9 +134,8 @@ the three EQ frequencies and says `LO CUT` and `HI CUT` when they are cuts.
 see what you are shaping. It is the only thing on this panel measured from the
 audio; EARLY and TAIL are drawn from the controls alone and cost nothing.
 
-> The analyser shows the signal going **in**, ahead of the EQ: it is what
-> the EQ is given, and the curve over it is what the EQ does to it on the
-> way to the room. It does not move when you turn the EQ.
+> The analyser shows what the room is given: the signal after the EQ and
+> DARKEN, so it moves when you turn them. It is not the reverb's output.
 
 ## EARLY — how the reflections are made
 

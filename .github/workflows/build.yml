@@ -74,6 +74,34 @@ jobs:
           cmake --build build-rack --parallel
           ctest --test-dir build-rack --output-on-failure --parallel 4
 
+  # Six DSP suites keep a subset of their grids by default and run every row
+  # under --long (BMO_LONG_TESTS in the root CMakeLists.txt). Until this job
+  # the whole grid ran only when someone ran it by hand, so "run --long
+  # before merging a change to dsp/" was a rule and not a check. The same
+  # bare container as the DSP job, built once more with the option on, running
+  # only the long-labelled tests: the default rows are the DSP job's.
+  #
+  # dwell_dsp's whole grid is 360 rows and 26 minutes in Release on ICE QUEEN,
+  # so this job is about as long as the Windows build and runs beside it
+  # rather than on anyone's critical path. It is not a condition of anything:
+  # a red here says which grid moved, and the merge waits on it the way it
+  # waits on the DSP job, by someone reading the run.
+  long:
+    name: DSP, every row
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -B build -DBMO_DSP_ONLY=ON -DCMAKE_BUILD_TYPE=Release -DBMO_LONG_TESTS=ON
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test, every row
+        run: ctest --test-dir build -L long --output-on-failure --parallel 4
+
   plugin:
     name: ${{ matrix.name }}
     runs-on: ${{ matrix.os }}

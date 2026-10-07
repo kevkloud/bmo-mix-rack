@@ -73,7 +73,8 @@ private:
         have left it. */
     void selectMeterMode (ui::DynamicsMeter::Mode);
 
-    /** Lights the one ratio button that `choice` names. Called from the click
+    /** Lights the one ratio button that `choice` names, or all five for All,
+        which is every button pushed in at once. Called from the click
         handlers and from the parameter, so a setting made by the host and one
         made by a click land in the same state. */
     void showRatio (int choice);

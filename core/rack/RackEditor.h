@@ -63,6 +63,12 @@ private:
         void paint (juce::Graphics&) override;
         void resized() override;
 
+        /** Enables the "+" while the rack has a free slot. Called on every
+            layout, not only from resized(): a chain edit moves the strip
+            without resizing it, so resized() alone left the button in the
+            state of the last resize. */
+        void refreshEnabled();
+
     private:
         RackEditor& owner;
         juce::TextButton add { "+" };

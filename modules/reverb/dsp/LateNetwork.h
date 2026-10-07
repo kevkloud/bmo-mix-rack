@@ -60,6 +60,7 @@ struct LateConfig
     float hiKneeHz     = roomDefaults::kDampHiFreqHz;
     float modDepthMs   = roomDefaults::kModDepthMs;     ///< 0.1..0.8, each line's peak deviation
     float modRateHz    = roomDefaults::kModRateHz;      ///< 0.1..1.2
+    float attack       = 0.0f;                          ///< 0..1 of `kAttackSpanMs`, per type; 0 is immediate
 };
 
 //==============================================================================
@@ -92,6 +93,43 @@ public:
     static constexpr float kMaxPreDelayMs = 250.0f;
     static constexpr float kCrossfadeMs   = 30.0f;
     static constexpr float kSizeRetrigger = 0.01f;
+
+    /** **ATTACK, the onset bloom** (10 section 2, M3b, 2026-10-07).
+
+        Each line is fed the diffused input at its own delay and its own
+        level: the first line at once and quietly, the last ATTACK x
+        `kAttackSpanMs` later and loudest. So an impulse enters the network
+        line by line, rising, and the tail's level climbs over that span
+        instead of starting at its full height: the tail blooms behind the
+        early reflections, and the bulk of it arrives ATTACK x 120 ms late
+        without PRE-DELAY having moved. At ATTACK 0 every line is fed now, at
+        unity, and the tail is immediate, which is Plate.
+
+        10 section 2 asks for "a rising envelope on the FDN input". An
+        envelope needs something to start it, and continuous audio has no
+        onsets to start it on; a detector would be a second opinion about the
+        music. Delays are linear, need no trigger, and treat every sample of
+        the input the same way. Frosty approved rising taps on 2026-10-06.
+
+        **One tap a line, and not N taps into one input.** The first build
+        summed eight rising taps ahead of the network, which is a sparse FIR
+        in front of everything, and it showed: the late tail's spectral
+        flatness fell from 0.77 to 0.53 on Room and from 0.92 to 0.72 on Hall
+        (2026-10-07, on ICE QUEEN), a comb on the whole tail. Fed a line
+        each, the taps never meet except through the mixing matrix, where
+        they add as the lines themselves do.
+
+        **The levels are normalised by energy**, mean square one across the
+        lines, so the tail's level does not depend on ATTACK: what the
+        network is given is spread in time, not turned up.
+
+        The span, the first line's level, the curve and which line is fed
+        when are all CALIBRATE: nothing here has been heard. */
+    static constexpr float kAttackSpanMs = 120.0f;
+    /** A line's level before normalising: kAttackFloor for the first fed,
+        rising as position ^ kAttackCurve to one for the last. */
+    static constexpr float kAttackFloor = 0.12f;
+    static constexpr float kAttackCurve = 1.5f;
 
     /** Coefficient smoothing for DECAY and the multipliers, 10 section 5. */
     static constexpr float kSmoothingMs = 20.0f;
@@ -149,6 +187,9 @@ public:
         preLength = (int) std::ceil ((kMaxPreDelayMs + 1.0f) * 0.001 * sampleRate) + 4;
         preLine.assign ((size_t) preLength, 0.0f);
 
+        bloomLength = (int) std::ceil ((kAttackSpanMs + 1.0f) * 0.001 * sampleRate) + 4;
+        bloomLine.assign ((size_t) bloomLength, 0.0f);
+
         for (int a = 0; a < 4; ++a)
         {
             apLength[a] = std::max (2, (int) std::lround (kAllpassMs[a] * 0.001 * sampleRate));
@@ -167,7 +208,7 @@ public:
 
         // Whatever was in flight belongs to the old rate and buffer; reset()
         // builds everything from the settings last asked for.
-        fading = dipping = preFading = false;
+        fading = dipping = preFading = bloomFading = false;
 
         reset();
     }
@@ -176,6 +217,8 @@ public:
     {
         for (auto& l : lines) std::fill (l.begin(), l.end(), 0.0f);
         std::fill (preLine.begin(), preLine.end(), 0.0f);
+        std::fill (bloomLine.begin(), bloomLine.end(), 0.0f);
+        bloomIdx = 0;
         for (auto& a : apLine) std::fill (a.begin(), a.end(), 0.0f);
         for (auto& f : filt) f = {};
         for (auto& f : filtTo) f = {};
@@ -354,8 +397,27 @@ public:
 
             hadamard (mixed);
 
+            // ATTACK: each line is fed at its own delay and level, and a
+            // change of ATTACK crossfades the two feeds. See kAttackSpanMs.
+            bloomLine[(size_t) bloomIdx] = x;
+            const auto bloomW = bloomFading ? raisedCosine (bloomPos, fadeLength) : 0.0f;
+
             for (int i = 0; i < N; ++i)
-                lines[i][(size_t) writeIdx] = flush (mixed[i] + inSign[i] * x);
+            {
+                auto fed = fedTo (i, bloomNow, x);
+                if (bloomFading)
+                    fed = fed * (1.0f - bloomW) + fedTo (i, bloomNext, x) * bloomW;
+
+                lines[i][(size_t) writeIdx] = flush (mixed[i] + inSign[i] * fed);
+            }
+
+            if (bloomFading && ++bloomPos >= fadeLength)
+            {
+                bloomFading = false;
+                bloomNow = bloomNext;
+                attackNow = attackTarget;
+            }
+            if (++bloomIdx == bloomLength) bloomIdx = 0;
 
             if (++writeIdx == lineLength) writeIdx = 0;
 
@@ -406,7 +468,10 @@ public:
     /** 0 while the diffusers are taken after two, 1 after four. */
     float diffuserWeight() const noexcept { return fourWeight; }
     int  preDelayNow() const noexcept { return preDelaySamples; }
-    bool isMoving() const noexcept { return fading || dipping || preFading; }
+    /** Whether the lines are fed at ATTACK's delays, and line `i`'s. */
+    bool bloomIsOn() const noexcept { return bloomNow.on; }
+    int  bloomDelaySamples (int i) const noexcept { return bloomNow.delay[i]; }
+    bool isMoving() const noexcept { return fading || dipping || preFading || bloomFading; }
 
     /** |H_i| at DC, at the line's own mid and at Nyquist: the absorbent
         filter's three anchors, for the stability assertion. */
@@ -532,6 +597,10 @@ private:
         fading = dipping = preFading = false;
         movePos = moveEnd = dipPos = prePos = 0;
         preDelaySamples = preDelayFor (current.preDelayMs);
+        bloomFading = false;
+        bloomPos = 0;
+        attackNow = attackTarget = current.attack;
+        bloomNow = bloomNext = bloomFor (current.attack);
 
         smoothed = { current.decaySeconds, current.dampLo, current.dampHi };
         designAll();
@@ -555,6 +624,16 @@ private:
             }
         }
 
+        // ATTACK: a crossfade to the new feed, likewise. It has no host lane,
+        // so in a host this only ever happens with a TYPE change.
+        if (! bloomFading && r.attack != attackNow)
+        {
+            attackTarget = r.attack;
+            bloomNext = bloomFor (r.attack);
+            bloomFading = true;
+            bloomPos = 0;
+        }
+
         if (fading || dipping)
             return;
 
@@ -569,6 +648,7 @@ private:
         current.loKneeHz     = r.loKneeHz;
         current.hiKneeHz     = r.hiKneeHz;
         current.preDelayMs   = r.preDelayMs;
+        current.attack       = r.attack;
 
         if (typeChanged)
         {
@@ -661,6 +741,62 @@ private:
         auto i = preIdx - delay;
         if (i < 0) i += preLength;
         return preLine[(size_t) i];
+    }
+
+    /** When each line is fed the diffused input, in samples after it, and
+        how loudly. See `kAttackSpanMs`. */
+    struct Bloom
+    {
+        int   delay[N] {};
+        float level[N] {};
+        bool  on = false;      ///< false: every line is fed now, at unity
+    };
+
+    Bloom bloomFor (float attack) const noexcept
+    {
+        Bloom b;
+        for (auto& l : b.level) l = 1.0f;
+
+        const auto span = (int) std::lround (std::clamp (attack, 0.0f, 1.0f) * kAttackSpanMs * 0.001 * sampleRate);
+
+        // Too short a span to feed N lines at N different samples is no
+        // bloom at all: every line now, at unity, as before ATTACK existed.
+        if (span < N || bloomLength < span + 2)
+            return b;
+
+        float energy = 0.0f;
+        for (int i = 0; i < N; ++i)
+        {
+            // The order the lines are fed in is scattered over them (5 is
+            // coprime to any power of two), so that the loudest feeds are
+            // not the longest lines'. Positions run 0..1, uneven between.
+            const auto k   = (i * 5) % N;
+            const auto mid = k > 0 && k < N - 1 ? 0.3f * ((float) std::fmod ((double) k * 0.6180339887, 1.0) - 0.5f) : 0.0f;
+            const auto pos = ((float) k + mid) / (float) (N - 1);
+
+            b.delay[i] = (int) std::lround ((float) span * pos);
+            b.level[i] = kAttackFloor + (1.0f - kAttackFloor) * std::pow (pos, kAttackCurve);
+            energy += b.level[i] * b.level[i];
+        }
+
+        const auto norm = std::sqrt ((float) N / energy);
+        for (auto& l : b.level)
+            l *= norm;
+
+        b.on = true;
+        return b;
+    }
+
+    /** Line `i`'s share of the diffused input under `b`; `now` is this
+        sample's, which is already in the bloom line at `bloomIdx`. */
+    float fedTo (int i, const Bloom& b, float now) const noexcept
+    {
+        if (! b.on)
+            return now;
+
+        auto at = bloomIdx - b.delay[i];
+        if (at < 0) at += bloomLength;
+        return b.level[i] * bloomLine[(size_t) at];
     }
 
     float read (int line, int delay) const noexcept
@@ -1056,6 +1192,12 @@ private:
     std::vector<float> preLine;
     int preLength = 0, preIdx = 0, preDelaySamples = 0, preDelayTarget = 0, prePos = 0;
     bool preFading = false;
+
+    std::vector<float> bloomLine;                     ///< the diffused input, `kAttackSpanMs` of it
+    int bloomLength = 0, bloomIdx = 0, bloomPos = 0;
+    Bloom bloomNow, bloomNext;                        ///< `bloomNext` is the feed an ATTACK change is fading to
+    float attackNow = 0.0f, attackTarget = 0.0f;
+    bool bloomFading = false;
 
     std::array<std::vector<float>, 4> apLine;
     std::array<int, 4> apLength {}, apIdx {};

@@ -653,8 +653,51 @@ stereo, from the two sets rendered on ICE QUEEN
   the old range reads lower. §2 and §6 still say 2–20 kHz where they tell
   the parameter's history.
 
-Still to build in M3b: ATTACK (the onset contour), and `11` §6's onset,
-echo-density, denormal and pitch rows.
+**ATTACK, the onset bloom** (`LateNetwork.h`, 2026-10-07). §2 asks for "a
+rising envelope on the FDN *input*". As built, **each line is fed the
+diffused input at its own delay and its own level**: the shortest line at
+once and quietly, the last ATTACK × 120 ms later and loudest, the levels
+normalised so their mean square is one. Where it departs from §2, and why:
+
+- **Delays, not an envelope.** An envelope needs something to start it and
+  continuous audio has no onsets; delays are linear, need no trigger and
+  treat every sample alike. Frosty approved rising taps on 2026-10-06.
+- **One tap a line, not eight taps into one input.** Eight rising taps
+  summed ahead of the network were built first and are a sparse FIR in front
+  of everything: the late tail's spectral flatness fell from 0.775 to 0.528
+  on Room, 0.864 to 0.628 on Chamber, 0.924 to 0.718 on Hall, 0.931 to 0.770
+  on Cavern and 0.529 to 0.382 on Ambience (the floor is 0.3). Fed a line
+  each: 0.768, 0.873, 0.925, 0.927 and 0.522. Plate, at ATTACK 0, is
+  untouched in both, 0.759.
+- **Measured** on Room at 12 m, DECAY 1.8 s, the tail fed directly: half of
+  the tail's first 400 ms is in by 87.0 ms at ATTACK 0, 97.0 at 10 %, 115.3
+  at 30 %, 150.1 at 65 % and 186.0 at 100 %, so the full span holds the bulk
+  of the tail back by 99 ms. The whole tail's energy stays within 0.08 dB
+  from 0 to 100 %. The tail's first sample does not move.
+- **The reported tail gains ATTACK × 0.12 s** (`DspCore::tailSecondsFor`),
+  since the bulk of the tail ends that much later: Room 36 ms, Chamber 42,
+  Hall 60, Cavern 78, Plate 0, Ambience 12.
+- **A change of ATTACK crossfades two feeds over 30 ms.** It has no host
+  lane, so in a host this happens only with a TYPE change. On a held 440 Hz
+  tail, 30 → 100 %: the largest sample step during the move is 0.00357
+  against 0.00356 settled.
+- **A bloom inside a fitted range reads as a longer decay in a short
+  band.** With Room's 36 ms the 50 Hz band at LOW × 0.25 fits 0.631 s where
+  the filters alone give 0.557. The damping test runs with ATTACK off for
+  that reason; the T60 and tail-report tests run with it on.
+- **CPU**, `measure_reverb bench worst`, on a busy ICE QUEEN (2026-10-07):
+  48 kHz / 128 1.357 → 1.370 %. At 192 kHz / 32 the machine was moving the
+  figure by more than a point between runs; the best single runs with the
+  bloom in were 5.23 %, against 5.13 % measured without it the day before.
+  That is past the 5.18 % Frosty accepted and is with him.
+- **The energy is the same and the peak is not.** The lines fed last are
+  fed up to 4.9 dB harder than without a bloom, so a transient's tail has a
+  peakier first loud arrival: a snare through Hall, tail only, peaks at
+  −30.4 dBFS at Hall's 50 % against −33.7 with the bloom off.
+- The span, the first line's level (0.12), the curve (position^1.5) and the
+  order the lines are fed in are **CALIBRATE**. Not heard yet.
+
+Still to build in M3b: `11` §6's echo-density, denormal and pitch rows.
 
 ## 5. Parameter changes, bypass, tail reporting
 

@@ -493,12 +493,21 @@ void renderWav (const std::string& inPath, const std::string& outPath, const std
 
     auto v = defaults();
 
+    float attackOverride = -1.0f;
+
     for (const auto& o : overrides)
     {
         const auto eq = o.find ('=');
         if (eq == std::string::npos) { std::printf ("bad override %s (want id=value)\n", o.c_str()); return; }
         const auto id = o.substr (0, eq);
         const auto value = (float) std::atof (o.c_str() + eq + 1);
+
+        // **`attack=` is the tool's own, in per cent, and not a parameter.**
+        // ATTACK is a per-type constant with no host lane, and it is
+        // CALIBRATE: this is how a listening set hears a type at a bloom
+        // other than the one its row carries. Written straight onto the
+        // core after the parameters.
+        if (id == "attack") { attackOverride = value * 0.01f; continue; }
         // **`type=` selects a type the way the panel does**: it stamps that
         // type's voicing (`typeSettings`) first, then the index, so a Hall
         // render is Hall's SIZE, SOURCE, levels and the rest, not Room's
@@ -516,7 +525,22 @@ void renderWav (const std::string& inPath, const std::string& outPath, const std
 
     ReverbDsp dsp;
     dsp.prepare (rate, 512, 2);
-    dsp.setParams (v.data(), (int) v.size());
+
+    // Every time the parameters are sent, since sending them puts the
+    // type's own ATTACK back.
+    const auto send = [&]
+    {
+        dsp.setParams (v.data(), (int) v.size());
+
+        if (attackOverride >= 0.0f)
+        {
+            auto p = dsp.getCore().getParams();
+            p.attack = attackOverride;
+            dsp.getCore().setParams (p);
+        }
+    };
+
+    send();
 
     // **The tail is rendered, not cut at the clip's last sample**: silence
     // is appended for the tail the host would be told, up to 20 s.
@@ -539,7 +563,7 @@ void renderWav (const std::string& inPath, const std::string& outPath, const std
     for (size_t at = 0; at < n; at += 512)
     {
         float* chans[] { ch[0].data() + at, ch[1].data() + at };
-        dsp.setParams (v.data(), (int) v.size());
+        send();
         dsp.process (chans, 2, (int) std::min<size_t> (512, n - at));
     }
 

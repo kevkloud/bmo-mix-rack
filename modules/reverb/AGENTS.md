@@ -18,7 +18,7 @@ control-set trim below cut six and the Reverb EQ added six others, neither
 edited `docs/`, so read this file for what the schema is.
 
 **The early reflections, the tail, its modulation and the input stage (the
-Reverb EQ and DARKEN) are real; the onset bloom and the type voicings are
+Reverb EQ and DARKEN) and the onset bloom are real; the type voicings are
 not yet.** Milestone M2 landed on ICE QUEEN on
 2026-09-24: `dsp/ErGenerator.h` plays the six image-source tables in
 `dsp/TapTables.h` through the Size law, four order-banded poles, the DENSITY
@@ -35,8 +35,10 @@ passed on 2026-10-06** (`testing-notes/linger-listening-set-2026-10-06-m3b.md`):
 the tail's lines are modulated (2026-10-05), and `dsp/InputStage.h` puts a
 20 Hz high-pass, DARKEN and the three Reverb EQ nodes ahead of both
 generators (2026-10-06); `10` §4's "As built in M3b" is the record. Still to
-come: the rest of M3b (the onset contour; the truncation contour is left out
-on Frosty's word, 2026-10-06) and M4 (the type blocks).
+ATTACK, the per-type onset bloom, went in on 2026-10-07 and is not heard
+yet: each tail line is fed at its own delay and level over ATTACK x 120 ms
+(`LateNetwork::kAttackSpanMs` has the argument). The truncation contour is
+left out on Frosty's word, 2026-10-06. Still to come: M4 (the type blocks).
 Latency is zero, which is the *shipped* figure and not a stand-in. **Both
 have been heard**: the early reflections at the M2 checkpoint
 (`testing-notes/linger-listening-set-2026-09-24.md`) and the tail at M3a's

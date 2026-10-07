@@ -9,7 +9,8 @@ have one without the other. No latency.
 > **Not finished.** The panel, the parameters, the display, the early
 > reflections and the tail are real, and the early reflections and the tail
 > have been heard. The EQ page's curve and DARKEN are in the sound and the
-> tail is modulated, both heard; the tail's onset bloom is not built,
+> tail is modulated, both heard; the tail's onset bloom is built and not
+> heard yet,
 > and only Room's voicing is worked out. See `AGENTS.md` and `docs/reverb/`.
 
 ## The shape of it

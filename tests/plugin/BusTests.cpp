@@ -473,9 +473,17 @@ const Golden kDefaults[]
       //   -18.2163826847, 0.241076186299,
       //   -17.9521647983, 0.248789131641, -18.2492136317, 0.243127435446,
       //   -17.8128251726, 0.259215831757, -18.6147332839, 0.237616017461
-      -17.9323007224, 0.245891451836,
-      -17.7967445471, 0.250216603279, -18.2873682888, 0.243833884597,
-      -17.5203057249, 0.262792050838, -18.3458081581, 0.24177634716 },
+      // Recaptured on ICE QUEEN, 2026-10-07, when ATTACK went in (M3b): Room's
+      // tail is fed line by line over 36 ms, so less of it is in this
+      // suite's 85 ms. RMS moved by -0.089 to +0.034 dB (mono -17.9323 ->
+      // -17.9732) and the peaks by up to 0.0026 on 0.24. The swept row did
+      // not move: its tail never starts inside the render. Before:
+      //   -17.9323007224, 0.245891451836,
+      //   -17.7967445471, 0.250216603279, -18.2873682888, 0.243833884597,
+      //   -17.5203057249, 0.262792050838, -18.3458081581, 0.24177634716
+      -17.9732115262, 0.245891451836,
+      -17.8506388827, 0.250216603279, -18.253345822, 0.246418222785,
+      -17.6093550429, 0.261974543333, -18.3306692562, 0.240427851677 },
     // Recaptured with the BMO Saturator row above, for the same reason: the
     // Saturator is the third slot of this chain. RMS fell by 1.281 dB (mono,
     // stereo-in duplicate, mono -> stereo), 1.152 dB (stereo L) and 0.882 dB

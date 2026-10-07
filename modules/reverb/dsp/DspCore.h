@@ -55,8 +55,9 @@ enum class ErMode { taps = 0, energy };
     SOURCE's balance of the dry mid and the ER bus and returned through
     WIDTH and the REVERB fader. `InputStage.h` is what both are given: the
     mid of the input through a 20 Hz high-pass, DARKEN and the Reverb EQ
-    (M3b, 2026-10-06). Still to come: the rest of M3b (the onset contour)
-    and M4 (the six type blocks). Latency is zero, which is the *shipped*
+    (M3b, 2026-10-06), and ATTACK blooms the tail's onset per type
+    (2026-10-07, `LateNetwork::kAttackSpanMs`). Still to come: M4 (the six
+    type blocks). Latency is zero, which is the *shipped*
     figure.
 
     The spec is `docs/reverb/10-dsp-spec.md`; what the tests ask of it is
@@ -472,7 +473,7 @@ public:
 
     /** The tail the host should be told about, in seconds:
 
-            preDelay + T_mid * max(1, r_lo, r_hi) + t_ER,max + 0.05 s
+            preDelay + attack * 0.12 s + T_mid * max(1, r_lo, r_hi) + t_ER,max + 0.05 s
 
         clamped to `kMaxTailSeconds` (10 section 5). From parameter values
         rather than from DSP state, which is what lets it be answered before
@@ -504,7 +505,10 @@ public:
                                                      : erSpanMsAt ((int) p.type, p.sizeM);
 
         const auto longest = std::max (1.0f, std::max (p.dampLo, p.dampHi));
+        // ATTACK holds the bulk of the tail back by its span, so the tail ends
+        // that much later (2026-10-07).
         const auto seconds = p.preDelayMs * 0.001f
+                           + std::clamp (p.attack, 0.0f, 1.0f) * Late::kAttackSpanMs * 0.001f
                            + p.decaySeconds * longest
                            + erMs * 0.001f
                            + 0.05f;
@@ -543,6 +547,7 @@ private:
         lc.hiKneeHz     = params.dampHiFreqHz;
         lc.modDepthMs   = params.modDepthMs;
         lc.modRateHz    = params.modRateHz;
+        lc.attack       = params.attack;
         late.setConfig (lc);
 
         input.set (eqSettingsFor (params), params.inHiCutHz, grid);

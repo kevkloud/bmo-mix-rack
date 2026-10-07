@@ -2613,8 +2613,9 @@ int main (int argc, char** argv)
     {
         DspCore::Params p;
 
-        // preDelay + T_mid * max(1, r_lo, r_hi) + t_ER,max + 0.05
-        const auto expected = 0.0f + 1.8f * 1.20f + erSpanMsAt (p.sizeM) * 0.001f + 0.05f;
+        // preDelay + attack * 0.12 + T_mid * max(1, r_lo, r_hi) + t_ER,max + 0.05.
+        // Room's ATTACK is 30 %, so 36 ms of bloom since 2026-10-07.
+        const auto expected = 0.0f + 0.30f * 0.120f + 1.8f * 1.20f + erSpanMsAt (p.sizeM) * 0.001f + 0.05f;
         check (near (DspCore::tailSecondsFor (p), expected, 1.0e-3f),
                "the tail formula at the defaults");
 
@@ -2647,11 +2648,11 @@ int main (int argc, char** argv)
         // over the Taps table's 61 ms; the formula added the Taps span in
         // both modes until the 2026-09-30 review, so at a short DECAY a
         // bounce cut most of an Energy cluster off.
-        //   0 + 1.8 * 1.20 + 500 ms + 0.05 = 2.71
+        //   0 + 0.036 (Room's bloom) + 1.8 * 1.20 + 500 ms + 0.05 = 2.746
         DspCore::Params spread = p;
         spread.erMode     = ErMode::energy;
         spread.erSpreadMs = 200.0f;
-        check (near (DspCore::tailSecondsFor (spread), 2.71f, 1.0e-3f),
+        check (near (DspCore::tailSecondsFor (spread), 2.746f, 1.0e-3f),
                "Energy mode's tail carries its own 500 ms window at ER SPREAD 200");
 
         // And the figure covers what actually plays, in both modes, at the
@@ -3216,6 +3217,12 @@ int main (int argc, char** argv)
                     p.decaySeconds = decay;
                     p.dampLo = side == 0 ? r : 1.0f;
                     p.dampHi = side == 1 ? r : 1.0f;
+                    // ATTACK off: this is about the absorbent filters, and a
+                    // bloom inside the fitted range reads as a longer decay
+                    // in a band this short. With Room's 36 ms the 50 Hz band
+                    // at LOW x 0.25 fitted 0.631 s where the filters give
+                    // 0.557 (2026-10-07), a ratio of 0.312 against 0.280.
+                    p.attack = 0.0f;
                 }, 48000.0, 512, decay * std::max (1.0f, r) * 1.2f + 0.8f);
 
                 const auto tMid  = t60Of (bandEnergyOf (ir, midBand), ir.rate, -5.0, -25.0);
@@ -4474,6 +4481,9 @@ int main (int argc, char** argv)
             p.type = (Type) t;
             p.sizeM = c.sizeM;
             p.feed  = c.feed * 0.01f;
+            // The type's own bloom: ATTACK's taps are in the late tail's
+            // envelope and spectrum, and each type ships its own span.
+            p.attack = c.attack * 0.01f;
             p.decaySeconds = 1.8f;
             p.dampLo = p.dampHi = 1.0f;
         }, 48000.0, 512, 2.6f);
@@ -5320,6 +5330,166 @@ int main (int argc, char** argv)
 
                 check (untouched, "with the faders off at MIX 50 % the output is the input, sample for sample, whatever the EQ and DARKEN");
             }
+        }
+    }
+
+    //== ATTACK: the tail blooms, and Plate's does not ==========================
+    //
+    // 10 section 2 and 11 section 6's Onset row. ATTACK has no host lane, so
+    // it is driven through `DspCore::Params`. Tail only, fed by the direct
+    // signal alone (SOURCE 0) with the modulation off, so that the onset is
+    // the network's and the same every run. Room at 12 m, DECAY 1.8 s.
+    {
+        struct Onset { float attack; double totalDb, halfMs; int first; std::vector<double> windowDb; };
+        std::vector<Onset> rows;
+
+        for (const auto attack : { 0.0f, 0.1f, 0.3f, 0.65f, 1.0f })
+        {
+            const auto ir = renderTail ([attack] (DspCore::Params& p)
+            {
+                p.attack = attack;
+                p.feed = 0.0f;
+                p.modDepthMs = 0.0f;
+            }, 48000.0, 512, 3.0f);
+
+            Onset o;
+            o.attack  = attack;
+            o.totalDb = 10.0 * std::log10 ((double) ir.energy (0, ir.size()));
+
+            for (int w = 0; w < 12; ++w)
+                o.windowDb.push_back (10.0 * std::log10 (std::max (1.0e-30, (double) ir.energy (ir.msToSamples (15.0f * (float) w),
+                                                                                                 ir.msToSamples (15.0f * (float) (w + 1))))));
+
+            const auto all = (double) ir.energy (0, ir.msToSamples (400.0f));
+            double sum = 0.0;
+            int at = 0;
+            for (; at < ir.msToSamples (400.0f) && sum < 0.5 * all; ++at)
+                sum += (double) ir.l[(size_t) at] * ir.l[(size_t) at] + (double) ir.r[(size_t) at] * ir.r[(size_t) at];
+            o.halfMs = (double) at / 48.0;
+
+            o.first = 0;
+            while (o.first < ir.size() && std::abs (ir.l[(size_t) o.first]) + std::abs (ir.r[(size_t) o.first]) < 1.0e-5f)
+                ++o.first;
+
+            std::cout << "  ATTACK " << attack * 100.0f << " %: tail energy " << o.totalDb << " dB, half of its first 400 ms in by "
+                      << o.halfMs << " ms, first sample " << o.first << "\n";
+            rows.push_back (o);
+        }
+
+        // The level does not depend on ATTACK: the feeds are normalised by
+        // energy. What this cannot see is a level change that DECAY hides,
+        // which is why it is the whole tail's energy and not a peak.
+        bool level = true, later = true, sameStart = true;
+        for (size_t i = 1; i < rows.size(); ++i)
+        {
+            level     = level && std::abs (rows[i].totalDb - rows[0].totalDb) <= 0.5;
+            later     = later && rows[i].halfMs > rows[i - 1].halfMs + 5.0;
+            sameStart = sameStart && rows[i].first == rows[0].first;
+        }
+
+        check (level, "the tail's energy is within 0.5 dB at every ATTACK");
+        check (later, "each step of ATTACK brings the bulk of the tail in later");
+
+        const auto held = rows.back().halfMs - rows.front().halfMs;
+        check (held >= 60.0 && held <= 120.0, "ATTACK 100 % holds the bulk of the tail back by 60 to 120 ms");
+
+        // PRE-DELAY has not moved: the tail's first sample is where it was,
+        // quieter. The first line fed is the shortest.
+        check (sameStart, "the tail starts on the same sample at every ATTACK");
+
+        // The bloom rises: across the span, no 15 ms window is more than 2 dB
+        // under the one before. The first window is before the shortest
+        // line's first return and holds nothing, so the count starts at the
+        // second.
+        bool rises = true;
+        for (const auto& o : rows)
+        {
+            const auto last = 1 + (int) std::floor (o.attack * 120.0f / 15.0f);
+            for (int w = 2; w <= std::min (last, 11); ++w)
+                rises = rises && o.windowDb[(size_t) w] >= o.windowDb[(size_t) (w - 1)] - 2.0;
+        }
+        check (rises, "the bloom rises across ATTACK's span, 15 ms at a time");
+
+        // And it is a bloom: at ATTACK 100 % the second window is at least
+        // 15 dB under the same window with ATTACK off.
+        check (rows.back().windowDb[2] <= rows.front().windowDb[2] - 15.0, "at ATTACK 100 % the tail starts at least 15 dB down");
+
+        // Plate's constant is 0, and at 0 nothing is delayed.
+        {
+            DspCore core;
+            DspCore::Params p;
+            p.attack = 0.0f;
+            core.prepare (48000.0, 512, 2);
+            core.setParams (p);
+            std::vector<float> l (512, 0.0f), r (512, 0.0f);
+            float* chans[] { l.data(), r.data() };
+            core.process (chans, 2, 512);
+            check (! core.lateNetwork().bloomIsOn(), "at ATTACK 0 every line is fed at once");
+            check (plateDefaults::kAttack == 0.0f, "Plate's ATTACK is 0: its tail is immediate");
+
+            p.attack = 0.3f;
+            core.prepare (48000.0, 512, 2);
+            core.setParams (p);
+            core.process (chans, 2, 512);
+            check (core.lateNetwork().bloomIsOn(), "at Room's ATTACK the lines are fed in turn");
+
+            int longest = 0;
+            bool distinct = true;
+            for (int i = 0; i < DspCore::kNumLines; ++i)
+            {
+                longest = std::max (longest, core.lateNetwork().bloomDelaySamples (i));
+                for (int j = 0; j < i; ++j)
+                    distinct = distinct && core.lateNetwork().bloomDelaySamples (i) != core.lateNetwork().bloomDelaySamples (j);
+            }
+            check (longest == (int) std::lround (0.3 * 0.120 * 48000.0), "the last line is fed ATTACK x 120 ms after the first");
+            check (distinct, "no two lines are fed on the same sample");
+        }
+
+        // A change of ATTACK is a crossfade and does not click. The house
+        // rule, on a held 440 Hz sine at -18 dBFS with the modulation off so
+        // the tail is a steady sine too: the largest sample step while the
+        // feed moves from Room's 30 % to 100 % is under 1.5x the larger of
+        // the settled steps either side. Noise was tried first and cannot
+        // see a click: its own 1 ms energy wanders by 4.7 dB. In a host this
+        // only happens with a TYPE change, which dips the tail as well.
+        {
+            DspCore core;
+            DspCore::Params p;
+            p.erLevelDb = -40.0f; p.verbLevelDb = 0.0f; p.mix = 1.0f;
+            p.feed = 0.0f; p.modDepthMs = 0.0f;
+            p.attack = 0.3f;
+            core.prepare (48000.0, 48, 2);
+            core.setParams (p);
+
+            std::vector<float> l (48), r (48);
+            float last = 0.0f, before = 0.0f, during = 0.0f, after = 0.0f;
+            const int moveAt = 8000, moveEnds = 8000 + 40, total = 16000;   // blocks of 1 ms; the move is 30 ms
+
+            for (int block = 0; block < total; ++block)
+            {
+                if (block == moveAt) { p.attack = 1.0f; core.setParams (p); }
+
+                for (int i = 0; i < 48; ++i)
+                    l[(size_t) i] = r[(size_t) i] = 0.1259f * (float) std::sin (2.0 * 3.14159265358979323846 * 440.0 * (double) (block * 48 + i) / 48000.0);
+
+                float* chans[] { l.data(), r.data() };
+                core.process (chans, 2, 48);
+
+                for (int i = 0; i < 48; ++i)
+                {
+                    const auto step = std::abs (l[(size_t) i] - last);
+                    last = l[(size_t) i];
+
+                    if (block >= moveAt - 500 && block < moveAt)  before = std::max (before, step);
+                    if (block >= moveAt && block < moveEnds)      during = std::max (during, step);
+                    if (block >= total - 500)                     after  = std::max (after, step);
+                }
+            }
+
+            std::cout << "  ATTACK 30 % -> 100 % under a held 440 Hz tail: largest step " << before << " settled before, "
+                      << during << " during the move, " << after << " settled after\n";
+            check (before > 1.0e-5f && after > 1.0e-5f, "the held tail is sounding either side of the ATTACK move");
+            check (during <= 1.5f * std::max (before, after), "moving ATTACK steps no more than 1.5x the settled tail");
         }
     }
 

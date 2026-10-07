@@ -6,6 +6,7 @@
 #include "core/dsp/ModuleDsp.h"
 #include "modules/reverb/dsp/EqNodes.h"
 #include "modules/reverb/dsp/ErGenerator.h"
+#include "modules/reverb/dsp/InputStage.h"
 #include "modules/reverb/dsp/LateNetwork.h"
 #include "modules/reverb/dsp/TapTables.h"
 #include "modules/reverb/params.h"
@@ -52,9 +53,11 @@ enum class ErMode { taps = 0, energy };
     back at table level, and applies the two faders, the MIX law
     and OUTPUT with 20 ms smoothing. `LateNetwork.h` is the tail, fed by
     SOURCE's balance of the dry mid and the ER bus and returned through
-    WIDTH and the REVERB fader. Still to come: M3b (the Reverb EQ and DARKEN,
-    modulation, the onset and truncation contours) and M4 (the six type
-    blocks). Latency is zero, which is the *shipped* figure.
+    WIDTH and the REVERB fader. `InputStage.h` is what both are given: the
+    mid of the input through a 20 Hz high-pass, DARKEN and the Reverb EQ
+    (M3b, 2026-10-06). Still to come: the rest of M3b (the onset contour)
+    and M4 (the six type blocks). Latency is zero, which is the *shipped*
+    figure.
 
     The spec is `docs/reverb/10-dsp-spec.md`; what the tests ask of it is
     `docs/reverb/11-integration-and-test-plan.md` section 6, whose ER block is
@@ -254,6 +257,13 @@ public:
         blockSize  = std::max (1, maxBlockSize);
         channels   = numChannels;
 
+        // The design grid the Reverb EQ builds its three nodes on, built once
+        // per rate change because 48 pow() and sin() calls is most of a shelf
+        // design's cost (`dsp::DesignGrid`). Ahead of `pushErConfig`, which
+        // designs on it.
+        grid = dsp::DesignGrid::make (sampleRate);
+        input.prepare (sampleRate);
+
         er.prepare (sampleRate, blockSize);
         pushErConfig();
         late.prepare (sampleRate, blockSize);
@@ -269,13 +279,6 @@ public:
         snapGains();
         started = false;
         freshStart = true;
-
-        // The design grid the real EQ will build its three nodes on, built
-        // once per rate change because 48 pow() and sin() calls is most of a
-        // shelf design's cost (`dsp::DesignGrid`). Nothing runs it yet; it is
-        // here so that `prepare` is where it lands when the engine arrives,
-        // rather than being discovered on the audio thread.
-        grid = dsp::DesignGrid::make (newSampleRate > 0.0 ? newSampleRate : kEqDesignRate);
 
         // 4096 samples is the analyser's frame (`Analyser::kFftSize`), and the
         // tap rounds up to a power of two anyway. Twice the frame so a reader
@@ -297,6 +300,7 @@ public:
         still plays exactly what a fresh prepare() does. */
     void reset()
     {
+        input.reset();
         er.reset();
         late.reset();
         snapWetGains();
@@ -313,6 +317,10 @@ public:
         measurement tool. */
     ErGenerator& earlyReflections() noexcept { return er; }
     const ErGenerator& earlyReflections() const noexcept { return er; }
+
+    /** The input stage, likewise. */
+    InputStage& inputStage() noexcept { return input; }
+    const InputStage& inputStage() const noexcept { return input; }
 
     /** The late network, likewise. */
     using Late = LateNetwork<kNumLines>;
@@ -349,12 +357,11 @@ public:
         placeholder decision -- it is where the tap belongs once there is a
         reverb, and putting it on the output would have to be undone.
 
-        **Until the Reverb EQ is in the path (M3b) this shows the dry input,
-        and that is honest.** The EQ sits pre both generators, so the input
-        and the point the EQ acts on are still the same samples; the ER now
-        playing on the output is downstream of it. A reader who finds the
-        spectrum "not reacting to the EQ knobs" has found M3's absence, not a
-        broken analyser. **Do not move the tap to fix it.**
+        **It shows the input, ahead of the input stage, and does not react to
+        the EQ knobs.** The spectrum is what the EQ is given and the curve
+        over it is what the EQ does to it. A reader who finds the spectrum
+        "not reacting to the EQ knobs" has found that, not a broken analyser.
+        **Do not move the tap to fix it.**
         See modules/reverb/AGENTS.md, "The analyser is real and the signal
         under it is not yet".
 
@@ -366,12 +373,11 @@ public:
 
     /** M3a: the early reflections and the tail.
 
-        The analyser window is written from the input, which is still the
-        point the Reverb EQ will act on -- the EQ lands in M3b ahead of both
-        generators, and until then the input and that point are the same
-        samples. The ER generator is fed the mid of the input (a mono bus
-        feeds it directly), returns the ER bus at table level, and the tail is
-        fed SOURCE's balance, (1 - d) * dry mid + d * ER mid; the two faders,
+        The analyser window is written from the input, ahead of the input
+        stage. The mid of the input (a mono bus is its own mid) goes through
+        the input stage and is what both generators are given: the ER
+        generator returns the ER bus at table level, and the tail is fed
+        SOURCE's balance, (1 - d) * that mid + d * ER mid; the two faders,
         WIDTH, the MIX law and OUTPUT are applied here with 20 ms one-pole
         smoothing on every gain. */
     void process (float* const* channelData, int numChannels, int numSamples)
@@ -411,6 +417,10 @@ public:
             else
                 for (int i = 0; i < n; ++i)
                     feed[(size_t) i] = left[start + i];
+
+            // 10 section 2: the high-pass, DARKEN and the Reverb EQ act on
+            // what both generators are given, and on nothing else.
+            input.process (feed.data(), n);
 
             er.process (feed.data(), erL.data(), erR.data(), n);
 
@@ -539,6 +549,8 @@ private:
         lc.modRateHz    = params.modRateHz;
         late.setConfig (lc);
 
+        input.set (eqSettingsFor (params), params.inHiCutHz, grid);
+
         tEr    = faderGain (params.erLevelDb);
         tVerb  = faderGain (params.verbLevelDb);
         tFeed  = std::clamp (params.feed, 0.0f, 1.0f);
@@ -577,6 +589,7 @@ private:
         g = next == g ? t : next;
     }
 
+    InputStage input;
     ErGenerator er;
     Late late;
     std::vector<float> feed, erL, erR, tailIn, lateL, lateR;
@@ -587,10 +600,9 @@ private:
     bool  started = false;      ///< a block has played since prepare() or reset(); until one has, the wet gains snap
     bool  freshStart = false;   ///< nothing has played since prepare(): the dry gains snap as well
 
-    /** The grid the three EQ nodes are designed on, at the running rate.
-        Unused by the placeholder; rebuilt in `prepare` so the engine has it.
-        `kEqDesignRate` until a host says otherwise, which is BMO DEQ's
-        `kDesignRate` and its argument. */
+    /** The grid the three EQ nodes are designed on, at the running rate,
+        rebuilt in `prepare`. `kEqDesignRate` until a host says otherwise,
+        which is BMO DEQ's `kDesignRate` and its argument. */
     dsp::DesignGrid grid = dsp::DesignGrid::make (kEqDesignRate);
 
     /** Held by value and not behind a `unique_ptr<Shared>` as BMO DEQ's is.

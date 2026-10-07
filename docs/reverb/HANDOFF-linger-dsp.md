@@ -147,11 +147,14 @@ decay and damping across types, the ER-to-tail handover (the thing M2 could
 not let anyone hear), PRE-DELAY, and Plate at 8 lines on a vocal. Ask about
 the headphone amp's mono switch before a pass that follows a mono check.
 
-**2. M3b — the rest of the late block.** The Reverb EQ on the wet path,
-SOURCE, modulation (≤3 cents, its spectrum reported), the tail-onset contour
-over `TypeConstants::attack` and the decay-truncation contour, the 150 ms wet
-fade in `reset()`, and whatever of `11` §6 is still red. Its own listening
-items, then M4.
+**2. M3b — the rest of the late block.** The Reverb EQ **ahead of both
+generators** (this line said "on the wet path" until 2026-10-06, which `10`
+§2 never did), SOURCE, modulation (≤3 cents, its spectrum reported), the
+tail-onset contour over `TypeConstants::attack` and the decay-truncation
+contour, the 150 ms wet fade in `reset()`, and whatever of `11` §6 is still
+red. Its own listening items, then M4. *Built so far, on ICE QUEEN:
+modulation (2026-10-05) and the input stage — 20 Hz high-pass, DARKEN, the
+Reverb EQ (2026-10-06); `10` §4's "As built in M3b" is the record.*
 
 ### The decisions M3 needed — all made
 

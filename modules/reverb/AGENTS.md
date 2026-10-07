@@ -17,8 +17,9 @@ and the schema says thirty, and they are not the same thirty** — the
 control-set trim below cut six and the Reverb EQ added six others, neither
 edited `docs/`, so read this file for what the schema is.
 
-**The early reflections and the tail are real; the Reverb EQ, modulation and
-the type voicings are not yet.** Milestone M2 landed on ICE QUEEN on
+**The early reflections, the tail, its modulation and the input stage (the
+Reverb EQ and DARKEN) are real; the onset bloom and the type voicings are
+not yet.** Milestone M2 landed on ICE QUEEN on
 2026-09-24: `dsp/ErGenerator.h` plays the six image-source tables in
 `dsp/TapTables.h` through the Size law, four order-banded poles, the DENSITY
 bridge and its feed-forward diffuser, seven VARIATION positions and the ER
@@ -29,8 +30,12 @@ were printed from. **M3a landed on 2026-10-02** (heard and passed):
 `dsp/LateNetwork.h` is the tail -- pre-delay, input diffusers, eight prime
 lines with Hadamard mixing, absorbent filters in double -- fed by SOURCE and
 returned through WIDTH and REVERB; `10` §4's "As built in M3a" lists where it
-departs from the spec. Still to come: M3b (the Reverb EQ and DARKEN in the
-path, modulation, the onset and truncation contours) and M4 (the type blocks).
+departs from the spec. **M3b so far, on ICE QUEEN, neither part heard yet**:
+the tail's lines are modulated (2026-10-05), and `dsp/InputStage.h` puts a
+20 Hz high-pass, DARKEN and the three Reverb EQ nodes ahead of both
+generators (2026-10-06); `10` §4's "As built in M3b" is the record. Still to
+come: the rest of M3b (the onset contour, and the truncation contour if it is
+wanted) and M4 (the type blocks).
 Latency is zero, which is the *shipped* figure and not a stand-in. **Both
 have been heard**: the early reflections at the M2 checkpoint
 (`testing-notes/linger-listening-set-2026-09-24.md`) and the tail at M3a's
@@ -939,9 +944,13 @@ reflection stops fusing with the direct sound.
 **EQ — logarithmic frequency, 20 Hz to 20 kHz**, level linear over ±24 dB.
 **Three marked nodes over one summed curve, and a curtain that is not a node.**
 The three are the Reverb EQ's, drawn by `EqNodes::design` — which is
-`dsp::designMatched`, which is the code the engine will run. DARKEN's one
-pole is in the curve, because it is in the chain, and it is the screen's own
-arithmetic because nobody has chosen an order for it.
+`dsp::designMatched`, which is the code the engine runs
+(`dsp/InputStage.h`, since 2026-10-06). DARKEN's one pole is in the curve,
+because it is in the chain, **and it is still the screen's own analogue
+arithmetic, which is not the engine's law**: the engine's pole is exact at
+the corner and up to 0.53 dB off the drawn curve at the default at 48 kHz
+(`10` §4, "As built in M3b", has the table). Drawing
+`InputStage::lowPassDbAt` at the running rate closes it and is open.
 
 **DARKEN is drawn as a region and was an open circle until 2026-09-22.** The
 circle was wrong twice: one stroke's difference from three filled markers reads
@@ -1043,11 +1052,16 @@ the Reverb EQ acts on** — pre both generators, which is where `10` section 2
 puts the EQ. That is where it belongs once there is an engine, so no rewiring
 is owed.
 
-**Until the Reverb EQ is in the path (M3) it shows the dry input, and that is
-honest rather than broken.** The EQ is pre both generators, so the input and
-the point the EQ acts on are the same samples; the early reflections M2 added
-are downstream of it. A reader who finds the spectrum "not reacting to the EQ
-knobs" has found M3's absence. **Do not move the tap to fix it.**
+**It shows the input, ahead of the EQ, and it does not react to the EQ
+knobs. That is where it stays.** The Reverb EQ has been in the path since
+2026-10-06 (`dsp/InputStage.h`), so this section's heading is history: the
+signal under the curve is real now. The tap is still the module's input --
+what the stage is given, before the high-pass, DARKEN and the three nodes --
+so the picture reads as "this spectrum, shaped by this curve, is what the
+room hears". Moving the tap after the EQ would make the spectrum follow the
+knobs and would stop it being the thing the curve acts on; that is a
+decision for Frosty and has not been asked for. **Do not move the tap to
+fix it.**
 
 Adding the override costs the other modules nothing — `ModuleDsp::analyser()`
 returns null by default and BMO DEQ was its only overrider — and

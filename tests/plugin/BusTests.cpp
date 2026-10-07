@@ -465,9 +465,17 @@ const Golden kDefaults[]
       // Recaptured on ICE QUEEN, 2026-10-05, when the tail's lines began to
       // be modulated (M3b): one figure left tolerance, the last peak, by
       // 1.4e-4 (0.005 dB); the rest moved by at most 3.3e-5 dB and 9.2e-6.
-      -18.2163826847, 0.241076186299,
-      -17.9521647983, 0.248789131641, -18.2492136317, 0.243127435446,
-      -17.8128251726, 0.259215831757, -18.6147332839, 0.237616017461 },
+      // Recaptured on ICE QUEEN, 2026-10-06, when the input stage went in
+      // ahead of both generators (M3b): at defaults that is the 20 Hz
+      // high-pass and DARKEN at 20 kHz on everything wet, the EQ being flat
+      // and exact. RMS moved by -0.038 to +0.293 dB (mono -18.2164 ->
+      // -17.9323) and the peaks by 0.0007 to 0.0048 on 0.24. Before:
+      //   -18.2163826847, 0.241076186299,
+      //   -17.9521647983, 0.248789131641, -18.2492136317, 0.243127435446,
+      //   -17.8128251726, 0.259215831757, -18.6147332839, 0.237616017461
+      -17.9323007224, 0.245891451836,
+      -17.7967445471, 0.250216603279, -18.2873682888, 0.243833884597,
+      -17.5203057249, 0.262792050838, -18.3458081581, 0.24177634716 },
     // Recaptured with the BMO Saturator row above, for the same reason: the
     // Saturator is the third slot of this chain. RMS fell by 1.281 dB (mono,
     // stereo-in duplicate, mono -> stereo), 1.152 dB (stereo L) and 0.882 dB
@@ -608,10 +616,20 @@ const Golden kSwept[]
     // and the peaks by 4.1e-5 to 1.1e-4 on 0.066. The defaults row did not
     // move, and should not have: at defaults an instance already started at
     // its targets. No other row moved; no tolerance was touched.
+    //
+    // Regenerated on ICE QUEEN, 2026-10-06, with the defaults row and for the
+    // same reason, the input stage (M3b): at 0.63 every Reverb EQ control and
+    // DARKEN are off their defaults, and the early reflections now play
+    // through them. RMS moved by -0.032 to +0.098 dB (mono -29.2429 ->
+    // -29.2109) and the peaks by 2.5e-4 to 8.4e-4 on 0.066. Before:
+    //   -29.2428976613, 0.0666297152638,
+    //   -29.2489375559, 0.0658715516329, -29.6764939059, 0.0650616884232,
+    //   -28.9822617403, 0.0688233077526, -29.501805594, 0.0644361227751
+    // No other row moved; no tolerance was touched.
     { "reverb",
-      -29.2428976613, 0.0666297152638,
-      -29.2489375559, 0.0658715516329, -29.6764939059, 0.0650616884232,
-      -28.9822617403, 0.0688233077526, -29.501805594, 0.0644361227751 },
+      -29.210880253, 0.066381432116,
+      -29.2643343751, 0.0654515773058, -29.6790234038, 0.0647449195385,
+      -29.0140233606, 0.0679816156626, -29.4042598333, 0.0647812560201 },
     // Regenerated with the eq row above, for the same reason: BMO EQ is a slot
     // in this chain with Auto Gain on, so its first 60 ms now carry the +2.28
     // dB from the start, and the compressing slots after it turn that into

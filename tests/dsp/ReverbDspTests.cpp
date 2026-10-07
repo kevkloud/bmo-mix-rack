@@ -80,6 +80,9 @@ namespace
         int msToSamples (float ms) const noexcept { return (int) std::lround (ms * 0.001 * rate); }
     };
 
+    /** Set only by `renderBare`, below. */
+    bool bareGenerators = false;
+
     /** The ER-only condition every rule in 11 section 6's ER block is written
         in: REVERB off, ER at 0 dB, MIX 100 %, OUTPUT 0 dB, ER HI-CUT open.
         `edit` then moves whatever the test is about. A pre-roll of 300 ms of
@@ -101,6 +104,7 @@ namespace
         ReverbDsp dsp;
         dsp.prepare (rate, block, channels);
         dsp.setParams (v.data(), (int) v.size());
+        dsp.getCore().inputStage().setBypassedForMeasurement (bareGenerators);
 
         const auto preroll = (int) (0.3 * rate);
         const auto n       = (int) (seconds * rate);
@@ -121,6 +125,23 @@ namespace
         ir.rate = rate;
         ir.l.assign (l.begin() + preroll, l.end());
         ir.r.assign (channels > 1 ? r.begin() + preroll : l.begin() + preroll, channels > 1 ? r.end() : l.end());
+        return ir;
+    }
+
+    /** The same, with the input stage out, for the four rules that are read
+        off an impulse's own shape and are claims about the generator: a tap's
+        gain as a DC sum, energy after the span, the 5 ms energy windows, and
+        energy across a DENSITY sweep inside a fixed window. A 20 Hz high-pass
+        has no DC to sum and follows every tap with an 8 ms tail 52 dB under
+        it, so with the stage in (since 2026-10-06) those rows read 0.8 to
+        11 dB off the table and are measuring the high-pass. Every other row
+        in the ER block plays through the stage, and the stage's own block
+        asserts what it does to what the generators are given. */
+    Ir renderBare (const std::function<void (std::vector<float>&)>& edit)
+    {
+        bareGenerators = true;
+        auto ir = render (edit);
+        bareGenerators = false;
         return ir;
     }
 
@@ -917,7 +938,7 @@ int main (int argc, char** argv)
     {
         for (int t = 0; t < kNumTapTypes; ++t)
         {
-            const auto ir = render ([t] (auto& v) { v[Index::type] = (float) t; });
+            const auto ir = renderBare ([t] (auto& v) { v[Index::type] = (float) t; });
             const auto* table = kTypeTaps[t];
             bool timesOk = true, gainsOk = true;
 
@@ -993,7 +1014,7 @@ int main (int argc, char** argv)
 
     //== Flamming, on the rendered Room IR ========================================
     {
-        const auto ir = render ([] (auto&) {});
+        const auto ir = renderBare ([] (auto&) {});
         const auto span = erSpanMsAt (0, roomDefaults::kSizeM);
 
         // Each tap's energy as heard: the IR's energy between it and the next.
@@ -1070,7 +1091,7 @@ int main (int argc, char** argv)
 
     //== ER-only: self-terminating, ramped out, and flat ==========================
     {
-        const auto ir = render ([] (auto&) {});
+        const auto ir = renderBare ([] (auto&) {});
         const auto span = erSpanMsAt (0, roomDefaults::kSizeM);
         const auto er   = ir.energy (0, ir.msToSamples (span + 5.0f));
         const auto after = ir.energy (ir.msToSamples (span + 5.0f), ir.size());
@@ -1190,7 +1211,7 @@ int main (int argc, char** argv)
         for (int step = 0; step <= 20; ++step)
         {
             const auto d = (float) step * 5.0f;
-            const auto ir = render ([d] (auto& p) { p[Index::erdensity] = d; });
+            const auto ir = renderBare ([d] (auto& p) { p[Index::erdensity] = d; });
             const auto span = erSpanMsAt (0, roomDefaults::kSizeM);
             const auto e = ir.energy (0, ir.msToSamples (span + 15.0f));
 
@@ -4866,6 +4887,398 @@ int main (int argc, char** argv)
 
         std::cout << "  modulation at its corners over a 40 s tail: " << grew << " of " << rows << " rows grew\n";
         check (grew == 0, "the deepest and the fastest modulation never make the tail grow");
+    }
+
+    //== The input stage: what the room is given ================================
+    //
+    // 10 section 2: a fixed 20 Hz high-pass, DARKEN (one pole), then the three
+    // Reverb EQ nodes, ahead of both generators and never on the dry path.
+    // The first half drives `InputStage` alone; the second drives `DspCore`,
+    // because a stage that is right and wired after the generators, or onto
+    // the dry signal, passes every one of the first half's rows.
+    {
+        const auto db3 = 10.0 * std::log10 (2.0);
+
+        /** One DFT bin of an impulse response, in dB. */
+        const auto binDb = [] (const std::vector<float>& h, double hz, double rate)
+        {
+            const auto w = 2.0 * 3.14159265358979323846 * hz / rate;
+            double re = 0.0, im = 0.0;
+
+            for (size_t i = 0; i < h.size(); ++i)
+            {
+                re += (double) h[i] * std::cos (w * (double) i);
+                im -= (double) h[i] * std::sin (w * (double) i);
+            }
+
+            return 10.0 * std::log10 (std::max (re * re + im * im, 1.0e-300));
+        };
+
+        // B: a busy EQ with shelves. C: both outer nodes as cuts.
+        EqSettings flat, busy, cuts;
+        busy.loFreqHz = 140.0f;   busy.loDb = -6.0f;   busy.loQ = 1.35f;
+        busy.midFreqHz = 2600.0f; busy.midDb = 7.5f;   busy.midQ = 3.25f;
+        busy.hiFreqHz = 6000.0f;  busy.hiDb = 4.5f;    busy.hiQ = 0.45f;
+        cuts.filter = EqFilter::bandpass;
+        cuts.loFreqHz = 80.0f;    cuts.loDb = -9.0f;   cuts.loQ = 1.2f;
+        cuts.midFreqHz = 500.0f;  cuts.midDb = -12.0f; cuts.midQ = 0.7f;
+        cuts.hiFreqHz = 8000.0f;  cuts.hiDb = 6.0f;    cuts.hiQ = 0.71f;
+
+        struct Setting { const EqSettings* eq; float darkenHz; const char* name; };
+        const Setting settings[] { { &flat, 20000.0f, "flat" }, { &busy, 9000.0f, "busy" }, { &cuts, 2000.0f, "cuts" } };
+
+        //-- The two one-pole laws, as absolutes ---------------------------------
+        // DARKEN's corner is solved, so it is -3.01 dB at the knob's frequency
+        // to rounding. The high-pass is x minus a low-pass with that corner,
+        // which puts its own corner within 0.02 dB of 20 Hz at every rate.
+        {
+            auto worstHp = 0.0, worstLp = 0.0;
+
+            for (const auto rate : { 44100.0, 48000.0, 96000.0, 192000.0 })
+            {
+                worstHp = std::max (worstHp, std::abs (InputStage::highPassDbAt (InputStage::highPassCoefFor (rate), 20.0, rate) + db3));
+
+                for (const auto corner : { 2000.0, 9000.0, 20000.0 })
+                    worstLp = std::max (worstLp, std::abs (InputStage::lowPassDbAt (InputStage::darkenCoefFor (corner, rate), corner, rate) + db3));
+            }
+
+            std::cout << "  input stage: high-pass at 20 Hz within " << worstHp << " dB of -3.01, DARKEN at its corner within "
+                      << worstLp << " dB, 44.1-192 kHz\n";
+            check (worstHp < 0.02, "the high-pass is 3 dB down at 20 Hz at every rate");
+            check (worstLp < 1.0e-6, "DARKEN is 3 dB down at the knob's frequency at every rate, 20 kHz included");
+        }
+
+        //-- The running stage is its design -------------------------------------
+        // Off the impulse response, against the high-pass's and DARKEN's laws
+        // plus `EqNodes::design` -- the same three biquads the panel draws.
+        {
+            auto worst = 0.0;
+
+            for (const auto rate : { 48000.0, 96000.0 })
+                for (const auto& s : settings)
+                {
+                    InputStage stage;
+                    stage.prepare (rate);
+                    stage.set (*s.eq, s.darkenHz, bmo::dsp::DesignGrid::make (rate));
+
+                    std::vector<float> h ((size_t) (2.0 * rate), 0.0f);
+                    h[0] = 1.0f;
+                    stage.process (h.data(), (int) h.size());
+
+                    const auto design = EqNodes::design (*s.eq, rate);
+
+                    for (const auto hz : { 10.0, 20.0, 50.0, 140.0, 500.0, 1000.0, 2600.0, 6000.0, 9000.0, 15000.0 })
+                    {
+                        const auto expected = InputStage::highPassDbAt (InputStage::highPassCoefFor (rate), hz, rate)
+                                            + InputStage::lowPassDbAt (InputStage::darkenCoefFor ((double) s.darkenHz, rate), hz, rate)
+                                            + design.magnitudeDbAt (hz, rate);
+
+                        worst = std::max (worst, std::abs (binDb (h, hz, rate) - expected));
+                    }
+                }
+
+            std::cout << "  input stage: running response within " << worst << " dB of its design, 10 Hz-15 kHz, three settings, 48 and 96 kHz\n";
+            check (worst < 0.02, "the running input stage is the high-pass, DARKEN and the three designed nodes in series");
+        }
+
+        //-- A flat EQ is a wire --------------------------------------------------
+        // Where a flat node sits and how sharp it is cannot matter, to the
+        // bit; and what is left is the two one-poles, written out here.
+        // What the first row cannot see: with the stage's (1, 0, 0) mix left
+        // to the closed form instead of written out, it still passed on ICE
+        // QUEEN (2026-10-06) -- the closed form is off by parts in 1e16 and
+        // the output is a float. The stage writes the mix out so that this
+        // holds by construction rather than by rounding luck.
+        {
+            EqSettings elsewhere;
+            elsewhere.loFreqHz = 1600.0f;  elsewhere.loQ = 2.0f;
+            elsewhere.midFreqHz = 20.0f;   elsewhere.midQ = 40.0f;
+            elsewhere.hiFreqHz = 20000.0f; elsewhere.hiQ = 0.1f;
+
+            const auto rate = 48000.0;
+            const auto grid = bmo::dsp::DesignGrid::make (rate);
+            InputStage a, b;
+            a.prepare (rate); a.set (flat, 20000.0f, grid);
+            b.prepare (rate); b.set (elsewhere, 20000.0f, grid);
+
+            std::vector<float> x (9600), xa, xb;
+            for (int i = 0; i < (int) x.size(); ++i)
+                x[(size_t) i] = noiseAt (i);
+            xa = xb = x;
+            a.process (xa.data(), (int) xa.size());
+            b.process (xb.data(), (int) xb.size());
+
+            const auto hpC = InputStage::highPassCoefFor (rate), lpC = InputStage::darkenCoefFor (20000.0, rate);
+            double hp = 0.0, lp = 0.0, worst = 0.0;
+            bool same = true;
+
+            for (size_t i = 0; i < x.size(); ++i)
+            {
+                auto v = (double) x[i];
+                hp += hpC * (v - hp);  v -= hp;
+                lp += lpC * (v - lp);
+                worst = std::max (worst, std::abs (lp - (double) xa[i]));
+                same = same && xa[i] == xb[i];
+            }
+
+            check (same, "a flat EQ plays the same samples wherever its nodes sit");
+            check (worst < 1.0e-6, "with the EQ flat the stage is the high-pass and DARKEN and nothing else");
+        }
+
+        //-- A move does not click, and lands -----------------------------------
+        // The house rule: under 1.5x the steady signal's largest step. 97 Hz at
+        // -18 dBFS, node 1 from flat to +12 dB at 200 Hz with DARKEN from
+        // 20 kHz to 2 kHz, then both back. 97 Hz and an odd sample count, so
+        // the move does not start on a zero crossing.
+        {
+            const auto rate = 48000.0;
+            const auto grid = bmo::dsp::DesignGrid::make (rate);
+            const auto glide = (int) std::lround (InputStage::kGlideMs * 0.001 * rate);
+
+            EqSettings boosted;
+            boosted.loFreqHz = 200.0f; boosted.loDb = 12.0f;
+
+            InputStage stage, fresh;
+            stage.prepare (rate);
+            stage.set (flat, 20000.0f, grid);
+            fresh.prepare (rate);
+            fresh.set (boosted, 2000.0f, grid);
+
+            int at = 0;
+            float last = 0.0f;
+            const auto run = [&] (InputStage& s, int n, std::vector<float>* keep = nullptr)
+            {
+                float worstStep = 0.0f;
+
+                for (int i = 0; i < n; ++i, ++at)
+                {
+                    auto v = 0.1259f * (float) std::sin (2.0 * 3.14159265358979323846 * 97.0 * (double) at / rate);
+                    s.process (&v, 1);
+                    worstStep = std::max (worstStep, std::abs (v - last));
+                    last = v;
+                    if (keep != nullptr) keep->push_back (v);
+                }
+
+                return worstStep;
+            };
+
+            run (stage, 7001);
+            const auto before = run (stage, 2000);
+
+            stage.set (boosted, 2000.0f, grid);
+            check (stage.isMoving(), "a changed request starts a move");
+            const auto movingUp = run (stage, glide);
+            check (! stage.isMoving(), "a move is over in 20 ms");
+            check (stage.darkenCoefNow() == InputStage::darkenCoefFor (2000.0, rate), "DARKEN's coefficient lands exactly");
+
+            run (stage, 48000 - glide);
+            std::vector<float> moved, landed;
+            const auto after = run (stage, 2000, &moved);
+
+            // The fresh instance hears the same signal from sample zero.
+            {
+                const auto resume = at;
+                const auto lastWas = last;
+                at = 0;
+                run (fresh, resume - 2000);
+                run (fresh, 2000, &landed);
+                at = resume;
+                last = lastWas;
+            }
+
+            auto apart = 0.0f;
+            for (size_t i = 0; i < moved.size(); ++i)
+                apart = std::max (apart, std::abs (moved[i] - landed[i]));
+
+            stage.set (flat, 20000.0f, grid);
+            const auto movingDown = run (stage, glide);
+
+            std::cout << "  input stage: largest step " << before << " steady, " << movingUp << " during +12 dB / DARKEN 2 kHz, "
+                      << after << " after, " << movingDown << " on the way back\n";
+            check (movingUp   <= 1.5f * std::max (before, after), "an EQ and DARKEN move steps no more than 1.5x the steady signal");
+            check (movingDown <= 1.5f * std::max (before, after), "and no more on the way back");
+            check (apart < 1.0e-6f, "a moved stage settles on what a fresh one at those settings plays");
+        }
+
+        //-- Block size: bit-identical, moves included ---------------------------
+        // The glide counts samples. Two requests land at samples 5000 and
+        // 5400, the second inside the first's move.
+        {
+            const auto rate = 48000.0;
+            const auto grid = bmo::dsp::DesignGrid::make (rate);
+            std::vector<float> reference;
+            bool identical = true;
+
+            for (const auto block : { 1, 16, 127, 512, 2048 })
+            {
+                InputStage stage;
+                stage.prepare (rate);
+                stage.set (flat, 20000.0f, grid);
+
+                std::vector<float> x (20000);
+                for (int i = 0; i < (int) x.size(); ++i)
+                    x[(size_t) i] = noiseAt (i);
+
+                const int edges[] { 0, 5000, 5400, (int) x.size() };
+
+                for (int e = 0; e < 3; ++e)
+                {
+                    if (e == 1) stage.set (busy, 9000.0f, grid);
+                    if (e == 2) stage.set (cuts, 2000.0f, grid);
+
+                    for (int i = edges[e]; i < edges[e + 1]; i += block)
+                        stage.process (x.data() + i, std::min (block, edges[e + 1] - i));
+                }
+
+                if (reference.empty())
+                    reference = x;
+                else
+                    identical = identical && x == reference;
+            }
+
+            check (identical, "the input stage is bit-identical at blocks of 1, 16, 127, 512 and 2048, through two moves");
+        }
+
+        //-- Silence in reaches exactly zero out, and never through a subnormal --
+        // The slowest filter the schema allows: a 20 Hz bell at Q 40, +12 dB,
+        // over a 16 Hz cut at Q 2. Its state takes most of a minute to fall
+        // through 1e-30, where it is flushed.
+        {
+            const auto rate = 48000.0;
+            EqSettings slow;
+            slow.filter = EqFilter::loCut;
+            slow.loFreqHz = 16.0f;  slow.loQ = 2.0f;
+            slow.midFreqHz = 20.0f; slow.midDb = 12.0f; slow.midQ = 40.0f;
+
+            InputStage stage;
+            stage.prepare (rate);
+            stage.set (slow, 20000.0f, bmo::dsp::DesignGrid::make (rate));
+
+            std::vector<float> x (4800);
+            bool subnormal = false;
+            long long lastNonZero = 0, t60 = 0;
+            const auto total = (long long) (90.0 * rate);
+
+            for (long long n = 0; n < total; n += (long long) x.size())
+            {
+                for (int i = 0; i < (int) x.size(); ++i)
+                    x[(size_t) i] = n == 0 && i == 0 ? 1.0f : 0.0f;
+
+                stage.process (x.data(), (int) x.size());
+
+                for (int i = 0; i < (int) x.size(); ++i)
+                {
+                    subnormal = subnormal || std::fpclassify (x[(size_t) i]) == FP_SUBNORMAL;
+                    if (x[(size_t) i] != 0.0f) lastNonZero = n + i;
+                    if (std::abs (x[(size_t) i]) > 1.0e-3f) t60 = n + i;
+                }
+            }
+
+            std::cout << "  input stage: slowest EQ (20 Hz bell, Q 40, +12 dB) rings above -60 dB re the impulse for "
+                      << (double) t60 / rate << " s and is exactly zero after " << (double) lastNonZero / rate << " s\n";
+            check (lastNonZero < total - (long long) rate, "the slowest EQ setting reaches exactly zero");
+            check (! subnormal, "and never hands the generators a subnormal on the way");
+        }
+
+        //-- Through the engine: ahead of both generators, never on the dry ------
+        {
+            const auto rate = 48000.0;
+
+            const auto with = [&] (DspCore::Params p, const Setting& s)
+            {
+                p.eqFilter = s.eq->filter;
+                p.eqLoFreqHz = s.eq->loFreqHz;   p.eqLoDb = s.eq->loDb;   p.eqLoQ = s.eq->loQ;
+                p.eqMidFreqHz = s.eq->midFreqHz; p.eqMidDb = s.eq->midDb; p.eqMidQ = s.eq->midQ;
+                p.eqHiFreqHz = s.eq->hiFreqHz;   p.eqHiDb = s.eq->hiDb;   p.eqHiQ = s.eq->hiQ;
+                p.inHiCutHz = s.darkenHz;
+                return p;
+            };
+
+            /** The left channel's impulse response, with the stage in or out. */
+            const auto impulse = [&] (const DspCore::Params& p, bool stageOut)
+            {
+                DspCore core;
+                core.prepare (rate, 512, 2);
+                core.setParams (p);
+                core.inputStage().setBypassedForMeasurement (stageOut);
+
+                std::vector<float> l ((size_t) (2.0 * rate), 0.0f), r (l.size(), 0.0f);
+                l[0] = r[0] = 1.0f;
+
+                for (size_t at = 0; at < l.size(); at += 512)
+                {
+                    float* chans[] { l.data() + at, r.data() + at };
+                    core.process (chans, 2, (int) std::min<size_t> (512, l.size() - at));
+                }
+
+                return l;
+            };
+
+            // The modulation is off so the tail is one fixed linear system and
+            // a filter ahead of it multiplies its response; DECAY 0.5 s so two
+            // seconds holds all of it.
+            DspCore::Params erOnly, tailOnly;
+            erOnly.verbLevelDb = -40.0f;  erOnly.erLevelDb = 0.0f;     erOnly.mix = 1.0f;
+            tailOnly.erLevelDb = -40.0f;  tailOnly.verbLevelDb = 0.0f; tailOnly.mix = 1.0f;
+            tailOnly.feed = 0.0f;         tailOnly.decaySeconds = 0.5f; tailOnly.modDepthMs = 0.0f;
+
+            auto worstEr = 0.0, worstTail = 0.0;
+
+            for (const auto& s : { settings[1], settings[2] })
+            {
+                const auto design = EqNodes::design (*s.eq, rate);
+                const auto erIn   = impulse (with (erOnly, s), false),   erOut   = impulse (with (erOnly, s), true);
+                const auto tailIn = impulse (with (tailOnly, s), false), tailOut = impulse (with (tailOnly, s), true);
+
+                for (const auto hz : { 140.0, 500.0, 2600.0, 6000.0 })
+                {
+                    const auto expected = InputStage::highPassDbAt (InputStage::highPassCoefFor (rate), hz, rate)
+                                        + InputStage::lowPassDbAt (InputStage::darkenCoefFor ((double) s.darkenHz, rate), hz, rate)
+                                        + design.magnitudeDbAt (hz, rate);
+
+                    worstEr   = std::max (worstEr,   std::abs (binDb (erIn, hz, rate)   - binDb (erOut, hz, rate)   - expected));
+                    worstTail = std::max (worstTail, std::abs (binDb (tailIn, hz, rate) - binDb (tailOut, hz, rate) - expected));
+                }
+            }
+
+            std::cout << "  input stage through the engine: early reflections within " << worstEr << " dB of the stage's design, tail within "
+                      << worstTail << " dB\n";
+            check (worstEr < 0.05, "the early reflections are fed through the high-pass, DARKEN and the Reverb EQ");
+            check (worstTail < 0.05, "and so is the tail's direct feed");
+
+            // The dry path: MIX 50 %, both faders off, the busiest setting.
+            {
+                auto p = with (DspCore::Params {}, settings[2]);
+                p.erLevelDb = p.verbLevelDb = -40.0f;
+                p.mix = 0.5f;
+
+                DspCore core;
+                core.prepare (rate, 512, 2);
+                core.setParams (p);
+
+                std::vector<float> l (48000), r (48000);
+                bool untouched = true;
+
+                for (int at = 0; at < 48000; at += 512)
+                {
+                    const auto n = std::min (512, 48000 - at);
+                    for (int i = 0; i < n; ++i)
+                    {
+                        l[(size_t) (at + i)] = noiseAt (at + i);
+                        r[(size_t) (at + i)] = noiseAt (at + i + 7919);
+                    }
+
+                    float* chans[] { l.data() + at, r.data() + at };
+                    core.process (chans, 2, n);
+
+                    for (int i = 0; i < n; ++i)
+                        untouched = untouched && l[(size_t) (at + i)] == noiseAt (at + i)
+                                              && r[(size_t) (at + i)] == noiseAt (at + i + 7919);
+                }
+
+                check (untouched, "with the faders off at MIX 50 % the output is the input, sample for sample, whatever the EQ and DARKEN");
+            }
+        }
     }
 
     //== prepare() and reset() are reachable and do not throw ================

@@ -1,5 +1,22 @@
 # DSP tests build everywhere, JUCE or not. Plugin tests need JUCE.
 
+# The exhaustive run of a suite that keeps a subset by default: the same
+# executable with `--long`, registered as `<name>_long` and labelled `long`,
+# only when BMO_LONG_TESTS is ON (the option in the root CMakeLists.txt says
+# why). The fence is one figure for all six, set by the slowest. Measured on
+# the first CI run (ubuntu, four suites at a time, 2026-10-06): dwell_dsp
+# 3661 s (its 360 rows are 26 minutes in Release on ICE QUEEN; the container
+# is 2.3 times slower), reverb_dsp 870 s, vcomp_switch 301 s, eq_switch
+# 191 s, sat_switch and deq_dsp 59 s each. 11000 s is three times the
+# slowest honest run, as reverb_dsp's own 1350 s fence is three times its
+# slowest Debug run. A run that reaches the fence still fails, as a timeout.
+function(bmo_long_test name)
+    if(BMO_LONG_TESTS)
+        add_test(NAME ${name}_long COMMAND ${name}_tests --long)
+        set_tests_properties(${name}_long PROPERTIES LABELS long TIMEOUT 11000)
+    endif()
+endfunction()
+
 # Shared DSP in core/dsp, header-only, so it links nothing.
 bmo_add_dsp_tool(switch_fade_tests dsp/SwitchFadeTests.cpp)
 add_test(NAME switch_fade COMMAND switch_fade_tests)
@@ -13,6 +30,7 @@ add_test(NAME eq_dsp COMMAND eq_dsp_tests)
 bmo_add_dsp_tool(eq_switch_tests dsp/EqSwitchTests.cpp)
 target_link_libraries(eq_switch_tests PRIVATE bmo_eq_dsp)
 add_test(NAME eq_switch COMMAND eq_switch_tests)
+bmo_long_test(eq_switch)
 
 bmo_add_dsp_tool(sat_dsp_tests dsp/SatDspTests.cpp)
 target_link_libraries(sat_dsp_tests PRIVATE bmo_sat_dsp)
@@ -21,6 +39,7 @@ add_test(NAME sat_dsp COMMAND sat_dsp_tests)
 bmo_add_dsp_tool(sat_switch_tests dsp/SatSwitchTests.cpp)
 target_link_libraries(sat_switch_tests PRIVATE bmo_sat_dsp)
 add_test(NAME sat_switch COMMAND sat_switch_tests)
+bmo_long_test(sat_switch)
 
 bmo_add_dsp_tool(util_dsp_tests dsp/UtilDspTests.cpp)
 target_link_libraries(util_dsp_tests PRIVATE bmo_util_dsp)
@@ -41,6 +60,7 @@ add_test(NAME dim_dsp COMMAND dim_dsp_tests)
 bmo_add_dsp_tool(deq_dsp_tests dsp/DeqDspTests.cpp)
 target_link_libraries(deq_dsp_tests PRIVATE bmo_deq_dsp)
 add_test(NAME deq_dsp COMMAND deq_dsp_tests)
+bmo_long_test(deq_dsp)
 
 bmo_add_dsp_tool(vcomp_dsp_tests dsp/VcompDspTests.cpp)
 target_link_libraries(vcomp_dsp_tests PRIVATE bmo_vcomp_dsp)
@@ -49,6 +69,7 @@ add_test(NAME vcomp_dsp COMMAND vcomp_dsp_tests)
 bmo_add_dsp_tool(vcomp_switch_tests dsp/VcompSwitchTests.cpp)
 target_link_libraries(vcomp_switch_tests PRIVATE bmo_vcomp_dsp)
 add_test(NAME vcomp_switch COMMAND vcomp_switch_tests)
+bmo_long_test(vcomp_switch)
 
 bmo_add_dsp_tool(deesser_dsp_tests dsp/DeesserDspTests.cpp)
 target_link_libraries(deesser_dsp_tests PRIVATE bmo_deesser_dsp)
@@ -59,10 +80,12 @@ add_test(NAME fetcomp_dsp COMMAND fetcomp_dsp_tests)
 bmo_add_dsp_tool(dwell_dsp_tests dsp/DwellDspTests.cpp)
 target_link_libraries(dwell_dsp_tests PRIVATE bmo_dwell_dsp)
 add_test(NAME dwell_dsp COMMAND dwell_dsp_tests)
+bmo_long_test(dwell_dsp)
 
 bmo_add_dsp_tool(reverb_dsp_tests dsp/ReverbDspTests.cpp)
 target_link_libraries(reverb_dsp_tests PRIVATE bmo_reverb_dsp)
 add_test(NAME reverb_dsp COMMAND reverb_dsp_tests)
+bmo_long_test(reverb_dsp)
 # A regression that hangs has to fail here, not stall the job until the
 # runner gives up: reset() before prepare() spun forever on 6067809 and only
 # a probe run by hand found it. (ctest's own default is 1500 s.)

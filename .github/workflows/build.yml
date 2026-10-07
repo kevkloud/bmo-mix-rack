@@ -39,8 +39,17 @@ jobs:
       - name: Build
         run: cmake --build build --parallel
 
+      # Four suites at a time, on a four-core runner. The suites are separate
+      # processes that share nothing, so running them side by side changes no
+      # result; it changes the wall clock, which was the sum of the suites.
+      # Measured on the main push of 2026-10-05 (8e26f44), one suite at a time:
+      # this step 338 s, of which dwell_dsp 85, reverb_dsp 79, fetcomp_dsp 34,
+      # vcomp_switch 31 and eq_switch 29. Side by side it is bounded by the
+      # longest suite, not the sum. Every ctest call in this file is parallel
+      # for the same reason. --output-on-failure still prints a failing
+      # suite's whole output, buffered per suite, so a failure reads as before.
       - name: Test
-        run: ctest --test-dir build --output-on-failure
+        run: ctest --test-dir build --output-on-failure --parallel 4
 
   # BMO Tune RT is in this repository and not in the rack. That is only true
   # while each side still builds and passes its own suites with the other
@@ -57,13 +66,41 @@ jobs:
         run: |
           cmake -B build-tune -DBMO_DSP_ONLY=ON -DCMAKE_BUILD_TYPE=Release -DBMO_BUILD_RACK=OFF
           cmake --build build-tune --parallel
-          ctest --test-dir build-tune --output-on-failure
+          ctest --test-dir build-tune --output-on-failure --parallel 4
 
       - name: The rack alone
         run: |
           cmake -B build-rack -DBMO_DSP_ONLY=ON -DCMAKE_BUILD_TYPE=Release -DBMO_BUILD_TUNE=OFF
           cmake --build build-rack --parallel
-          ctest --test-dir build-rack --output-on-failure
+          ctest --test-dir build-rack --output-on-failure --parallel 4
+
+  # Six DSP suites keep a subset of their grids by default and run every row
+  # under --long (BMO_LONG_TESTS in the root CMakeLists.txt). Until this job
+  # the whole grid ran only when someone ran it by hand, so "run --long
+  # before merging a change to dsp/" was a rule and not a check. The same
+  # bare container as the DSP job, built once more with the option on, running
+  # only the long-labelled tests: the default rows are the DSP job's.
+  #
+  # dwell_dsp's whole grid is 360 rows and 26 minutes in Release on ICE QUEEN,
+  # so this job is about as long as the Windows build and runs beside it
+  # rather than on anyone's critical path. It is not a condition of anything:
+  # a red here says which grid moved, and the merge waits on it the way it
+  # waits on the DSP job, by someone reading the run.
+  long:
+    name: DSP, every row
+    runs-on: ubuntu-latest
+    timeout-minutes: 190
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -B build -DBMO_DSP_ONLY=ON -DCMAKE_BUILD_TYPE=Release -DBMO_LONG_TESTS=ON
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test, every row
+        run: ctest --test-dir build -L long --output-on-failure --parallel 4
 
   plugin:
     name: ${{ matrix.name }}
@@ -218,8 +255,15 @@ jobs:
       # because --output-on-failure shows a test's stdout only when it fails,
       # which suppresses exactly the output you want from a passing run.
       # Both come straight back out afterwards, as they did in 0.2.1.
+      #
+      # Parallel for the reason the DSP job's Test step gives. Here the sum
+      # was 424 s on Windows and 445 s on macOS (main, 8e26f44, 2026-10-05),
+      # with the same five DSP suites on top and the rack suite at 30 to 45 s;
+      # the macOS runner has three cores, which a fourth job oversubscribes
+      # harmlessly. The one suite with a stopwatch in it, lifecycle, allows
+      # five seconds for calls that take microseconds.
       - name: Test
-        run: ctest --test-dir build --output-on-failure
+        run: ctest --test-dir build --output-on-failure --parallel 4
 
       # Packaging inherits the implicit `if: success()`, so a failing test
       # withholds the build. While BMO Opto was under active preset/level

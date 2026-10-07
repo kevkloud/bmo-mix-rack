@@ -57,6 +57,20 @@ option(BMO_BUILD_TUNE "Build BMO Tune RT" ON)
 # `tools/fingerprint` is how the two kinds of plugin build are compared.
 option(BMO_LTO "Link-time optimisation on the plugin targets" ON)
 
+# Six DSP suites keep a subset of their grids by default and run every row
+# under `--long` on the command line (eq_switch, sat_switch, deq_dsp,
+# vcomp_switch, dwell_dsp, reverb_dsp; each file's header says which rows).
+# ctest never passed `--long`, so the whole grid ran only when someone ran it
+# by hand, and the rule "run --long before merging a change to dsp/" was a
+# rule, not a check. With this ON, each of those suites is registered a
+# second time as `<name>_long`, labelled `long`, running its executable with
+# `--long`; OFF, the default, registers nothing new, so `scripts/build.sh`
+# and every existing configure are unchanged. CI turns it on in a job of its
+# own (`.github/workflows/build.yml`, "DSP, every row") and runs `ctest -L
+# long` there. By hand: `ctest --test-dir build -L long -j 4`, or the suite's
+# executable with `--long` as before.
+option(BMO_LONG_TESTS "Also register each DSP suite's exhaustive --long run as <name>_long" OFF)
+
 if(NOT BMO_BUILD_RACK AND NOT BMO_BUILD_TUNE)
     message(FATAL_ERROR
         "Nothing to build: BMO_BUILD_RACK and BMO_BUILD_TUNE are both OFF.")

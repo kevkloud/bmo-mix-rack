@@ -1118,7 +1118,16 @@ inline const ParamSpecs& specs()
         // 25. DARKEN. Defaults wide open, so a fresh instance is not
         // quietly darker than the signal it was given. See kInHiCut for why
         // this parameter was marked "owner confirm" and kept.
-        S::logParam (kInHiCut, "Darken",    2000.0f, 20000.0f, 0.1f,
+        //
+        // **1 kHz at the bottom since 2026-10-07, and it was 2 kHz.** Frosty,
+        // on hearing 2 kHz: "maybe range down to 1khz", then "1k is the call".
+        // A range is one of the things a saved session references and the
+        // schema froze at 0.2.6, so this is that freeze broken once, on
+        // purpose, while BMO Linger has been installed on ICE QUEEN and
+        // nowhere else. State holds real values and restores unchanged; a
+        // host automation lane written against 2-20 kHz reads lower now
+        // (its midpoint was 6.3 kHz and is 4.5 kHz).
+        S::logParam (kInHiCut, "Darken",    1000.0f, 20000.0f, 0.1f,
                      roomDefaults::kInHiCutHz, F::Hertz),
 
         //== Output ============================================================

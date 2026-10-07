@@ -282,7 +282,7 @@ knob position.
 | 22 | `moddepth` | MOD DEPTH | 0.1…0.8 ms | *per type* (0.28) | `0.28 ms` | |
 | 23 | `modrate` | MOD RATE | 0.1…1.2 Hz | *per type* (0.50) | Hz | L |
 | 24 | `width` | WIDTH | 0…200 % | 100 | % | |
-| 25 | `inhicut` | DARKEN (was IN HI-CUT until 2026-09-29) | 2…20 kHz | *per type* (20 k) | Hz/kHz | L |
+| 25 | `inhicut` | DARKEN (was IN HI-CUT until 2026-09-29) | 1…20 kHz (2…20 kHz until 2026-10-07) | *per type* (20 k) | Hz/kHz | L |
 | 26 | `erlevel` | ER | −40…0 dB | *per type* (−6) | dB, `Off` at −40 | |
 | 27 | `verblevel` | REVERB | −40…0 dB | *per type* (−6) | as `erlevel` | |
 | 28 | `mix` | MIX | 0…100 % | 50 | % | default 50 since 2026-09-24, Frosty: input unchanged, verb heard |

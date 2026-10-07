@@ -626,10 +626,19 @@ const Golden kSwept[]
     //   -29.2489375559, 0.0658715516329, -29.6764939059, 0.0650616884232,
     //   -28.9822617403, 0.0688233077526, -29.501805594, 0.0644361227751
     // No other row moved; no tolerance was touched.
+    //
+    // Regenerated on ICE QUEEN, 2026-10-07, for this row alone, when DARKEN's
+    // range went from 2-20 kHz to 1-20 kHz on Frosty's word: 0.63 of its
+    // travel is a lower corner now. RMS moved by at most 0.0017 dB and the
+    // peaks by at most 4.6e-5 on 0.066. The defaults row did not move.
+    // Before:
+    //   -29.210880253, 0.066381432116,
+    //   -29.2643343751, 0.0654515773058, -29.6790234038, 0.0647449195385,
+    //   -29.0140233606, 0.0679816156626, -29.4042598333, 0.0647812560201
     { "reverb",
-      -29.210880253, 0.066381432116,
-      -29.2643343751, 0.0654515773058, -29.6790234038, 0.0647449195385,
-      -29.0140233606, 0.0679816156626, -29.4042598333, 0.0647812560201 },
+      -29.2121032462, 0.0663356781006,
+      -29.2647268114, 0.0654440149665, -29.6777416122, 0.0647597312927,
+      -29.0147774516, 0.0679436698556, -29.406001836, 0.0647422671318 },
     // Regenerated with the eq row above, for the same reason: BMO EQ is a slot
     // in this chain with Auto Gain on, so its first 60 ms now carry the +2.28
     // dB from the start, and the compressing slots after it turn that into

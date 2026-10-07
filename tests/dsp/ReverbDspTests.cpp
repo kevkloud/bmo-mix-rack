@@ -4938,7 +4938,7 @@ int main (int argc, char** argv)
             {
                 worstHp = std::max (worstHp, std::abs (InputStage::highPassDbAt (InputStage::highPassCoefFor (rate), 20.0, rate) + db3));
 
-                for (const auto corner : { 2000.0, 9000.0, 20000.0 })
+                for (const auto corner : { 1000.0, 2000.0, 9000.0, 20000.0 })
                     worstLp = std::max (worstLp, std::abs (InputStage::lowPassDbAt (InputStage::darkenCoefFor (corner, rate), corner, rate) + db3));
             }
 

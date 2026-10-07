@@ -24,7 +24,7 @@ namespace bmo::reverb
     - **The high-pass** is one pole at `kHighPassHz`, fixed, with no control.
       It keeps DC and subsonic rumble out of a loop that can hold them for
       forty seconds.
-    - **DARKEN** (`inhicut`) is one pole, 2-20 kHz. Its coefficient is solved
+    - **DARKEN** (`inhicut`) is one pole, 1-20 kHz. Its coefficient is solved
       so the corner is -3.01 dB at the knob's frequency at every rate
       (`darkenCoefFor`); the usual 1 - exp(-w) puts the corner a third of an
       octave low at 20 kHz / 48 kHz. **It is not transparent at the top of its

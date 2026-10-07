@@ -645,9 +645,13 @@ stereo, from the two sets rendered on ICE QUEEN
   it. Frosty: "record as not buildable and recommend making a bypass". The
   recommendation is §8 (4): a per-slot bypass in the rack, which lets a
   module's tail ring out or fade while the slot is still there.
-- **DARKEN's bottom of range, 2 kHz → 1 kHz, is raised and not decided.**
-  It is a range change on a schema that froze at 0.2.6; it waits for
-  Frosty's word.
+- **DARKEN's range is 1 to 20 kHz since 2026-10-07; it was 2 to 20.**
+  Frosty, on hearing 2 kHz: "maybe range down to 1khz", and the next day
+  "1k is the call". It is a range change on a schema that froze at 0.2.6,
+  made once and on purpose while Linger has been installed on ICE QUEEN and
+  nowhere else. State restores unchanged; an automation lane written against
+  the old range reads lower. §2 and §6 still say 2–20 kHz where they tell
+  the parameter's history.
 
 Still to build in M3b: ATTACK (the onset contour), and `11` §6's onset,
 echo-density, denormal and pitch rows.

@@ -159,7 +159,7 @@ public:
         float modDepthMs    = roomDefaults::kModDepthMs;     ///< 0.1..0.8
         float modRateHz     = roomDefaults::kModRateHz;      ///< 0.1..1.2
         float width         = 1.0f;                          ///< 0..2, M/S gain on the tail only
-        float inHiCutHz     = roomDefaults::kInHiCutHz;      ///< 2000..20000, ahead of both generators
+        float inHiCutHz     = roomDefaults::kInHiCutHz;      ///< 1000..20000, ahead of both generators
 
         float erLevelDb     = roomDefaults::kErLevelDb;      ///< -40..0; -40 is silence, not -40 dB
         float verbLevelDb   = roomDefaults::kVerbLevelDb;    ///< -40..0; likewise

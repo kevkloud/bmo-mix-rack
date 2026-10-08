@@ -5409,8 +5409,10 @@ int main (int argc, char** argv)
 
             std::cout << "  input stage through the engine: early reflections within " << worstEr << " dB of the stage's design, tail within "
                       << worstTail << " dB\n";
-            check (worstEr < 0.05, "the early reflections are fed through the high-pass, DARKEN and the Reverb EQ");
-            check (worstTail < 0.05, "and so is the tail's direct feed");
+            // 0.001 dB, against a measured 5e-7 and 7e-7: these were 0.05
+            // until QA's review pointed at the gap between the two.
+            check (worstEr < 1.0e-3, "the early reflections are fed through the high-pass, DARKEN and the Reverb EQ");
+            check (worstTail < 1.0e-3, "and so is the tail's direct feed");
 
             // The EQ page's spectrum is the stage's output (Frosty,
             // 2026-10-06: "it should show the output, with EQ applied"): a

@@ -4958,7 +4958,8 @@ int main (int argc, char** argv)
     // tenth. Until 2026-10-07 this compared the peaks of 5 s windows, which
     // fall 7.5 dB by design and so could not see an effect smaller than
     // that: QA's review found 0.17 to 0.45 dB a second hidden under it.
-    // What this still cannot see is growth slower than 0.1 dB a second.
+    // The slowest row measures 1.72; the floor is 1.65, so what this still
+    // cannot see is a gain under 0.07 dB a second.
     {
         int grew = 0, rows = 0;
         double slowest = 1.0e9, fastest = 0.0;
@@ -5019,7 +5020,7 @@ int main (int argc, char** argv)
         std::cout << "  modulation at its corners over a 40 s tail: " << grew << " of " << rows << " rows had a second louder than the last; the tail falls "
                   << slowest << " to " << fastest << " dB a second (1.5 by design)\n";
         check (grew == 0, "the deepest and the fastest modulation never make a second of the tail louder than the last");
-        check (slowest >= 1.4, "and the tail falls at least 1.4 dB a second where DECAY designs 1.5");
+        check (slowest >= 1.65, "and the tail falls at least 1.65 dB a second, where the slowest row measures 1.72");
     }
 
     //== The input stage: what the room is given ================================

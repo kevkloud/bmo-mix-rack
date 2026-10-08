@@ -1883,5 +1883,77 @@ int main()
                "and the module after it takes its lanes, as any remove does, got '" + rack->getSlotParameter (2, 0).getName (64) + "'");
     }
 
+    //== The add button follows the chain =====================================
+    // Heard in a host on ICE QUEEN, 2026-10-06: with all eight slots full,
+    // removing a module left the "+" disabled until the session was closed
+    // and reopened. Its enabled state was set only in the add strip's
+    // resized(), and a chain edit moves the strip without changing its size
+    // -- it is kAddStrip wide with seven modules and with eight -- so the
+    // framework never called it. Both directions are checked, because the
+    // same fault left the button live on a full rack; and the host's own
+    // path is checked as heard, an editor opened on a full rack and then a
+    // module removed.
+    {
+        const auto findAdd = [] (juce::Component& root) -> juce::Button*
+        {
+            std::vector<juce::Button*> plus;
+            std::function<void (juce::Component&)> walk = [&] (juce::Component& c)
+            {
+                if (auto* b = dynamic_cast<juce::Button*> (&c))
+                    if (b->getButtonText() == "+")
+                        plus.push_back (b);
+
+                for (auto* child : c.getChildren())
+                    walk (*child);
+            };
+            walk (root);
+            check (plus.size() == 1, "the rack editor has one + button, found " + juce::String ((int) plus.size()));
+            return plus.size() == 1 ? plus[0] : nullptr;
+        };
+
+        auto rack = createRack();
+        auto& util = *rack->findModule ("util");
+
+        // Filling the rack under an open editor, and emptying a slot again.
+        {
+            std::unique_ptr<juce::AudioProcessorEditor> editor (rack->createEditor());
+
+            if (auto* add = findAdd (*editor))
+            {
+                check (add->isEnabled(), "an empty rack's + is enabled");
+
+                for (int i = 0; i < RackProcessor::kSlots - 1; ++i)
+                    rack->addModule (util);
+
+                check (add->isEnabled(), "with seven modules the + is enabled");
+
+                rack->addModule (util);
+                check (rack->getNumModules() == RackProcessor::kSlots, "the rack is full");
+                check (! add->isEnabled(), "filling the eighth slot disables the +");
+
+                rack->removeModule (3);
+                check (add->isEnabled(), "removing one of eight modules enables the + again");
+
+                rack->addModule (util);
+                check (! add->isEnabled(), "filling the slot again disables the +");
+            }
+        }
+
+        // The case as heard: the editor opens on a full rack, then a module is
+        // removed.
+        {
+            check (rack->getNumModules() == RackProcessor::kSlots, "the rack is still full");
+            std::unique_ptr<juce::AudioProcessorEditor> editor (rack->createEditor());
+
+            if (auto* add = findAdd (*editor))
+            {
+                check (! add->isEnabled(), "an editor opened on a full rack has the + disabled");
+
+                rack->removeModule (7);
+                check (add->isEnabled(), "an editor opened on a full rack enables the + when a module is removed");
+            }
+        }
+    }
+
     return finish ("BMO Mix Rack");
 }

@@ -5090,6 +5090,39 @@ int main (int argc, char** argv)
 
             check (same, "a flat EQ plays the same samples wherever its nodes sit");
             check (worst < 1.0e-6, "with the EQ flat the stage is the high-pass and DARKEN and nothing else");
+
+            // **The identity itself, where it can be seen.** The two rows
+            // above pass with the stage's (1, 0, 0) shortcut deleted (QA's
+            // mutant, 2026-10-07, and this file's own note): the output is a
+            // float and the closed form is off by parts in 1e16. So the mix
+            // is read directly: every flat node, wherever it sits and at
+            // every rate, is (1, 0, 0) to the bit, and a node with gain is
+            // not.
+            bool exact = true, live = true;
+
+            for (const auto r : { 44100.0, 48000.0, 96000.0, 192000.0 })
+                for (const auto* s : { &flat, &elsewhere })
+                {
+                    InputStage stage;
+                    stage.prepare (r);
+                    stage.set (*s, 20000.0f, bmo::dsp::DesignGrid::make (r));
+
+                    for (int i = 0; i < kNumEqNodes; ++i)
+                    {
+                        const auto m = stage.nodeMixNow (i);
+                        exact = exact && m[0] == 1.0 && m[1] == 0.0 && m[2] == 0.0;
+                    }
+
+                    stage.set (busy, 20000.0f, bmo::dsp::DesignGrid::make (r));
+                    for (int i = 0; i < kNumEqNodes; ++i)
+                    {
+                        const auto m = stage.nodeMixNow (i);
+                        live = live && ! (m[0] == 1.0 && m[1] == 0.0 && m[2] == 0.0);
+                    }
+                }
+
+            check (exact, "a flat node's mix is (1, 0, 0) to the bit, at every rate and wherever it sits");
+            check (live, "and a node with gain is not");
         }
 
         //-- A move does not click, and lands -----------------------------------

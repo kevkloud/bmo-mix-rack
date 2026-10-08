@@ -253,6 +253,14 @@ public:
     /** DARKEN's coefficient as it is this sample, for the tests. */
     double darkenCoefNow() const noexcept { return darkCoef; }
 
+    /** Node `i`'s output mix (m0, m1, m2) as it is this sample, for the
+        tests: (1, 0, 0) exactly is a node that returns its input. */
+    std::array<double, 3> nodeMixNow (int i) const noexcept
+    {
+        const auto& c = nodes[(size_t) i].cur;
+        return { c.m0, c.m1, c.m2 };
+    }
+
     /** **For the tests and the measurement tool, never for a host.** With the
         stage out, what `DspCore` plays is the two generators on the bare
         input, which is the condition 11 section 6's early-reflection block

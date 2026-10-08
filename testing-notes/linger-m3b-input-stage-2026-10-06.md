@@ -7,7 +7,8 @@ targets only. Nothing here has been heard yet.
 ## What was built
 
 `modules/reverb/dsp/InputStage.h`: a fixed 20 Hz high-pass (one pole), DARKEN
-(`inhicut`, one pole, 2-20 kHz) and the three Reverb EQ nodes, in that order,
+(`inhicut`, one pole, 2-20 kHz when this was written and **1-20 kHz since
+2026-10-07**, `5fa2db5`) and the three Reverb EQ nodes, in that order,
 on the mid of the input, ahead of both generators (`10` section 2). The dry
 path does not pass through it. `10` section 4, "As built in M3b", lists where
 it departs from the spec.
@@ -17,7 +18,7 @@ it departs from the spec.
 | what | figure |
 |---|---|
 | High-pass at 20 Hz, 44.1 to 192 kHz | within 0.013 dB of -3.01 |
-| DARKEN at its corner (2, 9, 20 kHz), 44.1 to 192 kHz | -3.01 dB to 4e-14 |
+| DARKEN at its corner (2, 9, 20 kHz; 1 kHz added 2026-10-07), 44.1 to 192 kHz | -3.01 dB to 4e-14 |
 | Running stage against its design, 10 Hz to 15 kHz, three settings, 48 and 96 kHz | within 2.5e-6 dB |
 | Through the engine, stage in against stage out: early reflections | within 5.3e-7 dB of the design |
 | The same, the tail's direct feed (modulation off) | within 7.3e-7 dB |

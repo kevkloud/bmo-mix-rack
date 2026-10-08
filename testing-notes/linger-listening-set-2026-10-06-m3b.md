@@ -52,12 +52,16 @@ end, re-render after modulation).
   drawn at. It is paint; the audio thread's cost did not change.
 - **D:** done, read as **the input stage's output**: what the room is given,
   after the high-pass, DARKEN and the EQ. Not the module's output, which
-  would show the reverb and the dry signal. My reading of his words; easy to
-  move again if he meant the other.
+  would show the reverb and the dry signal. My reading of his words, and
+  **confirmed by him on 2026-10-07**: "you were correct for the visualizer,
+  input>EQ>visualizer. no tail".
 - **A, B:** recorded in `10` section 4, "As built in M3b". Nothing built. The
   bypass he asks for is a rack change (`10` section 8, item 4).
-- **5, "maybe range down to 1khz":** not done. The schema froze at 0.2.6 and
-  a range is one of the things a saved session references. Raised with him.
+- **5, "maybe range down to 1khz":** raised with him, since the schema froze
+  at 0.2.6 and a range is one of the things a saved session references.
+  **Done on 2026-10-07 on his word, "1k is the call"** (`5fa2db5`): DARKEN is
+  1 to 20 kHz. **The 1 kHz end has not been heard**; this set stopped at
+  2 kHz.
 - **11:** "close but audibly different" is taken as the EQ doing something
   modest on a snare, not as a fault. Not followed up.
 - **E:** next.

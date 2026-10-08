@@ -212,6 +212,17 @@ places. Do not merge them:
 | control | caption | where | shape |
 | --- | --- | --- | --- |
 | `inhicut` | **DARKEN** | on the input, ahead of the EQ and ahead of both generators, over a fixed 20 Hz high-pass | one pole, no Q, no gain |
+
+**DARKEN's range is 1 to 20 kHz since 2026-10-07; it was 2 to 20.** Frosty
+heard 2 kHz as the bottom on 2026-10-06 and said "maybe range down to 1khz",
+then "1k is the call". **This is the one range that moved after the schema
+froze at 0.2.6**, on purpose, while BMO Linger had been installed on ICE
+QUEEN and nowhere else. Saved state holds real values and restores
+unchanged. A host automation lane written against the old range reads
+lower: 0.0 is 1000 Hz where it meant 2000, 0.5 is 4472 Hz where it meant
+6325, 1.0 is the same. `tests/plugin/ReverbTests.cpp`'s golden row carries
+the new minimum. The 1 kHz end has not been heard. Do not treat this as a
+precedent: every other range in `params.h` is as frozen as it was.
 | `eqhifreq` with `eqfilter` on | **EQ HIGH FREQ** | node 3 of the Reverb EQ | second-order, with a Q |
 
 DARKEN darkens *what the room is given*; node 3 darkens *the room*. It was

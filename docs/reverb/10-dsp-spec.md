@@ -566,12 +566,38 @@ takes them back.
 **Modulation** (`LateNetwork.h`, 2026-10-05). Each line's delay wanders
 toward a new random target every half period along a smoothstep, each line
 at its own fraction of MOD RATE; it is random and not an LFO. The 3-cent
-bound holds by construction, so depth and rate trade at the top: 0.289 ms at
-1 Hz, the full 0.8 ms only under 0.36 Hz. Measured steepest detune 2.53
-cents. Reads are Lagrange, six points under 88.2 kHz and four above; four
-points at 48 kHz took enough off the top each pass to put HIGH × 2.0 at
-1.69. **Plate's late-envelope red is cleared**: 0.202 → 0.177 against 0.2,
-asserted again. Plate's modal density is still red, and is M4's.
+bound holds by construction, so depth and rate trade at the top: 0.283 ms at
+1 Hz, the full 0.8 ms only under 0.35 Hz. Reads are Lagrange, six points
+under 88.2 kHz and four above; four points at 48 kHz took enough off the top
+each pass to put HIGH × 2.0 at 1.69. **Plate's late-envelope red is
+cleared**: 0.202 → 0.177 against 0.2 (0.189 since the bound moved, below),
+and asserted since 2026-10-07; until then the test only printed it. Plate's
+modal density is still red, and is M4's.
+
+Three things QA's review of PR #55 added to this, 2026-10-07:
+
+- **The bound is built at 2.94 cents, and holds while the knobs move.** It
+  was built at 3.0001 and tested with MOD DEPTH and MOD RATE held: one MOD
+  RATE move 0.1 → 1.2 Hz at depth 0.8 read 3.0006. A moved knob lands a
+  little over what is built (0.4 % at 192 kHz, not run down), so the build
+  is 2 % under and the test moves both knobs across their ranges: 2.48
+  cents at fixed corners, 2.94 with a knob moved.
+- **Modulation shortens the top of the tail, and that is the price of
+  it.** An interpolated read loses a little off the very top on every
+  pass. Room, DECAY 2 s, 48 kHz, T60 at the default modulation over T60
+  unmodulated: 0.95 at 8 kHz and 0.82 at 12 kHz at 12 m; 0.69 at 12 kHz at
+  0.5 m; with HIGH × 2.0 at 0.5 m, 0.81 at 8 kHz and 0.63 at 12 kHz, so
+  HIGH × 2.0 is worth about × 1.27 at 12 kHz in the smallest room. (QA's
+  one-octave bands read 0.87, 0.79 and 0.77 at 12 kHz for the same rows.)
+  At the corners of depth and rate a DECAY 20 s × 2.0 tail falls 1.72 to
+  2.05 dB a second where 1.5 is designed. **Pinned, not compensated**: a
+  static gain that put the loss back would take the loop over unity
+  whenever a read landed on a sample, and §4's rule is that the loop always
+  loses. An allpass read would keep the top and is a different sound.
+  Frosty heard and passed the tail as it is on 2026-10-06; whether the top
+  wants holding up is a voicing question for M4.
+- **The loop's loss is tested second by second**, on energy, not on the
+  peaks of 5 s windows.
 
 **The input stage** (`InputStage.h`, 2026-10-06) is §2's first paragraph,
 built: a 20 Hz high-pass, DARKEN, then the three Reverb EQ nodes, on the
@@ -612,6 +638,27 @@ dry path. Where it departs from or adds to this document:
   +12 dB) reaches exactly zero 78 s after an impulse and never passes
   through a subnormal; its ring is under −60 dB re the impulse after 12 ms,
   so the tail report does not count it.
+- **The reported tail does not count the stage's own ringing** (QA,
+  2026-10-07). DECAY 0.1 s with the bell at 20 Hz, Q 40, +12 dB reports
+  0.231 s, and the wet signal stays above −60 dB re its peak until 1.33 s
+  (0.67 s with the bell at 100 Hz). That is the far corner of the EQ; at
+  any setting a room would use the tail outlasts the filter. Not charged to
+  the report; it would be a term in `tailSecondsFor` if Frosty wants it.
+- **A frequency jump on a sharp node steps more than the house rule
+  allows** (QA, 2026-10-07). The bell at Q 40, +12 dB, jumped 20 Hz →
+  20 kHz in one request under a 97 Hz tone: the largest sample step is
+  2.38× the signal's own, against the rule's 1.5×, with the peak only
+  0.22 dB over. Gain and DARKEN moves are within 1.031×. The 20 ms move is
+  a straight line in the filter's coefficients, which is not a straight
+  line in frequency. Gliding the frequency itself and redesigning along the
+  way, as BMO DEQ does, would close it. **Open, and with Frosty.**
+- **One NaN in latches the stage until `reset()`**, as it latches both
+  generators on `main`. The rack's guard upstream is what protects it; not
+  a regression and not changed.
+- **`setBypassedForMeasurement` is a test hook in a shipping header**, and
+  three tests run with MOD DEPTH at 0, under the knob's 0.1 minimum. Both
+  are deliberate and both are recorded here because a reviewer asked: no
+  parameter reaches either.
 - **Four early-reflection tests measure the generators with the stage
   out** (`renderBare` in `reverb_dsp_tests`): tap gain as a DC sum, energy
   after the span, the 5 ms energy windows and the DENSITY sweep's fixed
@@ -761,6 +808,25 @@ measured before and after in one sitting on 2026-10-06, adds 0.04 points at
 The stage's filters run whether or not the EQ is flat, so those are its
 whole cost. Run to run the machine moves these figures by about 0.2 points
 at 192 kHz, which is more than the stage costs.
+
+***The whole of PR #55 against `main`, which is the figure that matters and
+which the lines above never gave*** (QA, 2026-10-07, ICE QUEEN, same bench,
+medians of five, three interleaved passes, `main` 5e9cf91 against
+`5fa2db5`: modulation, the input stage and DARKEN's range, without ATTACK):
+
+| | `main` | PR #55 | |
+|---|---|---|---|
+| 48 kHz / 128 | 1.122–1.124 % | 1.361–1.471 % | budget 1.5 % |
+| 192 kHz / 32 | 5.583–5.823 % | 6.639–6.880 % | about +1.0 point, +18 % |
+
+The machine read `main` itself a point higher that day than the 4.58 % it
+gave on 2026-10-05, so the 192 kHz column is to be read as a difference:
+**M3b costs about one point of a core at 192 kHz / 32, nearly all of it the
+modulated reads.** Frosty accepted 5.18 % at 192 kHz on 2026-10-03 for M3a
+and said it was not a budget; this is past it and **is with him for a
+decision**. At 48 kHz the PR is inside the 1.5 % budget with less margin
+than the earlier lines suggested. ATTACK adds 0.013 points at 48 kHz and
+about a tenth at 192.
 
 **These are figures for held settings.** While a length move is in flight
 the tail runs two paths and the early reflections rebuild their table, and

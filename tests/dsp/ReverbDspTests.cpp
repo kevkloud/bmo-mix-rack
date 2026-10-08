@@ -4900,6 +4900,58 @@ int main (int argc, char** argv)
         }
     }
 
+    //== What modulation costs the top of the tail =============================
+    //
+    // **Above the high knee's band the tail is shorter than DECAY says, and
+    // modulation is why.** A read that moves is an interpolated read, and
+    // six points still lose a little off the very top on every pass: more
+    // passes a second in a small room, and more to lose where HIGH x holds
+    // the top up. QA's review of 2026-10-07 measured it (Room, DECAY 2 s,
+    // 48 kHz: 12 kHz 2.002 -> 1.747 s at 12 m, 1.990 -> 1.568 s at 0.5 m;
+    // HIGH x 2.0 at 0.5 m, 12 kHz 3.985 -> 3.054 s) and found no test above
+    // 6.4 kHz. This file's band filter weighs the very top more than QA's
+    // and reads lower: 0.954 at 8 kHz and 0.815 at 12 kHz at 12 m, 0.690 at
+    // 12 kHz at 0.5 m, and with HIGH x 2.0 at 0.5 m 0.811 and 0.634 -- so
+    // HIGH x 2.0 is worth x 1.27 at 12 kHz in the smallest room.
+    // It is pinned here as the price of modulation and not
+    // compensated: each row's T60 with modulation at its default against the
+    // same row with it off, held to a floor a little under what it measures,
+    // so a read that loses more (four points at 48 kHz did) fails. ATTACK
+    // off, so the fit is the loop's. Heard and passed as it is by Frosty on
+    // 2026-10-06; compensating it is a voicing question for M4.
+    {
+        struct Row { float size, high; double band, floor; const char* name; };
+
+        for (const auto& row : { Row { 12.0f, 1.0f,  8000.0, 0.92, "12 m, 8 kHz" },
+                                 Row { 12.0f, 1.0f, 12000.0, 0.78, "12 m, 12 kHz" },
+                                 Row { 0.5f,  1.0f, 12000.0, 0.66, "0.5 m, 12 kHz" },
+                                 Row { 0.5f,  2.0f,  8000.0, 0.78, "0.5 m, HIGH x 2.0, 8 kHz" },
+                                 Row { 0.5f,  2.0f, 12000.0, 0.60, "0.5 m, HIGH x 2.0, 12 kHz" } })
+        {
+            double t[2] {};
+
+            for (int on = 0; on < 2; ++on)
+            {
+                const auto ir = renderTail ([&row, on] (DspCore::Params& p)
+                {
+                    p.sizeM = row.size;
+                    p.decaySeconds = 2.0f;
+                    p.dampLo = 1.0f;
+                    p.dampHi = row.high;
+                    p.attack = 0.0f;
+                    if (on == 0) p.modDepthMs = 0.0f;
+                }, 48000.0, 512, 2.0f * row.high * 1.2f + 0.8f);
+
+                t[on] = t60Of (bandEnergyOf (ir, row.band), ir.rate, -5.0, -25.0);
+            }
+
+            const auto ratio = t[0] > 0.0 ? t[1] / t[0] : 0.0;
+            std::cout << "  T60, " << row.name << ": " << t[0] << " s unmodulated, " << t[1] << " s at the default modulation, ratio " << ratio << "\n";
+            check (ratio >= row.floor, (std::string (row.name) + ": modulation shortens the top of the tail by no more than it was measured to").c_str());
+            check (ratio <= 1.02, (std::string (row.name) + ": and never lengthens it").c_str());
+        }
+    }
+
     //== The deepest, fastest modulation does not feed the loop ================
     //
     // A read that moves is a read whose weights move, and the loop has to

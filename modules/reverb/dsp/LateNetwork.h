@@ -893,16 +893,26 @@ private:
     // has a steepest slope of 1.5 times their difference over P, and the
     // depth is held so that never passes kMaxDetune -- 3 cents. So MOD DEPTH
     // and MOD RATE trade against each other at the top: at 1 Hz the deepest
-    // a line may go is 0.289 ms, and the full 0.8 ms is only reached under
-    // 0.36 Hz.
+    // a line may go is 0.283 ms, and the full 0.8 ms is only reached under
+    // 0.35 Hz.
     //
     // The path is worked out every kModStride samples and walked in straight
     // lines between, one add a line a sample; a chord of a curve is never
     // steeper than the curve, so the bound holds. Counted in samples, never
     // in blocks, so the block size cannot be heard.
 
-    /** 2^(3/1200) - 1: the slope that is 3 cents. */
-    static constexpr float kMaxDetune = 0.0017344f;
+    /** The slope every segment is held under: 2.94 cents, where 3 cents is
+        2^(3/1200) - 1 = 0.00173437. **The 2 % is margin, and it is there
+        because the construction is not met to the last digit.** With this
+        at 0.0017344 (3.0001 cents) a segment the guard below had stretched
+        after a MOD RATE move measured 3.0006 at 48 kHz (QA, 2026-10-07);
+        at 0.001733 (2.997) the same kind of move measured 3.009 at 192 kHz,
+        0.4 % over what was built. Here it measures 2.943, 0.08 % over. The
+        excess was not run down: the period is rounded to a sample and the
+        path is summed in float on a delay of up to 150 samples, and either
+        would do it. `reverb_dsp_tests` moves both knobs across their ranges
+        and asserts under 3. */
+    static constexpr float kMaxDetune = 0.0017f;
     static constexpr int   kModStride = 16;
 
     struct Modulator

@@ -4809,8 +4809,65 @@ int main (int argc, char** argv)
                 apart = apart && std::abs (dot01) < 0.9 * std::sqrt (e0 * e1);
             }
 
-        std::cout << "  modulation: steepest detune over 16 corners " << worstCents << " cents\n";
-        check (worstCents <= 3.0f * 1.001f, "no line is ever detuned by more than 3 cents, at any corner of MOD DEPTH and MOD RATE");
+        // **And with the two knobs moving**, which is where the bound is
+        // earned and where the rows above cannot look: they hold the corners
+        // still, so the guard that stretches a segment after a move never
+        // runs, and with that guard deleted they still passed while one MOD
+        // RATE move reached 3.61 cents (QA's mutant, 2026-10-07). Each row
+        // settles for 6 s, moves one knob across its range, and runs 12 s.
+        //
+        // Read across the path's 16-sample stride and sample to sample. The
+        // bound is built at 2.94 cents and not 3 because a moved knob lands
+        // a little over what was built: with it at 2.997 this row read 3.009
+        // at 192 kHz, and at 2.94 it reads 2.943.
+        float movedCents = 0.0f, movedCentsBySample = 0.0f;
+        {
+            struct Move { float depthFrom, rateFrom, depthTo, rateTo; };
+
+            for (const auto rate : { 48000.0, 192000.0 })
+                for (const auto& mv : { Move { 0.8f, 0.1f, 0.8f, 1.2f }, Move { 0.8f, 1.2f, 0.8f, 0.1f },
+                                        Move { 0.1f, 1.2f, 0.8f, 1.2f }, Move { 0.8f, 0.1f, 0.1f, 1.2f } })
+                {
+                    LateConfig c;
+                    c.modDepthMs = mv.depthFrom;
+                    c.modRateHz  = mv.rateFrom;
+                    DspCore::Late late;
+                    late.setConfig (c);
+                    late.prepare (rate, 64);
+
+                    float in[1] {}, l[1], r[1];
+                    float past[DspCore::kNumLines][16] {};
+                    float steepest = 0.0f, steepestBySample = 0.0f;
+
+                    for (int n = 0; n < (int) (18.0 * rate); ++n)
+                    {
+                        if (n == (int) (6.0 * rate))
+                        {
+                            c.modDepthMs = mv.depthTo;
+                            c.modRateHz  = mv.rateTo;
+                            late.setConfig (c);
+                        }
+
+                        late.process (in, l, r, 1);
+                        for (int i = 0; i < DspCore::kNumLines; ++i)
+                        {
+                            const auto m = late.modulationSamples (i);
+                            steepest = std::max (steepest, std::abs (m - past[i][n % 16]) / 16.0f);
+                            steepestBySample = std::max (steepestBySample, std::abs (m - past[i][(n + 15) % 16]));
+                            past[i][n % 16] = m;
+                        }
+                    }
+
+                    movedCents = std::max (movedCents, 1200.0f * std::log2 (1.0f + steepest));
+                    movedCentsBySample = std::max (movedCentsBySample, 1200.0f * std::log2 (1.0f + steepestBySample));
+                }
+        }
+
+        std::cout << "  modulation: steepest detune over 16 corners " << worstCents << " cents; with MOD DEPTH or MOD RATE moved across its range, "
+                  << movedCents << " cents across a stride, " << movedCentsBySample << " sample to sample\n";
+        check (worstCents <= 3.0f, "no line is ever detuned by more than 3 cents, at any corner of MOD DEPTH and MOD RATE");
+        check (movedCents <= 3.0f, "nor while MOD DEPTH or MOD RATE is moved across its range");
+        check (movedCentsBySample <= 3.0f, "nor sample to sample, the delay's own float steps included");
         check (inside, "no line strays further than MOD DEPTH");
         check (moves, "every line is modulated");
         check (apart, "two lines' paths are not the same path");

@@ -4905,9 +4905,16 @@ int main (int argc, char** argv)
     // A read that moves is a read whose weights move, and the loop has to
     // lose energy with that on (Frosty's rule). The longest tail, a 10 ms
     // burst, MOD DEPTH and MOD RATE at their corners, at a six-point rate and
-    // a four-point one: no 5 s window is louder than the one before.
+    // a four-point one. **Second by second, on energy**: no second is louder
+    // than the one before, and the fall from the 2nd second to the 20th is
+    // at least the 1.5 dB a second that DECAY 20 s x 2.0 designs, less a
+    // tenth. Until 2026-10-07 this compared the peaks of 5 s windows, which
+    // fall 7.5 dB by design and so could not see an effect smaller than
+    // that: QA's review found 0.17 to 0.45 dB a second hidden under it.
+    // What this still cannot see is growth slower than 0.1 dB a second.
     {
         int grew = 0, rows = 0;
+        double slowest = 1.0e9, fastest = 0.0;
 
         for (const auto rate : { 48000.0, 96000.0 })
             for (const auto& corner : { std::array<float, 2> { 0.8f, 1.2f }, std::array<float, 2> { 0.8f, 0.3f } })
@@ -4928,8 +4935,9 @@ int main (int argc, char** argv)
 
                     std::vector<float> l (512), r (512);
                     float* chans[] { l.data(), r.data() };
-                    const auto window = (long long) (5.0 * rate), total = (long long) (20.0 * rate), burst = (long long) (0.01 * rate);
-                    float peak = 0.0f, last = 1.0e30f;
+                    const auto window = (long long) rate, total = (long long) (20.0 * rate), burst = (long long) (0.01 * rate);
+                    double energy = 0.0, lastDb = 0.0, secondDb = 0.0;
+                    int seconds = 0;
                     bool rose = false;
 
                     for (long long n = 0; n < total; n += 512)
@@ -4938,22 +4946,33 @@ int main (int argc, char** argv)
                             l[(size_t) i] = r[(size_t) i] = n + i < burst ? noiseAt ((int) (n + i)) * 0.6928f : 0.0f;
                         core.process (chans, 2, 512);
                         for (int i = 0; i < 512; ++i)
-                            peak = std::max ({ peak, std::abs (l[(size_t) i]), std::abs (r[(size_t) i]) });
+                            energy += (double) l[(size_t) i] * l[(size_t) i] + (double) r[(size_t) i] * r[(size_t) i];
 
                         if ((n + 512) / window != n / window)
                         {
-                            rose = rose || (n >= window && peak > last);
-                            if (n >= window) last = peak;
-                            peak = 0.0f;
+                            // The first second holds the burst and the
+                            // network filling; the count starts at the second.
+                            const auto db = 10.0 * std::log10 (std::max (energy, 1.0e-300));
+                            if (seconds == 1) secondDb = db;
+                            rose = rose || (seconds >= 2 && db >= lastDb);
+                            lastDb = db;
+                            energy = 0.0;
+                            ++seconds;
                         }
                     }
+
+                    const auto slope = (secondDb - lastDb) / (double) (seconds - 2);
+                    slowest = std::min (slowest, slope);
+                    fastest = std::max (fastest, slope);
 
                     ++rows;
                     grew += rose ? 1 : 0;
                 }
 
-        std::cout << "  modulation at its corners over a 40 s tail: " << grew << " of " << rows << " rows grew\n";
-        check (grew == 0, "the deepest and the fastest modulation never make the tail grow");
+        std::cout << "  modulation at its corners over a 40 s tail: " << grew << " of " << rows << " rows had a second louder than the last; the tail falls "
+                  << slowest << " to " << fastest << " dB a second (1.5 by design)\n";
+        check (grew == 0, "the deepest and the fastest modulation never make a second of the tail louder than the last");
+        check (slowest >= 1.4, "and the tail falls at least 1.4 dB a second where DECAY designs 1.5");
     }
 
     //== The input stage: what the room is given ================================

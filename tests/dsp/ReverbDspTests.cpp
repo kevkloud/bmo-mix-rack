@@ -4471,8 +4471,8 @@ int main (int argc, char** argv)
     // more than 6 dB over its smoothed neighbours, and the envelope's
     // autocorrelation with no peak above 0.2 at lags 2-200 ms. Damping at
     // unity so a type's intended tilt does not read as colour, and the decay
-    // divided out so the segment is stationary. Unmodulated until M3b, which
-    // is when this is hardest to pass.
+    // divided out so the segment is stationary. Modulated at each type's own
+    // default since M3b, and every type is asserted.
     for (int t = 0; t < numTypes; ++t)
     {
         const auto& c = constantsFor (t);
@@ -4615,19 +4615,14 @@ int main (int argc, char** argv)
         check (frames >= 4, (name + ": enough late tail to measure").c_str());
         check (flatness >= 0.3, (name + ": spectral flatness of the late tail >= 0.3").c_str());
         check (worstBand <= 6.0, (name + ": no 1/3-octave band more than 6 dB over its neighbours").c_str());
-        // **Plate is the known exception, printed and not asserted**, for the
-        // reason its modal density is: the sparsest network of the six,
-        // unmodulated until M3b, failing by a hair (0.202 at a 2 ms lag on
-        // 2026-10-02, a true local maximum -- a weak 500 Hz envelope beat).
-        // M3b's modulation is the spec's cure and M4's line count the other;
-        // when either lands, this assertion takes Plate back.
-        if (t == plate)
-        {
-            if (worstLag > 0.2)
-                std::cout << "  ringing, Plate envelope (known red until M3b/M4): " << worstLag << "\n";
-        }
-        else
-            check (worstLag <= 0.2, (name + ": no envelope autocorrelation peak above 0.2 at 2-200 ms").c_str());
+        // **Plate is asserted with the rest since 2026-10-07.** It was the
+        // known exception, printed and not asserted, while it failed by a
+        // hair unmodulated (0.202 at a 2 ms lag on 2026-10-02, a weak 500 Hz
+        // envelope beat). M3b's modulation was the spec's cure and it took:
+        // 0.177 on 2026-10-05, 0.189 with the modulation bound at 2.94
+        // cents. The modulation commit said the test asserted it again and
+        // the test did not; QA's review of PR #55 caught that.
+        check (worstLag <= 0.2, (name + ": no envelope autocorrelation peak above 0.2 at 2-200 ms").c_str());
     }
 
     //== Block size: bit-identical with the tail running ========================

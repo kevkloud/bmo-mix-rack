@@ -21,10 +21,13 @@ inline constexpr auto kLevel = "level";
 
 // Which hardware this instance behaves like. Two genuinely different
 // circuits, not a shared curve with different numbers -- see Detector.h.
-// "Tele" (Opto unit A) / "Stressed" (Comp unit B) are placeholder labels, not a
-// final naming decision -- that's still open. The Mode enum in DspCore.h
+// "Tele" (Opto unit A) / "Stress" (Comp unit B) are the labels a host shows,
+// and the panel's buttons read TELE / STRESS. Index 1 was "Stressed" and the
+// button ELD until Frosty renamed both, 2026-10-06/07, from the 0.2.6 pass.
+// A label can change because a session stores the index, never the word
+// (OptoTests holds both); the index order cannot. The Mode enum in DspCore.h
 // keeps the OptoUnitA/CompUnitB names internally regardless of what these
-// display strings end up being.
+// display strings are.
 inline constexpr auto kMode = "mode";
 
 // Stereo link: shares one detector's gain reduction across both channels
@@ -33,7 +36,7 @@ inline constexpr auto kLink = "link";
 
 // Color: an on/off harmonic stage modelled on whichever hardware kMode
 // currently selects -- see Detector.h. Only meaningful as a *choice* in
-// Stressed mode; Tele mode always runs it (the panel disables/hides the
+// Stress mode; Tele mode always runs it (the panel disables/hides the
 // switch there, and DspCore ignores this parameter's value in that mode) --
 // see DspCore::process().
 inline constexpr auto kColor = "color";
@@ -69,7 +72,7 @@ inline const ParamSpecs& specs()
         // survive such a change, so it stays possible later.
         S::floatParam (kLevel, "Level", -24.0f, 24.0f, 0.01f, 0.0f, F::Decibels),
 
-        S::choiceParam (kMode, "Mode", { "Tele", "Stressed" }, 0),
+        S::choiceParam (kMode, "Mode", { "Tele", "Stress" }, 0),
 
         S::boolParam (kLink,  "Link",  true),
         S::boolParam (kColor, "Color", false),

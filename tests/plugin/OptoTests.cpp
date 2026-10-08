@@ -34,6 +34,54 @@ int main()
         check (P::specs().size() == (size_t) P::Index::count, "the Index enum matches specs()");
     }
 
+    //== The Mode choice's labels, in order ====================================
+    // Index order freezes with the id; the labels are what a host shows and
+    // what `tools/snapshot` accepts by name. Index 1 read "Stressed" until
+    // Frosty renamed it "Stress" (2026-10-06/07, from the 0.2.6 pass), with
+    // the panel's ELD becoming STRESS. A label is safe to change because a
+    // session stores the index, which the round trip below shows.
+    {
+        auto proc = createOpto();
+
+        const auto modeText = [&proc] (float v)
+        {
+            setValue (*proc, P::kMode, v);
+            return param (*proc, P::kMode).getCurrentValueAsText();
+        };
+
+        check (modeText (0.0f) == "Tele", "mode 0 is Tele, got '" + modeText (0.0f) + "'");
+        check (modeText (1.0f) == "Stress", "mode 1 is Stress, got '" + modeText (1.0f) + "'");
+
+        // The session holds the index and not the word: saved at index 1, the
+        // state carries value 1 and no label, and restores to index 1.
+        setValue (*proc, P::kMode, 1.0f);
+        juce::MemoryBlock state;
+        proc->getStateInformation (state);
+
+        const auto xml = juce::AudioProcessor::getXmlFromBinary (state.getData(), (int) state.getSize());
+        check (xml != nullptr, "the Opto state is XML");
+
+        if (xml != nullptr)
+        {
+            const auto saved = xml->toString();
+            check (! saved.contains ("Stress") && ! saved.contains ("Tele"),
+                   "the saved state names no mode label");
+
+            const juce::XmlElement* mode = nullptr;
+            for (auto* e : xml->getChildIterator())
+                if (e->getStringAttribute ("id") == P::kMode)
+                    mode = e;
+
+            check (mode != nullptr && mode->getDoubleAttribute ("value") == 1.0,
+                   "the saved state holds mode as its index, 1");
+        }
+
+        auto restored = createOpto();
+        restored->setStateInformation (state.getData(), (int) state.getSize());
+        check (getValue (*restored, P::kMode) == 1.0f, "mode index 1 restores as index 1");
+        check (param (*restored, P::kMode).getCurrentValueAsText() == "Stress", "and reads Stress");
+    }
+
     //== Displayed values ======================================================
     {
         auto proc = createOpto();

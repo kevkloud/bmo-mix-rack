@@ -48,7 +48,7 @@ namespace bmo::opto
     headroom was thought to be 1dB, not 3.6, and the release fix has changed
     how crushed this preset *feels* independently of how deep it goes -- so
     it deserves an ear pass before another number is chosen. If it is wanted
-    deeper, CRUSH 100 is the direct route, ELD mode reaches the same depth
+    deeper, CRUSH 100 is the direct route, STRESS mode reaches the same depth
     for ~1.7dB less makeup at the cost of being a different unit's
     character, and kLevel's range no longer needs reopening.
 

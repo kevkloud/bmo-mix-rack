@@ -98,7 +98,7 @@ namespace
     /** The real value `text` asks for, or nothing if it names neither a number
         nor one of the parameter's own choices.
 
-        A choice may be given by name -- `mode=Stressed` as well as `mode=1` --
+        A choice may be given by name -- `mode=Stress` as well as `mode=1` --
         because that is what anyone reading params.h will type. Before this,
         every non-numeric value went through getFloatValue() and came out 0.0,
         so a choice name, or a typo, silently set the parameter to its *first*

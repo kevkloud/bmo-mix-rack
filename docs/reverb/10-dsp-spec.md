@@ -876,6 +876,25 @@ decision**. At 48 kHz the PR is inside the 1.5 % budget with less margin
 than the earlier lines suggested. ATTACK adds 0.013 points at 48 kHz and
 about a tenth at 192.
 
+***Measured again on a quiet ICE QUEEN, 2026-10-09, and these are the
+figures to use.*** Three interleaved passes, medians of five, every pass
+within 0.012 points of the others.
+
+| | 48 kHz / 128 | 192 kHz / 32 |
+|---|---|---|
+| `main` 5e9cf91 (QA's build) | 1.085 % | 4.447 % |
+| PR at `5fa2db5`, without ATTACK (QA's build) | 1.347 % | 5.342 % |
+| this branch, ATTACK forced off (the suite's build) | 1.318 % | 5.195 % |
+| this branch, as it is (the suite's build) | 1.325 % | 5.232 % |
+
+QA's two executables are built with different flags from the suite's and
+read about 0.15 points higher at 192 kHz for the same code, so each pair is
+compared within itself: **M3b without ATTACK costs 0.26 points at 48 kHz
+and 0.90 at 192 kHz over `main`; ATTACK costs 0.007 and 0.037.** The
+"about a tenth" above was a busy machine. **As built, M3b reads 5.23 % at
+192 kHz / 32**, 0.05 over the 5.18 % Frosty accepted for M3a, and 1.33 % at
+48 kHz / 128 against the 1.5 % budget. Still his to accept.
+
 **These are figures for held settings.** While a length move is in flight
 the tail runs two paths and the early reflections rebuild their table, and
 at 192 kHz / 32 QA measured a mean of about 10.5 % of the block with a 99th

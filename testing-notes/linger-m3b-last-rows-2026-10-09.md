@@ -89,3 +89,24 @@ SOURCE slow the tail down.
 
 build-dsp 24/24, build-full 48/48 runnable, `reverb_dsp_tests --long`
 passes, all builds exit 0, on the merged head.
+
+## CPU, measured again on a quiet machine
+
+`measure_reverb bench <rate> <block> worst`, medians of five, three
+interleaved passes, every pass within 0.012 points of the others. ICE QUEEN,
+2026-10-09, nothing else running.
+
+| | 48 kHz / 128 | 192 kHz / 32 |
+|---|---|---|
+| `main` 5e9cf91 (QA's build, `cl /O2`) | 1.085 % | 4.447 % |
+| PR at `5fa2db5`, without ATTACK (QA's build) | 1.347 % | 5.342 % |
+| this branch, ATTACK forced off (the suite's Release build) | 1.318 % | 5.195 % |
+| this branch, as it is (the suite's Release build) | 1.325 % | 5.232 % |
+
+QA's executables and the suite's are built with different flags and differ
+by about 0.15 points at 192 kHz on the same code, so each pair is compared
+within itself. M3b without ATTACK costs 0.26 points at 48 kHz and 0.90 at
+192 kHz over `main`; ATTACK costs 0.007 and 0.037. The busy-day figures in
+the earlier notes (5.6 to 6.9 %) were the machine. As built: 1.33 % at
+48 kHz / 128 against a 1.5 % budget, and 5.23 % at 192 kHz / 32 against the
+5.18 % Frosty accepted for M3a.

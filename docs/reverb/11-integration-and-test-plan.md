@@ -282,7 +282,7 @@ knob position.
 | 22 | `moddepth` | MOD DEPTH | 0.1…0.8 ms | *per type* (0.28) | `0.28 ms` | |
 | 23 | `modrate` | MOD RATE | 0.1…1.2 Hz | *per type* (0.50) | Hz | L |
 | 24 | `width` | WIDTH | 0…200 % | 100 | % | |
-| 25 | `inhicut` | DARKEN (was IN HI-CUT until 2026-09-29) | 2…20 kHz | *per type* (20 k) | Hz/kHz | L |
+| 25 | `inhicut` | DARKEN (was IN HI-CUT until 2026-09-29) | 1…20 kHz (2…20 kHz until 2026-10-07) | *per type* (20 k) | Hz/kHz | L |
 | 26 | `erlevel` | ER | −40…0 dB | *per type* (−6) | dB, `Off` at −40 | |
 | 27 | `verblevel` | REVERB | −40…0 dB | *per type* (−6) | as `erlevel` | |
 | 28 | `mix` | MIX | 0…100 % | 50 | % | default 50 since 2026-09-24, Frosty: input unchanged, verb heard |
@@ -709,10 +709,10 @@ the whole component, which is what stops a curve being drawn through the menu.
 - **The EQ page draws a spectrum behind its curve** — Frosty's addition,
   2026-09-21 — and it **overrides "redrawn from parameters only" for that page
   alone**. EARLY and TAIL are unchanged and the screen's timer runs only while
-  EQ is showing. The tap is at **the point the Reverb EQ acts on**, pre both
-  generators, which is where 10 §2 puts the EQ; until there is an engine
-  `DspCore::process` is a marked pass-through, so it shows the dry input, which
-  is honest rather than broken — **do not move the tap to fix it.** The
+  EQ is showing. The tap is on **the input stage's output** since 2026-10-06 (Frosty: "it
+  should show the output, with EQ applied"): what the room is given, after the
+  high-pass, DARKEN and the Reverb EQ, so the spectrum moves with the knobs.
+  Until then it was on the input, ahead of the EQ. The
   consequence for tooling is that **a render of this page needs `signal=-18`**:
   a parameter-driven screen renders at rest and an analyser does not.
 
@@ -803,7 +803,7 @@ The rest, one line each:
 | Modal density | Each *mᵢ* prime, **re-derived per rate, not multiplied**; `Σmᵢ ≥ 0.15·fs`, every type and rate. **10 §4 records Plate failing at 8 lines** — write it before Plate is tuned and expect red until 12 lines or 2× τ̄ |
 | Onset | First 50 ms in 1 ms windows, no jump above **3 dB** after the ER span; the bloom is monotonic over **0–120 ms** across `TypeConstants::attack` 0→100 (10 §2). **ATTACK has no host lane since the trim (§4a)**, so this is swept by selecting types or by driving `DspCore::Params` directly in the JUCE-free suite, not by writing a parameter — and Plate's 0 is an assertion of its own: the tail is immediate |
 | Ringing | Late tail (2× mixing time to −30 dB): spectral flatness **≥0.3**, no 1/3-octave band **>6 dB** over the smoothed mean, envelope autocorrelation **no peak >0.2 at lags 2–200 ms**, every type |
-| Modulation | 1 kHz sine, wet, tail only; instantaneous frequency from the phase derivative in 50 ms windows. Peak deviation **≤3 cents** at the top of depth and rate (10 §4). Report its spectrum — a visible rate means chorused, not randomised |
+| Modulation | 1 kHz sine, wet, tail only; instantaneous frequency from the phase derivative in 50 ms windows. Peak deviation **≤3 cents** at the top of depth and rate (10 §4). Report its spectrum — a visible rate means chorused, not randomised. *As measured on 2026-10-09: the 3 cents holds for each line and not for the tail, which is their sum — 1.68 cents RMS at the default, 3.0 at the corners, peaks to 17. The spectrum has no line (largest 3.8 % of the power). 10 §4, "As built in M3b", has the argument; the test asserts each line under 3 cents, the tail's RMS and the spectrum.* |
 | Pre-delay | First tail sample above −60 dB within **±1 sample**, every rate; **ER taps untouched, full stop** — `kPreLinkFixed` is `false` for every type since the trim (§4a), so the peak lag over the first 100 ms is 0 unconditionally and there is no second case to test; **range cannot go negative** and `latencyForParams` returns 0 throughout (10 §2) |
 | Parameter changes | TYPE: 30 ms dip, tables swapped at the minimum — no click, **no allocation**, no second engine. SIZE/PRE-DELAY: 30 ms crossfade, retriggered at 1% accumulated \|ΔS\|, windows summing to one, **ER and late sharing the scheme** (10 §3), no pitch shift on a held sine. *Since 2026-10-03 the late network does not share it: its length moves are weighted by when a sample was written, so a move cannot add energy to the loop (10 §4, "As built"); the ER generator keeps the 30 ms crossfade.* Coefficients: no 1 ms energy jump above 3 dB |
 | Stability | Matrix orthogonal to 1e−6, `max\|Hᵢ(ω)\| ≤ 1 − 1e−4`. At `damphi` 2.0 / `decay` 20 s (effective T60 40 s): ten minutes then silence, never above +6 dBFS, RMS never growing over any 10 s window |

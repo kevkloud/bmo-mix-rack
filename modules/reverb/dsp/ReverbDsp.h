@@ -182,9 +182,8 @@ public:
         all in. BMO DEQ is the other module that overrides it.
 
         `DspCore::eqAnalyser` carries the important part: **the samples are the
-        dry input until there is a reverb under them**, because the core is a
-        marked pass-through, and the tap is nonetheless at the point it belongs
-        at rather than at the output. */
+        input stage's output**, what the room is given with the Reverb EQ
+        applied, and not the module's output. */
     AnalyserTap* analyser() noexcept override { return &core.eqAnalyser(); }
 
     DspCore& getCore() noexcept { return core; }

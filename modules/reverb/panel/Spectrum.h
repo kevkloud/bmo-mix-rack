@@ -53,10 +53,9 @@ namespace bmo::reverb
     emphatic that this path can change neither the sound nor the latency, and
     why a torn read is accepted rather than locked against.
 
-    **And the samples it is showing are the dry input**, because
-    `reverb::DspCore` is a marked pass-through and there is no reverb under it
-    yet. The tap is at the point the Reverb EQ acts on, which is where it
-    belongs once there is one. See `DspCore::eqAnalyser`.
+    **And the samples it is showing are the input stage's output**, what the
+    room is given with the Reverb EQ applied, since 2026-10-06. See
+    `DspCore::eqAnalyser`.
 */
 class Spectrum
 {

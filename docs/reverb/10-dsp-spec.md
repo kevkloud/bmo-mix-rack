@@ -561,6 +561,239 @@ Two items are red and recorded, not hidden, both Plate: modal density, Σ*m*ᵢ
 autocorrelation of 0.202 against 0.2. M3b's modulation or M4's line count
 takes them back.
 
+### As built in M3b (2026-10-05 and 2026-10-06, on ICE QUEEN)
+
+**Modulation** (`LateNetwork.h`, 2026-10-05). Each line's delay wanders
+toward a new random target every half period along a smoothstep, each line
+at its own fraction of MOD RATE; it is random and not an LFO. The 3-cent
+bound holds by construction, so depth and rate trade at the top: 0.283 ms at
+1 Hz, the full 0.8 ms only under 0.35 Hz. Reads are Lagrange, six points
+under 88.2 kHz and four above; four points at 48 kHz took enough off the top
+each pass to put HIGH × 2.0 at 1.69. **Plate's late-envelope red is
+cleared**: 0.202 → 0.177 against 0.2 (0.189 since the bound moved, below),
+and asserted since 2026-10-07; until then the test only printed it. Plate's
+modal density is still red, and is M4's.
+
+Three things QA's review of PR #55 added to this, 2026-10-07:
+
+- **The bound is built at 2.94 cents, and holds while the knobs move.** It
+  was built at 3.0001 and tested with MOD DEPTH and MOD RATE held: one MOD
+  RATE move 0.1 → 1.2 Hz at depth 0.8 read 3.0006. A moved knob lands a
+  little over what is built (0.4 % at 192 kHz, not run down), so the build
+  is 2 % under and the test moves both knobs across their ranges: 2.48
+  cents at fixed corners, 2.94 with a knob moved.
+- **Modulation shortens the top of the tail, and that is the price of
+  it.** An interpolated read loses a little off the very top on every
+  pass. Room, DECAY 2 s, 48 kHz, T60 at the default modulation over T60
+  unmodulated: 0.95 at 8 kHz and 0.82 at 12 kHz at 12 m; 0.69 at 12 kHz at
+  0.5 m; with HIGH × 2.0 at 0.5 m, 0.81 at 8 kHz and 0.63 at 12 kHz, so
+  HIGH × 2.0 is worth about × 1.27 at 12 kHz in the smallest room. (QA's
+  one-octave bands read 0.87, 0.79 and 0.77 at 12 kHz for the same rows.)
+  At the corners of depth and rate a DECAY 20 s × 2.0 tail falls 1.72 to
+  2.05 dB a second where 1.5 is designed. **Pinned, not compensated**: a
+  static gain that put the loss back would take the loop over unity
+  whenever a read landed on a sample, and §4's rule is that the loop always
+  loses. An allpass read would keep the top and is a different sound.
+  Frosty heard and passed the tail as it is on 2026-10-06; whether the top
+  wants holding up is a voicing question for M4.
+- **The loop's loss is tested second by second**, on energy, not on the
+  peaks of 5 s windows.
+
+**The input stage** (`InputStage.h`, 2026-10-06) is §2's first paragraph,
+built: a 20 Hz high-pass, DARKEN, then the three Reverb EQ nodes, on the
+one signal both generators are fed (the mid of the input), never on the
+dry path. Where it departs from or adds to this document:
+
+- **Both fixed-order filters are one pole.** §2 gives neither an order. The
+  high-pass is within 0.013 dB of −3.01 at 20 Hz from 44.1 to 192 kHz.
+- **DARKEN's corner is exact; its slope below the corner is not the analogue
+  one near the top of its range.** The coefficient is solved for −3.01 dB at
+  the knob's frequency at every rate. Away from the corner a digital pole
+  is not the analogue curve the EQ page draws, and the gap grows as the
+  rate falls. At 48 kHz and the default, 20 kHz, it is **1.45 dB down at
+  10 kHz where the page draws 0.97** (0.46 against 0.26 at 5 kHz; worst
+  0.53 dB, at 12.4 kHz). With the corner low the gap is far down the skirt
+  instead: 2.6 dB at 20 kHz with the corner at 2 kHz, where the page draws
+  −20 dB. Worst gap anywhere up to 20 kHz, over corners 2 to 20 kHz: 3.1 dB
+  at 44.1 kHz, 2.6 at 48, 0.62 at 96, 0.15 at 192. A pole-zero fit was
+  worked through for the default and is no closer (0.52 dB at 10 kHz, the
+  error the other way). **The EQ page draws the engine's own law since
+  2026-10-06** (`InputStage::lowPassDbAt` at the rate the page is drawn
+  at), on Frosty's word: "option 1 if it doesn't increase cpu
+  significantly". It is paint and costs the audio thread nothing.
+- **DARKEN is not transparent at 20 kHz** and is not bypassed there: a
+  bypass at the end stop would be a step in the response one detent wide.
+- **A coefficient move is a straight line over 20 ms that lands exactly**,
+  not §5's one-pole smoothing: each node's five state-variable coefficients
+  and DARKEN's one. A line between two stable filters is stable throughout,
+  and it ends, which a one-pole approach never does. Measured on 97 Hz at
+  −18 dBFS, node 1 flat → +12 dB with DARKEN 20 → 2 kHz: the largest sample
+  step during the move is 0.0054 against 0.0057 for the settled +12 dB
+  signal (the house limit is 1.5×).
+- **A flat node returns its input bit for bit**, and its filter runs anyway
+  so its state is the signal's when a gain move starts. At the defaults the
+  EQ adds nothing; the high-pass and DARKEN are always in.
+- **The stage runs in double and flushes its states below 1e−30** every 64
+  samples. The slowest setting the schema allows (a 20 Hz bell at Q 40,
+  +12 dB) reaches exactly zero 78 s after an impulse and never passes
+  through a subnormal; its ring is under −60 dB re the impulse after 12 ms,
+  so the tail report does not count it.
+- **The reported tail does not count the stage's own ringing** (QA,
+  2026-10-07). DECAY 0.1 s with the bell at 20 Hz, Q 40, +12 dB reports
+  0.231 s, and the wet signal stays above −60 dB re its peak until 1.33 s
+  (0.67 s with the bell at 100 Hz). That is the far corner of the EQ; at
+  any setting a room would use the tail outlasts the filter. Not charged to
+  the report; it would be a term in `tailSecondsFor` if Frosty wants it.
+- **A frequency jump on a sharp node steps more than the house rule
+  allows** (QA, 2026-10-07). The bell at Q 40, +12 dB, jumped 20 Hz →
+  20 kHz in one request under a 97 Hz tone: the largest sample step is
+  2.38× the signal's own, against the rule's 1.5×, with the peak only
+  0.22 dB over. Gain and DARKEN moves are within 1.031×. The 20 ms move is
+  a straight line in the filter's coefficients, which is not a straight
+  line in frequency. Gliding the frequency itself and redesigning along the
+  way, as BMO DEQ does, would close it. **Open, and with Frosty.**
+- **One NaN in latches the stage until `reset()`**, as it latches both
+  generators on `main`. The rack's guard upstream is what protects it; not
+  a regression and not changed.
+- **`setBypassedForMeasurement` is a test hook in a shipping header**, and
+  three tests run with MOD DEPTH at 0, under the knob's 0.1 minimum. Both
+  are deliberate and both are recorded here because a reviewer asked: no
+  parameter reaches either.
+- **Four early-reflection tests measure the generators with the stage
+  out** (`renderBare` in `reverb_dsp_tests`): tap gain as a DC sum, energy
+  after the span, the 5 ms energy windows and the DENSITY sweep's fixed
+  window. A high-pass has no DC to sum and follows every tap with an 8 ms
+  tail. Every other row plays through the stage.
+- **The analyser tap is on the stage's output** (Frosty, 2026-10-06: "it
+  should show the output, with EQ applied"). The spectrum behind the EQ
+  curve is what the room is given, one channel, and moves with the knobs.
+  It was on the input until then. It is not the module's output.
+
+**Heard by Frosty on 2026-10-06**, on monitors and headphones, the amp in
+stereo, from the two sets rendered on ICE QUEEN
+(`testing-notes/linger-listening-set-2026-10-06-m3b.md` has every answer):
+
+- Modulation: "flutter is gone"; on the held note "ring is gone, depending
+  on type it reads as wobble, but in a good way"; the other types "sounds
+  good"; SOURCE "sounds better".
+- The input stage: DARKEN "works as expected, but maybe range down to
+  1khz"; the cuts, shelves, bell and bandpass all pass; and of the flat
+  default against M3a, with the high-pass and DARKEN now always in, "i like
+  this one more".
+
+**Decided by Frosty on 2026-10-06:**
+
+- **Decay truncation is left out**: "leave it out. I'm happy where we're
+  at". `decayShape` stays in `TypeConstants` at 3.5, linear, for every type
+  and the engine does not read it. §1's contour is not built.
+- **The 150 ms wet fade in `reset()` is not buildable in the DSP** and is
+  recorded as such: nothing plays after a reset for a fade to act on, and a
+  module cannot know one is coming. §5 and `11` §6's Bypass row asked for
+  it. Frosty: "record as not buildable and recommend making a bypass". The
+  recommendation is §8 (4): a per-slot bypass in the rack, which lets a
+  module's tail ring out or fade while the slot is still there.
+- **DARKEN's range is 1 to 20 kHz since 2026-10-07; it was 2 to 20.**
+  Frosty, on hearing 2 kHz: "maybe range down to 1khz", and the next day
+  "1k is the call". It is a range change on a schema that froze at 0.2.6,
+  made once and on purpose while Linger has been installed on ICE QUEEN and
+  nowhere else. State restores unchanged; an automation lane written against
+  the old range reads lower. §2 and §6 still say 2–20 kHz where they tell
+  the parameter's history.
+
+**ATTACK, the onset bloom** (`LateNetwork.h`, 2026-10-07). §2 asks for "a
+rising envelope on the FDN *input*". As built, **each line is fed the
+diffused input at its own delay and its own level**: the shortest line at
+once and quietly, the last ATTACK × 120 ms later and loudest, the levels
+normalised so their mean square is one. Where it departs from §2, and why:
+
+- **Delays, not an envelope.** An envelope needs something to start it and
+  continuous audio has no onsets; delays are linear, need no trigger and
+  treat every sample alike. Frosty approved rising taps on 2026-10-06.
+- **One tap a line, not eight taps into one input.** Eight rising taps
+  summed ahead of the network were built first and are a sparse FIR in front
+  of everything: the late tail's spectral flatness fell from 0.775 to 0.528
+  on Room, 0.864 to 0.628 on Chamber, 0.924 to 0.718 on Hall, 0.931 to 0.770
+  on Cavern and 0.529 to 0.382 on Ambience (the floor is 0.3). Fed a line
+  each: 0.768, 0.873, 0.925, 0.927 and 0.522. Plate, at ATTACK 0, is
+  untouched in both, 0.759.
+- **Measured** on Room at 12 m, DECAY 1.8 s, the tail fed directly: half of
+  the tail's first 400 ms is in by 87.0 ms at ATTACK 0, 97.0 at 10 %, 115.3
+  at 30 %, 150.1 at 65 % and 186.0 at 100 %, so the full span holds the bulk
+  of the tail back by 99 ms. The whole tail's energy stays within 0.08 dB
+  from 0 to 100 %. The tail's first sample does not move.
+- **The reported tail gains ATTACK × 0.12 s** (`DspCore::tailSecondsFor`),
+  since the bulk of the tail ends that much later: Room 36 ms, Chamber 42,
+  Hall 60, Cavern 78, Plate 0, Ambience 12.
+- **A change of ATTACK crossfades two feeds over 30 ms.** It has no host
+  lane, so in a host this happens only with a TYPE change. On a held 440 Hz
+  tail, 30 → 100 %: the largest sample step during the move is 0.00357
+  against 0.00356 settled.
+- **A bloom inside a fitted range reads as a longer decay in a short
+  band.** With Room's 36 ms the 50 Hz band at LOW × 0.25 fits 0.631 s where
+  the filters alone give 0.557. The damping test runs with ATTACK off for
+  that reason; the T60 and tail-report tests run with it on.
+- **CPU**, `measure_reverb bench worst`, on a busy ICE QUEEN (2026-10-07):
+  48 kHz / 128 1.357 → 1.370 %. At 192 kHz / 32 the machine was moving the
+  figure by more than a point between runs; the best single runs with the
+  bloom in were 5.23 %, against 5.13 % measured without it the day before.
+  That is past the 5.18 % Frosty accepted and is with him.
+- **The energy is the same and the peak is not.** The lines fed last are
+  fed up to 4.9 dB harder than without a bloom, so a transient's tail has a
+  peakier first loud arrival: a snare through Hall, tail only, peaks at
+  −30.4 dBFS at Hall's 50 % against −33.7 with the bloom off.
+- The span, the first line's level (0.12), the curve (position^1.5) and the
+  order the lines are fed in are **CALIBRATE**. Not heard yet.
+
+**`11` §6's last three rows** (2026-10-09, on ICE QUEEN), which close M3b's
+build. Two of them measure a target this document set and the engine does
+not meet; both are written down as they measured.
+
+- **Mixing time is over Polack's √V ms for every type, by a factor of 1.3
+  to 6.** Normalised echo density (Abel and Huang, 20 ms window) reaching
+  0.9, from the impulse, each type at its own SIZE, SOURCE and ATTACK:
+
+  | type | mixes at | at SOURCE 0 | √V for its SIZE |
+  |---|---|---|---|
+  | Room, 12 m | 154 ms | 168 ms | 26 ms |
+  | Chamber, 18 m | 185 ms | 192 ms | 48 ms |
+  | Hall, 34 m | 258 ms | 260 ms | 123 ms |
+  | Cavern, 55 m | 323 ms | 328 ms | 254 ms |
+  | Plate, 22 m | 87 ms | 87 ms | 64 ms |
+  | Ambience, 8 m | 83 ms | 129 ms | 14 ms |
+
+  The paragraph above this record says why: mixing time is set by the mean
+  delay, and eight lines behind two diffusers (four on Plate) take several
+  passes to fill in. ATTACK adds to it by design, 3 ms on Ambience to 59 on
+  Cavern. **Printed and pinned, not met**: no type may mix later than this
+  by more than a tenth, SOURCE at its default may never mix later than
+  SOURCE 0 and must be 10 ms sooner on Room and Ambience, and the gap to
+  √V is M4's, with the mean delays. Plate is the one type SOURCE does not
+  help.
+- **Denormals: nothing runs slow.** Flush-to-zero and denormals-are-zero
+  off, a 0.5 s burst, a minute of silence: the slowest 5 s of the silence
+  took 55 ms against 52 for the 5 s holding the burst at the defaults, and
+  68 against 67 with every filter in the module ringing. The output is
+  exactly zero by the end and never a subnormal.
+- **A held note through the tail wanders by more than 3 cents, and §4's
+  3 cents was never a claim about that.** Every line is held under 3 cents.
+  What comes out is eight lines summed and heard again on every pass, and
+  the phase of a sum of paths wanders further than any one path, most
+  where they nearly cancel. A 1 kHz sine through the tail alone, read in
+  50 ms windows over 40 s: **1.68 cents RMS at the default modulation with
+  peaks to 11.9; 2.93 to 3.00 cents RMS at the corners of depth and rate
+  with peaks to 17.3.** `11` §6's Modulation row asks for a peak within 3
+  cents on exactly this measurement; it is not met and cannot be by
+  bounding the lines. The deviation's spectrum has no line: the largest
+  holds 3.8 % of the power, so it is randomised and not a chorus, which is
+  the other half of that row and does hold. Frosty heard the held note on
+  2026-10-06: "ring is gone, depending on type it reads as wobble, but in a
+  good way". The test bounds the RMS at what it measured and the spectrum
+  at a tenth.
+
+**M3b's build is complete with these.** What is left before M4 is Frosty's
+ear on ATTACK and the decisions listed in
+`testing-notes/linger-m3b-qa-pr55-2026-10-07.md`.
+
 ## 5. Parameter changes, bypass, tail reporting
 
 Type switch may be a large jump in sound (`01` D3) but must not click: 30 ms
@@ -614,6 +847,53 @@ so the measured **5.18 %** stands as accepted. It is not a new budget:
 whatever M3b's EQ and modulation add on top is measured and brought to
 Frosty, not assumed to fit. 48 kHz / 128 stays at ≤1.5 % (measured
 1.10–1.22 %).
+
+*As measured in M3b (on ICE QUEEN, `measure_reverb bench <rate> <block>
+worst`, median of five):* modulation took 48 kHz / 128 from 1.10 to 1.30 %
+and 192 kHz / 32 from 4.58 to 5.19–5.21 % (2026-10-05). The input stage,
+measured before and after in one sitting on 2026-10-06, adds 0.04 points at
+48 kHz / 128 (1.285 → 1.325 %) and 0.14 at 192 kHz / 32 (4.990 → 5.126 %).
+The stage's filters run whether or not the EQ is flat, so those are its
+whole cost. Run to run the machine moves these figures by about 0.2 points
+at 192 kHz, which is more than the stage costs.
+
+***The whole of PR #55 against `main`, which is the figure that matters and
+which the lines above never gave*** (QA, 2026-10-07, ICE QUEEN, same bench,
+medians of five, three interleaved passes, `main` 5e9cf91 against
+`5fa2db5`: modulation, the input stage and DARKEN's range, without ATTACK):
+
+| | `main` | PR #55 | |
+|---|---|---|---|
+| 48 kHz / 128 | 1.122–1.124 % | 1.361–1.471 % | budget 1.5 % |
+| 192 kHz / 32 | 5.583–5.823 % | 6.639–6.880 % | about +1.0 point, +18 % |
+
+The machine read `main` itself a point higher that day than the 4.58 % it
+gave on 2026-10-05, so the 192 kHz column is to be read as a difference:
+**M3b costs about one point of a core at 192 kHz / 32, nearly all of it the
+modulated reads.** Frosty accepted 5.18 % at 192 kHz on 2026-10-03 for M3a
+and said it was not a budget; this is past it and **is with him for a
+decision**. At 48 kHz the PR is inside the 1.5 % budget with less margin
+than the earlier lines suggested. ATTACK adds 0.013 points at 48 kHz and
+about a tenth at 192.
+
+***Measured again on a quiet ICE QUEEN, 2026-10-09, and these are the
+figures to use.*** Three interleaved passes, medians of five, every pass
+within 0.012 points of the others.
+
+| | 48 kHz / 128 | 192 kHz / 32 |
+|---|---|---|
+| `main` 5e9cf91 (QA's build) | 1.085 % | 4.447 % |
+| PR at `5fa2db5`, without ATTACK (QA's build) | 1.347 % | 5.342 % |
+| this branch, ATTACK forced off (the suite's build) | 1.318 % | 5.195 % |
+| this branch, as it is (the suite's build) | 1.325 % | 5.232 % |
+
+QA's two executables are built with different flags from the suite's and
+read about 0.15 points higher at 192 kHz for the same code, so each pair is
+compared within itself: **M3b without ATTACK costs 0.26 points at 48 kHz
+and 0.90 at 192 kHz over `main`; ATTACK costs 0.007 and 0.037.** The
+"about a tenth" above was a busy machine. **As built, M3b reads 5.23 % at
+192 kHz / 32**, 0.05 over the 5.18 % Frosty accepted for M3a, and 1.33 % at
+48 kHz / 128 against the 1.5 % budget. Still his to accept.
 
 **These are figures for held settings.** While a length move is in flight
 the tail runs two paths and the early reflections rebuild their table, and

@@ -415,9 +415,9 @@ int main()
         const Tapped kTaps[] {
             { "util", false }, { "eq", false }, { "sat", false }, { "opto", false },
             { "dim", false }, { "ltvcomp", false }, { "fetcomp", false }, { "dwell", false },
-            // BMO DEQ's is post-EQ; BMO Linger's is at the point the Reverb EQ
-            // acts on, and shows the dry input until there is a reverb under
-            // it (modules/reverb/dsp/DspCore.h, `eqAnalyser`); BMO Defang's is
+            // BMO DEQ's is post-EQ; BMO Linger's is on its input stage's
+            // output, what the room is given with the Reverb EQ applied
+            // (modules/reverb/dsp/DspCore.h, `eqAnalyser`); BMO Defang's is
             // the sibilance ribbon's, four floats a frame, enabled only while
             // its panel is open (modules/deesser/dsp/DeesserDsp.h).
             { "deq", true }, { "reverb", true }, { "deesser", true },

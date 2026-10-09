@@ -29,12 +29,18 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <iostream>
 #include <memory>
 #include <string>
 #include <vector>
+
+#if defined (_M_X64) || defined (__SSE2__)
+ #include <pmmintrin.h>
+ #include <xmmintrin.h>
+#endif
 
 using namespace bmo::reverb;
 
@@ -80,6 +86,9 @@ namespace
         int msToSamples (float ms) const noexcept { return (int) std::lround (ms * 0.001 * rate); }
     };
 
+    /** Set only by `renderBare`, below. */
+    bool bareGenerators = false;
+
     /** The ER-only condition every rule in 11 section 6's ER block is written
         in: REVERB off, ER at 0 dB, MIX 100 %, OUTPUT 0 dB, ER HI-CUT open.
         `edit` then moves whatever the test is about. A pre-roll of 300 ms of
@@ -101,6 +110,7 @@ namespace
         ReverbDsp dsp;
         dsp.prepare (rate, block, channels);
         dsp.setParams (v.data(), (int) v.size());
+        dsp.getCore().inputStage().setBypassedForMeasurement (bareGenerators);
 
         const auto preroll = (int) (0.3 * rate);
         const auto n       = (int) (seconds * rate);
@@ -121,6 +131,23 @@ namespace
         ir.rate = rate;
         ir.l.assign (l.begin() + preroll, l.end());
         ir.r.assign (channels > 1 ? r.begin() + preroll : l.begin() + preroll, channels > 1 ? r.end() : l.end());
+        return ir;
+    }
+
+    /** The same, with the input stage out, for the four rules that are read
+        off an impulse's own shape and are claims about the generator: a tap's
+        gain as a DC sum, energy after the span, the 5 ms energy windows, and
+        energy across a DENSITY sweep inside a fixed window. A 20 Hz high-pass
+        has no DC to sum and follows every tap with an 8 ms tail 52 dB under
+        it, so with the stage in (since 2026-10-06) those rows read 0.8 to
+        11 dB off the table and are measuring the high-pass. Every other row
+        in the ER block plays through the stage, and the stage's own block
+        asserts what it does to what the generators are given. */
+    Ir renderBare (const std::function<void (std::vector<float>&)>& edit)
+    {
+        bareGenerators = true;
+        auto ir = render (edit);
+        bareGenerators = false;
         return ir;
     }
 
@@ -917,7 +944,7 @@ int main (int argc, char** argv)
     {
         for (int t = 0; t < kNumTapTypes; ++t)
         {
-            const auto ir = render ([t] (auto& v) { v[Index::type] = (float) t; });
+            const auto ir = renderBare ([t] (auto& v) { v[Index::type] = (float) t; });
             const auto* table = kTypeTaps[t];
             bool timesOk = true, gainsOk = true;
 
@@ -993,7 +1020,7 @@ int main (int argc, char** argv)
 
     //== Flamming, on the rendered Room IR ========================================
     {
-        const auto ir = render ([] (auto&) {});
+        const auto ir = renderBare ([] (auto&) {});
         const auto span = erSpanMsAt (0, roomDefaults::kSizeM);
 
         // Each tap's energy as heard: the IR's energy between it and the next.
@@ -1070,7 +1097,7 @@ int main (int argc, char** argv)
 
     //== ER-only: self-terminating, ramped out, and flat ==========================
     {
-        const auto ir = render ([] (auto&) {});
+        const auto ir = renderBare ([] (auto&) {});
         const auto span = erSpanMsAt (0, roomDefaults::kSizeM);
         const auto er   = ir.energy (0, ir.msToSamples (span + 5.0f));
         const auto after = ir.energy (ir.msToSamples (span + 5.0f), ir.size());
@@ -1190,7 +1217,7 @@ int main (int argc, char** argv)
         for (int step = 0; step <= 20; ++step)
         {
             const auto d = (float) step * 5.0f;
-            const auto ir = render ([d] (auto& p) { p[Index::erdensity] = d; });
+            const auto ir = renderBare ([d] (auto& p) { p[Index::erdensity] = d; });
             const auto span = erSpanMsAt (0, roomDefaults::kSizeM);
             const auto e = ir.energy (0, ir.msToSamples (span + 15.0f));
 
@@ -2198,6 +2225,14 @@ int main (int argc, char** argv)
                 v[(size_t) Index::erdensity] = 100.0f;
             }
 
+            // **Modulation off for this comparison.** Each line's delay wanders on
+            // its own random path from the moment the network lands, so an
+            // instance that has run ten seconds of silence and one that has run
+            // none are at different points on it and are not the same samples,
+            // however exactly both are at their settings. What is compared
+            // here is the settings.
+            v[(size_t) Index::moddepth] = 0.0f;
+
             auto settled = fresh (v, c.rate);
             play (*settled, v, (int) (10.0 * c.rate), true);
             const auto reference = play (*settled, v, (int) c.rate, false);
@@ -2584,8 +2619,9 @@ int main (int argc, char** argv)
     {
         DspCore::Params p;
 
-        // preDelay + T_mid * max(1, r_lo, r_hi) + t_ER,max + 0.05
-        const auto expected = 0.0f + 1.8f * 1.20f + erSpanMsAt (p.sizeM) * 0.001f + 0.05f;
+        // preDelay + attack * 0.12 + T_mid * max(1, r_lo, r_hi) + t_ER,max + 0.05.
+        // Room's ATTACK is 30 %, so 36 ms of bloom since 2026-10-07.
+        const auto expected = 0.0f + 0.30f * 0.120f + 1.8f * 1.20f + erSpanMsAt (p.sizeM) * 0.001f + 0.05f;
         check (near (DspCore::tailSecondsFor (p), expected, 1.0e-3f),
                "the tail formula at the defaults");
 
@@ -2618,11 +2654,11 @@ int main (int argc, char** argv)
         // over the Taps table's 61 ms; the formula added the Taps span in
         // both modes until the 2026-09-30 review, so at a short DECAY a
         // bounce cut most of an Energy cluster off.
-        //   0 + 1.8 * 1.20 + 500 ms + 0.05 = 2.71
+        //   0 + 0.036 (Room's bloom) + 1.8 * 1.20 + 500 ms + 0.05 = 2.746
         DspCore::Params spread = p;
         spread.erMode     = ErMode::energy;
         spread.erSpreadMs = 200.0f;
-        check (near (DspCore::tailSecondsFor (spread), 2.71f, 1.0e-3f),
+        check (near (DspCore::tailSecondsFor (spread), 2.746f, 1.0e-3f),
                "Energy mode's tail carries its own 500 ms window at ER SPREAD 200");
 
         // And the figure covers what actually plays, in both modes, at the
@@ -3187,6 +3223,12 @@ int main (int argc, char** argv)
                     p.decaySeconds = decay;
                     p.dampLo = side == 0 ? r : 1.0f;
                     p.dampHi = side == 1 ? r : 1.0f;
+                    // ATTACK off: this is about the absorbent filters, and a
+                    // bloom inside the fitted range reads as a longer decay
+                    // in a band this short. With Room's 36 ms the 50 Hz band
+                    // at LOW x 0.25 fitted 0.631 s where the filters give
+                    // 0.557 (2026-10-07), a ratio of 0.312 against 0.280.
+                    p.attack = 0.0f;
                 }, 48000.0, 512, decay * std::max (1.0f, r) * 1.2f + 0.8f);
 
                 const auto tMid  = t60Of (bandEnergyOf (ir, midBand), ir.rate, -5.0, -25.0);
@@ -3255,7 +3297,9 @@ int main (int argc, char** argv)
     {
         const auto onset = [rate] (float preMs)
         {
-            const auto ir = renderTail ([preMs] (DspCore::Params& p) { p.preDelayMs = preMs; }, rate, 512, 0.5f);
+            // Modulation off: it moves each line's first arrival by up to its
+            // depth, and this measures the pre-delay to the sample.
+            const auto ir = renderTail ([preMs] (DspCore::Params& p) { p.preDelayMs = preMs; p.modDepthMs = 0.0f; }, rate, 512, 0.5f);
             float peak = 0.0f;
             for (int i = 0; i < ir.size(); ++i)
                 peak = std::max (peak, std::abs (ir.l[(size_t) i]) + std::abs (ir.r[(size_t) i]));
@@ -3686,6 +3730,10 @@ int main (int argc, char** argv)
             c.dampLo = c.dampHi = 2.0f;
             c.loKneeHz = constantsFor (room).dampLoFreqHz;
             c.hiKneeHz = constantsFor (room).dampHiFreqHz;
+            // Modulation off: these figures pin what a length move takes from
+            // the tail. The interpolated reads modulation needs shave a little
+            // off the top of every pass as well, which is measured on its own.
+            c.modDepthMs = 0.0f;
             Late late;
             late.setConfig (c);
             late.prepare (rate, block);
@@ -4429,8 +4477,8 @@ int main (int argc, char** argv)
     // more than 6 dB over its smoothed neighbours, and the envelope's
     // autocorrelation with no peak above 0.2 at lags 2-200 ms. Damping at
     // unity so a type's intended tilt does not read as colour, and the decay
-    // divided out so the segment is stationary. Unmodulated until M3b, which
-    // is when this is hardest to pass.
+    // divided out so the segment is stationary. Modulated at each type's own
+    // default since M3b, and every type is asserted.
     for (int t = 0; t < numTypes; ++t)
     {
         const auto& c = constantsFor (t);
@@ -4439,6 +4487,9 @@ int main (int argc, char** argv)
             p.type = (Type) t;
             p.sizeM = c.sizeM;
             p.feed  = c.feed * 0.01f;
+            // The type's own bloom: ATTACK's taps are in the late tail's
+            // envelope and spectrum, and each type ships its own span.
+            p.attack = c.attack * 0.01f;
             p.decaySeconds = 1.8f;
             p.dampLo = p.dampHi = 1.0f;
         }, 48000.0, 512, 2.6f);
@@ -4570,19 +4621,14 @@ int main (int argc, char** argv)
         check (frames >= 4, (name + ": enough late tail to measure").c_str());
         check (flatness >= 0.3, (name + ": spectral flatness of the late tail >= 0.3").c_str());
         check (worstBand <= 6.0, (name + ": no 1/3-octave band more than 6 dB over its neighbours").c_str());
-        // **Plate is the known exception, printed and not asserted**, for the
-        // reason its modal density is: the sparsest network of the six,
-        // unmodulated until M3b, failing by a hair (0.202 at a 2 ms lag on
-        // 2026-10-02, a true local maximum -- a weak 500 Hz envelope beat).
-        // M3b's modulation is the spec's cure and M4's line count the other;
-        // when either lands, this assertion takes Plate back.
-        if (t == plate)
-        {
-            if (worstLag > 0.2)
-                std::cout << "  ringing, Plate envelope (known red until M3b/M4): " << worstLag << "\n";
-        }
-        else
-            check (worstLag <= 0.2, (name + ": no envelope autocorrelation peak above 0.2 at 2-200 ms").c_str());
+        // **Plate is asserted with the rest since 2026-10-07.** It was the
+        // known exception, printed and not asserted, while it failed by a
+        // hair unmodulated (0.202 at a 2 ms lag on 2026-10-02, a weak 500 Hz
+        // envelope beat). M3b's modulation was the spec's cure and it took:
+        // 0.177 on 2026-10-05, 0.189 with the modulation bound at 2.94
+        // cents. The modulation commit said the test asserted it again and
+        // the test did not; QA's review of PR #55 caught that.
+        check (worstLag <= 0.2, (name + ": no envelope autocorrelation peak above 0.2 at 2-200 ms").c_str());
     }
 
     //== Block size: bit-identical with the tail running ========================
@@ -4703,6 +4749,1195 @@ int main (int argc, char** argv)
             std::cout << "  tail on, " << m.name << ": worst 1 ms energy jump " << jump << " dB (step ratio "
                       << s.ratio << ", settles at " << s.settled << ")\n";
             check (jump <= 3.0, (std::string (m.name) + ": no 1 ms energy jump above 3 dB in the tail").c_str());
+        }
+    }
+
+    //==========================================================================
+    //== M3b: modulation, the input stage and the onset.
+    //==========================================================================
+
+    //== Modulation never detunes a line by more than 3 cents ===================
+    //
+    // 10 section 4 and 11 section 6: each line's delay wanders on a random
+    // path, and a delay changing at dT/dt detunes what passes through it by
+    // 1200 log2 (1 + dT/dt) cents. Read off the modulators themselves, every
+    // sample, at the corners of MOD DEPTH and MOD RATE and at four rates: the
+    // steepest step is at most the 3-cent slope, the deviation stays inside
+    // the depth asked for, the lines do move, and no two move together.
+    {
+        float worstCents = 0.0f;
+        bool inside = true, moves = true, apart = true;
+
+        for (const auto rate : { 44100.0, 48000.0, 96000.0, 192000.0 })
+            for (const auto& corner : { std::array<float, 2> { 0.8f, 1.2f }, std::array<float, 2> { 0.8f, 0.1f },
+                                        std::array<float, 2> { 0.1f, 1.2f }, std::array<float, 2> { 0.28f, 0.5f } })
+            {
+                LateConfig c;
+                c.modDepthMs = corner[0];
+                c.modRateHz  = corner[1];
+                DspCore::Late late;
+                late.setConfig (c);
+                late.prepare (rate, 64);
+
+                const auto depthSamples = corner[0] * 0.001f * (float) rate;
+                float in[64] {}, l[64], r[64];
+                float last[DspCore::kNumLines] {}, peak[DspCore::kNumLines] {};
+                double dot01 = 0.0, e0 = 0.0, e1 = 0.0;
+                float steepest = 0.0f;
+
+                // One sample a call, so every sample of every path is seen.
+                for (int n = 0; n < (int) (12.0 * rate); ++n)
+                {
+                    late.process (in, l, r, 1);
+                    for (int i = 0; i < DspCore::kNumLines; ++i)
+                    {
+                        const auto m = late.modulationSamples (i);
+                        steepest = std::max (steepest, std::abs (m - last[i]));
+                        peak[i]  = std::max (peak[i], std::abs (m));
+                        last[i]  = m;
+                    }
+                    dot01 += (double) last[0] * last[1];
+                    e0 += (double) last[0] * last[0];
+                    e1 += (double) last[1] * last[1];
+                }
+
+                worstCents = std::max (worstCents, 1200.0f * std::log2 (1.0f + steepest));
+                for (int i = 0; i < DspCore::kNumLines; ++i)
+                {
+                    inside = inside && peak[i] <= depthSamples * 1.0001f;
+                    moves  = moves && peak[i] > 0.0f;
+                }
+                apart = apart && std::abs (dot01) < 0.9 * std::sqrt (e0 * e1);
+            }
+
+        // **And with the two knobs moving**, which is where the bound is
+        // earned and where the rows above cannot look: they hold the corners
+        // still, so the guard that stretches a segment after a move never
+        // runs, and with that guard deleted they still passed while one MOD
+        // RATE move reached 3.61 cents (QA's mutant, 2026-10-07). Each row
+        // settles for 6 s, moves one knob across its range, and runs 12 s.
+        //
+        // Read across the path's 16-sample stride and sample to sample. The
+        // bound is built at 2.94 cents and not 3 because a moved knob lands
+        // a little over what was built: with it at 2.997 this row read 3.009
+        // at 192 kHz, and at 2.94 it reads 2.943.
+        float movedCents = 0.0f, movedCentsBySample = 0.0f;
+        {
+            struct Move { float depthFrom, rateFrom, depthTo, rateTo; };
+
+            for (const auto rate : { 48000.0, 192000.0 })
+                for (const auto& mv : { Move { 0.8f, 0.1f, 0.8f, 1.2f }, Move { 0.8f, 1.2f, 0.8f, 0.1f },
+                                        Move { 0.1f, 1.2f, 0.8f, 1.2f }, Move { 0.8f, 0.1f, 0.1f, 1.2f } })
+                {
+                    LateConfig c;
+                    c.modDepthMs = mv.depthFrom;
+                    c.modRateHz  = mv.rateFrom;
+                    DspCore::Late late;
+                    late.setConfig (c);
+                    late.prepare (rate, 64);
+
+                    float in[1] {}, l[1], r[1];
+                    float past[DspCore::kNumLines][16] {};
+                    float steepest = 0.0f, steepestBySample = 0.0f;
+
+                    for (int n = 0; n < (int) (18.0 * rate); ++n)
+                    {
+                        if (n == (int) (6.0 * rate))
+                        {
+                            c.modDepthMs = mv.depthTo;
+                            c.modRateHz  = mv.rateTo;
+                            late.setConfig (c);
+                        }
+
+                        late.process (in, l, r, 1);
+                        for (int i = 0; i < DspCore::kNumLines; ++i)
+                        {
+                            const auto m = late.modulationSamples (i);
+                            steepest = std::max (steepest, std::abs (m - past[i][n % 16]) / 16.0f);
+                            steepestBySample = std::max (steepestBySample, std::abs (m - past[i][(n + 15) % 16]));
+                            past[i][n % 16] = m;
+                        }
+                    }
+
+                    movedCents = std::max (movedCents, 1200.0f * std::log2 (1.0f + steepest));
+                    movedCentsBySample = std::max (movedCentsBySample, 1200.0f * std::log2 (1.0f + steepestBySample));
+                }
+        }
+
+        std::cout << "  modulation: steepest detune over 16 corners " << worstCents << " cents; with MOD DEPTH or MOD RATE moved across its range, "
+                  << movedCents << " cents across a stride, " << movedCentsBySample << " sample to sample\n";
+        check (worstCents <= 3.0f, "no line is ever detuned by more than 3 cents, at any corner of MOD DEPTH and MOD RATE");
+        check (movedCents <= 3.0f, "nor while MOD DEPTH or MOD RATE is moved across its range");
+        check (movedCentsBySample <= 3.0f, "nor sample to sample, the delay's own float steps included");
+        check (inside, "no line strays further than MOD DEPTH");
+        check (moves, "every line is modulated");
+        check (apart, "two lines' paths are not the same path");
+    }
+
+    //== The top of the tail decays the same at 48 kHz as at 96 ================
+    //
+    // Modulation needs fractional reads, and an interpolated read loses a
+    // little off the top on every pass -- more the lower the sample rate.
+    // Four-point reads at 48 kHz put the 6.4 kHz band 8-14 % short of the
+    // same band at 96 kHz; 11 section 6 allows 5 % between rates. So the
+    // reads are six-point under 88.2 kHz and four-point above, and this
+    // holds the band, with modulation on at its default, to that 5 %.
+    {
+        check (DspCore::Late().readsSixPoint(), "an unprepared network defaults to the six-point read");
+
+        double t48 = 0.0;
+        for (const auto rate : { 48000.0, 44100.0, 96000.0, 192000.0 })
+        {
+            const auto ir = renderTail ([] (DspCore::Params& p)
+            {
+                p.decaySeconds = 2.0f;
+                p.dampLo = p.dampHi = 1.0f;
+            }, rate, 512, 3.4f);
+            const auto t = t60Of (bandEnergyOf (ir, 6400.0), ir.rate, -5.0, -25.0);
+            if (rate == 48000.0) t48 = t;
+            std::cout << "  T60 at 6.4 kHz, modulated, " << rate << " Hz: " << t << " s\n";
+            check (std::abs (t - t48) <= 0.05 * t48,
+                   ("the 6.4 kHz T60 with modulation on is within 5 % of 48 kHz's at " + std::to_string ((int) rate)).c_str());
+        }
+    }
+
+    //== What modulation costs the top of the tail =============================
+    //
+    // **Above the high knee's band the tail is shorter than DECAY says, and
+    // modulation is why.** A read that moves is an interpolated read, and
+    // six points still lose a little off the very top on every pass: more
+    // passes a second in a small room, and more to lose where HIGH x holds
+    // the top up. QA's review of 2026-10-07 measured it (Room, DECAY 2 s,
+    // 48 kHz: 12 kHz 2.002 -> 1.747 s at 12 m, 1.990 -> 1.568 s at 0.5 m;
+    // HIGH x 2.0 at 0.5 m, 12 kHz 3.985 -> 3.054 s) and found no test above
+    // 6.4 kHz. This file's band filter weighs the very top more than QA's
+    // and reads lower: 0.954 at 8 kHz and 0.815 at 12 kHz at 12 m, 0.690 at
+    // 12 kHz at 0.5 m, and with HIGH x 2.0 at 0.5 m 0.811 and 0.634 -- so
+    // HIGH x 2.0 is worth x 1.27 at 12 kHz in the smallest room.
+    // It is pinned here as the price of modulation and not
+    // compensated: each row's T60 with modulation at its default against the
+    // same row with it off, held to a floor a little under what it measures,
+    // so a read that loses more (four points at 48 kHz did) fails. ATTACK
+    // off, so the fit is the loop's. Heard and passed as it is by Frosty on
+    // 2026-10-06; compensating it is a voicing question for M4.
+    {
+        struct Row { float size, high; double band, floor; const char* name; };
+
+        for (const auto& row : { Row { 12.0f, 1.0f,  8000.0, 0.92, "12 m, 8 kHz" },
+                                 Row { 12.0f, 1.0f, 12000.0, 0.78, "12 m, 12 kHz" },
+                                 Row { 0.5f,  1.0f, 12000.0, 0.66, "0.5 m, 12 kHz" },
+                                 Row { 0.5f,  2.0f,  8000.0, 0.78, "0.5 m, HIGH x 2.0, 8 kHz" },
+                                 Row { 0.5f,  2.0f, 12000.0, 0.60, "0.5 m, HIGH x 2.0, 12 kHz" } })
+        {
+            double t[2] {};
+
+            for (int on = 0; on < 2; ++on)
+            {
+                const auto ir = renderTail ([&row, on] (DspCore::Params& p)
+                {
+                    p.sizeM = row.size;
+                    p.decaySeconds = 2.0f;
+                    p.dampLo = 1.0f;
+                    p.dampHi = row.high;
+                    p.attack = 0.0f;
+                    if (on == 0) p.modDepthMs = 0.0f;
+                }, 48000.0, 512, 2.0f * row.high * 1.2f + 0.8f);
+
+                t[on] = t60Of (bandEnergyOf (ir, row.band), ir.rate, -5.0, -25.0);
+            }
+
+            const auto ratio = t[0] > 0.0 ? t[1] / t[0] : 0.0;
+            std::cout << "  T60, " << row.name << ": " << t[0] << " s unmodulated, " << t[1] << " s at the default modulation, ratio " << ratio << "\n";
+            check (ratio >= row.floor, (std::string (row.name) + ": modulation shortens the top of the tail by no more than it was measured to").c_str());
+            check (ratio <= 1.02, (std::string (row.name) + ": and never lengthens it").c_str());
+        }
+    }
+
+    //== The deepest, fastest modulation does not feed the loop ================
+    //
+    // A read that moves is a read whose weights move, and the loop has to
+    // lose energy with that on (Frosty's rule). The longest tail, a 10 ms
+    // burst, MOD DEPTH and MOD RATE at their corners, at a six-point rate and
+    // a four-point one. **Second by second, on energy**: no second is louder
+    // than the one before, and the fall from the 2nd second to the 20th is
+    // at least the 1.5 dB a second that DECAY 20 s x 2.0 designs, less a
+    // tenth. Until 2026-10-07 this compared the peaks of 5 s windows, which
+    // fall 7.5 dB by design and so could not see an effect smaller than
+    // that: QA's review found 0.17 to 0.45 dB a second hidden under it.
+    // The slowest row measures 1.72; the floor is 1.65, so what this still
+    // cannot see is a gain under 0.07 dB a second.
+    {
+        int grew = 0, rows = 0;
+        double slowest = 1.0e9, fastest = 0.0;
+
+        for (const auto rate : { 48000.0, 96000.0 })
+            for (const auto& corner : { std::array<float, 2> { 0.8f, 1.2f }, std::array<float, 2> { 0.8f, 0.3f } })
+                for (const auto size : { 0.5f, 12.0f, 80.0f })
+                {
+                    DspCore core;
+                    DspCore::Params p;
+                    p.sizeM = size;
+                    p.decaySeconds = 20.0f;
+                    p.dampLo = p.dampHi = 2.0f;
+                    p.modDepthMs = corner[0];
+                    p.modRateHz  = corner[1];
+                    p.erLevelDb = -40.0f;
+                    p.verbLevelDb = 0.0f;
+                    p.mix = 1.0f;
+                    core.setParams (p);
+                    core.prepare (rate, 512, 2);
+
+                    std::vector<float> l (512), r (512);
+                    float* chans[] { l.data(), r.data() };
+                    const auto window = (long long) rate, total = (long long) (20.0 * rate), burst = (long long) (0.01 * rate);
+                    double energy = 0.0, lastDb = 0.0, secondDb = 0.0;
+                    int seconds = 0;
+                    bool rose = false;
+
+                    for (long long n = 0; n < total; n += 512)
+                    {
+                        for (int i = 0; i < 512; ++i)
+                            l[(size_t) i] = r[(size_t) i] = n + i < burst ? noiseAt ((int) (n + i)) * 0.6928f : 0.0f;
+                        core.process (chans, 2, 512);
+                        for (int i = 0; i < 512; ++i)
+                            energy += (double) l[(size_t) i] * l[(size_t) i] + (double) r[(size_t) i] * r[(size_t) i];
+
+                        if ((n + 512) / window != n / window)
+                        {
+                            // The first second holds the burst and the
+                            // network filling; the count starts at the second.
+                            const auto db = 10.0 * std::log10 (std::max (energy, 1.0e-300));
+                            if (seconds == 1) secondDb = db;
+                            rose = rose || (seconds >= 2 && db >= lastDb);
+                            lastDb = db;
+                            energy = 0.0;
+                            ++seconds;
+                        }
+                    }
+
+                    const auto slope = (secondDb - lastDb) / (double) (seconds - 2);
+                    slowest = std::min (slowest, slope);
+                    fastest = std::max (fastest, slope);
+
+                    ++rows;
+                    grew += rose ? 1 : 0;
+                }
+
+        std::cout << "  modulation at its corners over a 40 s tail: " << grew << " of " << rows << " rows had a second louder than the last; the tail falls "
+                  << slowest << " to " << fastest << " dB a second (1.5 by design)\n";
+        check (grew == 0, "the deepest and the fastest modulation never make a second of the tail louder than the last");
+        check (slowest >= 1.65, "and the tail falls at least 1.65 dB a second, where the slowest row measures 1.72");
+    }
+
+    //== The input stage: what the room is given ================================
+    //
+    // 10 section 2: a fixed 20 Hz high-pass, DARKEN (one pole), then the three
+    // Reverb EQ nodes, ahead of both generators and never on the dry path.
+    // The first half drives `InputStage` alone; the second drives `DspCore`,
+    // because a stage that is right and wired after the generators, or onto
+    // the dry signal, passes every one of the first half's rows.
+    {
+        const auto db3 = 10.0 * std::log10 (2.0);
+
+        /** One DFT bin of an impulse response, in dB. */
+        const auto binDb = [] (const std::vector<float>& h, double hz, double rate)
+        {
+            const auto w = 2.0 * 3.14159265358979323846 * hz / rate;
+            double re = 0.0, im = 0.0;
+
+            for (size_t i = 0; i < h.size(); ++i)
+            {
+                re += (double) h[i] * std::cos (w * (double) i);
+                im -= (double) h[i] * std::sin (w * (double) i);
+            }
+
+            return 10.0 * std::log10 (std::max (re * re + im * im, 1.0e-300));
+        };
+
+        // B: a busy EQ with shelves. C: both outer nodes as cuts.
+        EqSettings flat, busy, cuts;
+        busy.loFreqHz = 140.0f;   busy.loDb = -6.0f;   busy.loQ = 1.35f;
+        busy.midFreqHz = 2600.0f; busy.midDb = 7.5f;   busy.midQ = 3.25f;
+        busy.hiFreqHz = 6000.0f;  busy.hiDb = 4.5f;    busy.hiQ = 0.45f;
+        cuts.filter = EqFilter::bandpass;
+        cuts.loFreqHz = 80.0f;    cuts.loDb = -9.0f;   cuts.loQ = 1.2f;
+        cuts.midFreqHz = 500.0f;  cuts.midDb = -12.0f; cuts.midQ = 0.7f;
+        cuts.hiFreqHz = 8000.0f;  cuts.hiDb = 6.0f;    cuts.hiQ = 0.71f;
+
+        struct Setting { const EqSettings* eq; float darkenHz; const char* name; };
+        const Setting settings[] { { &flat, 20000.0f, "flat" }, { &busy, 9000.0f, "busy" }, { &cuts, 2000.0f, "cuts" } };
+
+        //-- The two one-pole laws, as absolutes ---------------------------------
+        // DARKEN's corner is solved, so it is -3.01 dB at the knob's frequency
+        // to rounding. The high-pass is x minus a low-pass with that corner,
+        // which puts its own corner within 0.02 dB of 20 Hz at every rate.
+        {
+            auto worstHp = 0.0, worstLp = 0.0;
+
+            for (const auto rate : { 44100.0, 48000.0, 96000.0, 192000.0 })
+            {
+                worstHp = std::max (worstHp, std::abs (InputStage::highPassDbAt (InputStage::highPassCoefFor (rate), 20.0, rate) + db3));
+
+                for (const auto corner : { 1000.0, 2000.0, 9000.0, 20000.0 })
+                    worstLp = std::max (worstLp, std::abs (InputStage::lowPassDbAt (InputStage::darkenCoefFor (corner, rate), corner, rate) + db3));
+            }
+
+            std::cout << "  input stage: high-pass at 20 Hz within " << worstHp << " dB of -3.01, DARKEN at its corner within "
+                      << worstLp << " dB, 44.1-192 kHz\n";
+            check (worstHp < 0.02, "the high-pass is 3 dB down at 20 Hz at every rate");
+            check (worstLp < 1.0e-6, "DARKEN is 3 dB down at the knob's frequency at every rate, 20 kHz included");
+        }
+
+        //-- The running stage is its design -------------------------------------
+        // Off the impulse response, against the high-pass's and DARKEN's laws
+        // plus `EqNodes::design` -- the same three biquads the panel draws.
+        {
+            auto worst = 0.0;
+
+            for (const auto rate : { 48000.0, 96000.0 })
+                for (const auto& s : settings)
+                {
+                    InputStage stage;
+                    stage.prepare (rate);
+                    stage.set (*s.eq, s.darkenHz, bmo::dsp::DesignGrid::make (rate));
+
+                    std::vector<float> h ((size_t) (2.0 * rate), 0.0f);
+                    h[0] = 1.0f;
+                    stage.process (h.data(), (int) h.size());
+
+                    const auto design = EqNodes::design (*s.eq, rate);
+
+                    for (const auto hz : { 10.0, 20.0, 50.0, 140.0, 500.0, 1000.0, 2600.0, 6000.0, 9000.0, 15000.0 })
+                    {
+                        const auto expected = InputStage::highPassDbAt (InputStage::highPassCoefFor (rate), hz, rate)
+                                            + InputStage::lowPassDbAt (InputStage::darkenCoefFor ((double) s.darkenHz, rate), hz, rate)
+                                            + design.magnitudeDbAt (hz, rate);
+
+                        worst = std::max (worst, std::abs (binDb (h, hz, rate) - expected));
+                    }
+                }
+
+            std::cout << "  input stage: running response within " << worst << " dB of its design, 10 Hz-15 kHz, three settings, 48 and 96 kHz\n";
+            check (worst < 0.02, "the running input stage is the high-pass, DARKEN and the three designed nodes in series");
+        }
+
+        //-- A flat EQ is a wire --------------------------------------------------
+        // Where a flat node sits and how sharp it is cannot matter, to the
+        // bit; and what is left is the two one-poles, written out here.
+        // What the first row cannot see: with the stage's (1, 0, 0) mix left
+        // to the closed form instead of written out, it still passed on ICE
+        // QUEEN (2026-10-06) -- the closed form is off by parts in 1e16 and
+        // the output is a float. The stage writes the mix out so that this
+        // holds by construction rather than by rounding luck.
+        {
+            EqSettings elsewhere;
+            elsewhere.loFreqHz = 1600.0f;  elsewhere.loQ = 2.0f;
+            elsewhere.midFreqHz = 20.0f;   elsewhere.midQ = 40.0f;
+            elsewhere.hiFreqHz = 20000.0f; elsewhere.hiQ = 0.1f;
+
+            const auto rate = 48000.0;
+            const auto grid = bmo::dsp::DesignGrid::make (rate);
+            InputStage a, b;
+            a.prepare (rate); a.set (flat, 20000.0f, grid);
+            b.prepare (rate); b.set (elsewhere, 20000.0f, grid);
+
+            std::vector<float> x (9600), xa, xb;
+            for (int i = 0; i < (int) x.size(); ++i)
+                x[(size_t) i] = noiseAt (i);
+            xa = xb = x;
+            a.process (xa.data(), (int) xa.size());
+            b.process (xb.data(), (int) xb.size());
+
+            const auto hpC = InputStage::highPassCoefFor (rate), lpC = InputStage::darkenCoefFor (20000.0, rate);
+            double hp = 0.0, lp = 0.0, worst = 0.0;
+            bool same = true;
+
+            for (size_t i = 0; i < x.size(); ++i)
+            {
+                auto v = (double) x[i];
+                hp += hpC * (v - hp);  v -= hp;
+                lp += lpC * (v - lp);
+                worst = std::max (worst, std::abs (lp - (double) xa[i]));
+                same = same && xa[i] == xb[i];
+            }
+
+            check (same, "a flat EQ plays the same samples wherever its nodes sit");
+            check (worst < 1.0e-6, "with the EQ flat the stage is the high-pass and DARKEN and nothing else");
+
+            // **The identity itself, where it can be seen.** The two rows
+            // above pass with the stage's (1, 0, 0) shortcut deleted (QA's
+            // mutant, 2026-10-07, and this file's own note): the output is a
+            // float and the closed form is off by parts in 1e16. So the mix
+            // is read directly: every flat node, wherever it sits and at
+            // every rate, is (1, 0, 0) to the bit, and a node with gain is
+            // not.
+            bool exact = true, live = true;
+
+            for (const auto r : { 44100.0, 48000.0, 96000.0, 192000.0 })
+                for (const auto* s : { &flat, &elsewhere })
+                {
+                    InputStage stage;
+                    stage.prepare (r);
+                    stage.set (*s, 20000.0f, bmo::dsp::DesignGrid::make (r));
+
+                    for (int i = 0; i < kNumEqNodes; ++i)
+                    {
+                        const auto m = stage.nodeMixNow (i);
+                        exact = exact && m[0] == 1.0 && m[1] == 0.0 && m[2] == 0.0;
+                    }
+
+                    stage.set (busy, 20000.0f, bmo::dsp::DesignGrid::make (r));
+                    for (int i = 0; i < kNumEqNodes; ++i)
+                    {
+                        const auto m = stage.nodeMixNow (i);
+                        live = live && ! (m[0] == 1.0 && m[1] == 0.0 && m[2] == 0.0);
+                    }
+                }
+
+            check (exact, "a flat node's mix is (1, 0, 0) to the bit, at every rate and wherever it sits");
+            check (live, "and a node with gain is not");
+        }
+
+        //-- A move does not click, and lands -----------------------------------
+        // The house rule: under 1.5x the steady signal's largest step. 97 Hz at
+        // -18 dBFS, node 1 from flat to +12 dB at 200 Hz with DARKEN from
+        // 20 kHz to 2 kHz, then both back. 97 Hz and an odd sample count, so
+        // the move does not start on a zero crossing.
+        {
+            const auto rate = 48000.0;
+            const auto grid = bmo::dsp::DesignGrid::make (rate);
+            const auto glide = (int) std::lround (InputStage::kGlideMs * 0.001 * rate);
+
+            EqSettings boosted;
+            boosted.loFreqHz = 200.0f; boosted.loDb = 12.0f;
+
+            InputStage stage, fresh;
+            stage.prepare (rate);
+            stage.set (flat, 20000.0f, grid);
+            fresh.prepare (rate);
+            fresh.set (boosted, 2000.0f, grid);
+
+            int at = 0;
+            float last = 0.0f;
+            const auto run = [&] (InputStage& s, int n, std::vector<float>* keep = nullptr)
+            {
+                float worstStep = 0.0f;
+
+                for (int i = 0; i < n; ++i, ++at)
+                {
+                    auto v = 0.1259f * (float) std::sin (2.0 * 3.14159265358979323846 * 97.0 * (double) at / rate);
+                    s.process (&v, 1);
+                    worstStep = std::max (worstStep, std::abs (v - last));
+                    last = v;
+                    if (keep != nullptr) keep->push_back (v);
+                }
+
+                return worstStep;
+            };
+
+            run (stage, 7001);
+            const auto before = run (stage, 2000);
+
+            stage.set (boosted, 2000.0f, grid);
+            check (stage.isMoving(), "a changed request starts a move");
+            const auto movingUp = run (stage, glide);
+            check (! stage.isMoving(), "a move is over in 20 ms");
+            check (stage.darkenCoefNow() == InputStage::darkenCoefFor (2000.0, rate), "DARKEN's coefficient lands exactly");
+
+            run (stage, 48000 - glide);
+            std::vector<float> moved, landed;
+            const auto after = run (stage, 2000, &moved);
+
+            // The fresh instance hears the same signal from sample zero.
+            {
+                const auto resume = at;
+                const auto lastWas = last;
+                at = 0;
+                run (fresh, resume - 2000);
+                run (fresh, 2000, &landed);
+                at = resume;
+                last = lastWas;
+            }
+
+            auto apart = 0.0f;
+            for (size_t i = 0; i < moved.size(); ++i)
+                apart = std::max (apart, std::abs (moved[i] - landed[i]));
+
+            stage.set (flat, 20000.0f, grid);
+            const auto movingDown = run (stage, glide);
+
+            std::cout << "  input stage: largest step " << before << " steady, " << movingUp << " during +12 dB / DARKEN 2 kHz, "
+                      << after << " after, " << movingDown << " on the way back\n";
+            check (movingUp   <= 1.5f * std::max (before, after), "an EQ and DARKEN move steps no more than 1.5x the steady signal");
+            check (movingDown <= 1.5f * std::max (before, after), "and no more on the way back");
+            check (apart < 1.0e-6f, "a moved stage settles on what a fresh one at those settings plays");
+        }
+
+        //-- Block size: bit-identical, moves included ---------------------------
+        // The glide counts samples. Two requests land at samples 5000 and
+        // 5400, the second inside the first's move.
+        {
+            const auto rate = 48000.0;
+            const auto grid = bmo::dsp::DesignGrid::make (rate);
+            std::vector<float> reference;
+            bool identical = true;
+
+            for (const auto block : { 1, 16, 127, 512, 2048 })
+            {
+                InputStage stage;
+                stage.prepare (rate);
+                stage.set (flat, 20000.0f, grid);
+
+                std::vector<float> x (20000);
+                for (int i = 0; i < (int) x.size(); ++i)
+                    x[(size_t) i] = noiseAt (i);
+
+                const int edges[] { 0, 5000, 5400, (int) x.size() };
+
+                for (int e = 0; e < 3; ++e)
+                {
+                    if (e == 1) stage.set (busy, 9000.0f, grid);
+                    if (e == 2) stage.set (cuts, 2000.0f, grid);
+
+                    for (int i = edges[e]; i < edges[e + 1]; i += block)
+                        stage.process (x.data() + i, std::min (block, edges[e + 1] - i));
+                }
+
+                if (reference.empty())
+                    reference = x;
+                else
+                    identical = identical && x == reference;
+            }
+
+            check (identical, "the input stage is bit-identical at blocks of 1, 16, 127, 512 and 2048, through two moves");
+        }
+
+        //-- Silence in reaches exactly zero out, and never through a subnormal --
+        // The slowest filter the schema allows: a 20 Hz bell at Q 40, +12 dB,
+        // over a 16 Hz cut at Q 2. Its state takes most of a minute to fall
+        // through 1e-30, where it is flushed.
+        {
+            const auto rate = 48000.0;
+            EqSettings slow;
+            slow.filter = EqFilter::loCut;
+            slow.loFreqHz = 16.0f;  slow.loQ = 2.0f;
+            slow.midFreqHz = 20.0f; slow.midDb = 12.0f; slow.midQ = 40.0f;
+
+            InputStage stage;
+            stage.prepare (rate);
+            stage.set (slow, 20000.0f, bmo::dsp::DesignGrid::make (rate));
+
+            std::vector<float> x (4800);
+            bool subnormal = false;
+            long long lastNonZero = 0, t60 = 0;
+            const auto total = (long long) (90.0 * rate);
+
+            for (long long n = 0; n < total; n += (long long) x.size())
+            {
+                for (int i = 0; i < (int) x.size(); ++i)
+                    x[(size_t) i] = n == 0 && i == 0 ? 1.0f : 0.0f;
+
+                stage.process (x.data(), (int) x.size());
+
+                for (int i = 0; i < (int) x.size(); ++i)
+                {
+                    subnormal = subnormal || std::fpclassify (x[(size_t) i]) == FP_SUBNORMAL;
+                    if (x[(size_t) i] != 0.0f) lastNonZero = n + i;
+                    if (std::abs (x[(size_t) i]) > 1.0e-3f) t60 = n + i;
+                }
+            }
+
+            std::cout << "  input stage: slowest EQ (20 Hz bell, Q 40, +12 dB) rings above -60 dB re the impulse for "
+                      << (double) t60 / rate << " s and is exactly zero after " << (double) lastNonZero / rate << " s\n";
+            check (lastNonZero < total - (long long) rate, "the slowest EQ setting reaches exactly zero");
+            check (! subnormal, "and never hands the generators a subnormal on the way");
+        }
+
+        //-- Through the engine: ahead of both generators, never on the dry ------
+        {
+            const auto rate = 48000.0;
+
+            const auto with = [&] (DspCore::Params p, const Setting& s)
+            {
+                p.eqFilter = s.eq->filter;
+                p.eqLoFreqHz = s.eq->loFreqHz;   p.eqLoDb = s.eq->loDb;   p.eqLoQ = s.eq->loQ;
+                p.eqMidFreqHz = s.eq->midFreqHz; p.eqMidDb = s.eq->midDb; p.eqMidQ = s.eq->midQ;
+                p.eqHiFreqHz = s.eq->hiFreqHz;   p.eqHiDb = s.eq->hiDb;   p.eqHiQ = s.eq->hiQ;
+                p.inHiCutHz = s.darkenHz;
+                return p;
+            };
+
+            /** The left channel's impulse response, with the stage in or out. */
+            const auto impulse = [&] (const DspCore::Params& p, bool stageOut)
+            {
+                DspCore core;
+                core.prepare (rate, 512, 2);
+                core.setParams (p);
+                core.inputStage().setBypassedForMeasurement (stageOut);
+
+                std::vector<float> l ((size_t) (2.0 * rate), 0.0f), r (l.size(), 0.0f);
+                l[0] = r[0] = 1.0f;
+
+                for (size_t at = 0; at < l.size(); at += 512)
+                {
+                    float* chans[] { l.data() + at, r.data() + at };
+                    core.process (chans, 2, (int) std::min<size_t> (512, l.size() - at));
+                }
+
+                return l;
+            };
+
+            // The modulation is off so the tail is one fixed linear system and
+            // a filter ahead of it multiplies its response; DECAY 0.5 s so two
+            // seconds holds all of it.
+            DspCore::Params erOnly, tailOnly;
+            erOnly.verbLevelDb = -40.0f;  erOnly.erLevelDb = 0.0f;     erOnly.mix = 1.0f;
+            tailOnly.erLevelDb = -40.0f;  tailOnly.verbLevelDb = 0.0f; tailOnly.mix = 1.0f;
+            tailOnly.feed = 0.0f;         tailOnly.decaySeconds = 0.5f; tailOnly.modDepthMs = 0.0f;
+
+            auto worstEr = 0.0, worstTail = 0.0;
+
+            for (const auto& s : { settings[1], settings[2] })
+            {
+                const auto design = EqNodes::design (*s.eq, rate);
+                const auto erIn   = impulse (with (erOnly, s), false),   erOut   = impulse (with (erOnly, s), true);
+                const auto tailIn = impulse (with (tailOnly, s), false), tailOut = impulse (with (tailOnly, s), true);
+
+                for (const auto hz : { 140.0, 500.0, 2600.0, 6000.0 })
+                {
+                    const auto expected = InputStage::highPassDbAt (InputStage::highPassCoefFor (rate), hz, rate)
+                                        + InputStage::lowPassDbAt (InputStage::darkenCoefFor ((double) s.darkenHz, rate), hz, rate)
+                                        + design.magnitudeDbAt (hz, rate);
+
+                    worstEr   = std::max (worstEr,   std::abs (binDb (erIn, hz, rate)   - binDb (erOut, hz, rate)   - expected));
+                    worstTail = std::max (worstTail, std::abs (binDb (tailIn, hz, rate) - binDb (tailOut, hz, rate) - expected));
+                }
+            }
+
+            std::cout << "  input stage through the engine: early reflections within " << worstEr << " dB of the stage's design, tail within "
+                      << worstTail << " dB\n";
+            // 0.001 dB, against a measured 5e-7 and 7e-7: these were 0.05
+            // until QA's review pointed at the gap between the two.
+            check (worstEr < 1.0e-3, "the early reflections are fed through the high-pass, DARKEN and the Reverb EQ");
+            check (worstTail < 1.0e-3, "and so is the tail's direct feed");
+
+            // The EQ page's spectrum is the stage's output (Frosty,
+            // 2026-10-06: "it should show the output, with EQ applied"): a
+            // 5 kHz sine with DARKEN at 2 kHz reads as the stage leaves it,
+            // 8.5 dB down, and not as it went in. The tap holds the newest
+            // samples, so the last 4096 written are the last 4096 fed.
+            {
+                auto p = DspCore::Params {};
+                p.inHiCutHz = 2000.0f;
+
+                DspCore core;
+                core.prepare (rate, 512, 2);
+                core.setParams (p);
+                core.eqAnalyser().setEnabled (true);
+
+                std::vector<float> l (512), r (512);
+                // 4096 samples of a sine at 0.25: 426.7 cycles, so its mean
+                // square is the sine's to three parts in ten thousand.
+                const auto inSq = 4096.0 * 0.5 * 0.25 * 0.25;
+
+                for (int at = 0; at < 48000; at += 512)
+                {
+                    for (int i = 0; i < 512; ++i)
+                        l[(size_t) i] = r[(size_t) i] = 0.25f * (float) std::sin (2.0 * 3.14159265358979323846 * 5000.0 * (double) (at + i) / rate);
+
+                    float* chans[] { l.data(), r.data() };
+                    core.process (chans, 2, 512);
+                }
+
+                std::vector<float> seen (4096);
+                const auto got = core.eqAnalyser().read (seen.data(), 4096);
+                double outSq = 0.0;
+                for (const auto v : seen) outSq += (double) v * v;
+
+                const auto measured = 10.0 * std::log10 (std::max (outSq, 1.0e-300) / inSq);
+                const auto expected = InputStage::lowPassDbAt (InputStage::darkenCoefFor (2000.0, rate), 5000.0, rate)
+                                    + InputStage::highPassDbAt (InputStage::highPassCoefFor (rate), 5000.0, rate);
+
+                std::cout << "  the EQ page's spectrum tap: 5 kHz with DARKEN at 2 kHz reads " << measured << " dB re the input (the stage's design: " << expected << ")\n";
+                check (got == 4096, "the analyser tap fills while enabled");
+                check (std::abs (measured - expected) < 0.05, "the analyser tap is the input stage's output, EQ and DARKEN applied");
+            }
+
+            // The dry path: MIX 50 %, both faders off, the busiest setting.
+            {
+                auto p = with (DspCore::Params {}, settings[2]);
+                p.erLevelDb = p.verbLevelDb = -40.0f;
+                p.mix = 0.5f;
+
+                DspCore core;
+                core.prepare (rate, 512, 2);
+                core.setParams (p);
+
+                std::vector<float> l (48000), r (48000);
+                bool untouched = true;
+
+                for (int at = 0; at < 48000; at += 512)
+                {
+                    const auto n = std::min (512, 48000 - at);
+                    for (int i = 0; i < n; ++i)
+                    {
+                        l[(size_t) (at + i)] = noiseAt (at + i);
+                        r[(size_t) (at + i)] = noiseAt (at + i + 7919);
+                    }
+
+                    float* chans[] { l.data() + at, r.data() + at };
+                    core.process (chans, 2, n);
+
+                    for (int i = 0; i < n; ++i)
+                        untouched = untouched && l[(size_t) (at + i)] == noiseAt (at + i)
+                                              && r[(size_t) (at + i)] == noiseAt (at + i + 7919);
+                }
+
+                check (untouched, "with the faders off at MIX 50 % the output is the input, sample for sample, whatever the EQ and DARKEN");
+            }
+        }
+    }
+
+    //== ATTACK: the tail blooms, and Plate's does not ==========================
+    //
+    // 10 section 2 and 11 section 6's Onset row. ATTACK has no host lane, so
+    // it is driven through `DspCore::Params`. Tail only, fed by the direct
+    // signal alone (SOURCE 0) with the modulation off, so that the onset is
+    // the network's and the same every run. Room at 12 m, DECAY 1.8 s.
+    {
+        struct Onset { float attack; double totalDb, halfMs; int first; std::vector<double> windowDb; };
+        std::vector<Onset> rows;
+
+        for (const auto attack : { 0.0f, 0.1f, 0.3f, 0.65f, 1.0f })
+        {
+            const auto ir = renderTail ([attack] (DspCore::Params& p)
+            {
+                p.attack = attack;
+                p.feed = 0.0f;
+                p.modDepthMs = 0.0f;
+            }, 48000.0, 512, 3.0f);
+
+            Onset o;
+            o.attack  = attack;
+            o.totalDb = 10.0 * std::log10 ((double) ir.energy (0, ir.size()));
+
+            for (int w = 0; w < 12; ++w)
+                o.windowDb.push_back (10.0 * std::log10 (std::max (1.0e-30, (double) ir.energy (ir.msToSamples (15.0f * (float) w),
+                                                                                                 ir.msToSamples (15.0f * (float) (w + 1))))));
+
+            const auto all = (double) ir.energy (0, ir.msToSamples (400.0f));
+            double sum = 0.0;
+            int at = 0;
+            for (; at < ir.msToSamples (400.0f) && sum < 0.5 * all; ++at)
+                sum += (double) ir.l[(size_t) at] * ir.l[(size_t) at] + (double) ir.r[(size_t) at] * ir.r[(size_t) at];
+            o.halfMs = (double) at / 48.0;
+
+            o.first = 0;
+            while (o.first < ir.size() && std::abs (ir.l[(size_t) o.first]) + std::abs (ir.r[(size_t) o.first]) < 1.0e-5f)
+                ++o.first;
+
+            std::cout << "  ATTACK " << attack * 100.0f << " %: tail energy " << o.totalDb << " dB, half of its first 400 ms in by "
+                      << o.halfMs << " ms, first sample " << o.first << "\n";
+            rows.push_back (o);
+        }
+
+        // The level does not depend on ATTACK: the feeds are normalised by
+        // energy. What this cannot see is a level change that DECAY hides,
+        // which is why it is the whole tail's energy and not a peak.
+        bool level = true, later = true, sameStart = true;
+        for (size_t i = 1; i < rows.size(); ++i)
+        {
+            level     = level && std::abs (rows[i].totalDb - rows[0].totalDb) <= 0.5;
+            later     = later && rows[i].halfMs > rows[i - 1].halfMs + 5.0;
+            sameStart = sameStart && rows[i].first == rows[0].first;
+        }
+
+        check (level, "the tail's energy is within 0.5 dB at every ATTACK");
+        check (later, "each step of ATTACK brings the bulk of the tail in later");
+
+        const auto held = rows.back().halfMs - rows.front().halfMs;
+        check (held >= 60.0 && held <= 120.0, "ATTACK 100 % holds the bulk of the tail back by 60 to 120 ms");
+
+        // PRE-DELAY has not moved: the tail's first sample is where it was,
+        // quieter. The first line fed is the shortest.
+        check (sameStart, "the tail starts on the same sample at every ATTACK");
+
+        // The bloom rises: across the span, no 15 ms window is more than 2 dB
+        // under the one before. The first window is before the shortest
+        // line's first return and holds nothing, so the count starts at the
+        // second.
+        bool rises = true;
+        for (const auto& o : rows)
+        {
+            const auto last = 1 + (int) std::floor (o.attack * 120.0f / 15.0f);
+            for (int w = 2; w <= std::min (last, 11); ++w)
+                rises = rises && o.windowDb[(size_t) w] >= o.windowDb[(size_t) (w - 1)] - 2.0;
+        }
+        check (rises, "the bloom rises across ATTACK's span, 15 ms at a time");
+
+        // And it is a bloom: at ATTACK 100 % the second window is at least
+        // 15 dB under the same window with ATTACK off.
+        check (rows.back().windowDb[2] <= rows.front().windowDb[2] - 15.0, "at ATTACK 100 % the tail starts at least 15 dB down");
+
+        // Plate's constant is 0, and at 0 nothing is delayed.
+        {
+            DspCore core;
+            DspCore::Params p;
+            p.attack = 0.0f;
+            core.prepare (48000.0, 512, 2);
+            core.setParams (p);
+            std::vector<float> l (512, 0.0f), r (512, 0.0f);
+            float* chans[] { l.data(), r.data() };
+            core.process (chans, 2, 512);
+            check (! core.lateNetwork().bloomIsOn(), "at ATTACK 0 every line is fed at once");
+            check (plateDefaults::kAttack == 0.0f, "Plate's ATTACK is 0: its tail is immediate");
+
+            p.attack = 0.3f;
+            core.prepare (48000.0, 512, 2);
+            core.setParams (p);
+            core.process (chans, 2, 512);
+            check (core.lateNetwork().bloomIsOn(), "at Room's ATTACK the lines are fed in turn");
+
+            int longest = 0;
+            bool distinct = true;
+            for (int i = 0; i < DspCore::kNumLines; ++i)
+            {
+                longest = std::max (longest, core.lateNetwork().bloomDelaySamples (i));
+                for (int j = 0; j < i; ++j)
+                    distinct = distinct && core.lateNetwork().bloomDelaySamples (i) != core.lateNetwork().bloomDelaySamples (j);
+            }
+            check (longest == (int) std::lround (0.3 * 0.120 * 48000.0), "the last line is fed ATTACK x 120 ms after the first");
+            check (distinct, "no two lines are fed on the same sample");
+        }
+
+        // A change of ATTACK is a crossfade and does not click. The house
+        // rule, on a held 440 Hz sine at -18 dBFS with the modulation off so
+        // the tail is a steady sine too: the largest sample step while the
+        // feed moves from Room's 30 % to 100 % is under 1.5x the larger of
+        // the settled steps either side. Noise was tried first and cannot
+        // see a click: its own 1 ms energy wanders by 4.7 dB. In a host this
+        // only happens with a TYPE change, which dips the tail as well.
+        {
+            DspCore core;
+            DspCore::Params p;
+            p.erLevelDb = -40.0f; p.verbLevelDb = 0.0f; p.mix = 1.0f;
+            p.feed = 0.0f; p.modDepthMs = 0.0f;
+            p.attack = 0.3f;
+            core.prepare (48000.0, 48, 2);
+            core.setParams (p);
+
+            std::vector<float> l (48), r (48);
+            float last = 0.0f, before = 0.0f, during = 0.0f, after = 0.0f;
+            const int moveAt = 8000, moveEnds = 8000 + 40, total = 16000;   // blocks of 1 ms; the move is 30 ms
+
+            for (int block = 0; block < total; ++block)
+            {
+                if (block == moveAt) { p.attack = 1.0f; core.setParams (p); }
+
+                for (int i = 0; i < 48; ++i)
+                    l[(size_t) i] = r[(size_t) i] = 0.1259f * (float) std::sin (2.0 * 3.14159265358979323846 * 440.0 * (double) (block * 48 + i) / 48000.0);
+
+                float* chans[] { l.data(), r.data() };
+                core.process (chans, 2, 48);
+
+                for (int i = 0; i < 48; ++i)
+                {
+                    const auto step = std::abs (l[(size_t) i] - last);
+                    last = l[(size_t) i];
+
+                    if (block >= moveAt - 500 && block < moveAt)  before = std::max (before, step);
+                    if (block >= moveAt && block < moveEnds)      during = std::max (during, step);
+                    if (block >= total - 500)                     after  = std::max (after, step);
+                }
+            }
+
+            std::cout << "  ATTACK 30 % -> 100 % under a held 440 Hz tail: largest step " << before << " settled before, "
+                      << during << " during the move, " << after << " settled after\n";
+            check (before > 1.0e-5f && after > 1.0e-5f, "the held tail is sounding either side of the ATTACK move");
+            check (during <= 1.5f * std::max (before, after), "moving ATTACK steps no more than 1.5x the settled tail");
+        }
+    }
+
+    //== Echo density and mixing time ===========================================
+    //
+    // 11 section 6. Normalised echo density (Abel and Huang): the fraction of
+    // a 20 ms window's samples that lie outside the window's own standard
+    // deviation, over the 0.3173 a Gaussian gives; the mixing time is where
+    // it first reaches 0.9, counted from the impulse to the window's middle.
+    // Each type at its own SIZE, SOURCE and ATTACK, tail only, modulation
+    // off so the figure repeats.
+    //
+    // **10 section 4's target is Polack's sqrt (V) ms, and no type meets
+    // it.** That is printed beside each figure and not asserted, as Plate's
+    // modal density is: 10 section 4 says mixing time is set by the mean
+    // delay, and the mean delay per type is M4's to voice. What is asserted
+    // is what M3 owes: SOURCE at the type's default never mixes later than
+    // SOURCE 0 (the early reflections feeding the tail is the point of the
+    // control), and no type mixes later than it measured on 2026-10-09 by
+    // more than a tenth, so a change that thins the onset shows here.
+    {
+        const auto mixingMs = [] (const Ir& ir)
+        {
+            const auto w = ir.msToSamples (20.0f), hop = ir.msToSamples (1.0f);
+            int first = 0;
+            while (first < ir.size() && std::abs (ir.l[(size_t) first]) < 1.0e-6f) ++first;
+
+            for (int at = first; at + w < ir.size(); at += hop)
+            {
+                double sq = 0.0;
+                for (int i = at; i < at + w; ++i) sq += (double) ir.l[(size_t) i] * ir.l[(size_t) i];
+                const auto sd = std::sqrt (sq / (double) w);
+                int outside = 0;
+                for (int i = at; i < at + w; ++i) outside += std::abs ((double) ir.l[(size_t) i]) > sd ? 1 : 0;
+                if ((double) outside / (double) w / 0.3173 >= 0.9)
+                    return (double) (at + w / 2) / ir.rate * 1000.0;
+            }
+            return -1.0;
+        };
+
+        // Room, Chamber, Hall, Cavern, Plate, Ambience: measured 154.1, 184.9,
+        // 258.3, 322.5, 86.8 and 83.4 ms on ICE QUEEN, 2026-10-09.
+        const double ceilingMs[] { 170.0, 204.0, 284.0, 355.0, 96.0, 92.0 };
+
+        for (int t = 0; t < numTypes; ++t)
+        {
+            const auto& c = constantsFor (t);
+            double mixed[2] {};
+
+            for (int own = 0; own < 2; ++own)
+                mixed[own] = mixingMs (renderTail ([&] (DspCore::Params& p)
+                {
+                    p.type = (Type) t;
+                    p.sizeM = c.sizeM;
+                    p.feed = own == 1 ? c.feed * 0.01f : 0.0f;
+                    p.attack = c.attack * 0.01f;
+                    p.modDepthMs = 0.0f;
+                }, 48000.0, 512, 1.5f));
+
+            // The shoebox is 1 : 1.4 : 1.9 with SIZE its longest side.
+            const auto polack = std::sqrt ((1.4 / 1.9) * (1.0 / 1.9) * (double) c.sizeM * c.sizeM * c.sizeM);
+            const std::string name = kTypeNames[t];
+
+            std::cout << "  mixing time, " << name << ": " << mixed[1] << " ms at SOURCE " << c.feed << " %, " << mixed[0]
+                      << " ms at SOURCE 0; Polack's sqrt(V) for " << c.sizeM << " m is " << polack << " ms"
+                      << (mixed[1] > polack ? " (over: M4's)" : "") << "\n";
+
+            check (mixed[0] > 0.0 && mixed[1] > 0.0, (name + ": the tail reaches an echo density of 0.9").c_str());
+            check (mixed[1] <= mixed[0], (name + ": the tail mixes no later at its default SOURCE than at SOURCE 0").c_str());
+            check (mixed[1] <= ceilingMs[t], (name + ": the tail mixes no later than it measured, within a tenth").c_str());
+
+            // The two short rooms are where the reflections do most of the
+            // tail's mixing for it: 14 ms sooner on Room, 46 on Ambience.
+            if (t == room || t == ambience)
+                check (mixed[1] <= mixed[0] - 10.0, (name + ": SOURCE at its default mixes the tail at least 10 ms sooner than SOURCE 0").c_str());
+        }
+    }
+
+    //== Denormals: silence after a burst, with flush-to-zero off ===============
+    //
+    // 11 section 6. A host usually sets flush-to-zero and denormals-are-zero
+    // on its audio thread; this turns both off, where the test can, and runs
+    // a minute of silence after a loud burst. A decaying loop that is not
+    // flushed spends that minute in subnormal arithmetic, which is tens of
+    // times slower: so no 5 s of the silence may take more than 8x the first
+    // 5 s, which hold the burst. And the output is exactly zero by the end
+    // and never a subnormal on the way. The timing bound is loose because a
+    // test machine is busy. **It is a backstop and was not seen to fail**:
+    // with the tail's flush removed on ICE QUEEN (2026-10-09) the silence ran
+    // 1.6x slower, not 8x, and it was the two rows after it that failed.
+    {
+#if defined (_M_X64) || defined (__SSE2__)
+        const auto ftz = _MM_GET_FLUSH_ZERO_MODE();
+        const auto daz = _MM_GET_DENORMALS_ZERO_MODE();
+        _MM_SET_FLUSH_ZERO_MODE (_MM_FLUSH_ZERO_OFF);
+        _MM_SET_DENORMALS_ZERO_MODE (_MM_DENORMALS_ZERO_OFF);
+#endif
+
+        for (int row = 0; row < 2; ++row)
+        {
+            DspCore core;
+            DspCore::Params p;
+            p.decaySeconds = 1.0f;
+            p.mix = 1.0f;
+            p.erLevelDb = p.verbLevelDb = 0.0f;
+
+            if (row == 1)
+            {
+                // Every filter the module has, ringing: both EQ cuts, a sharp
+                // bell, DARKEN down, Plate's four diffusers, Energy mode.
+                p.type = Type::plate;
+                p.erMode = ErMode::energy;
+                p.eqFilter = EqFilter::bandpass;
+                p.eqLoFreqHz = 60.0f;   p.eqLoQ = 2.0f;
+                p.eqMidFreqHz = 300.0f; p.eqMidDb = 12.0f; p.eqMidQ = 20.0f;
+                p.eqHiFreqHz = 5000.0f; p.eqHiQ = 2.0f;
+                p.inHiCutHz = 1000.0f;
+                p.attack = 0.65f;
+            }
+
+            core.prepare (48000.0, 480, 2);
+            core.setParams (p);
+
+            std::vector<float> l (480), r (480);
+            const int blocksPerSpan = 500, spans = 12;   // 5 s a span, a minute in all
+            double firstSpan = 0.0, slowest = 0.0;
+            bool subnormal = false, silentAtEnd = true;
+
+            for (int span = 0; span < spans; ++span)
+            {
+                const auto began = std::chrono::steady_clock::now();
+
+                for (int block = 0; block < blocksPerSpan; ++block)
+                {
+                    const auto n = (span * blocksPerSpan + block) * 480;
+                    for (int i = 0; i < 480; ++i)
+                        l[(size_t) i] = r[(size_t) i] = n + i < 24000 ? 0.5f * noiseAt (n + i) : 0.0f;
+
+                    float* chans[] { l.data(), r.data() };
+                    core.process (chans, 2, 480);
+
+                    for (int i = 0; i < 480; ++i)
+                    {
+                        subnormal = subnormal || std::fpclassify (l[(size_t) i]) == FP_SUBNORMAL
+                                              || std::fpclassify (r[(size_t) i]) == FP_SUBNORMAL;
+                        if (span == spans - 1)
+                            silentAtEnd = silentAtEnd && l[(size_t) i] == 0.0f && r[(size_t) i] == 0.0f;
+                    }
+                }
+
+                const auto took = std::chrono::duration<double> (std::chrono::steady_clock::now() - began).count();
+                if (span == 0) firstSpan = took; else slowest = std::max (slowest, took);
+            }
+
+            std::cout << "  denormals, " << (row == 0 ? "defaults" : "every filter ringing") << ", flush-to-zero off: the first 5 s took "
+                      << firstSpan * 1000.0 << " ms, the slowest 5 s of the silence after it " << slowest * 1000.0 << " ms\n";
+            check (slowest <= 8.0 * firstSpan, "a minute of silence after a burst never runs slow with flush-to-zero off");
+            check (! subnormal, "and the output is never a subnormal");
+            check (silentAtEnd, "and is exactly zero for the last 5 s");
+        }
+
+#if defined (_M_X64) || defined (__SSE2__)
+        _MM_SET_FLUSH_ZERO_MODE (ftz);
+        _MM_SET_DENORMALS_ZERO_MODE (daz);
+#endif
+    }
+
+    //== End to end: what modulation does to a held note ========================
+    //
+    // 11 section 6's Modulation row asks for a 1 kHz sine through the tail
+    // alone, its frequency read off the phase in 50 ms windows, the peak
+    // within 3 cents, and the spectrum of the deviation reported, "a visible
+    // rate means chorused, not randomised".
+    //
+    // **The 3 cents is each line's, and the tail is not one line.** Every
+    // line is held under 3 cents (the test above). What comes out is the sum
+    // of eight of them, each heard again on every pass, and the phase of a
+    // sum of paths wanders further than any one path does, most of all where
+    // they nearly cancel. So this row reports and bounds what is true end to
+    // end: over 40 s, the RMS deviation, the peak over the windows that are
+    // above a quarter of the median level, and the largest share of the
+    // deviation's power that any one frequency holds. Measured on ICE QUEEN,
+    // 2026-10-09: RMS 1.68 cents at the default modulation and 2.93 to 3.00
+    // at its corners; peaks of 11.9 and 16.5 to 17.3; no frequency holding
+    // more than 3.8 % of the power. Frosty heard it on 2026-10-06 as wobble
+    // "in a good way". A peak under 3 cents end to end is not what this
+    // network does and the row does not pretend to assert it.
+    {
+        struct Held { float depthMs, rateHz; double rmsCeiling; const char* name; };
+
+        for (const auto& held : { Held { -1.0f, -1.0f, 2.2, "the default modulation" },
+                                  Held { 0.8f, 1.2f, 3.6, "MOD DEPTH 0.8 ms, MOD RATE 1.2 Hz" },
+                                  Held { 0.8f, 0.35f, 3.6, "MOD DEPTH 0.8 ms, MOD RATE 0.35 Hz" } })
+        {
+            const double twoPi = 2.0 * 3.14159265358979323846;
+
+            DspCore core;
+            DspCore::Params p;
+            p.erLevelDb = -40.0f; p.verbLevelDb = 0.0f; p.mix = 1.0f; p.feed = 0.0f;
+            if (held.depthMs >= 0.0f) { p.modDepthMs = held.depthMs; p.modRateHz = held.rateHz; }
+            core.prepare (48000.0, 480, 2);
+            core.setParams (p);
+
+            // 2400 samples is 50 ms and 50 whole cycles of 1 kHz.
+            std::vector<float> l (480), r (480);
+            const int window = 2400, total = 48000 * 44, settle = 48000 * 4;
+            double re = 0.0, im = 0.0, lastPhase = 0.0;
+            std::vector<double> cents, level;
+            bool have = false;
+
+            for (int n = 0; n < total; n += 480)
+            {
+                for (int i = 0; i < 480; ++i)
+                    l[(size_t) i] = r[(size_t) i] = 0.1259f * (float) std::sin (twoPi * 1000.0 * (double) (n + i) / 48000.0);
+
+                float* chans[] { l.data(), r.data() };
+                core.process (chans, 2, 480);
+
+                for (int i = 0; i < 480; ++i)
+                {
+                    const auto ph = twoPi * 1000.0 * (double) (n + i) / 48000.0;
+                    re += (double) l[(size_t) i] * std::cos (ph);
+                    im += (double) l[(size_t) i] * std::sin (ph);
+                }
+
+                if ((n + 480) % window == 0)
+                {
+                    const auto phase = std::atan2 (im, re);
+
+                    if (have && n >= settle)
+                    {
+                        auto d = phase - lastPhase;
+                        while (d > 0.5 * twoPi)  d -= twoPi;
+                        while (d < -0.5 * twoPi) d += twoPi;
+                        cents.push_back (1200.0 * std::log2 (1.0 + d / (twoPi * 0.05) / 1000.0));
+                        level.push_back (std::sqrt (re * re + im * im));
+                    }
+
+                    lastPhase = phase;
+                    have = true;
+                    re = im = 0.0;
+                }
+            }
+
+            auto sorted = level;
+            std::sort (sorted.begin(), sorted.end());
+            const auto floor = 0.25 * sorted[sorted.size() / 2];
+
+            double peak = 0.0, squares = 0.0;
+            int used = 0;
+            for (size_t i = 1; i < cents.size(); ++i)
+                if (level[i] > floor && level[i - 1] > floor)
+                {
+                    peak = std::max (peak, std::abs (cents[i]));
+                    squares += cents[i] * cents[i];
+                    ++used;
+                }
+            const auto rms = std::sqrt (squares / (double) std::max (1, used));
+
+            // The deviation's spectrum, 0.025 Hz a bin up to 10 Hz.
+            const auto count = (int) cents.size();
+            double power = 0.0, largest = 0.0;
+            int largestBin = 0;
+            for (int k = 1; k < count / 2; ++k)
+            {
+                double a = 0.0, b = 0.0;
+                for (int i = 0; i < count; ++i)
+                {
+                    a += cents[(size_t) i] * std::cos (twoPi * (double) k * (double) i / (double) count);
+                    b += cents[(size_t) i] * std::sin (twoPi * (double) k * (double) i / (double) count);
+                }
+                power += a * a + b * b;
+                if (a * a + b * b > largest) { largest = a * a + b * b; largestBin = k; }
+            }
+
+            std::cout << "  a held 1 kHz through the tail, " << held.name << ": " << rms << " cents RMS, peak " << peak
+                      << " over " << used << " of " << count << " windows; the largest line in its spectrum, at "
+                      << (double) largestBin * 20.0 / (double) count << " Hz, holds " << 100.0 * largest / power << " % of the power\n";
+
+            const std::string name = held.name;
+            check (used > count / 2, (name + ": most windows of the held tail are loud enough to read").c_str());
+            check (rms <= held.rmsCeiling, (name + ": the held note's pitch wanders no more than it measured, RMS").c_str());
+            check (largest <= 0.10 * power, (name + ": no one rate holds a tenth of the wander, so it is not a chorus").c_str());
         }
     }
 

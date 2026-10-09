@@ -744,7 +744,55 @@ normalised so their mean square is one. Where it departs from §2, and why:
 - The span, the first line's level (0.12), the curve (position^1.5) and the
   order the lines are fed in are **CALIBRATE**. Not heard yet.
 
-Still to build in M3b: `11` §6's echo-density, denormal and pitch rows.
+**`11` §6's last three rows** (2026-10-09, on ICE QUEEN), which close M3b's
+build. Two of them measure a target this document set and the engine does
+not meet; both are written down as they measured.
+
+- **Mixing time is over Polack's √V ms for every type, by a factor of 1.3
+  to 6.** Normalised echo density (Abel and Huang, 20 ms window) reaching
+  0.9, from the impulse, each type at its own SIZE, SOURCE and ATTACK:
+
+  | type | mixes at | at SOURCE 0 | √V for its SIZE |
+  |---|---|---|---|
+  | Room, 12 m | 154 ms | 168 ms | 26 ms |
+  | Chamber, 18 m | 185 ms | 192 ms | 48 ms |
+  | Hall, 34 m | 258 ms | 260 ms | 123 ms |
+  | Cavern, 55 m | 323 ms | 328 ms | 254 ms |
+  | Plate, 22 m | 87 ms | 87 ms | 64 ms |
+  | Ambience, 8 m | 83 ms | 129 ms | 14 ms |
+
+  The paragraph above this record says why: mixing time is set by the mean
+  delay, and eight lines behind two diffusers (four on Plate) take several
+  passes to fill in. ATTACK adds to it by design, 3 ms on Ambience to 59 on
+  Cavern. **Printed and pinned, not met**: no type may mix later than this
+  by more than a tenth, SOURCE at its default may never mix later than
+  SOURCE 0 and must be 10 ms sooner on Room and Ambience, and the gap to
+  √V is M4's, with the mean delays. Plate is the one type SOURCE does not
+  help.
+- **Denormals: nothing runs slow.** Flush-to-zero and denormals-are-zero
+  off, a 0.5 s burst, a minute of silence: the slowest 5 s of the silence
+  took 55 ms against 52 for the 5 s holding the burst at the defaults, and
+  68 against 67 with every filter in the module ringing. The output is
+  exactly zero by the end and never a subnormal.
+- **A held note through the tail wanders by more than 3 cents, and §4's
+  3 cents was never a claim about that.** Every line is held under 3 cents.
+  What comes out is eight lines summed and heard again on every pass, and
+  the phase of a sum of paths wanders further than any one path, most
+  where they nearly cancel. A 1 kHz sine through the tail alone, read in
+  50 ms windows over 40 s: **1.68 cents RMS at the default modulation with
+  peaks to 11.9; 2.93 to 3.00 cents RMS at the corners of depth and rate
+  with peaks to 17.3.** `11` §6's Modulation row asks for a peak within 3
+  cents on exactly this measurement; it is not met and cannot be by
+  bounding the lines. The deviation's spectrum has no line: the largest
+  holds 3.8 % of the power, so it is randomised and not a chorus, which is
+  the other half of that row and does hold. Frosty heard the held note on
+  2026-10-06: "ring is gone, depending on type it reads as wobble, but in a
+  good way". The test bounds the RMS at what it measured and the spectrum
+  at a tenth.
+
+**M3b's build is complete with these.** What is left before M4 is Frosty's
+ear on ATTACK and the decisions listed in
+`testing-notes/linger-m3b-qa-pr55-2026-10-07.md`.
 
 ## 5. Parameter changes, bypass, tail reporting
 

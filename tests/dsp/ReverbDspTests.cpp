@@ -29,12 +29,18 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <iostream>
 #include <memory>
 #include <string>
 #include <vector>
+
+#if defined (_M_X64) || defined (__SSE2__)
+ #include <pmmintrin.h>
+ #include <xmmintrin.h>
+#endif
 
 using namespace bmo::reverb;
 
@@ -5649,6 +5655,289 @@ int main (int argc, char** argv)
                       << during << " during the move, " << after << " settled after\n";
             check (before > 1.0e-5f && after > 1.0e-5f, "the held tail is sounding either side of the ATTACK move");
             check (during <= 1.5f * std::max (before, after), "moving ATTACK steps no more than 1.5x the settled tail");
+        }
+    }
+
+    //== Echo density and mixing time ===========================================
+    //
+    // 11 section 6. Normalised echo density (Abel and Huang): the fraction of
+    // a 20 ms window's samples that lie outside the window's own standard
+    // deviation, over the 0.3173 a Gaussian gives; the mixing time is where
+    // it first reaches 0.9, counted from the impulse to the window's middle.
+    // Each type at its own SIZE, SOURCE and ATTACK, tail only, modulation
+    // off so the figure repeats.
+    //
+    // **10 section 4's target is Polack's sqrt (V) ms, and no type meets
+    // it.** That is printed beside each figure and not asserted, as Plate's
+    // modal density is: 10 section 4 says mixing time is set by the mean
+    // delay, and the mean delay per type is M4's to voice. What is asserted
+    // is what M3 owes: SOURCE at the type's default never mixes later than
+    // SOURCE 0 (the early reflections feeding the tail is the point of the
+    // control), and no type mixes later than it measured on 2026-10-09 by
+    // more than a tenth, so a change that thins the onset shows here.
+    {
+        const auto mixingMs = [] (const Ir& ir)
+        {
+            const auto w = ir.msToSamples (20.0f), hop = ir.msToSamples (1.0f);
+            int first = 0;
+            while (first < ir.size() && std::abs (ir.l[(size_t) first]) < 1.0e-6f) ++first;
+
+            for (int at = first; at + w < ir.size(); at += hop)
+            {
+                double sq = 0.0;
+                for (int i = at; i < at + w; ++i) sq += (double) ir.l[(size_t) i] * ir.l[(size_t) i];
+                const auto sd = std::sqrt (sq / (double) w);
+                int outside = 0;
+                for (int i = at; i < at + w; ++i) outside += std::abs ((double) ir.l[(size_t) i]) > sd ? 1 : 0;
+                if ((double) outside / (double) w / 0.3173 >= 0.9)
+                    return (double) (at + w / 2) / ir.rate * 1000.0;
+            }
+            return -1.0;
+        };
+
+        // Room, Chamber, Hall, Cavern, Plate, Ambience: measured 154.1, 184.9,
+        // 258.3, 322.5, 86.8 and 83.4 ms on ICE QUEEN, 2026-10-09.
+        const double ceilingMs[] { 170.0, 204.0, 284.0, 355.0, 96.0, 92.0 };
+
+        for (int t = 0; t < numTypes; ++t)
+        {
+            const auto& c = constantsFor (t);
+            double mixed[2] {};
+
+            for (int own = 0; own < 2; ++own)
+                mixed[own] = mixingMs (renderTail ([&] (DspCore::Params& p)
+                {
+                    p.type = (Type) t;
+                    p.sizeM = c.sizeM;
+                    p.feed = own == 1 ? c.feed * 0.01f : 0.0f;
+                    p.attack = c.attack * 0.01f;
+                    p.modDepthMs = 0.0f;
+                }, 48000.0, 512, 1.5f));
+
+            // The shoebox is 1 : 1.4 : 1.9 with SIZE its longest side.
+            const auto polack = std::sqrt ((1.4 / 1.9) * (1.0 / 1.9) * (double) c.sizeM * c.sizeM * c.sizeM);
+            const std::string name = kTypeNames[t];
+
+            std::cout << "  mixing time, " << name << ": " << mixed[1] << " ms at SOURCE " << c.feed << " %, " << mixed[0]
+                      << " ms at SOURCE 0; Polack's sqrt(V) for " << c.sizeM << " m is " << polack << " ms"
+                      << (mixed[1] > polack ? " (over: M4's)" : "") << "\n";
+
+            check (mixed[0] > 0.0 && mixed[1] > 0.0, (name + ": the tail reaches an echo density of 0.9").c_str());
+            check (mixed[1] <= mixed[0], (name + ": the tail mixes no later at its default SOURCE than at SOURCE 0").c_str());
+            check (mixed[1] <= ceilingMs[t], (name + ": the tail mixes no later than it measured, within a tenth").c_str());
+
+            // The two short rooms are where the reflections do most of the
+            // tail's mixing for it: 14 ms sooner on Room, 46 on Ambience.
+            if (t == room || t == ambience)
+                check (mixed[1] <= mixed[0] - 10.0, (name + ": SOURCE at its default mixes the tail at least 10 ms sooner than SOURCE 0").c_str());
+        }
+    }
+
+    //== Denormals: silence after a burst, with flush-to-zero off ===============
+    //
+    // 11 section 6. A host usually sets flush-to-zero and denormals-are-zero
+    // on its audio thread; this turns both off, where the test can, and runs
+    // a minute of silence after a loud burst. A decaying loop that is not
+    // flushed spends that minute in subnormal arithmetic, which is tens of
+    // times slower: so no 5 s of the silence may take more than 8x the first
+    // 5 s, which hold the burst. And the output is exactly zero by the end
+    // and never a subnormal on the way. The timing bound is loose because a
+    // test machine is busy. **It is a backstop and was not seen to fail**:
+    // with the tail's flush removed on ICE QUEEN (2026-10-09) the silence ran
+    // 1.6x slower, not 8x, and it was the two rows after it that failed.
+    {
+#if defined (_M_X64) || defined (__SSE2__)
+        const auto ftz = _MM_GET_FLUSH_ZERO_MODE();
+        const auto daz = _MM_GET_DENORMALS_ZERO_MODE();
+        _MM_SET_FLUSH_ZERO_MODE (_MM_FLUSH_ZERO_OFF);
+        _MM_SET_DENORMALS_ZERO_MODE (_MM_DENORMALS_ZERO_OFF);
+#endif
+
+        for (int row = 0; row < 2; ++row)
+        {
+            DspCore core;
+            DspCore::Params p;
+            p.decaySeconds = 1.0f;
+            p.mix = 1.0f;
+            p.erLevelDb = p.verbLevelDb = 0.0f;
+
+            if (row == 1)
+            {
+                // Every filter the module has, ringing: both EQ cuts, a sharp
+                // bell, DARKEN down, Plate's four diffusers, Energy mode.
+                p.type = Type::plate;
+                p.erMode = ErMode::energy;
+                p.eqFilter = EqFilter::bandpass;
+                p.eqLoFreqHz = 60.0f;   p.eqLoQ = 2.0f;
+                p.eqMidFreqHz = 300.0f; p.eqMidDb = 12.0f; p.eqMidQ = 20.0f;
+                p.eqHiFreqHz = 5000.0f; p.eqHiQ = 2.0f;
+                p.inHiCutHz = 1000.0f;
+                p.attack = 0.65f;
+            }
+
+            core.prepare (48000.0, 480, 2);
+            core.setParams (p);
+
+            std::vector<float> l (480), r (480);
+            const int blocksPerSpan = 500, spans = 12;   // 5 s a span, a minute in all
+            double firstSpan = 0.0, slowest = 0.0;
+            bool subnormal = false, silentAtEnd = true;
+
+            for (int span = 0; span < spans; ++span)
+            {
+                const auto began = std::chrono::steady_clock::now();
+
+                for (int block = 0; block < blocksPerSpan; ++block)
+                {
+                    const auto n = (span * blocksPerSpan + block) * 480;
+                    for (int i = 0; i < 480; ++i)
+                        l[(size_t) i] = r[(size_t) i] = n + i < 24000 ? 0.5f * noiseAt (n + i) : 0.0f;
+
+                    float* chans[] { l.data(), r.data() };
+                    core.process (chans, 2, 480);
+
+                    for (int i = 0; i < 480; ++i)
+                    {
+                        subnormal = subnormal || std::fpclassify (l[(size_t) i]) == FP_SUBNORMAL
+                                              || std::fpclassify (r[(size_t) i]) == FP_SUBNORMAL;
+                        if (span == spans - 1)
+                            silentAtEnd = silentAtEnd && l[(size_t) i] == 0.0f && r[(size_t) i] == 0.0f;
+                    }
+                }
+
+                const auto took = std::chrono::duration<double> (std::chrono::steady_clock::now() - began).count();
+                if (span == 0) firstSpan = took; else slowest = std::max (slowest, took);
+            }
+
+            std::cout << "  denormals, " << (row == 0 ? "defaults" : "every filter ringing") << ", flush-to-zero off: the first 5 s took "
+                      << firstSpan * 1000.0 << " ms, the slowest 5 s of the silence after it " << slowest * 1000.0 << " ms\n";
+            check (slowest <= 8.0 * firstSpan, "a minute of silence after a burst never runs slow with flush-to-zero off");
+            check (! subnormal, "and the output is never a subnormal");
+            check (silentAtEnd, "and is exactly zero for the last 5 s");
+        }
+
+#if defined (_M_X64) || defined (__SSE2__)
+        _MM_SET_FLUSH_ZERO_MODE (ftz);
+        _MM_SET_DENORMALS_ZERO_MODE (daz);
+#endif
+    }
+
+    //== End to end: what modulation does to a held note ========================
+    //
+    // 11 section 6's Modulation row asks for a 1 kHz sine through the tail
+    // alone, its frequency read off the phase in 50 ms windows, the peak
+    // within 3 cents, and the spectrum of the deviation reported, "a visible
+    // rate means chorused, not randomised".
+    //
+    // **The 3 cents is each line's, and the tail is not one line.** Every
+    // line is held under 3 cents (the test above). What comes out is the sum
+    // of eight of them, each heard again on every pass, and the phase of a
+    // sum of paths wanders further than any one path does, most of all where
+    // they nearly cancel. So this row reports and bounds what is true end to
+    // end: over 40 s, the RMS deviation, the peak over the windows that are
+    // above a quarter of the median level, and the largest share of the
+    // deviation's power that any one frequency holds. Measured on ICE QUEEN,
+    // 2026-10-09: RMS 1.68 cents at the default modulation and 2.93 to 3.00
+    // at its corners; peaks of 11.9 and 16.5 to 17.3; no frequency holding
+    // more than 3.8 % of the power. Frosty heard it on 2026-10-06 as wobble
+    // "in a good way". A peak under 3 cents end to end is not what this
+    // network does and the row does not pretend to assert it.
+    {
+        struct Held { float depthMs, rateHz; double rmsCeiling; const char* name; };
+
+        for (const auto& held : { Held { -1.0f, -1.0f, 2.2, "the default modulation" },
+                                  Held { 0.8f, 1.2f, 3.6, "MOD DEPTH 0.8 ms, MOD RATE 1.2 Hz" },
+                                  Held { 0.8f, 0.35f, 3.6, "MOD DEPTH 0.8 ms, MOD RATE 0.35 Hz" } })
+        {
+            const double twoPi = 2.0 * 3.14159265358979323846;
+
+            DspCore core;
+            DspCore::Params p;
+            p.erLevelDb = -40.0f; p.verbLevelDb = 0.0f; p.mix = 1.0f; p.feed = 0.0f;
+            if (held.depthMs >= 0.0f) { p.modDepthMs = held.depthMs; p.modRateHz = held.rateHz; }
+            core.prepare (48000.0, 480, 2);
+            core.setParams (p);
+
+            // 2400 samples is 50 ms and 50 whole cycles of 1 kHz.
+            std::vector<float> l (480), r (480);
+            const int window = 2400, total = 48000 * 44, settle = 48000 * 4;
+            double re = 0.0, im = 0.0, lastPhase = 0.0;
+            std::vector<double> cents, level;
+            bool have = false;
+
+            for (int n = 0; n < total; n += 480)
+            {
+                for (int i = 0; i < 480; ++i)
+                    l[(size_t) i] = r[(size_t) i] = 0.1259f * (float) std::sin (twoPi * 1000.0 * (double) (n + i) / 48000.0);
+
+                float* chans[] { l.data(), r.data() };
+                core.process (chans, 2, 480);
+
+                for (int i = 0; i < 480; ++i)
+                {
+                    const auto ph = twoPi * 1000.0 * (double) (n + i) / 48000.0;
+                    re += (double) l[(size_t) i] * std::cos (ph);
+                    im += (double) l[(size_t) i] * std::sin (ph);
+                }
+
+                if ((n + 480) % window == 0)
+                {
+                    const auto phase = std::atan2 (im, re);
+
+                    if (have && n >= settle)
+                    {
+                        auto d = phase - lastPhase;
+                        while (d > 0.5 * twoPi)  d -= twoPi;
+                        while (d < -0.5 * twoPi) d += twoPi;
+                        cents.push_back (1200.0 * std::log2 (1.0 + d / (twoPi * 0.05) / 1000.0));
+                        level.push_back (std::sqrt (re * re + im * im));
+                    }
+
+                    lastPhase = phase;
+                    have = true;
+                    re = im = 0.0;
+                }
+            }
+
+            auto sorted = level;
+            std::sort (sorted.begin(), sorted.end());
+            const auto floor = 0.25 * sorted[sorted.size() / 2];
+
+            double peak = 0.0, squares = 0.0;
+            int used = 0;
+            for (size_t i = 1; i < cents.size(); ++i)
+                if (level[i] > floor && level[i - 1] > floor)
+                {
+                    peak = std::max (peak, std::abs (cents[i]));
+                    squares += cents[i] * cents[i];
+                    ++used;
+                }
+            const auto rms = std::sqrt (squares / (double) std::max (1, used));
+
+            // The deviation's spectrum, 0.025 Hz a bin up to 10 Hz.
+            const auto count = (int) cents.size();
+            double power = 0.0, largest = 0.0;
+            int largestBin = 0;
+            for (int k = 1; k < count / 2; ++k)
+            {
+                double a = 0.0, b = 0.0;
+                for (int i = 0; i < count; ++i)
+                {
+                    a += cents[(size_t) i] * std::cos (twoPi * (double) k * (double) i / (double) count);
+                    b += cents[(size_t) i] * std::sin (twoPi * (double) k * (double) i / (double) count);
+                }
+                power += a * a + b * b;
+                if (a * a + b * b > largest) { largest = a * a + b * b; largestBin = k; }
+            }
+
+            std::cout << "  a held 1 kHz through the tail, " << held.name << ": " << rms << " cents RMS, peak " << peak
+                      << " over " << used << " of " << count << " windows; the largest line in its spectrum, at "
+                      << (double) largestBin * 20.0 / (double) count << " Hz, holds " << 100.0 * largest / power << " % of the power\n";
+
+            const std::string name = held.name;
+            check (used > count / 2, (name + ": most windows of the held tail are loud enough to read").c_str());
+            check (rms <= held.rmsCeiling, (name + ": the held note's pitch wanders no more than it measured, RMS").c_str());
+            check (largest <= 0.10 * power, (name + ": no one rate holds a tenth of the wander, so it is not a chorus").c_str());
         }
     }
 

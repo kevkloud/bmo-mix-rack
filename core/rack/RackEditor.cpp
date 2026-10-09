@@ -125,6 +125,11 @@ void RackEditor::AddStrip::paint (juce::Graphics& g)
 void RackEditor::AddStrip::resized()
 {
     add.setBounds (getLocalBounds().withTrimmedTop (3).reduced (6).removeFromTop (kSlotBar - 6));
+    refreshEnabled();
+}
+
+void RackEditor::AddStrip::refreshEnabled()
+{
     add.setEnabled (owner.proc.getNumModules() < RackProcessor::kSlots);
 }
 
@@ -300,6 +305,12 @@ void RackEditor::layoutPlate()
     }
 
     addStrip.setBounds (x, kHeader, w - x, kDesignHeight - kHeader);
+
+    // The strip is kAddStrip wide with seven modules and with eight, so a
+    // chain edit only moves it and its resized() does not run. Its button
+    // follows the chain here instead, or a full rack's "+" stays dead after a
+    // remove until the editor is reopened (heard on ICE QUEEN, 2026-10-06).
+    addStrip.refreshEnabled();
 }
 
 void RackEditor::resized()

@@ -22,7 +22,7 @@ namespace
 
     // The IN/GR/OUT row is a row of switches, so it is switchHeight tall like
     // every other switch in the suite. It was 20, which is what made it read
-    // as a different kind of control from TELE/ELD and LINK/COLOR six inches
+    // as a different kind of control from TELE/STRESS and LINK/COLOR six inches
     // above and below it.
     constexpr int kMeterButtonRow = kSwitchHeight;
 
@@ -64,7 +64,7 @@ OptoPanel::OptoPanel (ui::ModuleContext ctx)
       meter (context.inputRms, context.rms, context.gainReductionDb,
              ui::DynamicsMeter::Mode::output, ui::tokens().neutral,
              ui::tokens().meterClip),
-      teleButton ("TELE"), eldButton ("ELD"),
+      teleButton ("TELE"), stressButton ("STRESS"),
       meterInButton ("IN"), meterOutButton ("OUT"), meterGrButton ("GR"),
       link  (context.params.param (Index::link),  "LINK",  ui::tokens().meterClip),
       color (context.params.param (Index::color), "COLOR", ui::tokens().meterClip)
@@ -73,7 +73,7 @@ OptoPanel::OptoPanel (ui::ModuleContext ctx)
     // owns it from the end of this constructor onwards. BmoLookAndFeel derives
     // each label from whatever fill it is drawing, so a lit switch reads dark
     // on colour and an unlit one light on grey without either being stated.
-    for (auto* b : { &teleButton, &eldButton,
+    for (auto* b : { &teleButton, &stressButton,
                      &meterInButton, &meterOutButton, &meterGrButton })
     {
         b->setClickingTogglesState (false);
@@ -85,8 +85,8 @@ OptoPanel::OptoPanel (ui::ModuleContext ctx)
     // the mode rather than toggling a button, so host automation and a click
     // land in the same place. timerCallback() is what reads the parameter back
     // into the two states.
-    teleButton.onClick = [this] { setChoice (context.params.param (Index::mode), 0.0f); };
-    eldButton .onClick = [this] { setChoice (context.params.param (Index::mode), 1.0f); };
+    teleButton  .onClick = [this] { setChoice (context.params.param (Index::mode), 0.0f); };
+    stressButton.onClick = [this] { setChoice (context.params.param (Index::mode), 1.0f); };
 
     meterInButton .onClick = [this] { selectMeterMode (ui::DynamicsMeter::Mode::input); };
     meterOutButton.onClick = [this] { selectMeterMode (ui::DynamicsMeter::Mode::output); };
@@ -101,8 +101,8 @@ OptoPanel::OptoPanel (ui::ModuleContext ctx)
         addAndMakeVisible (c);
 
     lastModeWasStressed = context.params.param (Index::mode).getValue() > 0.5f;
-    teleButton.setToggleState (! lastModeWasStressed, juce::dontSendNotification);
-    eldButton .setToggleState (  lastModeWasStressed, juce::dontSendNotification);
+    teleButton  .setToggleState (! lastModeWasStressed, juce::dontSendNotification);
+    stressButton.setToggleState (  lastModeWasStressed, juce::dontSendNotification);
     color.setLockedOn (! lastModeWasStressed);
     applyModeColours (lastModeWasStressed);
 
@@ -159,7 +159,7 @@ juce::Colour OptoPanel::hotColourFor (bool stressed) const
     // 4.5:1 on this dark face rather than being trusted to. Amber already
     // clears at 4.68:1 and comes back untouched; red is lightened to reach it.
     // That difference is why the meter keeps the mode's
-    // colour in both modes instead of falling back to red in Stressed -- the
+    // colour in both modes instead of falling back to red in Stress -- the
     // amber is the more readable of the two, not the less.
     return ui::accentTextOn (activeFor (stressed), ui::tokens().meterFace);
 }
@@ -179,7 +179,7 @@ void OptoPanel::applyModeColours (bool stressed)
     for (auto* s : { &link, &color })
         s->setTint (active);
 
-    for (auto* b : { &teleButton, &eldButton,
+    for (auto* b : { &teleButton, &stressButton,
                      &meterInButton, &meterOutButton, &meterGrButton })
     {
         b->setColour (juce::ToggleButton::tickColourId, active);
@@ -220,8 +220,8 @@ void OptoPanel::timerCallback()
     // of Mode (not just a click) still updates it.
     const auto stressed = context.params.param (Index::mode).getValue() > 0.5f;
 
-    teleButton.setToggleState (! stressed, juce::dontSendNotification);
-    eldButton .setToggleState (  stressed, juce::dontSendNotification);
+    teleButton  .setToggleState (! stressed, juce::dontSendNotification);
+    stressButton.setToggleState (  stressed, juce::dontSendNotification);
 
     if (stressed != lastModeWasStressed)
     {
@@ -264,7 +264,7 @@ void OptoPanel::resized()
     // as the bottom margin, so the spacing stays even if a block's height
     // changes later.
     const auto meterBlock  = kMeterHeight + kMeterButtonGap + kMeterButtonRow;
-    const auto stackBlock  = kSwitchHeight * 2 + kSwitchGap;   // TELE/ELD, and LINK/COLOR
+    const auto stackBlock  = kSwitchHeight * 2 + kSwitchGap;   // TELE/STRESS, and LINK/COLOR
     const auto content     = stackBlock + kKnobHeight + meterBlock + kKnobHeight + stackBlock;
 
     // Six divisions, not four: a margin above the first block and below the
@@ -279,9 +279,9 @@ void OptoPanel::resized()
     // width this module has none of -- and it mirrors LINK/COLOR at the foot.
     {
         auto head = area.removeFromTop (stackBlock);
-        teleButton.setBounds (centredSwitch (head.removeFromTop (kSwitchHeight)));
+        teleButton  .setBounds (centredSwitch (head.removeFromTop (kSwitchHeight)));
         head.removeFromTop (kSwitchGap);
-        eldButton.setBounds  (centredSwitch (head.removeFromTop (kSwitchHeight)));
+        stressButton.setBounds (centredSwitch (head.removeFromTop (kSwitchHeight)));
     }
     area.removeFromTop (gap);
 

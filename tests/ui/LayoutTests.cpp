@@ -439,17 +439,36 @@ void checkFetcompSwitches (bmo::ui::ModulePanel& panel, const juce::String& who)
         check (row[4]->getY() - row[3]->getBottom() > row[1]->getY() - row[0]->getBottom(),
                who + " ALL is set further apart than the ratios are from each other");
 
-        const auto lit = [&row]
+        // The buttons that are lit, by caption, in column order.
+        const auto lit = [&row, &names]
         {
-            auto count = 0, which = -1;
+            juce::StringArray on;
 
             for (int i = 0; i < 5; ++i)
-                if (row[i]->getToggleState()) { ++count; which = i; }
+                if (row[i]->getToggleState())
+                    on.add (names[i]);
 
-            return count == 1 ? which : -1;
+            return on.joinIntoString (" ");
         };
 
-        checkEquals (lit(), 0, who + " ratio at Init is 4:1");
+        // A numbered ratio lights alone. ALL is every button pushed in at once,
+        // and the panel shows it that way: all five lit (Frosty, 2026-10-06,
+        // from the 0.2.6 pass -- "all ratio buttons need to highlight when all
+        // is active"). Until then ALL lit alone, like a fifth ratio.
+        const auto expectedLit = [&names] (int choice)
+        {
+            return choice == bmo::fetcomp::ratioAll ? juce::String ("4:1 8:1 12:1 20:1 ALL")
+                                                     : juce::String (names[choice]);
+        };
+
+        const auto checkLit = [&] (int choice, const juce::String& what)
+        {
+            const auto got = lit();
+            check (got == expectedLit (choice),
+                   what + " -- expected lit '" + expectedLit (choice) + "', got '" + got + "'");
+        };
+
+        checkLit (bmo::fetcomp::ratio4, who + " ratio at Init is 4:1");
 
         // Every position, including the one the default already is: clicking a
         // lit ratio is a no-op, not a way out of it, because unlike
@@ -459,13 +478,21 @@ void checkFetcompSwitches (bmo::ui::ModulePanel& panel, const juce::String& who)
             if (row[i]->onClick != nullptr)
                 row[i]->onClick();
 
-            checkEquals (lit(), i, who + " " + names[i] + " lit alone after a click");
+            checkLit (i, who + " " + names[i] + " after a click");
             checkEquals (juce::roundToInt (params.getReal (bmo::fetcomp::Index::ratio)), i,
                          who + " clicking " + names[i] + " sets the ratio parameter");
         }
 
+        // Through the parameter, as a host's automation moves it: into All
+        // from a ratio and back out again.
+        params.setReal (bmo::fetcomp::Index::ratio, (float) bmo::fetcomp::ratio12);
+        checkLit (bmo::fetcomp::ratio12, who + " the parameter at 12:1");
+
+        params.setReal (bmo::fetcomp::Index::ratio, (float) bmo::fetcomp::ratioAll);
+        checkLit (bmo::fetcomp::ratioAll, who + " the parameter at All");
+
         params.setReal (bmo::fetcomp::Index::ratio, 0.0f);
-        checkEquals (lit(), 0, who + " the parameter lights the ratio buttons, not the click");
+        checkLit (bmo::fetcomp::ratio4, who + " the parameter lights the ratio buttons, not the click");
     }
 
     //== ATTACK dims under all-buttons and is live under every ratio ==========
@@ -4047,6 +4074,23 @@ int main (int argc, char** argv)
     withPanel (named ("sat"), [] (bmo::ui::ModulePanel& panel)
     {
         checkOversamplingRow (panel, "sat", 0);
+    });
+
+    // BMO Opto's mode pair reads TELE over STRESS (Frosty, 2026-10-06/07, from
+    // the 0.2.6 pass). It read TELE over ELD until then. The new word is twice
+    // as long, and checkSwitchLabelsFit already measures it against the box.
+    withPanel (named ("opto"), [] (bmo::ui::ModulePanel& panel)
+    {
+        auto* tele   = dynamic_cast<juce::Button*> (findNamed (panel, "TELE"));
+        auto* stress = dynamic_cast<juce::Button*> (findNamed (panel, "STRESS"));
+
+        check (tele != nullptr, "opto has a TELE switch");
+        check (stress != nullptr, "opto has a STRESS switch");
+        check (findNamed (panel, "ELD") == nullptr, "opto no longer has an ELD switch");
+
+        if (tele != nullptr && stress != nullptr)
+            check (tele->getBottom() < stress->getY() && tele->getX() == stress->getX(),
+                   "opto STRESS sits under TELE, as ELD did");
     });
 
     // BMO CEQ: AUTO took the switch-row place HI-Q left when it went up to the

@@ -9,14 +9,14 @@ looks after itself.
 |---|---|
 | **COMP** | How hard the programme drives the cell. It lowers the threshold and nothing else; the ratio and knee belong to the mode. At 0 a correctly staged track passes untouched. The parameter is `crush`. |
 | **MAKEUP** | Level after the cell, set by ear. There is no automatic makeup. The parameter is `level`, -24 to +24 dB. |
-| **TELE / ELD** | Which circuit this instance is. One button carrying its own state. |
+| **TELE / STRESS** | Which circuit this instance is: a stacked pair, and the lit one is running. A host shows the `mode` parameter as Tele / Stress. STRESS read ELD, and Stress read Stressed, until after 0.2.6. |
 | **LINK** | One gain for both channels, decided by the louder of them. Off, each channel compresses on its own. |
-| **COLOR** | A harmonic stage. In ELD it is a switch. In TELE it is always on, and the switch is shown disabled. |
+| **COLOR** | A harmonic stage. In STRESS it is a switch. In TELE it is always on, and the switch is shown disabled. |
 | **IN / OUT / GR** | What the needle reads. |
 
 ## The two modes
 
-| | TELE | ELD |
+| | TELE | STRESS |
 |---|---|---|
 | ratio | about 3:1 | 10:1 |
 | knee | soft, 16 dB | harder, 6 dB |

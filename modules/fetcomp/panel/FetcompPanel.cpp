@@ -450,11 +450,17 @@ void FetcompPanel::selectMeterMode (ui::DynamicsMeter::Mode mode)
 
 void FetcompPanel::showRatio (int choice)
 {
-    ratio4Button  .setToggleState (choice == ratio4,   juce::dontSendNotification);
-    ratio8Button  .setToggleState (choice == ratio8,   juce::dontSendNotification);
-    ratio12Button .setToggleState (choice == ratio12,  juce::dontSendNotification);
-    ratio20Button .setToggleState (choice == ratio20,  juce::dontSendNotification);
-    ratioAllButton.setToggleState (choice == ratioAll, juce::dontSendNotification);
+    // All is every ratio button pushed in at once, so every one of them lights
+    // with ALL (Frosty, 2026-10-06, from the 0.2.6 pass). A numbered ratio
+    // still lights alone. Display only: the parameter holds one index either
+    // way, and a click on a lit button still names its own position.
+    const auto all = choice == ratioAll;
+
+    ratio4Button  .setToggleState (all || choice == ratio4,  juce::dontSendNotification);
+    ratio8Button  .setToggleState (all || choice == ratio8,  juce::dontSendNotification);
+    ratio12Button .setToggleState (all || choice == ratio12, juce::dontSendNotification);
+    ratio20Button .setToggleState (all || choice == ratio20, juce::dontSendNotification);
+    ratioAllButton.setToggleState (all,                      juce::dontSendNotification);
 }
 
 void FetcompPanel::refreshAttack (int ratioChoice)

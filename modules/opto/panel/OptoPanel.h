@@ -5,7 +5,7 @@
 namespace bmo::opto
 {
 
-/** TELE and ELD stacked at the head, then COMP, the VU meter with its own
+/** TELE and STRESS stacked at the head, then COMP, the VU meter with its own
     IN/GR/OUT row, and MAKEUP, with LINK and COLOR stacked at the foot.
 
     Mode sits above everything because it is the one control that changes what
@@ -21,10 +21,10 @@ namespace bmo::opto
     The faceplate is greyscale in both modes. Colour appears on exactly two
     kinds of thing -- a switch that is engaged, and the meter's 0 VU-and-above
     zone -- so on this panel colour means "on" and nothing else, and which
-    colour it is says which circuit is running: Tele lights red, Stressed
+    colour it is says which circuit is running: Tele lights red, Stress
     amber.
 
-    The first cut of this ran Stressed in the module's lavender and Tele in
+    The first cut of this ran Stress in the module's lavender and Tele in
     greyscale, which read well as two modes but left the greyscale one unable
     to say which of its own switches was engaged: lit was `neutral` and
     unlit `switchOff`, two greys 2.15:1 apart with nothing but lightness
@@ -41,8 +41,9 @@ namespace bmo::opto
     Color is disabled but left in place in Tele mode, since Tele has no off
     state for it (DspCore locks it on regardless of the parameter) -- see
     timerCallback(). 0.2.0 hid it, which moved LINK every time the mode
-    changed. "TELE"/"ELD"/"COLOR" are the module's working names, not
-    necessarily final -- see modules/opto/params.h. */
+    changed. The mode pair reads TELE / STRESS; the second read ELD until
+    Frosty renamed it, 2026-10-06/07, with the host's "Stressed" becoming
+    "Stress" -- see modules/opto/params.h. */
 class OptoPanel final : public ui::ModulePanel,
                         private juce::Timer
 {
@@ -77,7 +78,7 @@ private:
 
     /** The faceplate is greyscale in both modes, so the one colour on it means
         "this is on" and nothing else. Which colour is the mode: Tele lights in
-        the suite's red, Stressed in its amber. */
+        the suite's red, Stress in its amber. */
     juce::Colour accentFor (bool stressed) const;
     juce::Colour activeFor (bool stressed) const;
     juce::Colour hotColourFor (bool stressed) const;
@@ -89,7 +90,7 @@ private:
     ui::PlainKnob crush, level;
     ui::DynamicsMeter meter;
 
-    juce::ToggleButton teleButton, eldButton;
+    juce::ToggleButton teleButton, stressButton;
     juce::ToggleButton meterInButton, meterOutButton, meterGrButton;
 
     ui::SwitchButton link, color;
